@@ -1,27 +1,25 @@
-from __future__ import annotations
+# home.py - HomePage clase que maneja la pantalla de inicio archivos recientes y tarjetas de acción.
+#======[imports]================================================================
+from __future__ import annotations 
 
-from pathlib import Path
-from typing import Callable
+from pathlib import Path 
+from typing import Callable 
 
-import flet as ft
-import recent_files as rf
+import flet as ft 
+import recent_files as rf 
 
-# ── dimensions ──────────────────────────────────────────────────────────────
-
+# ========[Dimensions]==============================================================
 _RECENT_W      = 280  
 _CARD_W        = 220
 _CARD_H        = 195
 
-# ── helper ───────────────────────────────────────────────────────────────────
-
+# ========[Helper Functions]========================================================
 def _row_hover(e: ft.HoverEvent) -> None:
     # SECONDARY_CONTAINER es nativo y seguro para estados de hover sutiles en M3
     e.control.bgcolor = ft.Colors.SECONDARY_CONTAINER if e.data == "true" else None
     e.control.update()
 
-
-# ── main class ───────────────────────────────────────────────────────────────
-
+# ========[Main Class Home page]==============================================================
 class HomePage:
     """Manages the static home tab: recent files, action cards and settings."""
 
@@ -42,8 +40,7 @@ class HomePage:
 
         self._build()
 
-    # ── public ───────────────────────────────────────────────────────────────
-
+    # =======[Public API]================================================================
     def refresh_recent(self) -> None:
         """Reload the recent-files list from disk and update the UI."""
         if self._recent_list is None:
@@ -69,8 +66,7 @@ class HomePage:
             )
         return self._tab
 
-    # ── recent-files panel ────────────────────────────────────────────────────
-
+    # ========[Recent Files Panel]========================================================
     def _make_recent_rows(self) -> list[ft.Control]:
         files = rf.load()
         if not files:
@@ -141,11 +137,10 @@ class HomePage:
             )
         return rows
 
-    # ── build ─────────────────────────────────────────────────────────────────
-
+    # ========[Build]===================================================================
     def _build(self) -> None:
 
-        # ── recent files panel ────────────────────────────────────────────────
+        # ========[Recent Files Panel]========================================================
         self._recent_list = ft.ListView(
             controls=self._make_recent_rows(),
             spacing=4,
@@ -181,8 +176,7 @@ class HomePage:
             border=ft.border.only(right=ft.BorderSide(1, ft.Colors.OUTLINE)),
         )
 
-        # ── action cards ──────────────────────────────────────────────────────
-
+        # ========[Action Cards]============================================================
         def _card(
             icon: str,
             container_color: str,
@@ -280,7 +274,7 @@ class HomePage:
             expand=True,
         )
 
-        # ── assemble ──────────────────────────────────────────────────────────
+        # ========[Assemble]================================================================
         main_row = ft.Row(
             [recent_panel, center_panel],
             expand=True,

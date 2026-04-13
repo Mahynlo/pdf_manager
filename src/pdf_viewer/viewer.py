@@ -1,5 +1,6 @@
 """PDFViewerTab: full-featured PDF viewer — continuous scroll, lazy rendering."""
 
+#======[Imports]================================================================
 from __future__ import annotations
 
 import math
@@ -15,8 +16,7 @@ from .ocr import OCRPageResult, OCRProcessor
 from .renderer import BASE_SCALE, ZOOM_LEVELS, display_to_pdf, render_page
 
 
-# ── constants ───────────────────────────────────────────────────────────────
-
+#======[Constants]================================================================
 _TOOL_DEFS: list[tuple[Tool, str, str, ft.MouseCursor]] = [
     (Tool.CURSOR,    ft.Icons.NEAR_ME,             "Cursor (seleccionar anotación)", ft.MouseCursor.BASIC),
     (Tool.SELECT,    ft.Icons.TEXT_FIELDS,          "Seleccionar texto",              ft.MouseCursor.TEXT),
@@ -28,6 +28,7 @@ _TOOL_DEFS: list[tuple[Tool, str, str, ft.MouseCursor]] = [
     (Tool.LINE,      ft.Icons.SHOW_CHART,           "Línea",                          ft.MouseCursor.PRECISE),
 ]
 
+# =======[Colors de renderizado]===================================================================
 _SELECTED_BG  = "#DDEEFF"
 _TOOLBAR_BG   = "#F3F3F3"
 _ANNOT_BG     = "#EBEBEB"
@@ -53,8 +54,7 @@ def _rgb_to_hex(r: float, g: float, b: float) -> str:
     return f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
 
 
-# ── main class ───────────────────────────────────────────────────────────────
-
+# =======[PDFViewerTab class]================================================================
 class PDFViewerTab:
     """Manages state and UI for a single open PDF document."""
 
@@ -132,8 +132,7 @@ class PDFViewerTab:
 
         self._build()
 
-    # ────────────────────────────────────────────── build
-
+    # ========[Build UI]================================================================
     def _build(self) -> None:
         total = len(self.doc)
 

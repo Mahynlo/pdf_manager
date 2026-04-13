@@ -5,13 +5,19 @@ description = ""
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [
-    { name = "Flet developer", email = "you@example.com" }
+    { name = "Malcom Navarro", email = "you@example.com" }
 ]
 dependencies = [
   "flet[all]==0.28.3",
+  "langchain>=0.3.28",
+  "langchain-community>=0.3.31",
+  "langchain-google-genai>=2.1.12",
+  "langchain-openai>=0.3.35",
   "onnxruntime>=1.20.1",
   "onnxtr[cpu,cpu-headless]>=0.5.1",
+  "pydantic>=2.12.5",
   "pymupdf>=1.26.5",
+  "python-dotenv>=1.2.1",
 ]
 
 [tool.flet]
