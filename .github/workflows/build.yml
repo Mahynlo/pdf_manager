@@ -22,6 +22,8 @@ jobs:
   build-windows:
     name: Build Windows App + Installer
     runs-on: windows-latest
+    permissions:
+      contents: write   # necesario para crear GitHub Releases
 
     steps:
       # ── 1. Código fuente ────────────────────────────────────────────────────
@@ -62,7 +64,7 @@ jobs:
       - name: Cache Flet/Flutter
         uses: actions/cache@v4
         with:
-          path: ~/.flet
+          path: ${{ env.USERPROFILE }}\.flet
           key: flet-flutter-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
           restore-keys: |
             flet-flutter-${{ runner.os }}-
