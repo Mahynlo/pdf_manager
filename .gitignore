@@ -164,3 +164,4 @@ storage/
 claude.md
 .claude/
 modelos/
+!uv.lock
