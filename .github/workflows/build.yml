@@ -1,0 +1,153 @@
+name: Build & Package Windows Installer
+
+# Dispara el workflow:
+#   - Al hacer push de un tag vX.Y.Z  → compila + crea Release en GitHub
+#   - Al hacer push a main/master      → compila + sube artefacto (sin Release)
+#   - Manualmente desde la UI de GitHub (Actions → Run workflow)
+on:
+  push:
+    tags:
+      - "v*"
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      version_override:
+        description: "Version (deja en blanco para leer de pyproject.toml)"
+        required: false
+        default: ""
+
+jobs:
+  build-windows:
+    name: Build Windows App + Installer
+    runs-on: windows-latest
+
+    steps:
+      # ── 1. Código fuente ────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Determinar version ───────────────────────────────────────────────
+      - name: Get version
+        id: version
+        shell: pwsh
+        run: |
+          # Prioridad: input manual > tag git > pyproject.toml
+          $ver = "${{ github.event.inputs.version_override }}"
+
+          if (-not $ver -and "${{ github.ref }}" -match "refs/tags/v(.+)") {
+            $ver = $Matches[1]
+          }
+
+          if (-not $ver) {
+            $content = Get-Content pyproject.toml -Raw
+            if ($content -match 'version\s*=\s*"([^"]+)"') {
+              $ver = $Matches[1]
+            } else {
+              $ver = "0.1.0"
+            }
+          }
+
+          Write-Host "Version: $ver"
+          echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
+
+      # ── 3. Instalar uv ──────────────────────────────────────────────────────
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      # ── 4. Cachear Flutter gestionado por Flet (~/.flet) ───────────────────
+      #       Flet descarga Flutter automáticamente la primera vez;
+      #       la cache evita re-descargarlo en cada run.
+      - name: Cache Flet/Flutter
+        uses: actions/cache@v4
+        with:
+          path: ~/.flet
+          key: flet-flutter-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            flet-flutter-${{ runner.os }}-
+
+      # ── 5. Instalar dependencias Python ────────────────────────────────────
+      - name: Install Python dependencies
+        run: uv sync
+
+      # ── 6. Build con Flet ───────────────────────────────────────────────────
+      - name: Build Windows app
+        run: uv run flet build windows -v
+
+      # ── 7. Verificar y mostrar salida del build ─────────────────────────────
+      - name: Locate build output
+        id: buildout
+        shell: pwsh
+        run: |
+          $base = "build\windows"
+          Write-Host "Contenido de $base :"
+          Get-ChildItem $base -Recurse -Filter "*.exe" | ForEach-Object {
+            Write-Host "  $($_.FullName)"
+          }
+
+          # Ruta estándar de Flutter para Windows x64
+          $expected = "build\windows\x64\runner\Release"
+          if (Test-Path $expected) {
+            echo "BUILD_DIR=$expected" >> $env:GITHUB_OUTPUT
+          } else {
+            # Fallback: primer directorio que contenga un .exe
+            $found = Get-ChildItem $base -Filter "*.exe" -Recurse | Select-Object -First 1
+            if (-not $found) {
+              Write-Error "No se encontro ningun .exe en $base"
+              exit 1
+            }
+            echo "BUILD_DIR=$($found.DirectoryName)" >> $env:GITHUB_OUTPUT
+          }
+
+      # ── 8. Instalar InnoSetup via Chocolatey ────────────────────────────────
+      - name: Install InnoSetup
+        run: choco install innosetup --no-progress -y
+
+      # ── 9. Compilar el instalador ───────────────────────────────────────────
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $ISCC    = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          $IssFile = "installer\setup.iss"
+          $version = "${{ steps.version.outputs.VERSION }}"
+          $buildDir = "${{ steps.buildout.outputs.BUILD_DIR }}"
+
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+          Write-Host "Compilando instalador v$version desde $buildDir ..."
+          & $ISCC `
+            "/DMyAppVersion=$version" `
+            "/DMyAppSourceDir=$buildDir" `
+            $IssFile
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "ISCC.exe fallo con codigo $LASTEXITCODE"
+            exit 1
+          }
+
+          Write-Host "Archivos en dist/:"
+          Get-ChildItem dist -Filter "*.exe" | ForEach-Object {
+            Write-Host "  $($_.Name)  ($([math]::Round($_.Length / 1MB, 1)) MB)"
+          }
+
+      # ── 10. Subir instalador como artefacto del workflow ────────────────────
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExtraerPDFs-installer-${{ steps.version.outputs.VERSION }}
+          path: dist/*.exe
+          if-no-files-found: error
+
+      # ── 11. Crear GitHub Release (solo en tags v*) ──────────────────────────
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Extraer PDFs v${{ steps.version.outputs.VERSION }}"
+          files: dist/*.exe
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}

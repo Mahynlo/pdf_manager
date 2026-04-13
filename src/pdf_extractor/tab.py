@@ -39,20 +39,23 @@ class PDFExtractionTab:
     # ------------------------------------------------------------------ UI
 
     def _build(self) -> None:
-        self._ref_path_text = ft.Text("Referencia: sin archivo", size=12, color="#546E7A")
-        self._ref_kind_text = ft.Text("Tipo: -", size=12, color="#546E7A")
-        self._target_count_text = ft.Text("Archivos objetivo: 0", size=12, color="#546E7A")
-        self._dest_text = ft.Text(f"Destino: {self.destination_dir}", size=12, color="#546E7A")
+        # Usando colores semánticos
+        self._ref_path_text = ft.Text("Referencia: sin archivo", size=12, color=ft.Colors.ON_SURFACE_VARIANT)
+        self._ref_kind_text = ft.Text("Tipo: -", size=12, color=ft.Colors.ON_SURFACE_VARIANT)
+        self._target_count_text = ft.Text("Archivos objetivo: 0", size=12, color=ft.Colors.ON_SURFACE_VARIANT)
+        self._dest_text = ft.Text(f"Destino: {self.destination_dir}", size=12, color=ft.Colors.ON_SURFACE_VARIANT)
 
         self._reference_pages = ft.TextField(
             label="Páginas de referencia (ej: 1,3-5)",
             hint_text="Vacío = todas",
             dense=True,
+            border_color=ft.Colors.OUTLINE_VARIANT,
         )
         self._hint_pages = ft.TextField(
             label="Página sugerida en cada objetivo (ej: 1,2)",
             hint_text="Se verifican primero; vacío = buscar en todas",
             dense=True,
+            border_color=ft.Colors.OUTLINE_VARIANT,
         )
         self._keywords = ft.TextField(
             label="Palabras clave / títulos / nombres de formato",
@@ -60,16 +63,21 @@ class PDFExtractionTab:
             multiline=True,
             min_lines=4,
             max_lines=8,
+            border_color=ft.Colors.OUTLINE_VARIANT,
         )
 
-        self._results = ft.ListView(expand=True, spacing=2, auto_scroll=True)
-        self._progress = ft.Text("", size=12, color="#1565C0", italic=True)
-        self._summary = ft.Text("Sin búsqueda ejecutada", size=12, color="#546E7A")
+        self._results = ft.ListView(expand=True, spacing=4, auto_scroll=True)
+        self._progress = ft.Text("", size=13, color=ft.Colors.PRIMARY, weight=ft.FontWeight.W_500, italic=True)
+        self._summary = ft.Text("Sin búsqueda ejecutada", size=13, color=ft.Colors.ON_SURFACE_VARIANT)
 
         self._run_btn = ft.ElevatedButton(
             "Buscar y extraer",
             icon=ft.Icons.SEARCH,
             on_click=self._run_extraction,
+            style=ft.ButtonStyle(
+                bgcolor=ft.Colors.PRIMARY,
+                color=ft.Colors.ON_PRIMARY,
+            )
         )
         self._preview_btn = ft.OutlinedButton(
             "Abrir vista previa",
@@ -85,10 +93,11 @@ class PDFExtractionTab:
             [self._pick_reference, self._pick_targets, self._pick_destination]
         )
 
+        # -- Panel Izquierdo --
         left_panel = ft.Container(
             ft.Column(
                 [
-                    ft.Text("Referencia", size=15, weight=ft.FontWeight.W_600),
+                    ft.Text("Referencia", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.ON_SURFACE),
                     ft.Row(
                         [
                             ft.ElevatedButton(
@@ -104,28 +113,32 @@ class PDFExtractionTab:
                     ),
                     self._ref_path_text,
                     self._ref_kind_text,
+                    ft.Container(height=4),
                     self._reference_pages,
-                    ft.Divider(height=1),
-                    ft.Text("Patrón de búsqueda", size=15, weight=ft.FontWeight.W_600),
+                    ft.Divider(height=24, color=ft.Colors.OUTLINE_VARIANT),
+                    
+                    ft.Text("Patrón de búsqueda", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.ON_SURFACE),
                     self._keywords,
-                    ft.Divider(height=1),
-                    ft.Text("Opciones avanzadas", size=14, weight=ft.FontWeight.W_500),
+                    ft.Divider(height=24, color=ft.Colors.OUTLINE_VARIANT),
+                    
+                    ft.Text("Opciones avanzadas", size=14, weight=ft.FontWeight.W_600, color=ft.Colors.ON_SURFACE),
                     self._hint_pages,
                 ],
                 spacing=8,
                 expand=True,
                 scroll=ft.ScrollMode.AUTO,
             ),
-            padding=ft.padding.all(12),
-            bgcolor="#F8FAFC",
-            border=ft.border.only(right=ft.BorderSide(1, "#DCE3EA")),
+            padding=ft.padding.all(20),
+            bgcolor=ft.Colors.SURFACE,
+            border=ft.border.only(right=ft.BorderSide(1, ft.Colors.OUTLINE_VARIANT)),
             expand=1,
         )
 
+        # -- Panel Derecho --
         right_panel = ft.Container(
             ft.Column(
                 [
-                    ft.Text("Objetivos y extracción", size=15, weight=ft.FontWeight.W_600),
+                    ft.Text("Objetivos y extracción", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.ON_SURFACE),
                     ft.Row(
                         [
                             ft.ElevatedButton(
@@ -149,18 +162,32 @@ class PDFExtractionTab:
                     ),
                     self._target_count_text,
                     self._dest_text,
-                    ft.Row([self._run_btn, self._preview_btn]),
+                    ft.Container(height=8),
+                    ft.Row([self._run_btn, self._preview_btn], spacing=12),
+                    
+                    ft.Container(height=4),
                     self._progress,
                     self._summary,
-                    ft.Divider(height=1),
-                    ft.Text("Registro de operación", size=13, color="#455A64"),
-                    ft.Container(self._results, expand=True),
+                    
+                    ft.Divider(height=24, color=ft.Colors.OUTLINE_VARIANT),
+                    ft.Text("Registro de operación", size=14, weight=ft.FontWeight.W_600, color=ft.Colors.ON_SURFACE),
+                    
+                    # Contenedor para el log, que le da un aspecto de "terminal" limpia
+                    ft.Container(
+                        content=self._results,
+                        expand=True,
+                        bgcolor=ft.Colors.SURFACE,
+                        border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                        border_radius=8,
+                        padding=ft.padding.all(12),
+                    ),
                 ],
                 spacing=8,
                 expand=True,
             ),
-            padding=ft.padding.all(12),
+            padding=ft.padding.all(20),
             expand=2,
+            bgcolor=ft.Colors.SURFACE,
         )
 
         self.view = ft.Row([left_panel, right_panel], expand=True, spacing=0)
@@ -170,10 +197,10 @@ class PDFExtractionTab:
             self._tab = ft.Tab(
                 tab_content=ft.Row(
                     [
-                        ft.Icon(ft.Icons.FIND_IN_PAGE, size=16, color=ft.Colors.BLUE_400),
-                        ft.Text("Extraer PDF", size=13),
+                        ft.Icon(ft.Icons.FIND_IN_PAGE, size=18, color=ft.Colors.PRIMARY),
+                        ft.Text("Extraer PDF", size=14, weight=ft.FontWeight.W_500),
                     ],
-                    spacing=6,
+                    spacing=8,
                     tight=True,
                 ),
                 content=self.view,
@@ -253,18 +280,9 @@ class PDFExtractionTab:
     def _extract_page_text(
         self, doc: fitz.Document, page_index: int
     ) -> tuple[str, str, float, bool]:
-        """Extract text from a page without forcing OCR unnecessarily.
-
-        Returns:
-            text        – extracted text (native and/or OCR)
-            mode_label  – 'Nativo' | 'OCR' | 'Híbrido' | 'Sin texto'
-            elapsed_ms  – wall time in milliseconds
-            used_ocr    – True if the OCR engine was actually invoked
-        """
         page = doc[page_index]
         needs_ocr = self.processor.page_needs_ocr(page)
 
-        # Only pass force_ocr when the page has no native text at all.
         result = self.processor.process_page(doc, page_index, force_ocr=needs_ocr)
         text = "\n".join(seg.text for seg in result.segments if seg.text.strip())
         used_ocr = bool(result.detections)
@@ -277,18 +295,18 @@ class PDFExtractionTab:
             chunks.extend(part.strip() for part in row.split(","))
         return [c.lower() for c in chunks if c]
 
-    def _log(self, text: str, color: str = "#455A64") -> None:
+    def _log(self, text: str, color: str = ft.Colors.ON_SURFACE_VARIANT) -> None:
         """Append a line to the results log and refresh."""
         self._results.controls.append(
             ft.Container(
-                ft.Text(text, size=12, color=color, selectable=True),
-                padding=ft.padding.symmetric(vertical=1, horizontal=4),
+                ft.Text(text, size=13, color=color, selectable=True, font_family="Consolas"),
+                padding=ft.padding.symmetric(vertical=2, horizontal=4),
             )
         )
         self.page_ref.update()
 
     def _log_separator(self) -> None:
-        self._results.controls.append(ft.Divider(height=1, color="#E0E0E0"))
+        self._results.controls.append(ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT))
         self.page_ref.update()
 
     def _set_progress(self, text: str) -> None:
@@ -297,13 +315,13 @@ class PDFExtractionTab:
 
     # ------------------------------------------------------------------ Core
 
-    def _run_extraction(self, e=None) -> None:  # noqa: C901 (complexity ok for a monolith step)
+    def _run_extraction(self, e=None) -> None:  # noqa: C901
         if not self.target_paths:
-            self._log("✗ Selecciona al menos un PDF objetivo.", "#B00020")
+            self._log("✗ Selecciona al menos un PDF objetivo.", ft.Colors.ERROR)
             return
         kws = self._collect_keywords()
         if not kws:
-            self._log("✗ Define al menos una palabra clave para la búsqueda.", "#B00020")
+            self._log("✗ Define al menos una palabra clave para la búsqueda.", ft.Colors.ERROR)
             return
 
         self._run_btn.disabled = True
@@ -333,11 +351,11 @@ class PDFExtractionTab:
                     self._log(
                         f"Referencia: {Path(self.reference_path).name} — "
                         f"{len(ref_tokens)} tokens, {len(list(pages_to_use))} páginas procesadas",
-                        "#0D47A1",
+                        ft.Colors.PRIMARY,
                     )
                     self._log_separator()
             except Exception as ex:
-                self._log(f"✗ Referencia no procesada: {ex}", "#B00020")
+                self._log(f"✗ Referencia no procesada: {ex}", ft.Colors.ERROR)
 
         # ── Target documents ─────────────────────────────────────────────────
         all_matches: list[PageMatch] = []
@@ -351,7 +369,7 @@ class PDFExtractionTab:
             try:
                 doc = fitz.open(path)
             except Exception as ex:
-                self._log(f"✗ {fname}: error al abrir — {ex}", "#B00020")
+                self._log(f"✗ {fname}: error al abrir — {ex}", ft.Colors.ERROR)
                 continue
 
             with doc:
@@ -361,17 +379,15 @@ class PDFExtractionTab:
 
                 self._log(
                     f"📄 [{file_idx + 1}/{total_files}] {fname} — {doc_kind_label}, {total_pages} página(s)",
-                    "#0D47A1",
+                    ft.Colors.PRIMARY,
                 )
 
-                # Warn early if the whole document is scanned (OCR will be slow).
                 if doc_kind == "scanned":
                     self._log(
                         "  ⚠ Documento escaneado — se ejecutará OCR en cada página sin texto nativo.",
-                        "#E65100",
+                        ft.Colors.ORANGE,
                     )
 
-                # Build scan order: hint pages first, then remaining pages.
                 hint_set = self._parse_pages(hint_pages_raw, total_pages)
                 if hint_set:
                     other_pages = [i for i in range(total_pages) if i not in hint_set]
@@ -379,7 +395,7 @@ class PDFExtractionTab:
                     self._log(
                         f"  ℹ Páginas sugeridas verificadas primero: "
                         f"{', '.join(str(p + 1) for p in sorted(hint_set))}",
-                        "#546E7A",
+                        ft.Colors.ON_SURFACE_VARIANT,
                     )
                 else:
                     scan_order = list(range(total_pages))
@@ -396,10 +412,6 @@ class PDFExtractionTab:
                         f"Analizando: {fname} — página {i + 1}/{total_pages}{hint_tag}"
                     )
 
-                    # ── Per-page text extraction ──────────────────────────────
-                    page_obj = doc[i]
-                    page_k = self.processor.page_kind(page_obj)
-
                     text, mode, elapsed_ms, used_ocr = self._extract_page_text(doc, i)
                     page_text_lower = text.lower()
 
@@ -409,14 +421,12 @@ class PDFExtractionTab:
                     time_tag = f"{elapsed_ms:.0f}ms"
                     ocr_tag = " | OCR" if used_ocr else ""
 
-                    # ── Keyword matching ──────────────────────────────────────
                     if not page_text_lower.strip():
                         pages_skipped += 1
-                        # Only log skipped hint pages; skip noise for other empty pages.
                         if is_hint:
                             self._log(
                                 f"  ~ Pág {i + 1}{hint_tag} [{mode} | {time_tag}]: sin texto extraíble",
-                                "#FF6F00",
+                                ft.Colors.ORANGE,
                             )
                         continue
 
@@ -432,7 +442,7 @@ class PDFExtractionTab:
                                 inter = len(ref_tokens & page_tokens)
                                 union = len(ref_tokens | page_tokens)
                                 jaccard = inter / union if union else 0.0
-                                score += jaccard * 2  # weight similarity
+                                score += jaccard * 2
                                 reason += f", sim={jaccard:.2f}"
 
                         file_matches.append(PageMatch(path, i, score, reason))
@@ -442,18 +452,15 @@ class PDFExtractionTab:
                         self._log(
                             f"  ✓ Pág {i + 1}{hint_tag} [{mode}{ocr_tag} | {time_tag}]: "
                             f"{shown}{extra}",
-                            "#1B5E20",
+                            ft.Colors.GREEN,
                         )
                     else:
-                        # Always report hint-page misses; silently skip other pages.
                         if is_hint:
                             self._log(
-                                f"  ~ Pág {i + 1}{hint_tag} [{mode}{ocr_tag} | {time_tag}]: "
-                                f"no coincide",
-                                "#FF6F00",
+                                f"  ~ Pág {i + 1}{hint_tag} [{mode}{ocr_tag} | {time_tag}]: no coincide",
+                                ft.Colors.ORANGE,
                             )
 
-                # ── Per-file summary ──────────────────────────────────────────
                 file_matches.sort(key=lambda m: m.score, reverse=True)
                 all_matches.extend(file_matches)
 
@@ -462,12 +469,12 @@ class PDFExtractionTab:
                 if file_matches:
                     self._log(
                         f"  → {len(file_matches)} página(s) encontrada(s){ocr_note}{skip_note}",
-                        "#1565C0",
+                        ft.Colors.PRIMARY,
                     )
                 else:
                     self._log(
                         f"  → Sin coincidencias{ocr_note}{skip_note}",
-                        "#757575",
+                        ft.Colors.OUTLINE,
                     )
                 self._log_separator()
 
@@ -505,7 +512,7 @@ class PDFExtractionTab:
             f"Finalizado: {len(all_matches)} coincidencia(s) en "
             f"{len(grouped)} archivo(s). Salida: {out_path.name}"
         )
-        self._log(f"💾 Archivo guardado: {out_path}", "#0D47A1")
+        self._log(f"💾 Archivo guardado: {out_path}", ft.Colors.PRIMARY)
         self._run_btn.disabled = False
         self.page_ref.update()
 
