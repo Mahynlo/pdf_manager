@@ -82,53 +82,103 @@ class _RenderMixin:
             redact_ov   = ft.Stack([], visible=False)
 
             _btn_style = ft.ButtonStyle(
-                padding=ft.padding.symmetric(horizontal=5, vertical=2),
-                text_style=ft.TextStyle(size=11),
+                padding=ft.padding.symmetric(horizontal=6, vertical=3),
+                text_style=ft.TextStyle(size=11, weight=ft.FontWeight.W_500),
+                overlay_color={ft.ControlState.HOVERED: "#12000000"},
             )
             popup_ov = ft.Container(
                 content=ft.Row([
-                    ft.TextButton("Copiar",   icon=ft.Icons.CONTENT_COPY,
-                                  on_click=self._text_sel_copy, style=_btn_style),
-                    ft.TextButton("Resaltar", icon=ft.Icons.HIGHLIGHT,
-                                  on_click=lambda e: self._text_sel_apply(Tool.HIGHLIGHT),
-                                  style=_btn_style),
-                    ft.TextButton("Subrayar", icon=ft.Icons.FORMAT_UNDERLINE,
-                                  on_click=lambda e: self._text_sel_apply(Tool.UNDERLINE),
-                                  style=_btn_style),
-                    ft.TextButton("Tachar",   icon=ft.Icons.FORMAT_STRIKETHROUGH,
-                                  on_click=lambda e: self._text_sel_apply(Tool.STRIKEOUT),
-                                  style=_btn_style),
-                    ft.IconButton(ft.Icons.CLOSE, icon_size=14, tooltip="Cerrar",
-                                  on_click=self._text_sel_dismiss,
-                                  style=ft.ButtonStyle(padding=ft.padding.all(2))),
+                    ft.TextButton(
+                        "Copiar",
+                        icon=ft.Icons.CONTENT_COPY,
+                        icon_color="#5E5E5E",
+                        on_click=self._text_sel_copy,
+                        style=_btn_style,
+                    ),
+                    ft.Container(width=1, height=20, bgcolor="#E0E0E0"),
+                    ft.TextButton(
+                        "Resaltar",
+                        icon=ft.Icons.HIGHLIGHT,
+                        icon_color="#E6AC00",
+                        on_click=lambda e: self._text_sel_apply(Tool.HIGHLIGHT),
+                        style=_btn_style,
+                    ),
+                    ft.TextButton(
+                        "Subrayar",
+                        icon=ft.Icons.FORMAT_UNDERLINE,
+                        icon_color="#1565C0",
+                        on_click=lambda e: self._text_sel_apply(Tool.UNDERLINE),
+                        style=_btn_style,
+                    ),
+                    ft.TextButton(
+                        "Tachar",
+                        icon=ft.Icons.FORMAT_STRIKETHROUGH,
+                        icon_color="#C62828",
+                        on_click=lambda e: self._text_sel_apply(Tool.STRIKEOUT),
+                        style=_btn_style,
+                    ),
+                    ft.IconButton(
+                        ft.Icons.CLOSE,
+                        icon_size=14,
+                        icon_color="#9E9E9E",
+                        tooltip="Cerrar selección",
+                        on_click=self._text_sel_dismiss,
+                        style=ft.ButtonStyle(padding=ft.padding.all(4)),
+                    ),
                 ], spacing=0, tight=True,
                    vertical_alignment=ft.CrossAxisAlignment.CENTER),
                 left=0, top=0, visible=False,
-                bgcolor="white", border_radius=6,
-                padding=ft.padding.symmetric(horizontal=6, vertical=3),
-                shadow=ft.BoxShadow(blur_radius=8, spread_radius=1,
-                                    color="#33000000", offset=ft.Offset(0, 2)),
-                border=ft.border.all(1, "#DDDDDD"),
+                bgcolor="#FAFAFA",
+                border_radius=8,
+                padding=ft.padding.symmetric(horizontal=4, vertical=2),
+                shadow=ft.BoxShadow(
+                    blur_radius=12, spread_radius=1,
+                    color="#44000000", offset=ft.Offset(0, 3),
+                ),
+                border=ft.border.all(1, "#D0D0D0"),
             )
 
+            _abtn = ft.ButtonStyle(
+                padding=ft.padding.symmetric(horizontal=6, vertical=3),
+                text_style=ft.TextStyle(size=11, weight=ft.FontWeight.W_500),
+                overlay_color={ft.ControlState.HOVERED: "#12000000"},
+            )
             annot_popup_ov = ft.Container(
                 content=ft.Row([
-                    ft.TextButton("Eliminar", icon=ft.Icons.DELETE_OUTLINE,
-                                  icon_color=ft.Colors.RED_600,
-                                  on_click=self._annot_popup_delete, style=_btn_style),
-                    ft.TextButton("Color", icon=ft.Icons.PALETTE_OUTLINED,
-                                  on_click=self._annot_popup_recolor, style=_btn_style),
-                    ft.IconButton(ft.Icons.CLOSE, icon_size=14, tooltip="Cerrar",
-                                  on_click=self._hide_annot_popup,
-                                  style=ft.ButtonStyle(padding=ft.padding.all(2))),
+                    ft.TextButton(
+                        "Eliminar",
+                        icon=ft.Icons.DELETE_OUTLINE,
+                        icon_color=ft.Colors.RED_600,
+                        on_click=self._annot_popup_delete,
+                        style=_abtn,
+                    ),
+                    ft.Container(width=1, height=20, bgcolor="#E0E0E0"),
+                    ft.TextButton(
+                        "Color",
+                        icon=ft.Icons.PALETTE_OUTLINED,
+                        icon_color="#7B1FA2",
+                        on_click=self._annot_popup_recolor,
+                        style=_abtn,
+                    ),
+                    ft.IconButton(
+                        ft.Icons.CLOSE,
+                        icon_size=14,
+                        icon_color="#9E9E9E",
+                        tooltip="Cerrar",
+                        on_click=self._hide_annot_popup,
+                        style=ft.ButtonStyle(padding=ft.padding.all(4)),
+                    ),
                 ], spacing=0, tight=True,
                    vertical_alignment=ft.CrossAxisAlignment.CENTER),
                 left=0, top=0, visible=False,
-                bgcolor="white", border_radius=6,
-                padding=ft.padding.symmetric(horizontal=6, vertical=3),
-                shadow=ft.BoxShadow(blur_radius=8, spread_radius=1,
-                                    color="#33000000", offset=ft.Offset(0, 2)),
-                border=ft.border.all(1, "#DDDDDD"),
+                bgcolor="#FAFAFA",
+                border_radius=8,
+                padding=ft.padding.symmetric(horizontal=4, vertical=2),
+                shadow=ft.BoxShadow(
+                    blur_radius=12, spread_radius=1,
+                    color="#44000000", offset=ft.Offset(0, 3),
+                ),
+                border=ft.border.all(1, "#D0D0D0"),
             )
 
             self._page_images.append(img)
@@ -151,7 +201,9 @@ class _RenderMixin:
                 width=w, height=h,
                 bgcolor=_PAGE_BG,
                 border_radius=2,
-                clip_behavior=ft.ClipBehavior.HARD_EDGE,
+                # NONE allows floating popups (popup_ov / annot_popup_ov) to
+                # paint outside the page boundary without being clipped.
+                clip_behavior=ft.ClipBehavior.NONE,
             )
             self._page_slots.append(slot)
 

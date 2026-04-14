@@ -17,15 +17,27 @@ class _AnnotMixin:
     # ── annotation floating popup ─────────────────────────────────────────────
 
     def _show_annot_popup(self, pn: int, xref: int, pdf_rect: fitz.Rect) -> None:
-        """Show the floating annotation action popup below pdf_rect."""
+        """Show the floating annotation action popup near pdf_rect."""
         self._hide_annot_popup()
         self._selected = (pn, xref)
         if pn >= len(self._annot_popups):
             return
         scale  = self.zoom * BASE_SCALE
         popup  = self._annot_popups[pn]
-        popup.left    = max(0.0, pdf_rect.x0 * scale)
-        popup.top     = pdf_rect.y1 * scale + 8
+
+        _POPUP_H = 44
+        _POPUP_W = 200
+        _MARGIN  = 8
+
+        page_h = float(self._page_heights[pn]) if pn < len(self._page_heights) else 9999.0
+        page_w = float(self._page_slots[pn].width or 9999) if pn < len(self._page_slots) else 9999.0
+
+        below_top = pdf_rect.y1 * scale + _MARGIN
+        above_top = pdf_rect.y0 * scale - _POPUP_H - _MARGIN
+
+        popup.top  = below_top if below_top + _POPUP_H <= page_h - _MARGIN else max(_MARGIN, above_top)
+        popup.left = max(0.0, min(pdf_rect.x0 * scale, page_w - _POPUP_W))
+
         popup.visible = True
         self._annot_popup_pn = pn
         try:

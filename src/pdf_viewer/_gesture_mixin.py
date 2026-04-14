@@ -18,6 +18,12 @@ class _GestureMixin:
         self._pending_tap_page = pn
 
     def _on_tap(self, e, pn: int) -> None:
+        # A plain tap while the SELECT tool is active dismisses the selection bar.
+        if self._annot.tool == Tool.SELECT:
+            self._hide_text_sel_bar()
+            self._pending_tap      = None
+            self._pending_tap_page = None
+            return
         if (
             self._annot.tool != Tool.CURSOR
             or self._pending_tap is None
