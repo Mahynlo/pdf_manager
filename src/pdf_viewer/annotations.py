@@ -93,6 +93,8 @@ class AnnotationManager:
         self._last_rect: fitz.Rect | None = None
         # Saved after a SELECT drag so the viewer can offer deferred text actions.
         self.last_rect: fitz.Rect | None = None
+        # Always-saved rect from the last SELECT drag (even when no native text found).
+        self.last_select_rect: fitz.Rect | None = None
         # History for undo: list of (page_num, annot_xref) in insertion order.
         self._history: list[tuple[int, int]] = []
 
@@ -141,6 +143,7 @@ class AnnotationManager:
 
         # ── text selection (copy / deferred annotation) ──────────────────────
         if self.tool == Tool.SELECT:
+            self.last_select_rect = rect   # always saved (OCR fallback uses this)
             text = page.get_text("text", clip=rect).strip()
             if text:
                 self.last_rect = rect
