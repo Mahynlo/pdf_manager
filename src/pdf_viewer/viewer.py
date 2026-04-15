@@ -120,20 +120,26 @@ class PDFViewerTab(
         self._annot_popup_pn:  int | None = None
 
         # Redaction state
-        self._redact_panel_open = False
-        self._redact_overlays:  list[ft.Stack] = []
-        self._redact_matches:   list[tuple[int, fitz.Rect, str]] = []
-        self._redact_preview    = False
+        self._redact_panel_open     = False
+        self._redact_overlays:   list[ft.Stack] = []
+        self._redact_matches:    list[tuple[int, fitz.Rect, str]] = []
+        self._redact_terms:      list[str] = []
+        self._redact_term_matches: dict[str, list] = {}
+        self._redact_preview        = False
+        self._redact_case_sensitive = True
+        self._redact_box_color      = "#000000"
 
         # Redaction panel UI refs (set by _build_redact_sidebar_panel)
         self._redact_panel:        ft.Container | None = None
         self._redact_content_area: ft.Container | None = None
         self._redact_collapse_btn: ft.IconButton | None = None
         self._redact_query_field:  ft.TextField  | None = None
-        self._redact_replace_field: ft.TextField | None = None
-        self._redact_results_list: ft.ListView   | None = None
+        self._redact_terms_list:   ft.ListView   | None = None
+        self._redact_count_text:   ft.Text       | None = None
         self._redact_incl_ocr:     ft.Switch     | None = None
+        self._redact_case_btn:     ft.IconButton | None = None
         self._redact_preview_btn:  ft.IconButton | None = None
+        self._redact_color_btns:   dict          = {}
 
         # Sidebar visibility
         self._sidebar_visible = True

@@ -27,11 +27,13 @@ class HomePage:
         self,
         page_ref: ft.Page,
         on_open_extractor: Callable[[], None],
+        on_open_merge: Callable[[], None],
         on_open_picker: Callable[[], None],
         on_open_pdf: Callable[[str], None],
     ):
         self._page              = page_ref
         self._on_open_extractor = on_open_extractor
+        self._on_open_merge     = on_open_merge
         self._on_open_picker    = on_open_picker
         self._on_open_pdf       = on_open_pdf
 
@@ -240,6 +242,14 @@ class HomePage:
                     on_click=lambda e: self._on_open_extractor(),
                 ),
                 _card(
+                    icon=ft.Icons.MERGE_TYPE,
+                    container_color=ft.Colors.SECONDARY_CONTAINER,
+                    on_container_color=ft.Colors.ON_SECONDARY_CONTAINER,
+                    title="Combinar PDFs",
+                    subtitle="Une varios PDFs\neligiendo las páginas",
+                    on_click=lambda e: self._on_open_merge(),
+                ),
+                _card(
                     icon=ft.Icons.DOCUMENT_SCANNER,
                     container_color=ft.Colors.TERTIARY_CONTAINER,
                     on_container_color=ft.Colors.ON_TERTIARY_CONTAINER,
@@ -249,7 +259,8 @@ class HomePage:
                 ),
             ],
             alignment=ft.MainAxisAlignment.CENTER,
-            spacing=32,
+            spacing=24,
+            wrap=True,
         )
 
         center_panel = ft.Column(

@@ -8,6 +8,7 @@ import flet as ft
 import recent_files as rf
 from home import HomePage
 from pdf_extractor import PDFExtractionTab
+from pdf_merge import MergePDFTab
 from pdf_viewer import PDFViewerTab
 from settings_tab import SettingsTab
 
@@ -23,6 +24,7 @@ def main(page: ft.Page) -> None:
 
     open_tabs:     list[PDFViewerTab]      = []
     extractor_tab: PDFExtractionTab | None = None
+    merge_tab:     MergePDFTab      | None = None
     settings_tab:  SettingsTab      | None = None
 
     tabs_ctrl = ft.Tabs(
@@ -43,14 +45,24 @@ def main(page: ft.Page) -> None:
         n = 1  # home
         if extractor_tab is not None:
             n += 1
+        if merge_tab is not None:
+            n += 1
         if settings_tab is not None:
             n += 1
         return n
+
+    def _merge_tab_idx() -> int:
+        return 1 + (1 if extractor_tab is not None else 0)
+
+    def _settings_tab_idx() -> int:
+        return 1 + (1 if extractor_tab is not None else 0) + (1 if merge_tab is not None else 0)
 
     def _rebuild_tabs(selected_index: int | None = None) -> None:
         base: list[ft.Tab] = [home.get_tab()]
         if extractor_tab is not None:
             base.append(extractor_tab.get_tab())
+        if merge_tab is not None:
+            base.append(merge_tab.get_tab())
         if settings_tab is not None:
             base.append(settings_tab.get_tab())
         tabs_ctrl.tabs = [*base, *[t.get_tab() for t in open_tabs]]
@@ -97,18 +109,31 @@ def main(page: ft.Page) -> None:
             extractor_tab = PDFExtractionTab(page, _open_pdf_path)
         _rebuild_tabs(1)
 
+    # ── merge tab ─────────────────────────────────────────────────────────────
+
+    def _open_merge() -> None:
+        nonlocal merge_tab
+        if merge_tab is not None:
+            _rebuild_tabs(_merge_tab_idx())
+            return
+        merge_tab = MergePDFTab(page, _close_merge_tab, _open_pdf_path)
+        _rebuild_tabs(_merge_tab_idx())
+
+    def _close_merge_tab(tab: MergePDFTab) -> None:
+        nonlocal merge_tab
+        tab.close()
+        merge_tab = None
+        _rebuild_tabs(0)
+
     # ── settings tab ─────────────────────────────────────────────────────────
 
     def _open_settings() -> None:
         nonlocal settings_tab
         if settings_tab is not None:
-            # focus existing tab
-            idx = 1 + (1 if extractor_tab is not None else 0)
-            _rebuild_tabs(idx)
+            _rebuild_tabs(_settings_tab_idx())
             return
         settings_tab = SettingsTab(page, _close_settings_tab)
-        idx = 1 + (1 if extractor_tab is not None else 0)
-        _rebuild_tabs(idx)
+        _rebuild_tabs(_settings_tab_idx())
 
     def _close_settings_tab(tab: SettingsTab) -> None:
         nonlocal settings_tab
@@ -239,6 +264,12 @@ def main(page: ft.Page) -> None:
                     lambda e: _open_extractor(),
                     tooltip="Abrir pestaña de extracción por palabras clave",
                 ),
+                _nav_btn(
+                    ft.Icons.MERGE_TYPE,
+                    "Combinar PDFs",
+                    lambda e: _open_merge(),
+                    tooltip="Combinar múltiples PDFs en uno",
+                ),
                 ft.Container(width=4),
                 ft.Container(
                     width=1, height=20,
@@ -269,6 +300,7 @@ def main(page: ft.Page) -> None:
     home = HomePage(
         page_ref=page,
         on_open_extractor=_open_extractor,
+        on_open_merge=_open_merge,
         on_open_picker=_open_picker,
         on_open_pdf=_open_pdf_path,
     )
