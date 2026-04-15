@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import time
 
 import flet as ft
 import fitz
@@ -14,12 +15,37 @@ class _GestureMixin:
     """Pan and tap event handling — routes to annotation or text-selection logic."""
 
     def _on_tap_down(self, e: ft.TapEvent, pn: int) -> None:
+        now  = time.time()
+        dist = math.hypot(
+            e.local_x - self._last_tap_pos[0],
+            e.local_y - self._last_tap_pos[1],
+        )
+        if (pn == self._last_tap_pn
+                and now - self._last_tap_time < 0.5
+                and dist < 20):
+            self._tap_count += 1
+        else:
+            self._tap_count = 1
+        self._last_tap_time = now
+        self._last_tap_pos  = (e.local_x, e.local_y)
+        self._last_tap_pn   = pn
         self._pending_tap      = (e.local_x, e.local_y)
         self._pending_tap_page = pn
 
     def _on_tap(self, e, pn: int) -> None:
-        # A plain tap while the SELECT tool is active dismisses the selection bar.
+        # Triple-tap while SELECT tool is active → select paragraph under cursor.
         if self._annot.tool == Tool.SELECT:
+            if (self._tap_count >= 3
+                    and self._pending_tap is not None
+                    and self._pending_tap_page == pn):
+                x, y = self._pending_tap
+                pdf_x, pdf_y   = display_to_pdf(x, y, self.zoom)
+                self._pending_tap      = None
+                self._pending_tap_page = None
+                self._hide_text_sel_bar()
+                self._select_paragraph_at(pn, (pdf_x, pdf_y))
+                return
+            # Plain tap while SELECT tool is active dismisses the selection bar.
             self._hide_text_sel_bar()
             self._pending_tap      = None
             self._pending_tap_page = None

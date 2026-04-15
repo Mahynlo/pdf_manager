@@ -56,6 +56,11 @@ class PDFViewerTab(
         self.zoom            = 1.0
         self._current_cursor = ft.MouseCursor.BASIC
 
+        # Night-mode state
+        self._night_mode      = False
+        self._viewer_body:    ft.Container | None = None
+        self._night_mode_btn: ft.IconButton | None = None
+
         self._tab       = None
         self._annot     = AnnotationManager(on_modified=self._update)
         self._tool_btns: dict[Tool, ft.IconButton] = {}
@@ -66,6 +71,12 @@ class PDFViewerTab(
         self._pending_tap_page: int | None = None
         self._moving_selected   = False
         self._move_last_pdf:    tuple[float, float] | None = None
+
+        # Triple-tap tracking (paragraph selection on SELECT tool)
+        self._tap_count:     int        = 0
+        self._last_tap_time: float      = 0.0
+        self._last_tap_pos:  tuple      = (0.0, 0.0)
+        self._last_tap_pn:   int | None = None
 
         # Per-page render controls
         self._page_images:      list[ft.Image]     = []
@@ -102,7 +113,7 @@ class PDFViewerTab(
         self._ocr_show_boxes   = False
         self._ocr_active_index = 0
         self._ocr_toggle_btn:  ft.IconButton | None = None
-        self._ocr_panel_open   = True
+        self._ocr_panel_open   = False
 
         # OCR panel UI refs (set by _build_ocr_sidebar_panel)
         self._ocr_info:         ft.Text       | None = None
@@ -147,7 +158,8 @@ class PDFViewerTab(
         self._right_sidebar:  ft.Container | None = None
 
         # Agent panel state
-        self._agent_panel_open    = False
+        self._agent_panel_open    = True
+        self._agent_toolbar_btn:  ft.IconButton | None = None
         self._agent_panel:        ft.Container  | None = None
         self._agent_content_area: ft.Container  | None = None
         self._agent_collapse_btn: ft.IconButton | None = None
@@ -219,7 +231,43 @@ class PDFViewerTab(
                     ft.IconButton(ft.Icons.DOCUMENT_SCANNER, tooltip="Ejecutar OCR en la página actual", on_click=self._run_ocr),
                     self._make_ocr_toggle_btn(),
                     _vdivider(),
+                    self._make_agent_toolbar_btn(),
+                    _vdivider(),
                     self._make_sidebar_toggle_btn(),
+                    _vdivider(),
+                    self._make_night_mode_btn(),
+                    ft.PopupMenuButton(
+                        icon=ft.Icons.MORE_VERT,
+                        tooltip="Más opciones",
+                        items=[
+                            ft.PopupMenuItem(
+                                text="Guardar PDF",
+                                icon=ft.Icons.SAVE_ALT,
+                                on_click=self._save,
+                            ),
+                            ft.PopupMenuItem(
+                                text="Cerrar pestaña",
+                                icon=ft.Icons.CLOSE,
+                                on_click=lambda e: self.on_close(self),
+                            ),
+                            ft.PopupMenuItem(),
+                            ft.PopupMenuItem(
+                                text="Ajustar al ancho",
+                                icon=ft.Icons.FIT_SCREEN,
+                                on_click=self._fit_width,
+                            ),
+                            ft.PopupMenuItem(
+                                text="Ajustar a la página",
+                                icon=ft.Icons.FULLSCREEN_OUTLINED,
+                                on_click=self._fit_page,
+                            ),
+                            ft.PopupMenuItem(
+                                text="Tamaño real (100%)",
+                                icon=ft.Icons.CROP_FREE,
+                                on_click=lambda e: self._set_zoom(1.0),
+                            ),
+                        ],
+                    ),
                 ],
                 spacing=2,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -317,6 +365,7 @@ class PDFViewerTab(
             bgcolor=_VIEWER_BG,
             padding=20,
         )
+        self._viewer_body = viewer_body
         main_content = ft.Row([viewer_body, self._right_sidebar], expand=True, spacing=0)
 
         self.view = ft.Column(
@@ -356,3 +405,62 @@ class PDFViewerTab(
             self.page_ref.update()
         except ValueError:
             pass
+
+    # ── agent toolbar button ──────────────────────────────────────────────────
+
+    def _make_agent_toolbar_btn(self) -> ft.IconButton:
+        self._agent_toolbar_btn = ft.IconButton(
+            ft.Icons.SMART_TOY_OUTLINED,
+            tooltip="Agente IA — abrir / cerrar chat",
+            icon_color="#5C35C9",   # activo porque agent_panel_open = True
+            bgcolor="#EDE7F6",
+            on_click=self._toggle_agent_panel,
+        )
+        return self._agent_toolbar_btn
+
+    # ── night mode ────────────────────────────────────────────────────────────
+
+    def _make_night_mode_btn(self) -> ft.IconButton:
+        self._night_mode_btn = ft.IconButton(
+            ft.Icons.DARK_MODE,
+            tooltip="Modo nocturno",
+            on_click=self._toggle_night_mode,
+        )
+        return self._night_mode_btn
+
+    def _toggle_night_mode(self, e=None) -> None:
+        self._night_mode = not self._night_mode
+        if self._night_mode_btn:
+            self._night_mode_btn.icon    = ft.Icons.LIGHT_MODE if self._night_mode else ft.Icons.DARK_MODE
+            self._night_mode_btn.tooltip = "Desactivar modo nocturno" if self._night_mode else "Modo nocturno"
+        _color = "#FFFFFFFF" if self._night_mode else None
+        _blend = ft.BlendMode.DIFFERENCE if self._night_mode else None
+        for img in self._page_images:
+            img.color            = _color
+            img.color_blend_mode = _blend
+        if self._viewer_body:
+            self._viewer_body.bgcolor = "#1E1E1E" if self._night_mode else _VIEWER_BG
+        try:
+            self.page_ref.update()
+        except Exception:
+            pass
+
+    # ── select all text on current page (Ctrl+A) ─────────────────────────────
+
+    def _select_all_page_text(self) -> None:
+        pn    = self.current_page
+        words = self._get_page_words(pn)
+        if not words:
+            self._show_snack("No hay texto en esta página")
+            return
+        start_pt = (
+            (words[0][0].x0 + words[0][0].x1) / 2,
+            (words[0][0].y0 + words[0][0].y1) / 2,
+        )
+        end_pt = (
+            (words[-1][0].x0 + words[-1][0].x1) / 2,
+            (words[-1][0].y0 + words[-1][0].y1) / 2,
+        )
+        sel_text = self._update_text_selection(pn, start_pt, end_pt, update_ui=True)
+        if sel_text:
+            self._show_text_sel_bar(sel_text)

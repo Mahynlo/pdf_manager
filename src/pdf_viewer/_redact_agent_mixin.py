@@ -1,12 +1,34 @@
 """Redaction search/apply and AI-agent chat panel for PDFViewerTab."""
 from __future__ import annotations
 
+import json
 import re
 import string
 import threading
 
 import flet as ft
 import fitz
+
+
+# ── response formatter ────────────────────────────────────────────────────────
+
+def _format_agent_response(text: str) -> str:
+    """Wrap JSON responses in a fenced code block for Markdown rendering.
+
+    If *text* looks like a JSON object or array (starts/ends with {}/[]),
+    it is pretty-printed and returned inside a ```json fence so that
+    ft.Markdown renders it with syntax highlighting.  Plain Markdown text
+    is returned unchanged.
+    """
+    stripped = text.strip()
+    if stripped and stripped[0] in ('{', '[') and stripped[-1] in ('}', ']'):
+        try:
+            parsed = json.loads(stripped)
+            pretty = json.dumps(parsed, ensure_ascii=False, indent=2)
+            return f"```json\n{pretty}\n```"
+        except Exception:
+            pass
+    return text
 
 from .renderer import BASE_SCALE
 from ._viewer_defs import _SELECTED_BG
@@ -193,99 +215,164 @@ class _RedactAgentMixin:
                 pass
 
     def _build_agent_sidebar_panel(self) -> ft.Container:
-        """Build the AI Agent collapsible panel and initialise its controls."""
-        _AGENT_BG  = "#F3F0FF"
-        _AGENT_HDR = "#5C35C9"
+        """Build the AI Agent panel — dedicated full-height section with Markdown chat."""
+        _AGENT_BG   = "#F3F0FF"
+        _AGENT_HDR  = "#5C35C9"
+        _AGENT_LINE = "#D1C4E9"
+        _is_open    = self._agent_panel_open   # True by default
 
+        # ── chat list ─────────────────────────────────────────────────────────
         self._agent_chat_list = ft.ListView(
-            expand=True, spacing=6,
-            padding=ft.padding.only(bottom=8),
+            expand=True, spacing=10,
+            padding=ft.padding.symmetric(horizontal=6, vertical=8),
             auto_scroll=True,
         )
+
+        # ── input ─────────────────────────────────────────────────────────────
         self._agent_input = ft.TextField(
             hint_text="Pregunta sobre el documento…",
             dense=True, expand=True, shift_enter=True,
             on_submit=self._agent_send,
-            content_padding=ft.padding.symmetric(horizontal=8, vertical=6),
+            content_padding=ft.padding.symmetric(horizontal=10, vertical=8),
+            border_radius=20,
+            filled=True,
+            fill_color="#FFFFFF",
+            border_color=_AGENT_LINE,
+            focused_border_color=_AGENT_HDR,
         )
+
+        # ── api key ───────────────────────────────────────────────────────────
         self._agent_key_field = ft.TextField(
             hint_text="API Key (Google Gemini u OpenAI)",
             dense=True, password=True, can_reveal_password=True, expand=True,
             content_padding=ft.padding.symmetric(horizontal=8, vertical=6),
+            border_color=_AGENT_LINE,
+            focused_border_color=_AGENT_HDR,
         )
+
+        # ── header buttons ────────────────────────────────────────────────────
         self._agent_collapse_btn = ft.IconButton(
-            ft.Icons.EXPAND_MORE, icon_size=18,
-            tooltip="Expandir panel Agente IA",
+            ft.Icons.EXPAND_LESS if _is_open else ft.Icons.EXPAND_MORE,
+            icon_size=16,
+            tooltip="Contraer chat" if _is_open else "Expandir chat",
             on_click=self._toggle_agent_panel,
+            style=ft.ButtonStyle(padding=ft.padding.all(4)),
         )
+
+        _qbtn = ft.ButtonStyle(
+            padding=ft.padding.symmetric(horizontal=6, vertical=4),
+            text_style=ft.TextStyle(size=11),
+        )
+
+        # ── content area ──────────────────────────────────────────────────────
         self._agent_content_area = ft.Container(
             ft.Column(
                 [
+                    # API key row
                     ft.Row(
                         [
                             self._agent_key_field,
-                            ft.IconButton(ft.Icons.KEY, icon_size=18,
-                                          tooltip="Guardar API Key",
-                                          on_click=self._agent_save_key),
+                            ft.IconButton(
+                                ft.Icons.KEY, icon_size=18,
+                                tooltip="Guardar API Key",
+                                icon_color=_AGENT_HDR,
+                                on_click=self._agent_save_key,
+                            ),
                         ],
                         spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
+                    # Quick action buttons
                     ft.Row(
                         [
                             ft.OutlinedButton(
                                 "Resumir", icon=ft.Icons.SUMMARIZE_OUTLINED,
-                                style=ft.ButtonStyle(padding=ft.padding.symmetric(horizontal=8, vertical=4)),
-                                on_click=lambda e: self._agent_quick("Genera un resumen completo del documento.", direct_action="summarize"),
+                                style=_qbtn,
+                                on_click=lambda e: self._agent_quick(
+                                    "Genera un resumen completo del documento.",
+                                    direct_action="summarize",
+                                ),
                             ),
                             ft.OutlinedButton(
                                 "Estructura", icon=ft.Icons.ACCOUNT_TREE_OUTLINED,
-                                style=ft.ButtonStyle(padding=ft.padding.symmetric(horizontal=8, vertical=4)),
-                                on_click=lambda e: self._agent_quick("Analiza la estructura y el tipo de este documento.", direct_action="analyze"),
+                                style=_qbtn,
+                                on_click=lambda e: self._agent_quick(
+                                    "Analiza la estructura y el tipo de este documento.",
+                                    direct_action="analyze",
+                                ),
                             ),
                             ft.OutlinedButton(
                                 "Redactar", icon=ft.Icons.EDIT_OFF_OUTLINED,
-                                style=ft.ButtonStyle(padding=ft.padding.symmetric(horizontal=8, vertical=4)),
-                                on_click=lambda e: self._agent_quick("Identifica la información sensible que debería redactarse.", direct_action="redact"),
+                                style=_qbtn,
+                                on_click=lambda e: self._agent_quick(
+                                    "Identifica la información sensible que debería redactarse.",
+                                    direct_action="redact",
+                                ),
                             ),
                         ],
                         spacing=4, wrap=True,
                     ),
-                    ft.Divider(height=1, color="#D1C4E9"),
-                    ft.Container(self._agent_chat_list, expand=True),
+                    ft.Divider(height=1, color=_AGENT_LINE),
+                    # Chat bubble area — fills all remaining height
+                    ft.Container(
+                        self._agent_chat_list,
+                        expand=True,
+                        bgcolor="#FAFAFA",
+                        border_radius=8,
+                        border=ft.border.all(1, _AGENT_LINE),
+                        clip_behavior=ft.ClipBehavior.HARD_EDGE,
+                    ),
+                    # Input row
                     ft.Row(
                         [
                             self._agent_input,
-                            ft.IconButton(ft.Icons.SEND, icon_size=18,
-                                          tooltip="Enviar", icon_color=_AGENT_HDR,
-                                          on_click=self._agent_send),
+                            ft.IconButton(
+                                ft.Icons.SEND_ROUNDED, icon_size=20,
+                                tooltip="Enviar (Enter)",
+                                icon_color=_AGENT_HDR,
+                                on_click=self._agent_send,
+                                style=ft.ButtonStyle(padding=ft.padding.all(6)),
+                            ),
                         ],
                         spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                 ],
-                spacing=6, expand=True,
+                spacing=8, expand=True,
             ),
-            expand=True, visible=self._agent_panel_open,
+            expand=True, visible=_is_open,
+            padding=ft.padding.only(top=6),
         )
+
+        # ── panel container ───────────────────────────────────────────────────
         self._agent_panel = ft.Container(
             ft.Column(
                 [
                     ft.Row(
                         [
-                            ft.Icon(ft.Icons.SMART_TOY_OUTLINED, size=18, color=_AGENT_HDR),
-                            ft.Text("Agente IA", size=14, weight=ft.FontWeight.W_600),
+                            ft.Icon(ft.Icons.SMART_TOY_ROUNDED, size=18, color=_AGENT_HDR),
+                            ft.Text(
+                                "Agente IA",
+                                size=14, weight=ft.FontWeight.W_600, color=_AGENT_HDR,
+                            ),
                             ft.Container(expand=True),
+                            ft.IconButton(
+                                ft.Icons.DELETE_SWEEP_OUTLINED, icon_size=16,
+                                tooltip="Limpiar conversación",
+                                icon_color="#9E9E9E",
+                                on_click=self._agent_clear_chat,
+                                style=ft.ButtonStyle(padding=ft.padding.all(4)),
+                            ),
                             self._agent_collapse_btn,
                         ],
-                        spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     self._agent_content_area,
                 ],
-                spacing=4, expand=self._agent_panel_open,
+                spacing=4, expand=_is_open,
             ),
             padding=ft.padding.symmetric(horizontal=12, vertical=8),
             bgcolor=_AGENT_BG,
-            border=ft.border.only(top=ft.BorderSide(1, "#D1C4E9")),
-            expand=self._agent_panel_open,
+            border=ft.border.only(top=ft.BorderSide(1, _AGENT_LINE)),
+            expand=_is_open,
         )
         return self._agent_panel
 
@@ -310,16 +397,28 @@ class _RedactAgentMixin:
 
     def _toggle_agent_panel(self, e=None) -> None:
         self._agent_panel_open = not self._agent_panel_open
+        _open = self._agent_panel_open
         if self._agent_content_area is not None:
-            self._agent_content_area.visible = self._agent_panel_open
+            self._agent_content_area.visible = _open
         if self._agent_collapse_btn is not None:
-            self._agent_collapse_btn.icon    = ft.Icons.EXPAND_LESS if self._agent_panel_open else ft.Icons.EXPAND_MORE
-            self._agent_collapse_btn.tooltip = "Contraer panel Agente IA" if self._agent_panel_open else "Expandir panel Agente IA"
+            self._agent_collapse_btn.icon    = ft.Icons.EXPAND_LESS if _open else ft.Icons.EXPAND_MORE
+            self._agent_collapse_btn.tooltip = "Contraer chat" if _open else "Expandir chat"
         if self._agent_panel is not None:
-            self._agent_panel.expand = self._agent_panel_open
+            self._agent_panel.expand = _open
             col = self._agent_panel.content
             if isinstance(col, ft.Column):
-                col.expand = self._agent_panel_open
+                col.expand = _open
+        # Sync toolbar button colour
+        if hasattr(self, "_agent_toolbar_btn") and self._agent_toolbar_btn is not None:
+            self._agent_toolbar_btn.icon_color = "#5C35C9" if _open else None
+            self._agent_toolbar_btn.bgcolor    = "#EDE7F6" if _open else None
+            try:
+                self._agent_toolbar_btn.update()
+            except Exception:
+                pass
+        # Ensure sidebar is visible when opening agent
+        if _open and not self._sidebar_visible:
+            self._toggle_sidebar()
         try:
             self._right_sidebar.update()
         except Exception:
@@ -411,21 +510,50 @@ class _RedactAgentMixin:
         self._add_redact_term()
 
     def _agent_append_bubble(self, role: str, text: str) -> None:
-        is_user = role == "user"
+        _AGENT_HDR = "#5C35C9"
+        is_user    = role == "user"
+
+        if is_user:
+            body: ft.Control = ft.Text(
+                text, size=12, selectable=True, color="#1A237E",
+            )
+        else:
+            # Render assistant response as Markdown (JSON auto-wrapped in code block)
+            body = ft.Markdown(
+                _format_agent_response(text),
+                selectable=True,
+                extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+                code_theme="github",
+                on_tap_link=lambda e: self.page_ref.launch_url(e.data),
+            )
+
         bubble = ft.Container(
-            ft.Text(text, size=12, selectable=True,
-                    color="#1A237E" if is_user else "#212121"),
-            bgcolor="#E8EAF6" if is_user else "#F3F0FF",
+            content=body,
+            bgcolor="#E8EAF6" if is_user else "#FFFFFF",
             border_radius=ft.border_radius.only(
-                top_left=10, top_right=10,
-                bottom_left=0 if is_user else 10,
-                bottom_right=10 if is_user else 0,
+                top_left=12, top_right=12,
+                bottom_left=2  if is_user else 12,
+                bottom_right=12 if is_user else 2,
             ),
             padding=ft.padding.symmetric(horizontal=10, vertical=8),
-            margin=ft.margin.only(left=40 if is_user else 0, right=0 if is_user else 40),
+            margin=ft.margin.only(
+                left=32 if is_user else 0,
+                right=0  if is_user else 32,
+            ),
+            border=ft.border.all(1, "#C5CAE9" if is_user else "#E0E0E0"),
         )
         if self._agent_chat_list is not None:
             self._agent_chat_list.controls.append(bubble)
+            try:
+                self._agent_chat_list.update()
+            except Exception:
+                pass
+
+    def _agent_clear_chat(self, e=None) -> None:
+        """Clear all visible bubbles and reset conversation history."""
+        self._agent_history = []
+        if self._agent_chat_list is not None:
+            self._agent_chat_list.controls = []
             try:
                 self._agent_chat_list.update()
             except Exception:

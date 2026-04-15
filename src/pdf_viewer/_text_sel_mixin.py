@@ -1,6 +1,8 @@
 """Word-level text selection overlay and action popup for PDFViewerTab."""
 from __future__ import annotations
 
+import urllib.parse
+
 import flet as ft
 import fitz
 
@@ -252,3 +254,70 @@ class _TextSelMixin:
                 if t:
                     parts.append(t)
         return " ".join(parts)
+
+    # ── paragraph selection (triple-tap) ──────────────────────────────────────
+
+    def _select_paragraph_at(self, pn: int, pdf_pt: tuple) -> None:
+        """Select all words in the text block that contains *pdf_pt*."""
+        px, py = pdf_pt
+        with self._doc_lock:
+            blocks = self.doc[pn].get_text("blocks")
+
+        # Find the block that contains the click point (type 0 = text block)
+        target_rect: fitz.Rect | None = None
+        for block in blocks:
+            x0, y0, x1, y1 = block[0], block[1], block[2], block[3]
+            btype = block[6] if len(block) > 6 else 0
+            if btype != 0:
+                continue
+            if x0 <= px <= x1 and y0 <= py <= y1:
+                target_rect = fitz.Rect(x0, y0, x1, y1)
+                break
+
+        # Fallback: nearest text block by centre distance
+        if target_rect is None:
+            best_dist = float("inf")
+            for block in blocks:
+                x0, y0, x1, y1 = block[0], block[1], block[2], block[3]
+                btype = block[6] if len(block) > 6 else 0
+                if btype != 0:
+                    continue
+                cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+                d = (px - cx) ** 2 + (py - cy) ** 2
+                if d < best_dist:
+                    best_dist   = d
+                    target_rect = fitz.Rect(x0, y0, x1, y1)
+
+        if target_rect is None:
+            return
+
+        words = self._get_page_words(pn)
+        si: int | None = None
+        ei: int | None = None
+        for i, (r, _) in enumerate(words):
+            if target_rect.intersects(r):
+                if si is None:
+                    si = i
+                ei = i
+
+        if si is None:
+            return
+
+        start_r = words[si][0]
+        end_r   = words[ei][0]
+        start_pt = ((start_r.x0 + start_r.x1) / 2, (start_r.y0 + start_r.y1) / 2)
+        end_pt   = ((end_r.x0   + end_r.x1)   / 2, (end_r.y0   + end_r.y1)   / 2)
+
+        sel_text = self._update_text_selection(pn, start_pt, end_pt, update_ui=True)
+        if sel_text:
+            self._show_text_sel_bar(sel_text)
+
+    # ── external search ───────────────────────────────────────────────────────
+
+    def _text_sel_search_google(self, e=None) -> None:
+        """Open a Google search for the currently selected text."""
+        text = self._text_sel_text
+        self._hide_text_sel_bar()
+        if text:
+            q = urllib.parse.quote_plus(text[:200])
+            self.page_ref.launch_url(f"https://www.google.com/search?q={q}")

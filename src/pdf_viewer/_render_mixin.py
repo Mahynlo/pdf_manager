@@ -64,7 +64,11 @@ class _RenderMixin:
         for pn in range(total):
             w, h = page_dims[pn]
 
-            img = ft.Image(width=w, height=h, fit=ft.ImageFit.NONE, gapless_playback=True)
+            img = ft.Image(
+                width=w, height=h, fit=ft.ImageFit.NONE, gapless_playback=True,
+                color="#FFFFFFFF" if self._night_mode else None,
+                color_blend_mode=ft.BlendMode.DIFFERENCE if self._night_mode else None,
+            )
             drag_ov = ft.Container(
                 visible=False,
                 bgcolor=self._annot.overlay_color,
@@ -115,6 +119,14 @@ class _RenderMixin:
                         icon=ft.Icons.FORMAT_STRIKETHROUGH,
                         icon_color="#C62828",
                         on_click=lambda e: self._text_sel_apply(Tool.STRIKEOUT),
+                        style=_btn_style,
+                    ),
+                    ft.Container(width=1, height=20, bgcolor="#E0E0E0"),
+                    ft.TextButton(
+                        "Buscar",
+                        icon=ft.Icons.SEARCH,
+                        icon_color="#1A73E8",
+                        on_click=lambda e: self._text_sel_search_google(),
                         style=_btn_style,
                     ),
                     ft.IconButton(

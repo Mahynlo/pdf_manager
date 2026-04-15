@@ -195,6 +195,9 @@ def main(page: ft.Page) -> None:
         if e.ctrl and e.key.upper() == "Z":
             v._undo()
             return
+        if e.ctrl and e.key.upper() == "A":
+            v._select_all_page_text()
+            return
         match e.key:
             case "Arrow Left" | "Arrow Up":
                 v._prev()
