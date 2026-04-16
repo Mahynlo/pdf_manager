@@ -9,9 +9,9 @@ import flet as ft
 import recent_files as rf 
 
 # ========[Dimensions]==============================================================
-_RECENT_W      = 280  
-_CARD_W        = 220
-_CARD_H        = 195
+_RECENT_W = 280  
+_CARD_W = 220
+_CARD_H = 195
 
 # ========[Helper Functions]========================================================
 def _row_hover(e: ft.HoverEvent) -> None:

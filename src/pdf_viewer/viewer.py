@@ -157,6 +157,15 @@ class PDFViewerTab(
         self._sidebar_btn:    ft.IconButton | None = None
         self._right_sidebar:  ft.Container | None = None
 
+        # Sidebar mode: "ocr" | "redact" | "agent"
+        self._sidebar_mode             = "ocr"
+        self._sidebar_ocr_view:        ft.Container | None = None
+        self._sidebar_redact_view:     ft.Container | None = None
+        self._sidebar_agent_view:      ft.Container | None = None
+        self._sidebar_tab_ocr_btn:     ft.Container | None = None
+        self._sidebar_tab_redact_btn:  ft.Container | None = None
+        self._sidebar_tab_agent_btn:   ft.Container | None = None
+
         # Agent panel state
         self._agent_panel_open    = True
         self._agent_toolbar_btn:  ft.IconButton | None = None
@@ -340,9 +349,80 @@ class PDFViewerTab(
         redact_panel = self._build_redact_sidebar_panel()
         agent_panel  = self._build_agent_sidebar_panel()
 
+        # ── sidebar mode tab bar (3 tabs) ─────────────────────────────────────
+        _TAB_DEFS = [
+            ("ocr",    ft.Icons.TEXT_SNIPPET_OUTLINED, "OCR",       "#2E7D32", "#E8F5E9"),
+            ("redact", ft.Icons.EDIT_OFF_OUTLINED,     "Redacción", "#E65100", "#FFF3E0"),
+            ("agent",  ft.Icons.SMART_TOY_OUTLINED,    "Agente IA", "#5C35C9", "#EDE7F6"),
+        ]
+
+        def _make_tab_btn(mode: str, icon: str, label: str,
+                          active_color: str, active_bg: str) -> ft.Container:
+            is_active = (self._sidebar_mode == mode)
+            return ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Icon(icon, size=16,
+                                color=active_color if is_active else "#9E9E9E"),
+                        ft.Text(label, size=10,
+                                weight=ft.FontWeight.W_600,
+                                color=active_color if is_active else "#9E9E9E",
+                                text_align=ft.TextAlign.CENTER),
+                    ],
+                    spacing=2, tight=True,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                padding=ft.padding.symmetric(horizontal=6, vertical=8),
+                expand=True,
+                bgcolor=active_bg if is_active else None,
+                border=ft.border.only(
+                    bottom=ft.BorderSide(2, active_color if is_active else "#E0E0E0")
+                ),
+                on_click=lambda e, m=mode: self._switch_sidebar_mode(m),
+                ink=True,
+                tooltip=label,
+            )
+
+        self._sidebar_tab_ocr_btn    = _make_tab_btn(*_TAB_DEFS[0])
+        self._sidebar_tab_redact_btn = _make_tab_btn(*_TAB_DEFS[1])
+        self._sidebar_tab_agent_btn  = _make_tab_btn(*_TAB_DEFS[2])
+
+        tab_bar = ft.Container(
+            content=ft.Row(
+                [self._sidebar_tab_ocr_btn,
+                 self._sidebar_tab_redact_btn,
+                 self._sidebar_tab_agent_btn],
+                spacing=0,
+            ),
+            bgcolor=_OCR_PANEL_BG,
+            border=ft.border.only(bottom=ft.BorderSide(1, "#CCCCCC")),
+        )
+
+        # ── three sidebar views (one visible at a time) ───────────────────────
+        self._sidebar_ocr_view = ft.Container(
+            content=ocr_panel,
+            expand=(self._sidebar_mode == "ocr"),
+            visible=(self._sidebar_mode == "ocr"),
+        )
+        self._sidebar_redact_view = ft.Container(
+            content=redact_panel,
+            expand=(self._sidebar_mode == "redact"),
+            visible=(self._sidebar_mode == "redact"),
+        )
+        self._sidebar_agent_view = ft.Container(
+            content=agent_panel,
+            expand=(self._sidebar_mode == "agent"),
+            visible=(self._sidebar_mode == "agent"),
+        )
+
         self._right_sidebar = ft.Container(
-            content=ft.Column([ocr_panel, redact_panel, agent_panel],
-                              spacing=0, expand=True),
+            content=ft.Column(
+                [tab_bar,
+                 self._sidebar_ocr_view,
+                 self._sidebar_redact_view,
+                 self._sidebar_agent_view],
+                spacing=0, expand=True,
+            ),
             width=360,
             bgcolor=_OCR_PANEL_BG,
             border=ft.border.only(left=ft.BorderSide(1, "#D5E6D8")),
@@ -406,15 +486,71 @@ class PDFViewerTab(
         except ValueError:
             pass
 
+    # ── sidebar mode switching ────────────────────────────────────────────────
+
+    def _switch_sidebar_mode(self, mode: str) -> None:
+        """Switch sidebar between 'ocr', 'redact' and 'agent' views."""
+        self._sidebar_mode = mode
+
+        _TAB_META = {
+            "ocr":    ("#2E7D32", "#E8F5E9", "_sidebar_tab_ocr_btn",    "_sidebar_ocr_view"),
+            "redact": ("#E65100", "#FFF3E0", "_sidebar_tab_redact_btn", "_sidebar_redact_view"),
+            "agent":  ("#5C35C9", "#EDE7F6", "_sidebar_tab_agent_btn",  "_sidebar_agent_view"),
+        }
+
+        for m, (active_color, active_bg, tab_attr, view_attr) in _TAB_META.items():
+            is_active = (m == mode)
+
+            # Show/hide view
+            view: ft.Container | None = getattr(self, view_attr, None)
+            if view is not None:
+                view.visible = is_active
+                view.expand  = is_active
+
+            # Update tab button appearance
+            btn: ft.Container | None = getattr(self, tab_attr, None)
+            if btn is not None:
+                col = btn.content
+                if isinstance(col, ft.Column):
+                    for ctrl in col.controls:
+                        if isinstance(ctrl, ft.Icon):
+                            ctrl.color = active_color if is_active else "#9E9E9E"
+                        elif isinstance(ctrl, ft.Text):
+                            ctrl.color = active_color if is_active else "#9E9E9E"
+                btn.bgcolor = active_bg if is_active else None
+                btn.border  = ft.border.only(
+                    bottom=ft.BorderSide(2, active_color if is_active else "#E0E0E0")
+                )
+
+        # Toolbar agent button highlight
+        if self._agent_toolbar_btn is not None:
+            is_agent = (mode == "agent")
+            self._agent_toolbar_btn.icon_color = "#5C35C9" if is_agent else None
+            self._agent_toolbar_btn.bgcolor    = "#EDE7F6" if is_agent else None
+            try:
+                self._agent_toolbar_btn.update()
+            except Exception:
+                pass
+
+        # Ensure sidebar is visible
+        if not self._sidebar_visible:
+            self._toggle_sidebar()
+
+        try:
+            self._right_sidebar.update()
+        except Exception:
+            pass
+
     # ── agent toolbar button ──────────────────────────────────────────────────
 
     def _make_agent_toolbar_btn(self) -> ft.IconButton:
+        _is_agent = (self._sidebar_mode == "agent")
         self._agent_toolbar_btn = ft.IconButton(
             ft.Icons.SMART_TOY_OUTLINED,
-            tooltip="Agente IA — abrir / cerrar chat",
-            icon_color="#5C35C9",   # activo porque agent_panel_open = True
-            bgcolor="#EDE7F6",
-            on_click=self._toggle_agent_panel,
+            tooltip="Agente IA — abrir panel del agente",
+            icon_color="#5C35C9" if _is_agent else None,
+            bgcolor="#EDE7F6" if _is_agent else None,
+            on_click=lambda e: self._switch_sidebar_mode("agent"),
         )
         return self._agent_toolbar_btn
 

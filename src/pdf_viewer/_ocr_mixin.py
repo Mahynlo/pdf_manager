@@ -10,12 +10,12 @@ from ._viewer_defs import _OCR_BOX_BG, _OCR_BOX_CLR, _OCR_PANEL_BG, _SELECTED_BG
 
 
 class _OCRMixin:
-    """OCR runner, results list, bounding-box overlay and collapsible panel."""
+    """OCR runner, results list, bounding-box overlay and sidebar panel."""
 
     # ── sidebar panel builder ─────────────────────────────────────────────────
 
     def _build_ocr_sidebar_panel(self) -> ft.Container:
-        """Build the OCR collapsible panel and initialise all OCR UI controls."""
+        """Build the OCR panel and initialise all OCR UI controls."""
         self._ocr_info     = ft.Text("OCR: sin ejecutar", size=12, color="#455A64")
         self._ocr_source   = ft.Text("Modo: -",           size=12, color="#455A64")
         self._ocr_doc_kind = ft.Text("Documento: -",      size=12, color="#455A64")
@@ -25,12 +25,6 @@ class _OCRMixin:
             expand=True, spacing=6,
             padding=ft.padding.only(bottom=8),
             auto_scroll=False,
-        )
-        self._ocr_collapse_btn = ft.IconButton(
-            ft.Icons.EXPAND_LESS,
-            icon_size=18,
-            tooltip="Contraer panel OCR",
-            on_click=self._toggle_ocr_panel,
         )
         self._ocr_content_area = ft.Container(
             ft.Column(
@@ -47,7 +41,6 @@ class _OCRMixin:
                 expand=True,
             ),
             expand=True,
-            visible=self._ocr_panel_open,
         )
         self._ocr_panel = ft.Container(
             ft.Column(
@@ -56,8 +49,6 @@ class _OCRMixin:
                         [
                             ft.Icon(ft.Icons.TEXT_SNIPPET, size=18, color="#2E7D32"),
                             ft.Text("Resultados OCR", size=14, weight=ft.FontWeight.W_600),
-                            ft.Container(expand=True),
-                            self._ocr_collapse_btn,
                         ],
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -116,7 +107,10 @@ class _OCRMixin:
     # ── OCR execution ─────────────────────────────────────────────────────────
 
     def _run_ocr(self, e=None) -> None:
-        if not self._sidebar_visible:
+        # Switch to OCR view so results are visible
+        if hasattr(self, "_switch_sidebar_mode"):
+            self._switch_sidebar_mode("ocr")
+        elif not self._sidebar_visible:
             self._toggle_sidebar()
         pn = self.current_page
         self._ocr_info.value = f"OCR página {pn + 1}: procesando inferencia..."
@@ -260,22 +254,6 @@ class _OCRMixin:
                 ocr_ov.update()
             except Exception:
                 pass
-
-    # ── panel collapse ────────────────────────────────────────────────────────
-
-    def _toggle_ocr_panel(self, e=None) -> None:
-        self._ocr_panel_open = not self._ocr_panel_open
-        if self._ocr_content_area is not None:
-            self._ocr_content_area.visible = self._ocr_panel_open
-        if self._ocr_collapse_btn is not None:
-            self._ocr_collapse_btn.icon    = ft.Icons.EXPAND_LESS if self._ocr_panel_open else ft.Icons.EXPAND_MORE
-            self._ocr_collapse_btn.tooltip = "Contraer panel OCR" if self._ocr_panel_open else "Expandir panel OCR"
-        if self._ocr_panel is not None:
-            self._ocr_panel.expand = self._ocr_panel_open
-        try:
-            self._right_sidebar.update()
-        except Exception:
-            pass
 
     # ── OCR overrides for AI agent ────────────────────────────────────────────
 

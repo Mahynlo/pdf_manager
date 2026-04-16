@@ -112,16 +112,11 @@ class _RedactAgentMixin:
             self._redact_color_btns[hex_c] = btn
             color_ctrls.append(btn)
 
-        # ── preview + collapse ────────────────────────────────────────────────
+        # ── preview button ────────────────────────────────────────────────────
         self._redact_preview_btn = ft.IconButton(
             ft.Icons.PREVIEW_OUTLINED, icon_size=18,
             tooltip="Mostrar/ocultar zonas marcadas en el documento",
             on_click=self._toggle_redact_preview,
-        )
-        self._redact_collapse_btn = ft.IconButton(
-            ft.Icons.EXPAND_MORE, icon_size=18,
-            tooltip="Expandir panel Redacción",
-            on_click=self._toggle_redact_panel,
         )
 
         self._redact_content_area = ft.Container(
@@ -171,7 +166,7 @@ class _RedactAgentMixin:
                 ],
                 spacing=8, expand=True,
             ),
-            expand=True, visible=self._redact_panel_open,
+            expand=True,
             padding=ft.padding.only(top=4),
         )
         self._redact_panel = ft.Container(
@@ -182,19 +177,16 @@ class _RedactAgentMixin:
                             ft.Icon(ft.Icons.EDIT_OFF, size=18, color=_REDACT_HDR),
                             ft.Text("Redacción", size=14, weight=ft.FontWeight.W_600,
                                     color=_REDACT_HDR),
-                            ft.Container(expand=True),
-                            self._redact_collapse_btn,
                         ],
                         spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     self._redact_content_area,
                 ],
-                spacing=4, expand=self._redact_panel_open,
+                spacing=4, expand=True,
             ),
             padding=ft.padding.symmetric(horizontal=12, vertical=10),
             bgcolor=_REDACT_BG,
-            border=ft.border.only(top=ft.BorderSide(1, "#FFE0B2")),
-            expand=self._redact_panel_open,
+            expand=True,
         )
         return self._redact_panel
 
@@ -219,7 +211,6 @@ class _RedactAgentMixin:
         _AGENT_BG   = "#F3F0FF"
         _AGENT_HDR  = "#5C35C9"
         _AGENT_LINE = "#D1C4E9"
-        _is_open    = self._agent_panel_open   # True by default
 
         # ── chat list ─────────────────────────────────────────────────────────
         self._agent_chat_list = ft.ListView(
@@ -248,15 +239,6 @@ class _RedactAgentMixin:
             content_padding=ft.padding.symmetric(horizontal=8, vertical=6),
             border_color=_AGENT_LINE,
             focused_border_color=_AGENT_HDR,
-        )
-
-        # ── header buttons ────────────────────────────────────────────────────
-        self._agent_collapse_btn = ft.IconButton(
-            ft.Icons.EXPAND_LESS if _is_open else ft.Icons.EXPAND_MORE,
-            icon_size=16,
-            tooltip="Contraer chat" if _is_open else "Expandir chat",
-            on_click=self._toggle_agent_panel,
-            style=ft.ButtonStyle(padding=ft.padding.all(4)),
         )
 
         _qbtn = ft.ButtonStyle(
@@ -338,7 +320,7 @@ class _RedactAgentMixin:
                 ],
                 spacing=8, expand=True,
             ),
-            expand=True, visible=_is_open,
+            expand=True,
             padding=ft.padding.only(top=6),
         )
 
@@ -361,68 +343,26 @@ class _RedactAgentMixin:
                                 on_click=self._agent_clear_chat,
                                 style=ft.ButtonStyle(padding=ft.padding.all(4)),
                             ),
-                            self._agent_collapse_btn,
                         ],
                         spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     self._agent_content_area,
                 ],
-                spacing=4, expand=_is_open,
+                spacing=4, expand=True,
             ),
             padding=ft.padding.symmetric(horizontal=12, vertical=8),
             bgcolor=_AGENT_BG,
-            border=ft.border.only(top=ft.BorderSide(1, _AGENT_LINE)),
-            expand=_is_open,
+            expand=True,
         )
         return self._agent_panel
 
-    # ── panel collapse ────────────────────────────────────────────────────────
+    # ── panel collapse (no-ops — collapse handled by sidebar tab switching) ────
 
     def _toggle_redact_panel(self, e=None) -> None:
-        self._redact_panel_open = not self._redact_panel_open
-        if self._redact_content_area is not None:
-            self._redact_content_area.visible = self._redact_panel_open
-        if self._redact_collapse_btn is not None:
-            self._redact_collapse_btn.icon    = ft.Icons.EXPAND_LESS if self._redact_panel_open else ft.Icons.EXPAND_MORE
-            self._redact_collapse_btn.tooltip = "Contraer panel Redacción" if self._redact_panel_open else "Expandir panel Redacción"
-        if self._redact_panel is not None:
-            self._redact_panel.expand = self._redact_panel_open
-            col = self._redact_panel.content
-            if isinstance(col, ft.Column):
-                col.expand = self._redact_panel_open
-        try:
-            self._right_sidebar.update()
-        except Exception:
-            pass
+        pass
 
     def _toggle_agent_panel(self, e=None) -> None:
-        self._agent_panel_open = not self._agent_panel_open
-        _open = self._agent_panel_open
-        if self._agent_content_area is not None:
-            self._agent_content_area.visible = _open
-        if self._agent_collapse_btn is not None:
-            self._agent_collapse_btn.icon    = ft.Icons.EXPAND_LESS if _open else ft.Icons.EXPAND_MORE
-            self._agent_collapse_btn.tooltip = "Contraer chat" if _open else "Expandir chat"
-        if self._agent_panel is not None:
-            self._agent_panel.expand = _open
-            col = self._agent_panel.content
-            if isinstance(col, ft.Column):
-                col.expand = _open
-        # Sync toolbar button colour
-        if hasattr(self, "_agent_toolbar_btn") and self._agent_toolbar_btn is not None:
-            self._agent_toolbar_btn.icon_color = "#5C35C9" if _open else None
-            self._agent_toolbar_btn.bgcolor    = "#EDE7F6" if _open else None
-            try:
-                self._agent_toolbar_btn.update()
-            except Exception:
-                pass
-        # Ensure sidebar is visible when opening agent
-        if _open and not self._sidebar_visible:
-            self._toggle_sidebar()
-        try:
-            self._right_sidebar.update()
-        except Exception:
-            pass
+        pass
 
     # ── AI agent ──────────────────────────────────────────────────────────────
 
@@ -503,10 +443,9 @@ class _RedactAgentMixin:
     def _agent_apply_redaction_term(self, term: str) -> None:
         if self._redact_query_field is not None:
             self._redact_query_field.value = term
-        if not self._redact_panel_open:
-            self._toggle_redact_panel()
-        if not self._sidebar_visible:
-            self._toggle_sidebar()
+        # Switch to redaction view so the redaction panel is visible
+        if hasattr(self, "_switch_sidebar_mode"):
+            self._switch_sidebar_mode("redact")
         self._add_redact_term()
 
     def _agent_append_bubble(self, role: str, text: str) -> None:
@@ -576,9 +515,10 @@ class _RedactAgentMixin:
         if self._agent_running:
             self._show_snack("El agente ya está procesando una solicitud…")
             return
-        if not self._agent_panel_open:
-            self._toggle_agent_panel()
-        if not self._sidebar_visible:
+        # Switch to agent view and ensure sidebar is open
+        if hasattr(self, "_switch_sidebar_mode"):
+            self._switch_sidebar_mode("agent")
+        elif not self._sidebar_visible:
             self._toggle_sidebar()
 
         self._agent_append_bubble("user", message)
@@ -798,8 +738,6 @@ class _RedactAgentMixin:
         self._rebuild_redact_terms_list()
         if self._redact_preview:
             self._render_redact_preview(force_update=True)
-        if not self._redact_panel_open:
-            self._toggle_redact_panel()
         self.page_ref.update()
 
     def _remove_redact_term(self, term: str) -> None:

@@ -19,11 +19,11 @@ class _PDFEntry:
     """One source PDF added to the merge list."""
 
     def __init__(self, path: str):
-        self.path           = path
-        self.filename       = Path(path).name
-        self.doc            = fitz.open(path)
-        self.total          = len(self.doc)
-        self.selected       = [True] * self.total   # all pages selected by default
+        self.path = path
+        self.filename = Path(path).name
+        self.doc = fitz.open(path)
+        self.total = len(self.doc)
+        self.selected = [True] * self.total   # all pages selected by default
         self.chips_expanded = False                  # show all chips or just first _CHIPS_PREVIEW
 
     def close(self) -> None:
