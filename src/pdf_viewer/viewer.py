@@ -69,8 +69,14 @@ class PDFViewerTab(
         self._selected:         tuple[int, int] | None = None
         self._pending_tap:      tuple[float, float] | None = None
         self._pending_tap_page: int | None = None
-        self._moving_selected   = False
+        # Drag mode: None | "move" | "resize_tl" | "resize_tr" | "resize_bl" | "resize_br" | "rotate"
+        self._drag_mode:        str | None = None
         self._move_last_pdf:    tuple[float, float] | None = None
+        # Used during rotate drag: initial mouse angle and display-space center
+        self._rotate_start_angle:  float = 0.0
+        self._rotate_center_disp:  tuple[float, float] | None = None
+        # Per-page references to inner handle/menu controls inside sel_overlays
+        self._sel_handles: list[dict] = []
 
         # Triple-tap tracking (paragraph selection on SELECT tool)
         self._tap_count:     int        = 0

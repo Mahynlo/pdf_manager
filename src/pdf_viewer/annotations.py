@@ -97,6 +97,8 @@ class AnnotationManager:
         self.last_select_rect: fitz.Rect | None = None
         # History for undo: list of (page_num, annot_xref) in insertion order.
         self._history: list[tuple[int, int]] = []
+        # Visual rotation per annotation xref (degrees, not stored in PDF).
+        self._rotations: dict[int, float] = {}
 
     # ── tool selection ──────────────────────────────────────────────────────
 
@@ -275,6 +277,38 @@ class AnnotationManager:
             annot.update()
             return True
         return False
+
+    def resize_annot(
+        self,
+        doc: fitz.Document,
+        page_num: int,
+        xref: int,
+        new_rect: fitz.Rect,
+    ) -> bool:
+        """Set annotation to an explicit new rect (used by interactive corner-drag resize)."""
+        if new_rect.is_empty or new_rect.width < 1 or new_rect.height < 1:
+            return False
+        page = doc[page_num]
+        for annot in page.annots():
+            if annot.xref != xref:
+                continue
+            annot.set_rect(new_rect)
+            annot.update()
+            return True
+        return False
+
+    def get_rotation(self, xref: int) -> float:
+        """Return current visual rotation angle in degrees for the annotation."""
+        return self._rotations.get(xref, 0.0)
+
+    def add_rotation(self, xref: int, delta_deg: float) -> float:
+        """Accumulate a rotation delta; returns new total angle in degrees."""
+        new_angle = (self._rotations.get(xref, 0.0) + delta_deg) % 360
+        self._rotations[xref] = new_angle
+        return new_angle
+
+    def clear_rotation(self, xref: int) -> None:
+        self._rotations.pop(xref, None)
 
     def scale_annot(
         self,

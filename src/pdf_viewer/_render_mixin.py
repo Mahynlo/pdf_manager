@@ -32,6 +32,7 @@ class _RenderMixin:
         self._page_images      = []
         self._drag_overlays    = []
         self._sel_overlays     = []
+        self._sel_handles      = []
         self._ocr_overlays     = []
         self._text_sel_layers  = []
         self._redact_overlays  = []
@@ -75,12 +76,126 @@ class _RenderMixin:
                 border=ft.border.all(1, "#0055AA"),
                 left=0, top=0, width=0, height=0,
             )
-            sel_ov = ft.Container(
-                visible=False,
-                bgcolor="#200055FF",
-                border=ft.border.all(2, "#0055FF"),
-                left=0, top=0, width=0, height=0,
+
+            # ── interactive selection overlay ─────────────────────────────────
+            _HS  = 10   # corner handle size (px)
+            _HHS = _HS / 2
+            _RS  = 14   # rotation handle size (px)
+            _HANDLE_CLR = "#0055FF"
+            _HANDLE_STYLE = dict(
+                width=_HS, height=_HS,
+                bgcolor=_HANDLE_CLR,
+                border_radius=2,
+                left=0, top=0,
             )
+            sel_border = ft.Container(
+                left=0, top=0, width=0, height=0,
+                bgcolor="#200055FF",
+                border=ft.border.all(2, _HANDLE_CLR),
+            )
+            sel_tl = ft.Container(**_HANDLE_STYLE)
+            sel_tr = ft.Container(**_HANDLE_STYLE)
+            sel_bl = ft.Container(**_HANDLE_STYLE)
+            sel_br = ft.Container(**_HANDLE_STYLE)
+            sel_rot = ft.Container(
+                left=0, top=0, width=_RS, height=_RS,
+                bgcolor="#FF6600",
+                border_radius=_RS // 2,
+                border=ft.border.all(2, "#FFFFFF"),
+                tooltip="Rotar",
+            )
+            # Thin dashed line connecting rotation handle to bbox top edge
+            sel_rot_line = ft.Container(
+                left=0, top=0, width=2, height=20,
+                bgcolor="#FF6600",
+            )
+            _ctx_btn = ft.ButtonStyle(
+                padding=ft.padding.all(5),
+                shape=ft.RoundedRectangleBorder(radius=4),
+            )
+            sel_menu = ft.Container(
+                left=0, top=0,
+                visible=False,
+                bgcolor="#FFFFFF",
+                border_radius=8,
+                padding=ft.padding.symmetric(horizontal=4, vertical=3),
+                shadow=ft.BoxShadow(
+                    blur_radius=10, spread_radius=1,
+                    color="#33000000", offset=ft.Offset(0, 2),
+                ),
+                border=ft.border.all(1, "#D0D0D0"),
+                content=ft.Row(
+                    [
+                        ft.IconButton(
+                            ft.Icons.DELETE_OUTLINE,
+                            icon_color=ft.Colors.RED_600,
+                            icon_size=18,
+                            tooltip="Eliminar",
+                            on_click=self._delete_selected,
+                            style=_ctx_btn,
+                        ),
+                        ft.Container(width=1, height=22, bgcolor="#E0E0E0"),
+                        ft.IconButton(
+                            ft.Icons.PALETTE_OUTLINED,
+                            icon_color="#7B1FA2",
+                            icon_size=18,
+                            tooltip="Cambiar color",
+                            on_click=self._recolor_selected_menu,
+                            style=_ctx_btn,
+                        ),
+                        ft.Container(width=1, height=22, bgcolor="#E0E0E0"),
+                        ft.IconButton(
+                            ft.Icons.ROTATE_LEFT,
+                            icon_color="#1565C0",
+                            icon_size=18,
+                            tooltip="Rotar −15°",
+                            on_click=lambda e: self._rotate_selected(-15),
+                            style=_ctx_btn,
+                        ),
+                        ft.IconButton(
+                            ft.Icons.ROTATE_RIGHT,
+                            icon_color="#1565C0",
+                            icon_size=18,
+                            tooltip="Rotar +15°",
+                            on_click=lambda e: self._rotate_selected(15),
+                            style=_ctx_btn,
+                        ),
+                        ft.Container(width=1, height=22, bgcolor="#E0E0E0"),
+                        ft.IconButton(
+                            ft.Icons.CLOSE,
+                            icon_color="#9E9E9E",
+                            icon_size=14,
+                            tooltip="Deseleccionar",
+                            on_click=self._deselect_annot,
+                            style=_ctx_btn,
+                        ),
+                    ],
+                    spacing=0, tight=True,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+            )
+            sel_stack = ft.Stack(
+                [sel_border, sel_rot_line, sel_rot,
+                 sel_tl, sel_tr, sel_bl, sel_br,
+                 sel_menu],
+                clip_behavior=ft.ClipBehavior.NONE,
+            )
+            sel_ov = ft.Container(
+                content=sel_stack,
+                visible=False,
+                left=0, top=0, width=0, height=0,
+                clip_behavior=ft.ClipBehavior.NONE,
+            )
+            self._sel_handles.append({
+                "border":   sel_border,
+                "tl":       sel_tl,
+                "tr":       sel_tr,
+                "bl":       sel_bl,
+                "br":       sel_br,
+                "rot":      sel_rot,
+                "rot_line": sel_rot_line,
+                "menu":     sel_menu,
+            })
             ocr_ov      = ft.Stack([], visible=False)
             text_sel_ov = ft.Stack([], visible=False)
             redact_ov   = ft.Stack([], visible=False)

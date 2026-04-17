@@ -1,6 +1,8 @@
 """Annotation selection, editing and text-action dialogs for PDFViewerTab."""
 from __future__ import annotations
 
+import math
+
 import flet as ft
 import fitz
 
@@ -8,16 +10,39 @@ from .annotations import HIGHLIGHT_COLORS, Tool
 from .renderer import BASE_SCALE
 from ._viewer_defs import _SELECTED_BG, _rgb_to_hex
 
+# Pixel size of each corner handle (must match _render_mixin.py constant).
+_HS  = 10
+_HHS = _HS / 2
+_RS  = 14   # rotation handle diameter
+_ROT_OFFSET = 28   # px above the bbox top edge for the rotation handle centre
+
 
 class _AnnotMixin:
     """Annotation tool selection, selection overlay and edit operations."""
 
     # ── tool selection ────────────────────────────────────────────────────────
 
-    # ── annotation floating popup ─────────────────────────────────────────────
+    def _select_tool(self, tool: Tool, cursor: ft.MouseCursor) -> None:
+        if tool != Tool.SELECT:
+            self._hide_text_sel_bar()
+        self._hide_annot_popup()
+        self._annot.set_tool(tool)
+        self._current_cursor = cursor
+        for gd in self._page_gestures:
+            gd.mouse_cursor = cursor
+            gd.update()
+        for t, btn in self._tool_btns.items():
+            btn.bgcolor = _SELECTED_BG if t == tool else None
+            btn.update()
+
+    def _set_highlight_color(self, rgb: tuple[float, float, float]) -> None:
+        self._annot.highlight_color = rgb
+        self._select_tool(Tool.HIGHLIGHT, ft.MouseCursor.PRECISE)
+        self._show_snack("Color de resaltado actualizado")
+
+    # ── annotation floating popup (for text-markup annotations) ───────────────
 
     def _show_annot_popup(self, pn: int, xref: int, pdf_rect: fitz.Rect) -> None:
-        """Show the floating annotation action popup near pdf_rect."""
         self._hide_annot_popup()
         self._selected = (pn, xref)
         if pn >= len(self._annot_popups):
@@ -46,7 +71,6 @@ class _AnnotMixin:
             pass
 
     def _hide_annot_popup(self, e=None) -> None:
-        """Hide the annotation popup (does not clear self._selected)."""
         pn = self._annot_popup_pn
         if pn is not None and pn < len(self._annot_popups):
             popup = self._annot_popups[pn]
@@ -66,25 +90,35 @@ class _AnnotMixin:
         self._hide_annot_popup()
         self._recolor_selected_menu()
 
-    # ── tool selection ────────────────────────────────────────────────────────
+    # ── selection overlay helpers ─────────────────────────────────────────────
 
-    def _select_tool(self, tool: Tool, cursor: ft.MouseCursor) -> None:
-        if tool != Tool.SELECT:
-            self._hide_text_sel_bar()
-        self._hide_annot_popup()
-        self._annot.set_tool(tool)
-        self._current_cursor = cursor
-        for gd in self._page_gestures:
-            gd.mouse_cursor = cursor
-            gd.update()
-        for t, btn in self._tool_btns.items():
-            btn.bgcolor = _SELECTED_BG if t == tool else None
-            btn.update()
+    def _update_sel_handles(self, pn: int, W: float, H: float) -> None:
+        """Position all handle/menu controls inside the sel_overlay Stack."""
+        if pn >= len(self._sel_handles):
+            return
+        h = self._sel_handles[pn]
 
-    def _set_highlight_color(self, rgb: tuple[float, float, float]) -> None:
-        self._annot.highlight_color = rgb
-        self._select_tool(Tool.HIGHLIGHT, ft.MouseCursor.PRECISE)
-        self._show_snack("Color de resaltado actualizado")
+        h["border"].width  = W
+        h["border"].height = H
+
+        h["tl"].left = -_HHS;     h["tl"].top = -_HHS
+        h["tr"].left = W - _HHS;  h["tr"].top = -_HHS
+        h["bl"].left = -_HHS;     h["bl"].top = H - _HHS
+        h["br"].left = W - _HHS;  h["br"].top = H - _HHS
+
+        # Rotation handle: centred above the top edge.
+        h["rot"].left = W / 2 - _RS / 2
+        h["rot"].top  = -_ROT_OFFSET - _RS / 2
+
+        # Thin line connecting rotation handle to top edge.
+        h["rot_line"].left = W / 2 - 1
+        h["rot_line"].top  = -(_ROT_OFFSET - _RS / 2)
+        h["rot_line"].height = _ROT_OFFSET - _RS / 2
+
+        # Context menu: just below the bbox, left-aligned.
+        h["menu"].left = 0
+        h["menu"].top  = H + 6
+        h["menu"].visible = True
 
     # ── annotation selection overlay ──────────────────────────────────────────
 
@@ -93,6 +127,8 @@ class _AnnotMixin:
             old_pn = self._selected[0]
             if old_pn < len(self._sel_overlays):
                 self._sel_overlays[old_pn].visible = False
+                if old_pn < len(self._sel_handles):
+                    self._sel_handles[old_pn]["menu"].visible = False
                 try:
                     self._sel_overlays[old_pn].update()
                 except Exception:
@@ -100,16 +136,25 @@ class _AnnotMixin:
 
         self._selected = (pn, annot.xref)
         annot_name = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else "Anotación"
-        self._sel_label.value = f"{annot_name} seleccionada — arrastra para mover"
+        self._sel_label.value = f"{annot_name} — arrastra para mover"
 
         scale  = self.zoom * BASE_SCALE
         r      = annot.rect
+        W      = r.width  * scale
+        H      = r.height * scale
+
         sel_ov = self._sel_overlays[pn]
-        sel_ov.left    = r.x0     * scale
-        sel_ov.top     = r.y0     * scale
-        sel_ov.width   = r.width  * scale
-        sel_ov.height  = r.height * scale
+        sel_ov.left    = r.x0 * scale
+        sel_ov.top     = r.y0 * scale
+        sel_ov.width   = W
+        sel_ov.height  = H
         sel_ov.visible = True
+
+        # Apply stored visual rotation.
+        angle_rad = math.radians(self._annot.get_rotation(annot.xref))
+        sel_ov.rotate = ft.Rotate(angle=angle_rad, alignment=ft.alignment.center)
+
+        self._update_sel_handles(pn, W, H)
         self._annot_action_bar.visible = True
         try:
             sel_ov.update()
@@ -135,12 +180,20 @@ class _AnnotMixin:
             return
         scale  = self.zoom * BASE_SCALE
         r      = annot.rect
+        W      = max(2.0, r.width  * scale)
+        H      = max(2.0, r.height * scale)
+
         sel_ov = self._sel_overlays[pn]
-        sel_ov.left    = r.x0    * scale
-        sel_ov.top     = r.y0    * scale
-        sel_ov.width   = max(2, r.width  * scale)
-        sel_ov.height  = max(2, r.height * scale)
+        sel_ov.left    = r.x0 * scale
+        sel_ov.top     = r.y0 * scale
+        sel_ov.width   = W
+        sel_ov.height  = H
         sel_ov.visible = True
+
+        angle_rad = math.radians(self._annot.get_rotation(annot.xref))
+        sel_ov.rotate = ft.Rotate(angle=angle_rad, alignment=ft.alignment.center)
+
+        self._update_sel_handles(pn, W, H)
         try:
             sel_ov.update()
         except Exception:
@@ -152,8 +205,11 @@ class _AnnotMixin:
             return
         pn = self._selected[0]
         self._selected = None
+        self._drag_mode = None
         if pn < len(self._sel_overlays):
             self._sel_overlays[pn].visible = False
+            if pn < len(self._sel_handles):
+                self._sel_handles[pn]["menu"].visible = False
             try:
                 self._sel_overlays[pn].update()
             except Exception:
@@ -171,6 +227,7 @@ class _AnnotMixin:
         if self._selected is None:
             return
         pn, xref = self._selected
+        self._annot.clear_rotation(xref)
         with self._doc_lock:
             deleted = self._annot.delete_annot(self.doc, pn, xref)
         self._selected = None
@@ -195,6 +252,14 @@ class _AnnotMixin:
 
     def _scale_up_selected(self, e=None) -> None:
         self._scale_selected(1.15)
+
+    def _rotate_selected(self, delta_deg: float) -> None:
+        """Rotate the selected annotation visually by delta_deg degrees."""
+        if self._selected is None:
+            return
+        pn, xref = self._selected
+        self._annot.add_rotation(xref, delta_deg)
+        self._refresh_selected_overlay(pn)
 
     def _recolor_selected_menu(self, e=None) -> None:
         if self._selected is None:
