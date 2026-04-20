@@ -10,10 +10,8 @@ import fitz
 from .annotations import Tool
 from .renderer import BASE_SCALE, display_to_pdf
 
-# Pixel hit radius for corner handles and rotation handle.
-_HANDLE_HIT_R = 14
-# Rotation handle offset above bbox top edge (must match _annot_mixin.py).
-_ROT_OFFSET = 28
+# Pixel hit radius for corner handles.
+_HANDLE_HIT_R = 20
 
 
 class _GestureMixin:
@@ -22,42 +20,39 @@ class _GestureMixin:
     # ── helpers ───────────────────────────────────────────────────────────────
 
     def _sel_handle_positions(self, pn: int):
-        """Return dict of display-space handle centres accounting for rotation.
+        """Return dict of display-space handle centres.
 
-        Returns None if there is no active selection on *pn*.
-        Rotation is applied around the bbox centre.
+        Returns None if there is no active selection on *pn*.  Reads from the
+        cached ``_selected_rect`` to stay lock-free (the doc lock is often
+        held by a background page render and blocking here stalls pan_start).
         """
         if self._selected is None or self._selected[0] != pn:
             return None
-        annot = self._get_selected_annot()
-        if annot is None:
-            return None
+
+        if self._selected_rect is not None:
+            r = fitz.Rect(self._selected_rect)
+        else:
+            xref = self._selected[1]
+            with self._doc_lock:
+                page = self.doc[pn]
+                r = next((fitz.Rect(a.rect) for a in page.annots() if a.xref == xref), None)
+            if r is None:
+                return None
 
         scale = self.zoom * BASE_SCALE
-        r     = annot.rect
-        xref  = self._selected[1]
-        angle_rad = math.radians(self._annot.get_rotation(xref))
-
         cx = (r.x0 + r.x1) / 2 * scale
         cy = (r.y0 + r.y1) / 2 * scale
         W  = r.width  * scale
         H  = r.height * scale
 
-        cos_a = math.cos(angle_rad)
-        sin_a = math.sin(angle_rad)
-
-        def rot(dx: float, dy: float):
-            return (cx + dx * cos_a - dy * sin_a,
-                    cy + dx * sin_a + dy * cos_a)
-
         return {
-            "tl":  rot(-W / 2, -H / 2),
-            "tr":  rot( W / 2, -H / 2),
-            "bl":  rot(-W / 2,  H / 2),
-            "br":  rot( W / 2,  H / 2),
-            "rot": rot(0, -H / 2 - _ROT_OFFSET),
-            "cx":  cx,
-            "cy":  cy,
+            "tl": (cx - W / 2, cy - H / 2),
+            "tr": (cx + W / 2, cy - H / 2),
+            "bl": (cx - W / 2, cy + H / 2),
+            "br": (cx + W / 2, cy + H / 2),
+            "cx": cx,
+            "cy": cy,
+            "r":  r,
         }
 
     def _detect_drag_mode(self, pn: int, dx: float, dy: float) -> str:
@@ -66,32 +61,19 @@ class _GestureMixin:
         if positions is None:
             return "none"
 
-        # Check rotation handle first (it floats above the bbox).
-        rx, ry = positions["rot"]
-        if math.hypot(dx - rx, dy - ry) <= _HANDLE_HIT_R:
-            return "rotate"
-
         # Check corner handles.
         for name in ("tl", "tr", "bl", "br"):
             hx, hy = positions[name]
             if math.hypot(dx - hx, dy - hy) <= _HANDLE_HIT_R:
                 return f"resize_{name}"
 
-        # Check inside the (rotated) bounding box for move.
-        annot = self._get_selected_annot()
-        if annot is None:
-            return "none"
-        scale = self.zoom * BASE_SCALE
-        r     = annot.rect
+        # Check inside the bounding box for move.
+        scale  = self.zoom * BASE_SCALE
+        r      = positions["r"]
         cx, cy = positions["cx"], positions["cy"]
-        angle_rad = math.radians(self._annot.get_rotation(self._selected[1]))
-
-        # Rotate the click point back into un-rotated bbox space.
-        local_x = (dx - cx) * math.cos(-angle_rad) - (dy - cy) * math.sin(-angle_rad)
-        local_y = (dx - cx) * math.sin(-angle_rad) + (dy - cy) * math.cos(-angle_rad)
-        half_w  = r.width  * scale / 2 + 4
-        half_h  = r.height * scale / 2 + 4
-        if abs(local_x) <= half_w and abs(local_y) <= half_h:
+        half_w = r.width  * scale / 2 + 12
+        half_h = r.height * scale / 2 + 12
+        if abs(dx - cx) <= half_w and abs(dy - cy) <= half_h:
             return "move"
 
         return "none"
@@ -165,27 +147,49 @@ class _GestureMixin:
         self._pending_tap_page = None
 
         if self._annot.tool == Tool.CURSOR:
-            if self._selected is None or self._selected[0] != pn:
-                return
+            try:
+                pdf_x, pdf_y = display_to_pdf(e.local_x, e.local_y, self.zoom)
 
-            mode = self._detect_drag_mode(pn, e.local_x, e.local_y)
-            if mode == "none":
-                # Click outside bbox/handles deselects.
-                self._deselect_annot()
-                return
+                # If there is already a selection on this page, try handles first.
+                # Lock-free path: use the cached rect so we don't block waiting
+                # for the background render worker to release the doc lock.
+                if (self._selected is not None
+                        and self._selected[0] == pn
+                        and self._selected_rect is not None):
+                    mode = self._detect_drag_mode(pn, e.local_x, e.local_y)
+                    if mode != "none":
+                        self._drag_start_rect   = fitz.Rect(self._selected_rect)
+                        self._drag_current_rect = fitz.Rect(self._selected_rect)
+                        self._drag_mode     = mode
+                        self._move_last_pdf = (pdf_x, pdf_y)
+                        return
+                    # Drag started outside annotation — keep selection, do nothing.
+                    return
 
-            self._drag_mode    = mode
-            pdf_x, pdf_y       = display_to_pdf(e.local_x, e.local_y, self.zoom)
-            self._move_last_pdf = (pdf_x, pdf_y)
+                # No selection: try to auto-select any shape annotation under cursor
+                # so the user can drag it directly without tapping first.
+                cached_rect: fitz.Rect | None = None
+                found_annot = None
+                with self._doc_lock:
+                    page  = self.doc[pn]
+                    annot = self._annot.get_annot_at(page, pdf_x, pdf_y)
+                    if annot is not None:
+                        atype = (annot.type[1]
+                                 if isinstance(annot.type, (tuple, list)) and len(annot.type) > 1
+                                 else "")
+                        # Shape annotations only: text markup uses popup instead.
+                        if atype not in ("Highlight", "Underline", "StrikeOut", "Squiggly"):
+                            cached_rect = fitz.Rect(annot.rect)
+                            found_annot = annot
 
-            if mode == "rotate":
-                pos = self._sel_handle_positions(pn)
-                if pos:
-                    self._rotate_center_disp = (pos["cx"], pos["cy"])
-                    self._rotate_start_angle = math.degrees(math.atan2(
-                        e.local_y - pos["cy"],
-                        e.local_x - pos["cx"],
-                    ))
+                if found_annot is not None and cached_rect is not None:
+                    self._select_annot(pn, found_annot)
+                    self._drag_mode         = "move"
+                    self._move_last_pdf     = (pdf_x, pdf_y)
+                    self._drag_start_rect   = cached_rect
+                    self._drag_current_rect = fitz.Rect(cached_rect)
+            except Exception:
+                pass
             return
 
         self.current_page = pn
@@ -198,52 +202,47 @@ class _GestureMixin:
 
     def _on_pan_update(self, e: ft.DragUpdateEvent, pn: int) -> None:
         if self._annot.tool == Tool.CURSOR:
-            if self._drag_mode is None or self._selected is None:
+            # Lock-free drag: compute new rect from cached rect + delta, update only
+            # the selection overlay.  The PDF document is written once at pan_end.
+            if (self._drag_mode is None
+                    or self._selected is None
+                    or self._move_last_pdf is None
+                    or self._drag_current_rect is None):
                 return
             if self._selected[0] != pn:
                 return
 
-            pdf_x, pdf_y = display_to_pdf(e.local_x, e.local_y, self.zoom)
-            last_x, last_y = self._move_last_pdf
-            dx = pdf_x - last_x
-            dy = pdf_y - last_y
+            try:
+                pdf_x, pdf_y   = display_to_pdf(e.local_x, e.local_y, self.zoom)
+                last_x, last_y = self._move_last_pdf
+                dx = pdf_x - last_x
+                dy = pdf_y - last_y
 
-            if self._drag_mode == "move":
-                if not (math.isclose(dx, 0.0, abs_tol=0.01)
-                        and math.isclose(dy, 0.0, abs_tol=0.01)):
-                    with self._doc_lock:
-                        moved = self._annot.move_annot(
-                            self.doc, pn, self._selected[1], dx, dy
-                        )
-                    if moved:
-                        self._move_last_pdf = (pdf_x, pdf_y)
-                        self._refresh_selected_overlay(pn)
+                if math.isclose(dx, 0.0, abs_tol=0.01) and math.isclose(dy, 0.0, abs_tol=0.01):
+                    return
 
-            elif self._drag_mode.startswith("resize_"):
-                handle = self._drag_mode[len("resize_"):]   # "tl" | "tr" | "bl" | "br"
-                if not (math.isclose(dx, 0.0, abs_tol=0.01)
-                        and math.isclose(dy, 0.0, abs_tol=0.01)):
-                    with self._doc_lock:
-                        annot = self._get_selected_annot_nolock(pn)
-                        if annot is not None:
-                            new_rect = self._compute_resize_rect(annot.rect, handle, dx, dy)
-                            ok = self._annot.resize_annot(
-                                self.doc, pn, self._selected[1], new_rect
-                            )
-                    if ok:
-                        self._move_last_pdf = (pdf_x, pdf_y)
-                        self._refresh_selected_overlay(pn)
+                if self._drag_mode == "move":
+                    r = self._drag_current_rect
+                    new_rect = fitz.Rect(
+                        r.x0 + dx, r.y0 + dy,
+                        r.x1 + dx, r.y1 + dy,
+                    )
+                    self._drag_current_rect = new_rect
+                    self._move_last_pdf     = (pdf_x, pdf_y)
+                    self._ensure_drag_ghost_active(pn)
+                    self._refresh_selected_overlay(pn, annot_rect=new_rect)
 
-            elif self._drag_mode == "rotate":
-                if self._rotate_center_disp is not None:
-                    cx, cy = self._rotate_center_disp
-                    current_angle = math.degrees(math.atan2(
-                        e.local_y - cy, e.local_x - cx
-                    ))
-                    delta = current_angle - self._rotate_start_angle
-                    self._rotate_start_angle = current_angle
-                    self._annot.add_rotation(self._selected[1], delta)
-                    self._refresh_selected_overlay(pn)
+                elif self._drag_mode.startswith("resize_"):
+                    handle   = self._drag_mode[len("resize_"):]   # "tl" | "tr" | "bl" | "br"
+                    new_rect = self._compute_resize_rect(
+                        self._drag_current_rect, handle, dx, dy,
+                    )
+                    self._drag_current_rect = new_rect
+                    self._move_last_pdf     = (pdf_x, pdf_y)
+                    self._ensure_drag_ghost_active(pn)
+                    self._refresh_selected_overlay(pn, annot_rect=new_rect)
+            except Exception:
+                pass
             return
 
         pdf_x, pdf_y = display_to_pdf(e.local_x, e.local_y, self.zoom)
@@ -273,13 +272,55 @@ class _GestureMixin:
     def _on_pan_end(self, e: ft.DragEndEvent, pn: int) -> None:
         if self._annot.tool == Tool.CURSOR:
             if self._drag_mode is not None:
-                prev_mode      = self._drag_mode
-                self._drag_mode         = None
-                self._move_last_pdf     = None
-                self._rotate_center_disp = None
-                if prev_mode in ("move",) or prev_mode.startswith("resize_"):
-                    self._refresh_page(pn)
-                # For rotate we only updated the overlay; no PDF re-render needed.
+                prev_mode       = self._drag_mode
+                self._drag_mode = None
+                self._move_last_pdf = None
+                was_hidden = self._drag_annot_hidden
+                try:
+                    if (prev_mode == "move" or prev_mode.startswith("resize_")) \
+                            and self._selected is not None \
+                            and self._drag_current_rect is not None \
+                            and self._drag_start_rect is not None:
+                        xref       = self._selected[1]
+                        final_rect = self._drag_current_rect
+                        start_rect = self._drag_start_rect
+                        wrote_doc  = False
+                        # Single document write at gesture end + clear HIDDEN flag.
+                        with self._doc_lock:
+                            if prev_mode == "move":
+                                total_dx = final_rect.x0 - start_rect.x0
+                                total_dy = final_rect.y0 - start_rect.y0
+                                if abs(total_dx) > 0.01 or abs(total_dy) > 0.01:
+                                    self._annot.move_annot(self.doc, pn, xref, total_dx, total_dy)
+                                    wrote_doc = True
+                            else:
+                                self._annot.resize_annot(self.doc, pn, xref, final_rect)
+                                wrote_doc = True
+                            if was_hidden:
+                                self._annot.set_annot_hidden(self.doc, pn, xref, False)
+                        self._drag_annot_hidden = False
+                        # Update overlay + cached rect first so the next pan_start
+                        # sees the new geometry without waiting for the render.
+                        self._refresh_selected_overlay(pn, annot_rect=final_rect)
+                        # Background re-render (no full page flash).
+                        if wrote_doc or was_hidden:
+                            self._rerender_page_image(pn)
+                except Exception:
+                    # Best-effort: if we hid the annot but crashed, unhide it
+                    # so the user doesn't end up with an invisible annotation.
+                    if self._drag_annot_hidden and self._selected is not None:
+                        try:
+                            with self._doc_lock:
+                                self._annot.set_annot_hidden(
+                                    self.doc, pn, self._selected[1], False
+                                )
+                        except Exception:
+                            pass
+                        self._drag_annot_hidden = False
+                        self._rerender_page_image(pn)
+                finally:
+                    self._drag_start_rect   = None
+                    self._drag_current_rect = None
             return
 
         dov = self._drag_overlays[pn]
@@ -305,10 +346,24 @@ class _GestureMixin:
                                 break
 
         if modified:
-            self._clear_text_selection()
-            self._refresh_page(pn)
-            if new_markup is not None:
-                self._show_annot_popup(pn, new_markup[0], new_markup[1])
+            # Shapes: auto-switch to cursor and select the new annotation so the
+            # user can immediately move / resize without manually switching tool.
+            if tool in (Tool.RECT, Tool.CIRCLE, Tool.LINE):
+                self._select_tool(Tool.CURSOR, ft.MouseCursor.BASIC)
+                if self._annot._history:
+                    last_pn, last_xref = self._annot._history[-1]
+                    if last_pn == pn:
+                        with self._doc_lock:
+                            for a in self.doc[pn].annots():
+                                if a.xref == last_xref:
+                                    self._select_annot(pn, a)
+                                    break
+                self._rerender_page_image(pn)
+            else:
+                self._clear_text_selection()
+                self._refresh_page(pn)
+                if new_markup is not None:
+                    self._show_annot_popup(pn, new_markup[0], new_markup[1])
         elif self._annot.tool == Tool.SELECT:
             sel_text = self._update_text_selection(
                 pn, self._text_sel_start_pdf, self._text_sel_end_pdf, update_ui=True
@@ -325,6 +380,25 @@ class _GestureMixin:
             self._clear_text_selection()
 
     # ── internal helpers ──────────────────────────────────────────────────────
+
+    def _ensure_drag_ghost_active(self, pn: int) -> None:
+        """Hide the real annotation the first time a drag moves so the
+        selection overlay looks like it is moving the annotation itself
+        instead of trailing behind a stale page image.
+        """
+        if self._drag_annot_hidden or self._selected is None:
+            return
+        if self._selected[0] != pn:
+            return
+        xref = self._selected[1]
+        try:
+            with self._doc_lock:
+                ok = self._annot.set_annot_hidden(self.doc, pn, xref, True)
+        except Exception:
+            return
+        if ok:
+            self._drag_annot_hidden = True
+            self._rerender_page_image(pn)
 
     def _get_selected_annot_nolock(self, pn: int) -> fitz.Annot | None:
         """Return selected annot WITHOUT acquiring the doc lock (caller holds it)."""

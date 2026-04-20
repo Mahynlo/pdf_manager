@@ -1,8 +1,6 @@
 """Annotation selection, editing and text-action dialogs for PDFViewerTab."""
 from __future__ import annotations
 
-import math
-
 import flet as ft
 import fitz
 
@@ -13,8 +11,11 @@ from ._viewer_defs import _SELECTED_BG, _rgb_to_hex
 # Pixel size of each corner handle (must match _render_mixin.py constant).
 _HS  = 10
 _HHS = _HS / 2
-_RS  = 14   # rotation handle diameter
-_ROT_OFFSET = 28   # px above the bbox top edge for the rotation handle centre
+# Extra height added to sel_ov so the context menu (below the annotation) is
+# within the container's hit-test region (Flutter ignores clicks outside bounds).
+_MENU_EXTRA = 52
+# Distance from the top of the box to the centre of the rotation handle.
+_ROT_OFFSET = 30
 
 
 class _AnnotMixin:
@@ -92,6 +93,33 @@ class _AnnotMixin:
 
     # ── selection overlay helpers ─────────────────────────────────────────────
 
+    def _apply_overlay_style(
+        self, pn: int, annot: fitz.Annot, W: float, H: float,
+    ) -> None:
+        """Restyle the selection border so it visually matches the annotation
+        type/colour.  Makes the overlay read as a live ghost of the annotation
+        while its real image is hidden during drag.
+        """
+        if pn >= len(self._sel_handles):
+            return
+        atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
+        self._selected_atype = atype
+        colors = {}
+        try:
+            colors = annot.colors or {}
+        except Exception:
+            pass
+        stroke = colors.get("stroke") or (0.0, 0.33, 1.0)
+        try:
+            hex_color = _rgb_to_hex(*stroke)
+        except Exception:
+            hex_color = "#0055FF"
+
+        border_ctl = self._sel_handles[pn]["border"]
+        border_ctl.border_radius = 2
+        border_ctl.bgcolor = None
+        border_ctl.border  = ft.border.all(2, hex_color)
+
     def _update_sel_handles(self, pn: int, W: float, H: float) -> None:
         """Position all handle/menu controls inside the sel_overlay Stack."""
         if pn >= len(self._sel_handles):
@@ -100,20 +128,23 @@ class _AnnotMixin:
 
         h["border"].width  = W
         h["border"].height = H
+        h["border"].border_radius = 2
 
         h["tl"].left = -_HHS;     h["tl"].top = -_HHS
         h["tr"].left = W - _HHS;  h["tr"].top = -_HHS
         h["bl"].left = -_HHS;     h["bl"].top = H - _HHS
         h["br"].left = W - _HHS;  h["br"].top = H - _HHS
 
-        # Rotation handle: centred above the top edge.
-        h["rot"].left = W / 2 - _RS / 2
-        h["rot"].top  = -_ROT_OFFSET - _RS / 2
-
-        # Thin line connecting rotation handle to top edge.
-        h["rot_line"].left = W / 2 - 1
-        h["rot_line"].top  = -(_ROT_OFFSET - _RS / 2)
-        h["rot_line"].height = _ROT_OFFSET - _RS / 2
+        # Rotation handle: centred above the box, connected by a short stem.
+        if "rot" in h:
+            h["rot"].left = W / 2 - _HHS
+            h["rot"].top  = -_ROT_OFFSET
+            h["rot"].visible = True
+        if "rot_stem" in h:
+            h["rot_stem"].left = W / 2 - 0.5
+            h["rot_stem"].top  = -_ROT_OFFSET + _HHS
+            h["rot_stem"].height = _ROT_OFFSET - _HHS
+            h["rot_stem"].visible = True
 
         # Context menu: just below the bbox, left-aligned.
         h["menu"].left = 0
@@ -139,7 +170,8 @@ class _AnnotMixin:
         self._sel_label.value = f"{annot_name} — arrastra para mover"
 
         scale  = self.zoom * BASE_SCALE
-        r      = annot.rect
+        r      = fitz.Rect(annot.rect)
+        self._selected_rect = r
         W      = r.width  * scale
         H      = r.height * scale
 
@@ -147,13 +179,10 @@ class _AnnotMixin:
         sel_ov.left    = r.x0 * scale
         sel_ov.top     = r.y0 * scale
         sel_ov.width   = W
-        sel_ov.height  = H
+        sel_ov.height  = H + _MENU_EXTRA
         sel_ov.visible = True
 
-        # Apply stored visual rotation.
-        angle_rad = math.radians(self._annot.get_rotation(annot.xref))
-        sel_ov.rotate = ft.Rotate(angle=angle_rad, alignment=ft.alignment.center)
-
+        self._apply_overlay_style(pn, annot, W, H)
         self._update_sel_handles(pn, W, H)
         self._annot_action_bar.visible = True
         try:
@@ -173,25 +202,45 @@ class _AnnotMixin:
                     return annot
         return None
 
-    def _refresh_selected_overlay(self, pn: int) -> None:
-        annot = self._get_selected_annot()
-        if annot is None:
-            self._deselect_annot()
-            return
-        scale  = self.zoom * BASE_SCALE
-        r      = annot.rect
-        W      = max(2.0, r.width  * scale)
-        H      = max(2.0, r.height * scale)
+    def _refresh_selected_overlay(self, pn: int, annot_rect: fitz.Rect | None = None) -> None:
+        """Reposition the selection overlay for the annotation on page *pn*.
+
+        Pass *annot_rect* (already-fetched PDF rect) to skip the lock
+        re-acquisition during drag loops.  When omitted, falls back to the
+        cached ``self._selected_rect`` (also lock-free) and only hits the
+        document as a last resort.
+        """
+        if annot_rect is None:
+            if self._selected is None:
+                return
+            if self._selected_rect is not None:
+                annot_rect = fitz.Rect(self._selected_rect)
+            else:
+                xref = self._selected[1]
+                with self._doc_lock:
+                    page = self.doc[pn]
+                    annot_rect = next(
+                        (fitz.Rect(a.rect) for a in page.annots() if a.xref == xref),
+                        None,
+                    )
+                if annot_rect is None:
+                    self._deselect_annot()
+                    return
+
+        # Keep the cached rect in sync so subsequent lock-free reads work.
+        self._selected_rect = fitz.Rect(annot_rect)
+
+        scale = self.zoom * BASE_SCALE
+        r     = annot_rect
+        W     = max(2.0, r.width  * scale)
+        H     = max(2.0, r.height * scale)
 
         sel_ov = self._sel_overlays[pn]
         sel_ov.left    = r.x0 * scale
         sel_ov.top     = r.y0 * scale
         sel_ov.width   = W
-        sel_ov.height  = H
+        sel_ov.height  = H + _MENU_EXTRA
         sel_ov.visible = True
-
-        angle_rad = math.radians(self._annot.get_rotation(annot.xref))
-        sel_ov.rotate = ft.Rotate(angle=angle_rad, alignment=ft.alignment.center)
 
         self._update_sel_handles(pn, W, H)
         try:
@@ -204,7 +253,21 @@ class _AnnotMixin:
         if self._selected is None:
             return
         pn = self._selected[0]
+        # If a drag left the annotation hidden (e.g. tool changed mid-drag),
+        # unhide before dropping the reference so it doesn't stay invisible.
+        if self._drag_annot_hidden:
+            try:
+                with self._doc_lock:
+                    self._annot.set_annot_hidden(
+                        self.doc, pn, self._selected[1], False
+                    )
+            except Exception:
+                pass
+            self._drag_annot_hidden = False
+            self._rerender_page_image(pn)
         self._selected = None
+        self._selected_rect = None
+        self._selected_atype = None
         self._drag_mode = None
         if pn < len(self._sel_overlays):
             self._sel_overlays[pn].visible = False
@@ -227,11 +290,10 @@ class _AnnotMixin:
         if self._selected is None:
             return
         pn, xref = self._selected
-        self._annot.clear_rotation(xref)
         with self._doc_lock:
             deleted = self._annot.delete_annot(self.doc, pn, xref)
-        self._selected = None
         if deleted:
+            self._deselect_annot()   # oculta overlay + action bar, limpia self._selected
             self._refresh_page(pn)
         else:
             self._show_snack("No se pudo eliminar la anotación")
@@ -241,9 +303,10 @@ class _AnnotMixin:
             return
         pn, xref = self._selected
         with self._doc_lock:
-            result = self._annot.scale_annot(self.doc, pn, xref, factor)
-        if result:
-            self._refresh_page(pn)
+            new_rect = self._annot.scale_annot(self.doc, pn, xref, factor)
+        if new_rect is not None:
+            self._refresh_selected_overlay(pn, annot_rect=new_rect)
+            self._rerender_page_image(pn)
         else:
             self._show_snack("No se pudo ajustar el tamaño")
 
@@ -253,32 +316,47 @@ class _AnnotMixin:
     def _scale_up_selected(self, e=None) -> None:
         self._scale_selected(1.15)
 
-    def _rotate_selected(self, delta_deg: float) -> None:
-        """Rotate the selected annotation visually by delta_deg degrees."""
+    def _rotate_selected(self, angle_deg: float) -> None:
         if self._selected is None:
             return
         pn, xref = self._selected
-        self._annot.add_rotation(xref, delta_deg)
-        self._refresh_selected_overlay(pn)
+        with self._doc_lock:
+            result = self._annot.rotate_annot(self.doc, pn, xref, angle_deg)
+        if result is None:
+            self._show_snack("No se pudo rotar esta anotación")
+            return
+        new_rect, new_xref = result
+        # rotate_annot may replace the annot (Square/Circle → Polygon) with a
+        # new xref — keep selection pointing at the right object.
+        self._selected = (pn, new_xref)
+        self._refresh_selected_overlay(pn, annot_rect=new_rect)
+        self._rerender_page_image(pn)
+
+    def _rotate_selected_left(self, e=None) -> None:
+        self._rotate_selected(-15.0)
+
+    def _rotate_selected_right(self, e=None) -> None:
+        self._rotate_selected(15.0)
 
     def _recolor_selected_menu(self, e=None) -> None:
         if self._selected is None:
             return
         pn, xref = self._selected
 
-        dlg = ft.AlertDialog(title=ft.Text("Cambiar color de anotación"))
+        dlg = ft.AlertDialog(modal=True, title=ft.Text("Cambiar color de anotación"))
 
         def pick(rgb: tuple[float, float, float]) -> None:
-            dlg.open = False
-            self.page_ref.update()
+            self.page_ref.close(dlg)
             with self._doc_lock:
-                self._annot.change_annot_color(self.doc, pn, xref, rgb)
-            self._selected = None
-            self._refresh_page(pn)
+                ok = self._annot.change_annot_color(self.doc, pn, xref, rgb)
+            if not ok:
+                self._show_snack("No se pudo cambiar el color")
+                return
+            self._rerender_page_image(pn)
+            self._refresh_selected_overlay(pn)
 
         def cancel(ev) -> None:
-            dlg.open = False
-            self.page_ref.update()
+            self.page_ref.close(dlg)
 
         dlg.content = ft.Column(
             [
@@ -298,9 +376,7 @@ class _AnnotMixin:
             tight=True, spacing=2,
         )
         dlg.actions = [ft.TextButton("Cancelar", on_click=cancel)]
-        self.page_ref.dialog = dlg
-        dlg.open = True
-        self.page_ref.update()
+        self.page_ref.open(dlg)
 
     # ── text-selection action dialog (OCR click fallback) ─────────────────────
 

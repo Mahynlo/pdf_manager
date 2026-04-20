@@ -69,12 +69,23 @@ class PDFViewerTab(
         self._selected:         tuple[int, int] | None = None
         self._pending_tap:      tuple[float, float] | None = None
         self._pending_tap_page: int | None = None
-        # Drag mode: None | "move" | "resize_tl" | "resize_tr" | "resize_bl" | "resize_br" | "rotate"
-        self._drag_mode:        str | None = None
-        self._move_last_pdf:    tuple[float, float] | None = None
-        # Used during rotate drag: initial mouse angle and display-space center
-        self._rotate_start_angle:  float = 0.0
-        self._rotate_center_disp:  tuple[float, float] | None = None
+        # Drag mode: None | "move" | "resize_tl" | "resize_tr" | "resize_bl" | "resize_br"
+        self._drag_mode:     str | None = None
+        self._move_last_pdf: tuple[float, float] | None = None
+        # Cached rects for lock-free dragging (written at pan_start, applied at pan_end)
+        self._drag_start_rect:   fitz.Rect | None = None
+        self._drag_current_rect: fitz.Rect | None = None
+        # Current PDF rect of the selected annotation — kept in sync with the
+        # document so hit-tests / handle-positioning / pan-start never need to
+        # acquire the doc lock (which may be held by a background page render).
+        self._selected_rect:     fitz.Rect | None = None
+        # Whether the selected annotation currently has PDF_ANNOT_IS_HIDDEN set
+        # (flipped on during drag so the old position doesn't show behind the
+        # moving ghost).  Always reset at pan_end.
+        self._drag_annot_hidden: bool = False
+        # Annotation subtype of the current selection (e.g. "Square", "Circle",
+        # "Line", "Polygon") — drives overlay border-radius during resize.
+        self._selected_atype:    str | None = None
         # Per-page references to inner handle/menu controls inside sel_overlays
         self._sel_handles: list[dict] = []
 
@@ -338,6 +349,10 @@ class PDFViewerTab(
                                   on_click=self._scale_down_selected),
                     ft.TextButton("Agrandar",      icon=ft.Icons.ADD_CIRCLE_OUTLINE,
                                   on_click=self._scale_up_selected),
+                    ft.TextButton("Rotar -15°",    icon=ft.Icons.ROTATE_LEFT,
+                                  on_click=self._rotate_selected_left),
+                    ft.TextButton("Rotar +15°",    icon=ft.Icons.ROTATE_RIGHT,
+                                  on_click=self._rotate_selected_right),
                     ft.TextButton("Deseleccionar", icon=ft.Icons.CLOSE,
                                   on_click=self._deselect_annot),
                 ],

@@ -80,7 +80,6 @@ class _RenderMixin:
             # ── interactive selection overlay ─────────────────────────────────
             _HS  = 10   # corner handle size (px)
             _HHS = _HS / 2
-            _RS  = 14   # rotation handle size (px)
             _HANDLE_CLR = "#0055FF"
             _HANDLE_STYLE = dict(
                 width=_HS, height=_HS,
@@ -97,17 +96,18 @@ class _RenderMixin:
             sel_tr = ft.Container(**_HANDLE_STYLE)
             sel_bl = ft.Container(**_HANDLE_STYLE)
             sel_br = ft.Container(**_HANDLE_STYLE)
-            sel_rot = ft.Container(
-                left=0, top=0, width=_RS, height=_RS,
-                bgcolor="#FF6600",
-                border_radius=_RS // 2,
-                border=ft.border.all(2, "#FFFFFF"),
-                tooltip="Rotar",
+            # Rotation handle: a small circle connected to the box by a vertical stem.
+            sel_rot_stem = ft.Container(
+                width=1, height=0,
+                bgcolor=_HANDLE_CLR,
+                left=0, top=0,
             )
-            # Thin dashed line connecting rotation handle to bbox top edge
-            sel_rot_line = ft.Container(
-                left=0, top=0, width=2, height=20,
-                bgcolor="#FF6600",
+            sel_rot = ft.Container(
+                width=_HS, height=_HS,
+                bgcolor="#FFFFFF",
+                border=ft.border.all(2, _HANDLE_CLR),
+                border_radius=_HS,
+                left=0, top=0,
             )
             _ctx_btn = ft.ButtonStyle(
                 padding=ft.padding.all(5),
@@ -145,23 +145,6 @@ class _RenderMixin:
                         ),
                         ft.Container(width=1, height=22, bgcolor="#E0E0E0"),
                         ft.IconButton(
-                            ft.Icons.ROTATE_LEFT,
-                            icon_color="#1565C0",
-                            icon_size=18,
-                            tooltip="Rotar −15°",
-                            on_click=lambda e: self._rotate_selected(-15),
-                            style=_ctx_btn,
-                        ),
-                        ft.IconButton(
-                            ft.Icons.ROTATE_RIGHT,
-                            icon_color="#1565C0",
-                            icon_size=18,
-                            tooltip="Rotar +15°",
-                            on_click=lambda e: self._rotate_selected(15),
-                            style=_ctx_btn,
-                        ),
-                        ft.Container(width=1, height=22, bgcolor="#E0E0E0"),
-                        ft.IconButton(
                             ft.Icons.CLOSE,
                             icon_color="#9E9E9E",
                             icon_size=14,
@@ -175,9 +158,7 @@ class _RenderMixin:
                 ),
             )
             sel_stack = ft.Stack(
-                [sel_border, sel_rot_line, sel_rot,
-                 sel_tl, sel_tr, sel_bl, sel_br,
-                 sel_menu],
+                [sel_border, sel_rot_stem, sel_tl, sel_tr, sel_bl, sel_br, sel_rot, sel_menu],
                 clip_behavior=ft.ClipBehavior.NONE,
             )
             sel_ov = ft.Container(
@@ -193,7 +174,7 @@ class _RenderMixin:
                 "bl":       sel_bl,
                 "br":       sel_br,
                 "rot":      sel_rot,
-                "rot_line": sel_rot_line,
+                "rot_stem": sel_rot_stem,
                 "menu":     sel_menu,
             })
             ocr_ov      = ft.Stack([], visible=False)
@@ -412,8 +393,19 @@ class _RenderMixin:
 
     # ── render / update ───────────────────────────────────────────────────────
 
-    def _refresh_page(self, pn: int) -> None:
-        if self._selected is not None and self._selected[0] == pn:
+    def _rerender_page_image(self, pn: int) -> None:
+        """Lightweight re-render: only re-renders the page image in background.
+
+        Unlike _refresh_page this does NOT clear selection, update OCR UI, or
+        call page_ref.update() — the background thread calls slot.update() when
+        the new image is ready.  Use this after move / resize / scale so the
+        UI doesn't flash.
+        """
+        self._rendered.discard(pn)
+        self._render_page_slot(pn)
+
+    def _refresh_page(self, pn: int, keep_selection: bool = False) -> None:
+        if not keep_selection and self._selected is not None and self._selected[0] == pn:
             self._selected = None
             self._sel_overlays[pn].visible = False
             self._annot_action_bar.visible = False

@@ -1,5 +1,6 @@
 """Annotation tools and drag-gesture state machine."""
 
+import math
 from enum import Enum
 from typing import Callable
 
@@ -82,6 +83,15 @@ def _line_merged_rects(rects: list[fitz.Rect]) -> list[fitz.Rect]:
     return merged
 
 
+def _map_point(p: fitz.Point, old: fitz.Rect, new: fitz.Rect) -> fitz.Point:
+    """Map *p* from *old* rect's coordinate space into *new* rect's space."""
+    ow = max(old.width, 0.001)
+    oh = max(old.height, 0.001)
+    tx = (p.x - old.x0) / ow
+    ty = (p.y - old.y0) / oh
+    return fitz.Point(new.x0 + tx * new.width, new.y0 + ty * new.height)
+
+
 class AnnotationManager:
     """Tracks tool selection and drag state; applies annotations to a document."""
 
@@ -97,8 +107,6 @@ class AnnotationManager:
         self.last_select_rect: fitz.Rect | None = None
         # History for undo: list of (page_num, annot_xref) in insertion order.
         self._history: list[tuple[int, int]] = []
-        # Visual rotation per annotation xref (degrees, not stored in PDF).
-        self._rotations: dict[int, float] = {}
 
     # ── tool selection ──────────────────────────────────────────────────────
 
@@ -226,12 +234,12 @@ class AnnotationManager:
         pt = fitz.Point(x, y)
         result = None
         for annot in page.annots():
-            # Expand hit-area a little so thin lines are easier to pick.
+            # Expand hit-area so lines and small annotations are easier to pick.
             hit = fitz.Rect(annot.rect)
-            hit.x0 -= 3
-            hit.y0 -= 3
-            hit.x1 += 3
-            hit.y1 += 3
+            hit.x0 -= 6
+            hit.y0 -= 6
+            hit.x1 += 6
+            hit.y1 += 6
             if hit.contains(pt):
                 result = annot
         return result
@@ -272,9 +280,43 @@ class AnnotationManager:
         for annot in page.annots():
             if annot.xref != xref:
                 continue
+            atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
+            if atype in ("Line", "Polygon", "PolyLine"):
+                verts = annot.vertices
+                if verts and len(verts) >= 2:
+                    new_verts = [fitz.Point(v.x + dx, v.y + dy) for v in verts]
+                    annot.set_vertices(new_verts)
+                    annot.update()
+                    return True
             r = annot.rect
             annot.set_rect(fitz.Rect(r.x0 + dx, r.y0 + dy, r.x1 + dx, r.y1 + dy))
             annot.update()
+            return True
+        return False
+
+    def set_annot_hidden(
+        self,
+        doc: fitz.Document,
+        page_num: int,
+        xref: int,
+        hidden: bool,
+    ) -> bool:
+        """Toggle the PDF_ANNOT_IS_HIDDEN flag so the annotation disappears
+        from the rendered image while its PDF state is untouched.
+
+        Used during interactive drag so the old position doesn't show under
+        the moving ghost overlay.
+        """
+        page = doc[page_num]
+        flag = fitz.PDF_ANNOT_IS_HIDDEN
+        for annot in page.annots():
+            if annot.xref != xref:
+                continue
+            cur = annot.flags
+            new = (cur | flag) if hidden else (cur & ~flag)
+            if new != cur:
+                annot.set_flags(new)
+                annot.update()
             return True
         return False
 
@@ -292,23 +334,113 @@ class AnnotationManager:
         for annot in page.annots():
             if annot.xref != xref:
                 continue
+            atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
+            if atype == "Line":
+                verts = annot.vertices
+                if verts and len(verts) >= 2:
+                    old_rect = annot.rect
+                    p1 = _map_point(fitz.Point(verts[0].x, verts[0].y), old_rect, new_rect)
+                    p2 = _map_point(fitz.Point(verts[1].x, verts[1].y), old_rect, new_rect)
+                    annot.set_vertices([p1, p2])
+                    annot.update()
+                    return True
             annot.set_rect(new_rect)
             annot.update()
             return True
         return False
 
-    def get_rotation(self, xref: int) -> float:
-        """Return current visual rotation angle in degrees for the annotation."""
-        return self._rotations.get(xref, 0.0)
+    def rotate_annot(
+        self,
+        doc: fitz.Document,
+        page_num: int,
+        xref: int,
+        angle_deg: float,
+    ) -> tuple[fitz.Rect, int] | None:
+        """Rotate the annotation around its centre by *angle_deg*.
 
-    def add_rotation(self, xref: int, delta_deg: float) -> float:
-        """Accumulate a rotation delta; returns new total angle in degrees."""
-        new_angle = (self._rotations.get(xref, 0.0) + delta_deg) % 360
-        self._rotations[xref] = new_angle
-        return new_angle
+        * ``Line`` rotates its two vertices in place (xref preserved).
+        * ``Square`` / ``Circle`` cannot rotate natively — they are replaced
+          with a ``Polygon`` approximation (square → 4 rotated corners,
+          circle → 36-point ellipse) and given a fresh xref.
 
-    def clear_rotation(self, xref: int) -> None:
-        self._rotations.pop(xref, None)
+        Returns ``(new_rect, new_xref)`` on success, or ``None`` on failure.
+        """
+        if abs(angle_deg) < 0.01:
+            return None
+        page = doc[page_num]
+        rad     = math.radians(angle_deg)
+        cos_a   = math.cos(rad)
+        sin_a   = math.sin(rad)
+
+        def _rotate(p: fitz.Point, cx: float, cy: float) -> fitz.Point:
+            dx, dy = p.x - cx, p.y - cy
+            return fitz.Point(cx + dx * cos_a - dy * sin_a,
+                              cy + dx * sin_a + dy * cos_a)
+
+        for annot in page.annots():
+            if annot.xref != xref:
+                continue
+            atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
+
+            if atype == "Line":
+                verts = annot.vertices
+                if not verts or len(verts) < 2:
+                    return None
+                cx = (verts[0].x + verts[1].x) / 2
+                cy = (verts[0].y + verts[1].y) / 2
+                new_verts = [_rotate(fitz.Point(v.x, v.y), cx, cy) for v in verts]
+                annot.set_vertices(new_verts)
+                annot.update()
+                return fitz.Rect(annot.rect), annot.xref
+
+            # Square / Circle → Polygon conversion (only way to visually rotate).
+            if atype not in ("Square", "Circle"):
+                return None
+
+            colors = annot.colors or {}
+            stroke = colors.get("stroke")
+            border = annot.border or {}
+            width  = border.get("width", 2) or 2
+            r = fitz.Rect(annot.rect)
+            cx = (r.x0 + r.x1) / 2
+            cy = (r.y0 + r.y1) / 2
+
+            if atype == "Square":
+                corners = [
+                    fitz.Point(r.x0, r.y0),
+                    fitz.Point(r.x1, r.y0),
+                    fitz.Point(r.x1, r.y1),
+                    fitz.Point(r.x0, r.y1),
+                ]
+            else:
+                # Circle → 36-point ellipse sampled around centre, then rotated.
+                rx = (r.x1 - r.x0) / 2
+                ry = (r.y1 - r.y0) / 2
+                n  = 36
+                corners = [
+                    fitz.Point(cx + rx * math.cos(2 * math.pi * i / n),
+                               cy + ry * math.sin(2 * math.pi * i / n))
+                    for i in range(n)
+                ]
+
+            rotated = [_rotate(p, cx, cy) for p in corners]
+
+            # Replace the annot: delete old, add polygon, copy style.
+            page.delete_annot(annot)
+            new_annot = page.add_polygon_annot(rotated)
+            if stroke is not None:
+                new_annot.set_colors(stroke=stroke)
+            new_annot.set_border(width=width)
+            new_annot.update()
+
+            # Keep undo history consistent (swap xref in the stack).
+            self._history = [
+                (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
+                for (p, x) in self._history
+            ]
+            return fitz.Rect(new_annot.rect), new_annot.xref
+
+        return None
 
     def scale_annot(
         self,
@@ -316,9 +448,13 @@ class AnnotationManager:
         page_num: int,
         xref: int,
         factor: float,
-    ) -> bool:
+    ) -> fitz.Rect | None:
+        """Scale the annotation around its centre by *factor*.
+
+        Returns the new PDF rect on success, or None on failure.
+        """
         if factor <= 0:
-            return False
+            return None
         page = doc[page_num]
         for annot in page.annots():
             if annot.xref != xref:
@@ -328,10 +464,20 @@ class AnnotationManager:
             cy = (r.y0 + r.y1) / 2
             half_w = max(1.0, r.width * factor / 2)
             half_h = max(1.0, r.height * factor / 2)
-            annot.set_rect(fitz.Rect(cx - half_w, cy - half_h, cx + half_w, cy + half_h))
+            new_rect = fitz.Rect(cx - half_w, cy - half_h, cx + half_w, cy + half_h)
+            atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
+            if atype == "Line":
+                verts = annot.vertices
+                if verts and len(verts) >= 2:
+                    p1 = _map_point(fitz.Point(verts[0].x, verts[0].y), r, new_rect)
+                    p2 = _map_point(fitz.Point(verts[1].x, verts[1].y), r, new_rect)
+                    annot.set_vertices([p1, p2])
+                    annot.update()
+                    return new_rect
+            annot.set_rect(new_rect)
             annot.update()
-            return True
-        return False
+            return new_rect
+        return None
 
     # ── deferred text annotation ──────────────────────────────────────────────
 
