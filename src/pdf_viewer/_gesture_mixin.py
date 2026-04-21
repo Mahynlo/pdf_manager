@@ -46,13 +46,14 @@ class _GestureMixin:
         H  = r.height * scale
 
         return {
-            "tl": (cx - W / 2, cy - H / 2),
-            "tr": (cx + W / 2, cy - H / 2),
-            "bl": (cx - W / 2, cy + H / 2),
-            "br": (cx + W / 2, cy + H / 2),
-            "cx": cx,
-            "cy": cy,
-            "r":  r,
+            "tl":  (cx - W / 2, cy - H / 2),
+            "tr":  (cx + W / 2, cy - H / 2),
+            "bl":  (cx - W / 2, cy + H / 2),
+            "br":  (cx + W / 2, cy + H / 2),
+            "rot": (cx,           cy - H / 2 - 30),
+            "cx":  cx,
+            "cy":  cy,
+            "r":   r,
         }
 
     def _detect_drag_mode(self, pn: int, dx: float, dy: float) -> str:
@@ -60,6 +61,11 @@ class _GestureMixin:
         positions = self._sel_handle_positions(pn)
         if positions is None:
             return "none"
+
+        # Rotation handle takes priority — it sits above the box outside the bbox.
+        rx, ry = positions["rot"]
+        if math.hypot(dx - rx, dy - ry) <= _HANDLE_HIT_R:
+            return "rotate"
 
         # Check corner handles.
         for name in ("tl", "tr", "bl", "br"):
@@ -157,6 +163,26 @@ class _GestureMixin:
                         and self._selected[0] == pn
                         and self._selected_rect is not None):
                     mode = self._detect_drag_mode(pn, e.local_x, e.local_y)
+                    if mode == "rotate":
+                        positions = self._sel_handle_positions(pn)
+                        if positions is None:
+                            return
+                        cx, cy = positions["cx"], positions["cy"]
+                        self._drag_mode = "rotate"
+                        self._drag_start_rect   = fitz.Rect(self._selected_rect)
+                        self._drag_current_rect = fitz.Rect(self._selected_rect)
+                        self._drag_rotate_start_angle = math.atan2(
+                            e.local_y - cy, e.local_x - cx,
+                        )
+                        self._drag_rotate_delta = 0.0
+                        # Hide the context menu — it would look odd rotating.
+                        if pn < len(self._sel_handles):
+                            self._sel_handles[pn]["menu"].visible = False
+                            try:
+                                self._sel_handles[pn]["menu"].update()
+                            except Exception:
+                                pass
+                        return
                     if mode != "none":
                         self._drag_start_rect   = fitz.Rect(self._selected_rect)
                         self._drag_current_rect = fitz.Rect(self._selected_rect)
@@ -206,10 +232,26 @@ class _GestureMixin:
             # the selection overlay.  The PDF document is written once at pan_end.
             if (self._drag_mode is None
                     or self._selected is None
-                    or self._move_last_pdf is None
                     or self._drag_current_rect is None):
                 return
             if self._selected[0] != pn:
+                return
+
+            # Rotation branch: no pdf-coord deltas needed, just angle from centre.
+            if self._drag_mode == "rotate":
+                if self._drag_rotate_start_angle is None:
+                    return
+                positions = self._sel_handle_positions(pn)
+                if positions is None:
+                    return
+                cx, cy = positions["cx"], positions["cy"]
+                angle_now = math.atan2(e.local_y - cy, e.local_x - cx)
+                self._drag_rotate_delta = angle_now - self._drag_rotate_start_angle
+                self._ensure_drag_ghost_active(pn)
+                self._apply_rotation_preview(pn, self._drag_rotate_delta)
+                return
+
+            if self._move_last_pdf is None:
                 return
 
             try:
@@ -276,6 +318,61 @@ class _GestureMixin:
                 self._drag_mode = None
                 self._move_last_pdf = None
                 was_hidden = self._drag_annot_hidden
+
+                # Rotation branch: commit the accumulated angle to the PDF, clear
+                # the visual preview transform.
+                if prev_mode == "rotate":
+                    angle_rad = self._drag_rotate_delta
+                    self._drag_rotate_start_angle = None
+                    self._drag_rotate_delta       = 0.0
+                    # Clear the preview rotation on the overlay regardless of outcome.
+                    self._clear_rotation_preview(pn)
+                    try:
+                        if self._selected is not None and abs(angle_rad) > 0.001:
+                            xref = self._selected[1]
+                            angle_deg = math.degrees(angle_rad)
+                            with self._doc_lock:
+                                result = self._annot.rotate_annot(
+                                    self.doc, pn, xref, angle_deg,
+                                )
+                                if was_hidden:
+                                    # Unhide using the (possibly new) xref so the
+                                    # annotation is visible again after rerender.
+                                    target_xref = result[1] if result else xref
+                                    self._annot.set_annot_hidden(
+                                        self.doc, pn, target_xref, False,
+                                    )
+                            self._drag_annot_hidden = False
+                            if result is not None:
+                                new_rect, new_xref = result
+                                self._selected = (pn, new_xref)
+                                self._refresh_selected_overlay(pn, annot_rect=new_rect)
+                            self._rerender_page_image(pn)
+                        else:
+                            # Tiny rotation — just unhide and refresh overlay.
+                            if was_hidden and self._selected is not None:
+                                with self._doc_lock:
+                                    self._annot.set_annot_hidden(
+                                        self.doc, pn, self._selected[1], False,
+                                    )
+                                self._drag_annot_hidden = False
+                                self._rerender_page_image(pn)
+                    except Exception:
+                        if self._drag_annot_hidden and self._selected is not None:
+                            try:
+                                with self._doc_lock:
+                                    self._annot.set_annot_hidden(
+                                        self.doc, pn, self._selected[1], False,
+                                    )
+                            except Exception:
+                                pass
+                            self._drag_annot_hidden = False
+                            self._rerender_page_image(pn)
+                    finally:
+                        self._drag_start_rect   = None
+                        self._drag_current_rect = None
+                    return
+
                 try:
                     if (prev_mode == "move" or prev_mode.startswith("resize_")) \
                             and self._selected is not None \
@@ -285,20 +382,36 @@ class _GestureMixin:
                         final_rect = self._drag_current_rect
                         start_rect = self._drag_start_rect
                         wrote_doc  = False
+                        new_xref   = xref
                         # Single document write at gesture end + clear HIDDEN flag.
                         with self._doc_lock:
+                            result = None
                             if prev_mode == "move":
                                 total_dx = final_rect.x0 - start_rect.x0
                                 total_dy = final_rect.y0 - start_rect.y0
                                 if abs(total_dx) > 0.01 or abs(total_dy) > 0.01:
-                                    self._annot.move_annot(self.doc, pn, xref, total_dx, total_dy)
+                                    result = self._annot.move_annot(
+                                        self.doc, pn, xref, total_dx, total_dy,
+                                    )
                                     wrote_doc = True
                             else:
-                                self._annot.resize_annot(self.doc, pn, xref, final_rect)
+                                result = self._annot.resize_annot(
+                                    self.doc, pn, xref, final_rect,
+                                )
                                 wrote_doc = True
+                            if result is not None:
+                                new_rect, new_xref = result
+                                final_rect = new_rect
                             if was_hidden:
-                                self._annot.set_annot_hidden(self.doc, pn, xref, False)
+                                # If xref changed (polygon delete+recreate), the
+                                # old annot is gone and the new one is not hidden.
+                                if new_xref == xref:
+                                    self._annot.set_annot_hidden(
+                                        self.doc, pn, xref, False,
+                                    )
                         self._drag_annot_hidden = False
+                        if new_xref != xref:
+                            self._selected = (pn, new_xref)
                         # Update overlay + cached rect first so the next pan_start
                         # sees the new geometry without waiting for the render.
                         self._refresh_selected_overlay(pn, annot_rect=final_rect)
@@ -380,6 +493,44 @@ class _GestureMixin:
             self._clear_text_selection()
 
     # ── internal helpers ──────────────────────────────────────────────────────
+
+    def _apply_rotation_preview(self, pn: int, angle_rad: float) -> None:
+        """Apply a visual-only rotation to the selection overlay during a
+        rotation-handle drag.  Rotates around the bbox centre (not the
+        container centre, which is offset down by MENU_EXTRA).
+        """
+        if pn >= len(self._sel_overlays):
+            return
+        sel_ov = self._sel_overlays[pn]
+        total_h = sel_ov.height or 0
+        # _MENU_EXTRA from _annot_mixin — the menu sits below the bbox inside
+        # the same container, so the bbox centre is shifted up from the
+        # container's geometric centre.
+        from ._annot_mixin import _MENU_EXTRA
+        if total_h > _MENU_EXTRA:
+            box_h = total_h - _MENU_EXTRA
+            # Alignment y: -1 is top edge, +1 is bottom edge. We want the pivot
+            # at y = box_h/2 from the top, while the container's midpoint is at
+            # total_h/2. So offset = (box_h/2 - total_h/2) / (total_h/2).
+            ay = (box_h / 2 - total_h / 2) / (total_h / 2)
+        else:
+            ay = 0.0
+        sel_ov.rotate = ft.Rotate(angle=angle_rad, alignment=ft.Alignment(0.0, ay))
+        try:
+            sel_ov.update()
+        except Exception:
+            pass
+
+    def _clear_rotation_preview(self, pn: int) -> None:
+        """Remove any rotation preview transform from the selection overlay."""
+        if pn >= len(self._sel_overlays):
+            return
+        sel_ov = self._sel_overlays[pn]
+        sel_ov.rotate = None
+        try:
+            sel_ov.update()
+        except Exception:
+            pass
 
     def _ensure_drag_ghost_active(self, pn: int) -> None:
         """Hide the real annotation the first time a drag moves so the

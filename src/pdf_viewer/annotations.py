@@ -92,6 +92,48 @@ def _map_point(p: fitz.Point, old: fitz.Rect, new: fitz.Rect) -> fitz.Point:
     return fitz.Point(new.x0 + tx * new.width, new.y0 + ty * new.height)
 
 
+def _polygon_replace(
+    page: fitz.Page,
+    annot: fitz.Annot,
+    new_verts: list[fitz.Point],
+    atype: str,
+) -> fitz.Annot:
+    """Delete *annot* and recreate it as the same vertex-based type with
+    *new_verts*, preserving stroke colour and border width.
+
+    Why delete+recreate instead of ``set_vertices`` + ``update``:
+    PyMuPDF regenerates the appearance stream from whatever geometry is
+    recorded when the annotation was created. Mutating vertices afterwards
+    does not always refresh the appearance stream in the rendered page,
+    which manifests as the annotation appearing to "snap back" to its
+    pre-mutation shape after move / resize / rotate. Recreating guarantees
+    the appearance matches the new geometry.
+    """
+    colors = {}
+    try:
+        colors = annot.colors or {}
+    except Exception:
+        pass
+    stroke = colors.get("stroke")
+    border = annot.border or {}
+    width  = border.get("width", 2) or 2
+
+    page.delete_annot(annot)
+
+    if atype == "Line":
+        new_annot = page.add_line_annot(new_verts[0], new_verts[1])
+    elif atype == "PolyLine":
+        new_annot = page.add_polyline_annot(new_verts)
+    else:  # Polygon
+        new_annot = page.add_polygon_annot(new_verts)
+
+    if stroke is not None:
+        new_annot.set_colors(stroke=stroke)
+    new_annot.set_border(width=width)
+    new_annot.update()
+    return new_annot
+
+
 class AnnotationManager:
     """Tracks tool selection and drag state; applies annotations to a document."""
 
@@ -275,7 +317,17 @@ class AnnotationManager:
         xref: int,
         dx: float,
         dy: float,
-    ) -> bool:
+    ) -> tuple[fitz.Rect, int, float] | None:
+        """Translate annotation by (dx, dy) in PDF coords.
+
+        Returns ``(new_rect, new_xref, rotation_deg)`` on success, ``None``
+        on failure. ``new_rect`` is the PyMuPDF bbox of the annotation after
+        the move (expanded to contain any rotated appearance). For
+        Line/Polygon/PolyLine the xref changes (delete+recreate) and
+        rotation is always 0 because the angle is baked into the vertices.
+        For Square/Circle/FreeText the xref is preserved and any existing
+        /Rotate value is returned unchanged.
+        """
         page = doc[page_num]
         for annot in page.annots():
             if annot.xref != xref:
@@ -283,16 +335,30 @@ class AnnotationManager:
             atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
             if atype in ("Line", "Polygon", "PolyLine"):
                 verts = annot.vertices
-                if verts and len(verts) >= 2:
-                    new_verts = [fitz.Point(v.x + dx, v.y + dy) for v in verts]
-                    annot.set_vertices(new_verts)
-                    annot.update()
-                    return True
+                if not verts or len(verts) < 2:
+                    return None
+                new_verts = []
+                for v in verts:
+                    try:
+                        vx, vy = float(v[0]), float(v[1])
+                    except (TypeError, IndexError):
+                        vx, vy = float(v.x), float(v.y)
+                    new_verts.append(fitz.Point(vx + dx, vy + dy))
+                new_annot = _polygon_replace(page, annot, new_verts, atype)
+                self._history = [
+                    (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
+                    for (p, x) in self._history
+                ]
+                return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
             r = annot.rect
             annot.set_rect(fitz.Rect(r.x0 + dx, r.y0 + dy, r.x1 + dx, r.y1 + dy))
             annot.update()
-            return True
-        return False
+            try:
+                rotation = float(annot.rotation or 0)
+            except Exception:
+                rotation = 0.0
+            return fitz.Rect(annot.rect), annot.xref, rotation
+        return None
 
     def set_annot_hidden(
         self,
@@ -326,28 +392,63 @@ class AnnotationManager:
         page_num: int,
         xref: int,
         new_rect: fitz.Rect,
-    ) -> bool:
-        """Set annotation to an explicit new rect (used by interactive corner-drag resize)."""
+    ) -> tuple[fitz.Rect, int, float] | None:
+        """Set annotation to *new_rect* (used by interactive corner-drag resize).
+
+        ``new_rect`` is the **unrotated** (visual) rect. For a rotated
+        Square/Circle/FreeText the rotation is temporarily stripped so
+        ``set_rect`` sizes the real shape (instead of fitting inside the
+        expanded bbox), then the rotation is re-applied. This keeps the
+        visual shape at the exact size the user dragged to.
+
+        Returns ``(pdf_bbox, new_xref, rotation_deg)`` on success, ``None``
+        on failure. ``pdf_bbox`` is the PyMuPDF bbox of the annotation after
+        the edit (may be larger than ``new_rect`` because of rotation).
+        """
         if new_rect.is_empty or new_rect.width < 1 or new_rect.height < 1:
-            return False
+            return None
         page = doc[page_num]
         for annot in page.annots():
             if annot.xref != xref:
                 continue
             atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
-            if atype == "Line":
+            if atype in ("Line", "Polygon", "PolyLine"):
                 verts = annot.vertices
-                if verts and len(verts) >= 2:
-                    old_rect = annot.rect
-                    p1 = _map_point(fitz.Point(verts[0].x, verts[0].y), old_rect, new_rect)
-                    p2 = _map_point(fitz.Point(verts[1].x, verts[1].y), old_rect, new_rect)
-                    annot.set_vertices([p1, p2])
+                if not verts or len(verts) < 2:
+                    return None
+                old_rect = annot.rect
+                new_verts = []
+                for v in verts:
+                    try:
+                        vx, vy = float(v[0]), float(v[1])
+                    except (TypeError, IndexError):
+                        vx, vy = float(v.x), float(v.y)
+                    new_verts.append(_map_point(fitz.Point(vx, vy), old_rect, new_rect))
+                new_annot = _polygon_replace(page, annot, new_verts, atype)
+                self._history = [
+                    (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
+                    for (p, x) in self._history
+                ]
+                return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
+            try:
+                rotation = int(annot.rotation or 0) % 360
+            except Exception:
+                rotation = 0
+            try:
+                if rotation:
+                    # Strip rotation so set_rect sizes the shape itself, not
+                    # the expanded bbox that would shrink the rotated figure.
+                    annot.set_rotation(0)
                     annot.update()
-                    return True
-            annot.set_rect(new_rect)
-            annot.update()
-            return True
-        return False
+                annot.set_rect(new_rect)
+                annot.update()
+                if rotation:
+                    annot.set_rotation(rotation)
+                    annot.update()
+            except Exception:
+                return None
+            return fitz.Rect(annot.rect), annot.xref, float(rotation)
+        return None
 
     def rotate_annot(
         self,
@@ -355,90 +456,96 @@ class AnnotationManager:
         page_num: int,
         xref: int,
         angle_deg: float,
-    ) -> tuple[fitz.Rect, int] | None:
-        """Rotate the annotation around its centre by *angle_deg*.
+        visual_rect: fitz.Rect | None = None,
+    ) -> tuple[fitz.Rect, int, float] | None:
+        """Rotate the annotation by *angle_deg*, accumulating with any prior rotation.
 
-        * ``Line`` rotates its two vertices in place (xref preserved).
-        * ``Square`` / ``Circle`` cannot rotate natively — they are replaced
-          with a ``Polygon`` approximation (square → 4 rotated corners,
-          circle → 36-point ellipse) and given a fresh xref.
+        * ``Square`` / ``Circle`` / ``FreeText`` use PyMuPDF's native
+          ``set_rotation`` (PDF /Rotate entry). The annotation keeps its
+          original type, so subsequent move / resize / rotate continue to
+          work without any conversion.
+        * ``Line`` / ``Polygon`` / ``PolyLine`` rotate their vertices around
+          the bbox centre (delete + recreate — the xref changes).
 
-        Returns ``(new_rect, new_xref)`` on success, or ``None`` on failure.
+        ``visual_rect`` is the caller-tracked pre-rotation axis-aligned
+        rect (same width/height as the original unrotated shape, same
+        centre). When supplied for Square/Circle/FreeText, the rotation is
+        temporarily stripped so the shape is re-sized to *visual_rect*
+        before re-applying the new angle — that way repeated rotations
+        don't cause PyMuPDF's expanded bbox to creep outwards.
+
+        Returns ``(visual_rect_out, new_xref, rotation_deg)``:
+        ``visual_rect_out`` is the user-facing unrotated rect (unchanged
+        for Square/Circle; the new vertex bbox for Line/Polygon).
         """
         if abs(angle_deg) < 0.01:
             return None
         page = doc[page_num]
-        rad     = math.radians(angle_deg)
-        cos_a   = math.cos(rad)
-        sin_a   = math.sin(rad)
-
-        def _rotate(p: fitz.Point, cx: float, cy: float) -> fitz.Point:
-            dx, dy = p.x - cx, p.y - cy
-            return fitz.Point(cx + dx * cos_a - dy * sin_a,
-                              cy + dx * sin_a + dy * cos_a)
 
         for annot in page.annots():
             if annot.xref != xref:
                 continue
             atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
 
-            if atype == "Line":
+            if atype in ("Line", "Polygon", "PolyLine"):
                 verts = annot.vertices
                 if not verts or len(verts) < 2:
                     return None
-                cx = (verts[0].x + verts[1].x) / 2
-                cy = (verts[0].y + verts[1].y) / 2
-                new_verts = [_rotate(fitz.Point(v.x, v.y), cx, cy) for v in verts]
-                annot.set_vertices(new_verts)
+                r = fitz.Rect(annot.rect)
+                cx = (r.x0 + r.x1) / 2
+                cy = (r.y0 + r.y1) / 2
+                rad   = math.radians(angle_deg)
+                cos_a = math.cos(rad)
+                sin_a = math.sin(rad)
+                new_verts = []
+                for v in verts:
+                    try:
+                        vx, vy = float(v[0]), float(v[1])
+                    except (TypeError, IndexError):
+                        vx, vy = float(v.x), float(v.y)
+                    dx, dy = vx - cx, vy - cy
+                    new_verts.append(fitz.Point(
+                        cx + dx * cos_a - dy * sin_a,
+                        cy + dx * sin_a + dy * cos_a,
+                    ))
+                new_annot = _polygon_replace(page, annot, new_verts, atype)
+                self._history = [
+                    (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
+                    for (p, x) in self._history
+                ]
+                return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
+
+            # Square / Circle / FreeText: native /Rotate (arbitrary angles in
+            # PyMuPDF 1.27+). Accumulates with any existing rotation.
+            try:
+                current = annot.rotation
+                if current is None or current < 0:
+                    current = 0
+            except Exception:
+                current = 0
+            new_rotation = int(round(current + angle_deg)) % 360
+            if new_rotation < 0:
+                new_rotation += 360
+
+            vr = fitz.Rect(visual_rect) if visual_rect is not None else None
+            try:
+                if vr is not None:
+                    # Unrotate, re-pin the visual rect, then apply the new
+                    # angle. This keeps the underlying shape exactly at the
+                    # user's intended size across repeated rotations.
+                    if current:
+                        annot.set_rotation(0)
+                        annot.update()
+                    annot.set_rect(vr)
+                    annot.update()
+                    annot.set_rotation(new_rotation)
+                    annot.update()
+                    return vr, annot.xref, float(new_rotation)
+                annot.set_rotation(new_rotation)
                 annot.update()
-                return fitz.Rect(annot.rect), annot.xref
-
-            # Square / Circle → Polygon conversion (only way to visually rotate).
-            if atype not in ("Square", "Circle"):
+            except Exception:
                 return None
-
-            colors = annot.colors or {}
-            stroke = colors.get("stroke")
-            border = annot.border or {}
-            width  = border.get("width", 2) or 2
-            r = fitz.Rect(annot.rect)
-            cx = (r.x0 + r.x1) / 2
-            cy = (r.y0 + r.y1) / 2
-
-            if atype == "Square":
-                corners = [
-                    fitz.Point(r.x0, r.y0),
-                    fitz.Point(r.x1, r.y0),
-                    fitz.Point(r.x1, r.y1),
-                    fitz.Point(r.x0, r.y1),
-                ]
-            else:
-                # Circle → 36-point ellipse sampled around centre, then rotated.
-                rx = (r.x1 - r.x0) / 2
-                ry = (r.y1 - r.y0) / 2
-                n  = 36
-                corners = [
-                    fitz.Point(cx + rx * math.cos(2 * math.pi * i / n),
-                               cy + ry * math.sin(2 * math.pi * i / n))
-                    for i in range(n)
-                ]
-
-            rotated = [_rotate(p, cx, cy) for p in corners]
-
-            # Replace the annot: delete old, add polygon, copy style.
-            page.delete_annot(annot)
-            new_annot = page.add_polygon_annot(rotated)
-            if stroke is not None:
-                new_annot.set_colors(stroke=stroke)
-            new_annot.set_border(width=width)
-            new_annot.update()
-
-            # Keep undo history consistent (swap xref in the stack).
-            self._history = [
-                (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
-                for (p, x) in self._history
-            ]
-            return fitz.Rect(new_annot.rect), new_annot.xref
+            return fitz.Rect(annot.rect), annot.xref, float(new_rotation)
 
         return None
 

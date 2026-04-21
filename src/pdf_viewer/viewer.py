@@ -86,6 +86,19 @@ class PDFViewerTab(
         # Annotation subtype of the current selection (e.g. "Square", "Circle",
         # "Line", "Polygon") — drives overlay border-radius during resize.
         self._selected_atype:    str | None = None
+        # Live rotation state during a rotation-handle drag. Angle is the pointer
+        # angle relative to the box centre at pan_start; delta is accumulated
+        # so far. Applied to sel_ov via ft.Rotate for preview, written to the
+        # PDF at pan_end.
+        self._drag_rotate_start_angle: float | None = None
+        self._drag_rotate_delta:       float        = 0.0
+        # Persistent rotation of the current selection (degrees, 0–359). The
+        # selection overlay is rendered at `_selected_visual_rect` (the
+        # pre-rotation axis-aligned rect) with ft.Rotate applied, so the
+        # handles hug the rotated figure instead of tracking PyMuPDF's
+        # expanded bbox.
+        self._selected_rotation:    float           = 0.0
+        self._selected_visual_rect: fitz.Rect | None = None
         # Per-page references to inner handle/menu controls inside sel_overlays
         self._sel_handles: list[dict] = []
 
@@ -349,10 +362,6 @@ class PDFViewerTab(
                                   on_click=self._scale_down_selected),
                     ft.TextButton("Agrandar",      icon=ft.Icons.ADD_CIRCLE_OUTLINE,
                                   on_click=self._scale_up_selected),
-                    ft.TextButton("Rotar -15°",    icon=ft.Icons.ROTATE_LEFT,
-                                  on_click=self._rotate_selected_left),
-                    ft.TextButton("Rotar +15°",    icon=ft.Icons.ROTATE_RIGHT,
-                                  on_click=self._rotate_selected_right),
                     ft.TextButton("Deseleccionar", icon=ft.Icons.CLOSE,
                                   on_click=self._deselect_annot),
                 ],
