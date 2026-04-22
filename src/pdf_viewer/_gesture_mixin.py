@@ -22,14 +22,18 @@ class _GestureMixin:
     def _sel_handle_positions(self, pn: int):
         """Return dict of display-space handle centres.
 
-        Returns None if there is no active selection on *pn*.  Reads from the
-        cached ``_selected_rect`` to stay lock-free (the doc lock is often
-        held by a background page render and blocking here stalls pan_start).
+        Returns None if there is no active selection on *pn*. Uses the
+        cached visual rect (pre-rotation) and rotates handle positions by
+        ``self._selected_rotation`` so the hit-test matches what the user
+        sees after the overlay ft.Rotate has been applied. Stays lock-free
+        so pan_start never blocks on a background render.
         """
         if self._selected is None or self._selected[0] != pn:
             return None
 
-        if self._selected_rect is not None:
+        if self._selected_visual_rect is not None:
+            r = fitz.Rect(self._selected_visual_rect)
+        elif self._selected_rect is not None:
             r = fitz.Rect(self._selected_rect)
         else:
             xref = self._selected[1]
@@ -45,15 +49,25 @@ class _GestureMixin:
         W  = r.width  * scale
         H  = r.height * scale
 
+        rot_deg = float(self._selected_rotation or 0.0)
+        rad     = math.radians(rot_deg)
+        cos_a   = math.cos(rad)
+        sin_a   = math.sin(rad)
+
+        def rot(ox: float, oy: float) -> tuple[float, float]:
+            return (cx + ox * cos_a - oy * sin_a,
+                    cy + ox * sin_a + oy * cos_a)
+
         return {
-            "tl":  (cx - W / 2, cy - H / 2),
-            "tr":  (cx + W / 2, cy - H / 2),
-            "bl":  (cx - W / 2, cy + H / 2),
-            "br":  (cx + W / 2, cy + H / 2),
-            "rot": (cx,           cy - H / 2 - 30),
+            "tl":  rot(-W / 2, -H / 2),
+            "tr":  rot( W / 2, -H / 2),
+            "bl":  rot(-W / 2,  H / 2),
+            "br":  rot( W / 2,  H / 2),
+            "rot": rot(0.0,    -H / 2 - 30),
             "cx":  cx,
             "cy":  cy,
             "r":   r,
+            "rotation": rot_deg,
         }
 
     def _detect_drag_mode(self, pn: int, dx: float, dy: float) -> str:
@@ -73,13 +87,18 @@ class _GestureMixin:
             if math.hypot(dx - hx, dy - hy) <= _HANDLE_HIT_R:
                 return f"resize_{name}"
 
-        # Check inside the bounding box for move.
+        # Check inside the (possibly rotated) bounding box for move. Rotate
+        # the click back into the box's local frame before comparing.
         scale  = self.zoom * BASE_SCALE
         r      = positions["r"]
         cx, cy = positions["cx"], positions["cy"]
+        rot_deg = float(positions.get("rotation", 0.0))
+        rad     = math.radians(-rot_deg)
+        lx = (dx - cx) * math.cos(rad) - (dy - cy) * math.sin(rad)
+        ly = (dx - cx) * math.sin(rad) + (dy - cy) * math.cos(rad)
         half_w = r.width  * scale / 2 + 12
         half_h = r.height * scale / 2 + 12
-        if abs(dx - cx) <= half_w and abs(dy - cy) <= half_h:
+        if abs(lx) <= half_w and abs(ly) <= half_h:
             return "move"
 
         return "none"
@@ -157,11 +176,12 @@ class _GestureMixin:
                 pdf_x, pdf_y = display_to_pdf(e.local_x, e.local_y, self.zoom)
 
                 # If there is already a selection on this page, try handles first.
-                # Lock-free path: use the cached rect so we don't block waiting
-                # for the background render worker to release the doc lock.
+                # Lock-free path: use the cached visual rect so we don't block
+                # waiting for the background render worker to release the doc lock.
+                drag_seed = self._selected_visual_rect or self._selected_rect
                 if (self._selected is not None
                         and self._selected[0] == pn
-                        and self._selected_rect is not None):
+                        and drag_seed is not None):
                     mode = self._detect_drag_mode(pn, e.local_x, e.local_y)
                     if mode == "rotate":
                         positions = self._sel_handle_positions(pn)
@@ -169,23 +189,16 @@ class _GestureMixin:
                             return
                         cx, cy = positions["cx"], positions["cy"]
                         self._drag_mode = "rotate"
-                        self._drag_start_rect   = fitz.Rect(self._selected_rect)
-                        self._drag_current_rect = fitz.Rect(self._selected_rect)
+                        self._drag_start_rect   = fitz.Rect(drag_seed)
+                        self._drag_current_rect = fitz.Rect(drag_seed)
                         self._drag_rotate_start_angle = math.atan2(
                             e.local_y - cy, e.local_x - cx,
                         )
                         self._drag_rotate_delta = 0.0
-                        # Hide the context menu — it would look odd rotating.
-                        if pn < len(self._sel_handles):
-                            self._sel_handles[pn]["menu"].visible = False
-                            try:
-                                self._sel_handles[pn]["menu"].update()
-                            except Exception:
-                                pass
                         return
                     if mode != "none":
-                        self._drag_start_rect   = fitz.Rect(self._selected_rect)
-                        self._drag_current_rect = fitz.Rect(self._selected_rect)
+                        self._drag_start_rect   = fitz.Rect(drag_seed)
+                        self._drag_current_rect = fitz.Rect(drag_seed)
                         self._drag_mode     = mode
                         self._move_last_pdf = (pdf_x, pdf_y)
                         return
@@ -276,8 +289,18 @@ class _GestureMixin:
 
                 elif self._drag_mode.startswith("resize_"):
                     handle   = self._drag_mode[len("resize_"):]   # "tl" | "tr" | "bl" | "br"
+                    # Transform the pointer delta into the rect's local
+                    # (unrotated) frame so corner drags feel intuitive when
+                    # the overlay is rotated.
+                    rot_deg = float(self._selected_rotation or 0.0)
+                    if abs(rot_deg) > 0.01:
+                        rad = math.radians(-rot_deg)
+                        ldx = dx * math.cos(rad) - dy * math.sin(rad)
+                        ldy = dx * math.sin(rad) + dy * math.cos(rad)
+                    else:
+                        ldx, ldy = dx, dy
                     new_rect = self._compute_resize_rect(
-                        self._drag_current_rect, handle, dx, dy,
+                        self._drag_current_rect, handle, ldx, ldy,
                     )
                     self._drag_current_rect = new_rect
                     self._move_last_pdf     = (pdf_x, pdf_y)
@@ -325,15 +348,19 @@ class _GestureMixin:
                     angle_rad = self._drag_rotate_delta
                     self._drag_rotate_start_angle = None
                     self._drag_rotate_delta       = 0.0
-                    # Clear the preview rotation on the overlay regardless of outcome.
-                    self._clear_rotation_preview(pn)
                     try:
                         if self._selected is not None and abs(angle_rad) > 0.001:
                             xref = self._selected[1]
                             angle_deg = math.degrees(angle_rad)
+                            visual_rect = (
+                                fitz.Rect(self._selected_visual_rect)
+                                if self._selected_visual_rect is not None
+                                else None
+                            )
                             with self._doc_lock:
                                 result = self._annot.rotate_annot(
                                     self.doc, pn, xref, angle_deg,
+                                    visual_rect=visual_rect,
                                 )
                                 if was_hidden:
                                     # Unhide using the (possibly new) xref so the
@@ -344,12 +371,18 @@ class _GestureMixin:
                                     )
                             self._drag_annot_hidden = False
                             if result is not None:
-                                new_rect, new_xref = result
+                                new_rect, new_xref, new_rotation = result
                                 self._selected = (pn, new_xref)
+                                self._selected_rotation = float(new_rotation)
                                 self._refresh_selected_overlay(pn, annot_rect=new_rect)
+                            else:
+                                # Rotation failed — snap overlay back to state.
+                                self._refresh_selected_overlay(pn)
                             self._rerender_page_image(pn)
                         else:
-                            # Tiny rotation — just unhide and refresh overlay.
+                            # Tiny rotation — just unhide and refresh overlay
+                            # so any preview transform snaps back to the
+                            # persistent _selected_rotation value.
                             if was_hidden and self._selected is not None:
                                 with self._doc_lock:
                                     self._annot.set_annot_hidden(
@@ -357,6 +390,7 @@ class _GestureMixin:
                                     )
                                 self._drag_annot_hidden = False
                                 self._rerender_page_image(pn)
+                            self._refresh_selected_overlay(pn)
                     except Exception:
                         if self._drag_annot_hidden and self._selected is not None:
                             try:
@@ -368,6 +402,7 @@ class _GestureMixin:
                                 pass
                             self._drag_annot_hidden = False
                             self._rerender_page_image(pn)
+                        self._refresh_selected_overlay(pn)
                     finally:
                         self._drag_start_rect   = None
                         self._drag_current_rect = None
@@ -400,8 +435,16 @@ class _GestureMixin:
                                 )
                                 wrote_doc = True
                             if result is not None:
-                                new_rect, new_xref = result
-                                final_rect = new_rect
+                                _, new_xref, rotation_deg = result
+                                # For move we keep the drag-tracked translated
+                                # rect (in the unrotated frame) as the visual
+                                # rect — move_annot's return is the expanded
+                                # bbox which would un-do the tight overlay.
+                                if prev_mode == "move":
+                                    pass  # final_rect already = translated visual
+                                else:
+                                    final_rect = fitz.Rect(final_rect)
+                                self._selected_rotation = float(rotation_deg)
                             if was_hidden:
                                 # If xref changed (polygon delete+recreate), the
                                 # old annot is gone and the new one is not hidden.
@@ -494,41 +537,21 @@ class _GestureMixin:
 
     # ── internal helpers ──────────────────────────────────────────────────────
 
-    def _apply_rotation_preview(self, pn: int, angle_rad: float) -> None:
-        """Apply a visual-only rotation to the selection overlay during a
-        rotation-handle drag.  Rotates around the bbox centre (not the
-        container centre, which is offset down by MENU_EXTRA).
+    def _apply_rotation_preview(self, pn: int, delta_rad: float) -> None:
+        """Apply a visual-only rotation to the inner rot_group during a
+        rotation-handle drag. Pivots around the bbox centre. The preview
+        accumulates on top of ``self._selected_rotation`` so a subsequent
+        rotation gesture starts from the current tilt.
         """
-        if pn >= len(self._sel_overlays):
+        if pn >= len(self._sel_handles):
             return
-        sel_ov = self._sel_overlays[pn]
-        total_h = sel_ov.height or 0
-        # _MENU_EXTRA from _annot_mixin — the menu sits below the bbox inside
-        # the same container, so the bbox centre is shifted up from the
-        # container's geometric centre.
-        from ._annot_mixin import _MENU_EXTRA
-        if total_h > _MENU_EXTRA:
-            box_h = total_h - _MENU_EXTRA
-            # Alignment y: -1 is top edge, +1 is bottom edge. We want the pivot
-            # at y = box_h/2 from the top, while the container's midpoint is at
-            # total_h/2. So offset = (box_h/2 - total_h/2) / (total_h/2).
-            ay = (box_h / 2 - total_h / 2) / (total_h / 2)
-        else:
-            ay = 0.0
-        sel_ov.rotate = ft.Rotate(angle=angle_rad, alignment=ft.Alignment(0.0, ay))
-        try:
-            sel_ov.update()
-        except Exception:
-            pass
-
-    def _clear_rotation_preview(self, pn: int) -> None:
-        """Remove any rotation preview transform from the selection overlay."""
-        if pn >= len(self._sel_overlays):
+        h = self._sel_handles[pn]
+        if "rot_group" not in h:
             return
-        sel_ov = self._sel_overlays[pn]
-        sel_ov.rotate = None
+        total_rad = math.radians(float(self._selected_rotation or 0.0)) + delta_rad
+        h["rot_group"].rotate = ft.Rotate(angle=total_rad, alignment=ft.Alignment(0.0, 0.0))
         try:
-            sel_ov.update()
+            h["rot_group"].update()
         except Exception:
             pass
 

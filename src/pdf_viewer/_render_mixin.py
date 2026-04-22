@@ -157,8 +157,21 @@ class _RenderMixin:
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
             )
+            # Inner container that holds everything that should rotate with
+            # the annotation (border + corner handles + rotation knob). The
+            # sel_menu sits OUTSIDE this group so it stays axis-aligned and
+            # readable regardless of the annotation's rotation.
+            sel_rot_group_inner = ft.Stack(
+                [sel_border, sel_rot_stem, sel_tl, sel_tr, sel_bl, sel_br, sel_rot],
+                clip_behavior=ft.ClipBehavior.NONE,
+            )
+            sel_rot_group = ft.Container(
+                content=sel_rot_group_inner,
+                left=0, top=0, width=0, height=0,
+                clip_behavior=ft.ClipBehavior.NONE,
+            )
             sel_stack = ft.Stack(
-                [sel_border, sel_rot_stem, sel_tl, sel_tr, sel_bl, sel_br, sel_rot, sel_menu],
+                [sel_rot_group, sel_menu],
                 clip_behavior=ft.ClipBehavior.NONE,
             )
             sel_ov = ft.Container(
@@ -168,14 +181,15 @@ class _RenderMixin:
                 clip_behavior=ft.ClipBehavior.NONE,
             )
             self._sel_handles.append({
-                "border":   sel_border,
-                "tl":       sel_tl,
-                "tr":       sel_tr,
-                "bl":       sel_bl,
-                "br":       sel_br,
-                "rot":      sel_rot,
-                "rot_stem": sel_rot_stem,
-                "menu":     sel_menu,
+                "border":    sel_border,
+                "tl":        sel_tl,
+                "tr":        sel_tr,
+                "bl":        sel_bl,
+                "br":        sel_br,
+                "rot":       sel_rot,
+                "rot_stem":  sel_rot_stem,
+                "menu":      sel_menu,
+                "rot_group": sel_rot_group,
             })
             ocr_ov      = ft.Stack([], visible=False)
             text_sel_ov = ft.Stack([], visible=False)

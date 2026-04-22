@@ -92,6 +92,57 @@ def _map_point(p: fitz.Point, old: fitz.Rect, new: fitz.Rect) -> fitz.Point:
     return fitz.Point(new.x0 + tx * new.width, new.y0 + ty * new.height)
 
 
+def _rot_matrix(rect: fitz.Rect, angle_deg: float) -> fitz.Matrix:
+    """Build an ``apn_matrix`` that rotates the annotation appearance by
+    *angle_deg* around the centre of *rect*.
+
+    PyMuPDF's ``annot.set_rotation`` writes a ``/Rotate`` entry but MuPDF
+    does NOT honour it for Square/Circle appearances (verified on 1.27) —
+    the shape renders axis-aligned regardless. Setting the Form XObject's
+    ``/Matrix`` via ``set_apn_matrix`` DOES rotate the rendered appearance.
+    """
+    theta   = math.radians(angle_deg)
+    cos_a   = math.cos(theta)
+    sin_a   = math.sin(theta)
+    bx      = (rect.x0 + rect.x1) / 2
+    by      = (rect.y0 + rect.y1) / 2
+    m  = fitz.Matrix(1, 0, 0, 1, -bx, -by)
+    m *= fitz.Matrix(cos_a, sin_a, -sin_a, cos_a, 0, 0)
+    m *= fitz.Matrix(1, 0, 0, 1, bx, by)
+    return m
+
+
+_IDENTITY = fitz.Matrix(1, 0, 0, 1, 0, 0)
+
+
+def _reset_ap(annot: fitz.Annot) -> None:
+    """Reset ``apn_matrix`` to identity.
+
+    Must be called BEFORE ``annot.update()`` on any annotation that may
+    have a custom apn_matrix — PyMuPDF 1.27 has a bug where update()
+    crashes with ``AttributeError('setRect')`` if the Form XObject's
+    /Matrix is non-identity. Resetting keeps us on the safe path.
+    """
+    try:
+        annot.set_apn_matrix(_IDENTITY)
+    except Exception:
+        pass
+
+
+def _apply_rot(annot: fitz.Annot, angle_deg: float) -> None:
+    """Apply rotation visually to *annot* via its AP matrix, around the
+    centre of its current rect. ``annot.update()`` MUST have been called
+    first (update resets apn_matrix to identity).
+    """
+    a = angle_deg % 360
+    if a < 0:
+        a += 360
+    if a < 0.01 or abs(a - 360) < 0.01:
+        annot.set_apn_matrix(_IDENTITY)
+        return
+    annot.set_apn_matrix(_rot_matrix(annot.rect, a))
+
+
 def _polygon_replace(
     page: fitz.Page,
     annot: fitz.Annot,
@@ -149,6 +200,23 @@ class AnnotationManager:
         self.last_select_rect: fitz.Rect | None = None
         # History for undo: list of (page_num, annot_xref) in insertion order.
         self._history: list[tuple[int, int]] = []
+        # Visual (unrotated) rect per annotation xref. ``annot.rect`` is
+        # also the visual rect here because we never expand it — rotation
+        # is handled via the Form XObject's /Matrix — but caching lets the
+        # viewer read it without holding the document lock during drag.
+        self._visual_rects: dict[int, fitz.Rect] = {}
+        # Rotation in degrees per xref. ``annot.rotation`` (/Rotate) is
+        # NOT used as the source of truth: setting /Rotate makes PyMuPDF
+        # expand the bbox inside update(), which undoes the work of
+        # keeping /Rect at the visual size.
+        self._rotations: dict[int, float] = {}
+
+    def get_visual_rect(self, xref: int) -> fitz.Rect | None:
+        vr = self._visual_rects.get(xref)
+        return fitz.Rect(vr) if vr is not None else None
+
+    def get_rotation(self, xref: int) -> float:
+        return float(self._rotations.get(xref, 0.0))
 
     # ── tool selection ──────────────────────────────────────────────────────
 
@@ -292,6 +360,8 @@ class AnnotationManager:
             if annot.xref == xref:
                 page.delete_annot(annot)
                 self._history = [(p, x) for p, x in self._history if x != xref]
+                self._visual_rects.pop(xref, None)
+                self._rotations.pop(xref, None)
                 return True
         return False
 
@@ -305,8 +375,12 @@ class AnnotationManager:
         page = doc[page_num]
         for annot in page.annots():
             if annot.xref == xref:
+                rotation = self._rotations.get(xref, 0.0)
+                _reset_ap(annot)
                 annot.set_colors(stroke=color)
                 annot.update()
+                if rotation:
+                    _apply_rot(annot, rotation)
                 return True
         return False
 
@@ -349,15 +423,26 @@ class AnnotationManager:
                     (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
                     for (p, x) in self._history
                 ]
+                self._visual_rects.pop(xref, None)
+                self._rotations.pop(xref, None)
                 return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
-            r = annot.rect
-            annot.set_rect(fitz.Rect(r.x0 + dx, r.y0 + dy, r.x1 + dx, r.y1 + dy))
-            annot.update()
+            rotation = self._rotations.get(xref, 0.0)
+            cached = self._visual_rects.get(xref)
+            base   = cached if cached is not None else fitz.Rect(annot.rect)
+            new_visual = fitz.Rect(
+                base.x0 + dx, base.y0 + dy,
+                base.x1 + dx, base.y1 + dy,
+            )
             try:
-                rotation = float(annot.rotation or 0)
+                _reset_ap(annot)  # avoid PyMuPDF 1.27 setRect bug in update()
+                annot.set_rect(new_visual)
+                annot.update()
+                if rotation:
+                    _apply_rot(annot, rotation)
             except Exception:
-                rotation = 0.0
-            return fitz.Rect(annot.rect), annot.xref, rotation
+                return None
+            self._visual_rects[annot.xref] = fitz.Rect(new_visual)
+            return new_visual, annot.xref, rotation
         return None
 
     def set_annot_hidden(
@@ -381,8 +466,12 @@ class AnnotationManager:
             cur = annot.flags
             new = (cur | flag) if hidden else (cur & ~flag)
             if new != cur:
+                rotation = self._rotations.get(xref, 0.0)
+                _reset_ap(annot)
                 annot.set_flags(new)
                 annot.update()
+                if rotation:
+                    _apply_rot(annot, rotation)
             return True
         return False
 
@@ -429,25 +518,20 @@ class AnnotationManager:
                     (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
                     for (p, x) in self._history
                 ]
+                self._visual_rects.pop(xref, None)
+                self._rotations.pop(xref, None)
                 return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
+            rotation = self._rotations.get(xref, 0.0)
             try:
-                rotation = int(annot.rotation or 0) % 360
-            except Exception:
-                rotation = 0
-            try:
-                if rotation:
-                    # Strip rotation so set_rect sizes the shape itself, not
-                    # the expanded bbox that would shrink the rotated figure.
-                    annot.set_rotation(0)
-                    annot.update()
+                _reset_ap(annot)
                 annot.set_rect(new_rect)
                 annot.update()
                 if rotation:
-                    annot.set_rotation(rotation)
-                    annot.update()
+                    _apply_rot(annot, rotation)
             except Exception:
                 return None
-            return fitz.Rect(annot.rect), annot.xref, float(rotation)
+            self._visual_rects[annot.xref] = fitz.Rect(new_rect)
+            return fitz.Rect(new_rect), annot.xref, rotation
         return None
 
     def rotate_annot(
@@ -513,39 +597,49 @@ class AnnotationManager:
                     (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
                     for (p, x) in self._history
                 ]
+                self._visual_rects.pop(xref, None)
+                self._rotations.pop(xref, None)
                 return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
 
-            # Square / Circle / FreeText: native /Rotate (arbitrary angles in
-            # PyMuPDF 1.27+). Accumulates with any existing rotation.
-            try:
-                current = annot.rotation
-                if current is None or current < 0:
-                    current = 0
-            except Exception:
-                current = 0
-            new_rotation = int(round(current + angle_deg)) % 360
+            # Square / Circle / FreeText: visually rotate via the Form
+            # XObject's /Matrix (apn_matrix). PyMuPDF's native set_rotation
+            # stores /Rotate but MuPDF does not render Square/Circle at
+            # arbitrary angles — only bbox expansion happens. We instead
+            # keep /Rect equal to the visual rect and set apn_matrix so the
+            # appearance is rotated around the rect's centre.
+            current     = self._rotations.get(xref, 0.0)
+            new_rotation = (float(current) + float(angle_deg)) % 360
             if new_rotation < 0:
                 new_rotation += 360
 
-            vr = fitz.Rect(visual_rect) if visual_rect is not None else None
+            vr = None
+            if visual_rect is not None:
+                vr = fitz.Rect(visual_rect)
+            else:
+                cached = self._visual_rects.get(xref)
+                if cached is not None:
+                    vr = fitz.Rect(cached)
+            if vr is None:
+                vr = fitz.Rect(annot.rect)
             try:
-                if vr is not None:
-                    # Unrotate, re-pin the visual rect, then apply the new
-                    # angle. This keeps the underlying shape exactly at the
-                    # user's intended size across repeated rotations.
-                    if current:
-                        annot.set_rotation(0)
-                        annot.update()
-                    annot.set_rect(vr)
-                    annot.update()
-                    annot.set_rotation(new_rotation)
-                    annot.update()
-                    return vr, annot.xref, float(new_rotation)
-                annot.set_rotation(new_rotation)
+                # Rewrite /Rect to the visual rect (unrotated) and
+                # regenerate the axis-aligned appearance, then rotate the
+                # Form XObject via its /Matrix. Reset apn_matrix first —
+                # PyMuPDF 1.27's update() crashes if apn_matrix is
+                # non-identity. set_rotation is NOT called: it would
+                # cause update() to expand the bbox and render the shape
+                # axis-aligned inside the expansion.
+                _reset_ap(annot)
+                annot.set_rect(vr)
                 annot.update()
+                _apply_rot(annot, new_rotation)
             except Exception:
                 return None
-            return fitz.Rect(annot.rect), annot.xref, float(new_rotation)
+            self._visual_rects[annot.xref] = fitz.Rect(vr)
+            # Stash rotation so re-selection can recover it without
+            # decoding the apn_matrix. Keyed by current xref.
+            self._rotations[annot.xref] = float(new_rotation)
+            return vr, annot.xref, float(new_rotation)
 
         return None
 
@@ -558,7 +652,10 @@ class AnnotationManager:
     ) -> fitz.Rect | None:
         """Scale the annotation around its centre by *factor*.
 
-        Returns the new PDF rect on success, or None on failure.
+        Returns the new visual rect on success, or None on failure. For
+        rotated annotations we scale the *pre-rotation* rect (cached)
+        instead of ``annot.rect`` — otherwise each click compounds the
+        bbox expansion caused by PyMuPDF's /Rotate handling.
         """
         if factor <= 0:
             return None
@@ -566,13 +663,18 @@ class AnnotationManager:
         for annot in page.annots():
             if annot.xref != xref:
                 continue
-            r = annot.rect
+            atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
+
+            # Use the cached pre-rotation rect when available so scale is
+            # applied to the user-facing shape, not PyMuPDF's expanded bbox.
+            cached = self._visual_rects.get(xref)
+            r = fitz.Rect(cached) if cached is not None else fitz.Rect(annot.rect)
             cx = (r.x0 + r.x1) / 2
             cy = (r.y0 + r.y1) / 2
             half_w = max(1.0, r.width * factor / 2)
             half_h = max(1.0, r.height * factor / 2)
             new_rect = fitz.Rect(cx - half_w, cy - half_h, cx + half_w, cy + half_h)
-            atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
+
             if atype == "Line":
                 verts = annot.vertices
                 if verts and len(verts) >= 2:
@@ -581,8 +683,17 @@ class AnnotationManager:
                     annot.set_vertices([p1, p2])
                     annot.update()
                     return new_rect
-            annot.set_rect(new_rect)
-            annot.update()
+
+            rotation = self._rotations.get(xref, 0.0)
+            try:
+                _reset_ap(annot)
+                annot.set_rect(new_rect)
+                annot.update()
+                if rotation:
+                    _apply_rot(annot, rotation)
+            except Exception:
+                return None
+            self._visual_rects[annot.xref] = fitz.Rect(new_rect)
             return new_rect
         return None
 
