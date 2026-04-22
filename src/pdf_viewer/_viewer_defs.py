@@ -35,6 +35,8 @@ _TOOL_DEFS: list[tuple[Tool, str, str, ft.MouseCursor]] = [
     (Tool.RECT,      ft.Icons.CROP_DIN,             "Rectángulo",                     ft.MouseCursor.PRECISE),
     (Tool.CIRCLE,    ft.Icons.PANORAMA_FISH_EYE,    "Círculo / Elipse",               ft.MouseCursor.PRECISE),
     (Tool.LINE,      ft.Icons.SHOW_CHART,           "Línea",                          ft.MouseCursor.PRECISE),
+    (Tool.ARROW,     ft.Icons.ARROW_FORWARD,        "Flecha",                         ft.MouseCursor.PRECISE),
+    (Tool.INK,       ft.Icons.BRUSH,                "Dibujo a mano alzada",           ft.MouseCursor.PRECISE),
 ]
 
 

@@ -233,6 +233,12 @@ class _GestureMixin:
 
         self.current_page = pn
         pdf_x, pdf_y = display_to_pdf(e.local_x, e.local_y, self.zoom)
+
+        if self._annot.tool == Tool.INK:
+            self._ink_points = [(pdf_x, pdf_y)]
+            self._ink_page   = pn
+            return
+
         if self._annot.tool == Tool.SELECT:
             self._text_sel_start_pdf = (pdf_x, pdf_y)
             self._text_sel_end_pdf   = (pdf_x, pdf_y)
@@ -311,6 +317,15 @@ class _GestureMixin:
             return
 
         pdf_x, pdf_y = display_to_pdf(e.local_x, e.local_y, self.zoom)
+
+        if self._annot.tool == Tool.INK:
+            ink_pts = getattr(self, "_ink_points", None)
+            ink_pg  = getattr(self, "_ink_page",   None)
+            if ink_pts is not None and ink_pg == pn:
+                ink_pts.append((pdf_x, pdf_y))
+                self._update_ink_canvas_preview(pn)
+            return
+
         pdf_rect = self._annot.move(pdf_x, pdf_y)
         if pdf_rect is None:
             return
@@ -479,6 +494,20 @@ class _GestureMixin:
                     self._drag_current_rect = None
             return
 
+        if self._annot.tool == Tool.INK:
+            ink_pts = getattr(self, "_ink_points", [])
+            ink_pg  = getattr(self, "_ink_page",   None)
+            if ink_pg == pn and len(ink_pts) >= 2:
+                with self._doc_lock:
+                    self._annot.commit_ink(self.doc, pn, ink_pts)
+                self._clear_ink_canvas_preview(pn)
+                self._refresh_page(pn)
+            else:
+                self._clear_ink_canvas_preview(pn)
+            self._ink_points = []
+            self._ink_page   = None
+            return
+
         dov = self._drag_overlays[pn]
         dov.visible = False
         try:
@@ -504,7 +533,7 @@ class _GestureMixin:
         if modified:
             # Shapes: auto-switch to cursor and select the new annotation so the
             # user can immediately move / resize without manually switching tool.
-            if tool in (Tool.RECT, Tool.CIRCLE, Tool.LINE):
+            if tool in (Tool.RECT, Tool.CIRCLE, Tool.LINE, Tool.ARROW):
                 self._select_tool(Tool.CURSOR, ft.MouseCursor.BASIC)
                 if self._annot._history:
                     last_pn, last_xref = self._annot._history[-1]
@@ -583,6 +612,41 @@ class _GestureMixin:
             if annot.xref == xref:
                 return annot
         return None
+
+    # ── ink canvas preview ────────────────────────────────────────────────────
+
+    def _update_ink_canvas_preview(self, pn: int) -> None:
+        ink_pts = getattr(self, "_ink_points", [])
+        canvases = getattr(self, "_ink_canvases", [])
+        if pn >= len(canvases) or len(ink_pts) < 2:
+            return
+        import flet.canvas as cv
+        scale = self.zoom * BASE_SCALE
+        disp  = [(x * scale, y * scale) for x, y in ink_pts]
+        path  = cv.Path(
+            elements=[cv.Path.MoveTo(disp[0][0], disp[0][1])]
+                     + [cv.Path.LineTo(x, y) for x, y in disp[1:]],
+            paint=ft.Paint(
+                stroke_width=2,
+                color="#CC1155DD",
+                style=ft.PaintingStyle.STROKE,
+            ),
+        )
+        canvases[pn].shapes = [path]
+        try:
+            canvases[pn].update()
+        except Exception:
+            pass
+
+    def _clear_ink_canvas_preview(self, pn: int) -> None:
+        canvases = getattr(self, "_ink_canvases", [])
+        if pn >= len(canvases):
+            return
+        canvases[pn].shapes = []
+        try:
+            canvases[pn].update()
+        except Exception:
+            pass
 
     @staticmethod
     def _compute_resize_rect(r: fitz.Rect, handle: str, dx: float, dy: float) -> fitz.Rect:

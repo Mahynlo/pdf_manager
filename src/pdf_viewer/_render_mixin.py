@@ -5,6 +5,7 @@ import threading
 from pathlib import Path
 
 import flet as ft
+import flet.canvas as cv
 import fitz
 
 from .annotations import Tool
@@ -36,8 +37,10 @@ class _RenderMixin:
         self._ocr_overlays     = []
         self._text_sel_layers  = []
         self._redact_overlays  = []
+        self._ink_canvases     = []
         self._page_slots       = []
         self._page_gestures    = []
+        self._page_rows        = []
         self._page_cum_offsets = []
         self._page_heights     = []
         self._rendered             = set()
@@ -303,12 +306,15 @@ class _RenderMixin:
                 border=ft.border.all(1, "#D0D0D0"),
             )
 
+            ink_canvas = cv.Canvas(shapes=[], width=w, height=h)
+
             self._page_images.append(img)
             self._drag_overlays.append(drag_ov)
             self._sel_overlays.append(sel_ov)
             self._ocr_overlays.append(ocr_ov)
             self._text_sel_layers.append(text_sel_ov)
             self._redact_overlays.append(redact_ov)
+            self._ink_canvases.append(ink_canvas)
             self._text_sel_popups.append(popup_ov)
             self._annot_popups.append(annot_popup_ov)
             self._page_cum_offsets.append(cum)
@@ -317,14 +323,12 @@ class _RenderMixin:
 
             slot = ft.Container(
                 content=ft.Stack(
-                    [img, text_sel_ov, drag_ov, sel_ov, ocr_ov, redact_ov, popup_ov, annot_popup_ov],
+                    [img, text_sel_ov, drag_ov, ink_canvas, sel_ov, ocr_ov, redact_ov, popup_ov, annot_popup_ov],
                     clip_behavior=ft.ClipBehavior.NONE,
                 ),
                 width=w, height=h,
                 bgcolor=_PAGE_BG,
                 border_radius=2,
-                # NONE allows floating popups (popup_ov / annot_popup_ov) to
-                # paint outside the page boundary without being clipped.
                 clip_behavior=ft.ClipBehavior.NONE,
             )
             self._page_slots.append(slot)
@@ -339,14 +343,31 @@ class _RenderMixin:
                 mouse_cursor  = self._current_cursor,
             )
             self._page_gestures.append(gd)
-            rows.append(ft.Row([gd], alignment=ft.MainAxisAlignment.CENTER))
+            row = ft.Row([gd], alignment=ft.MainAxisAlignment.CENTER)
+            self._page_rows.append(row)
+            rows.append(row)
 
         self.viewer_scroll.controls = rows
 
-        for pn in range(min(total, 1 + _PRELOAD)):
-            self._render_page_slot(pn)
+        # Apply display-mode visibility before first render.
+        display_mode = getattr(self, "_display_mode", "continuous")
+        if display_mode == "single":
+            for i, row in enumerate(self._page_rows):
+                row.visible = (i == self.current_page)
+        elif display_mode == "double":
+            pair_start = (self.current_page // 2) * 2
+            for i, row in enumerate(self._page_rows):
+                row.visible = (i == pair_start or i == pair_start + 1)
 
-        if scroll_back and self._page_cum_offsets:
+        if display_mode in ("single", "double"):
+            pair_start = (self.current_page // 2) * 2 if display_mode == "double" else self.current_page
+            for pn in range(pair_start, min(pair_start + 2, total)):
+                self._render_page_slot(pn)
+        else:
+            for pn in range(min(total, 1 + _PRELOAD)):
+                self._render_page_slot(pn)
+
+        if scroll_back and self._page_cum_offsets and display_mode == "continuous":
             try:
                 self.viewer_scroll.scroll_to(
                     offset=self._page_cum_offsets[self.current_page], duration=0,
@@ -438,6 +459,8 @@ class _RenderMixin:
         self.next_btn.disabled = self.current_page == total - 1
 
     def _on_view_scroll(self, e: ft.OnScrollEvent) -> None:
+        if getattr(self, "_display_mode", "continuous") != "continuous":
+            return
         pixels     = getattr(e, "pixels",            None)
         viewport_h = getattr(e, "viewport_dimension", None) or 600.0
         if pixels is None:
@@ -477,6 +500,23 @@ class _RenderMixin:
         self._update_nav_state()
         self._render_page_slot(pn)
         self._refresh_ocr_ui_for_page()
+        display_mode = getattr(self, "_display_mode", "continuous")
+        if display_mode in ("single", "double") and getattr(self, "_page_rows", None):
+            if display_mode == "single":
+                for i, row in enumerate(self._page_rows):
+                    row.visible = (i == pn)
+            else:
+                pair_start = (pn // 2) * 2
+                for i, row in enumerate(self._page_rows):
+                    row.visible = (i == pair_start or i == pair_start + 1)
+                if pair_start + 1 < len(self._page_rows):
+                    self._render_page_slot(pair_start + 1)
+            try:
+                self.viewer_scroll.update()
+            except Exception:
+                pass
+            self.page_ref.update()
+            return
         try:
             self.viewer_scroll.scroll_to(offset=self._page_cum_offsets[pn], duration=250)
         except Exception:
@@ -484,12 +524,24 @@ class _RenderMixin:
         self.page_ref.update()
 
     def _prev(self, e=None) -> None:
+        total = len(self.doc)
         if self.current_page > 0:
-            self._scroll_to_page(self.current_page - 1)
+            display_mode = getattr(self, "_display_mode", "continuous")
+            if display_mode == "double":
+                pair_start = (self.current_page // 2) * 2
+                self._scroll_to_page(max(0, pair_start - 2))
+            else:
+                self._scroll_to_page(self.current_page - 1)
 
     def _next(self, e=None) -> None:
-        if self.current_page < len(self.doc) - 1:
-            self._scroll_to_page(self.current_page + 1)
+        total = len(self.doc)
+        if self.current_page < total - 1:
+            display_mode = getattr(self, "_display_mode", "continuous")
+            if display_mode == "double":
+                pair_start = (self.current_page // 2) * 2
+                self._scroll_to_page(min(total - 1, pair_start + 2))
+            else:
+                self._scroll_to_page(self.current_page + 1)
 
     def _go_to_page(self, e) -> None:
         try:

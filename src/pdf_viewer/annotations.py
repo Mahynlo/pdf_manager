@@ -16,6 +16,8 @@ class Tool(Enum):
     RECT      = "rect"
     CIRCLE    = "circle"
     LINE      = "line"
+    ARROW     = "arrow"
+    INK       = "ink"
 
 
 OVERLAY_COLOR: dict[Tool, str] = {
@@ -26,6 +28,8 @@ OVERLAY_COLOR: dict[Tool, str] = {
     Tool.RECT:      "#400055AA",
     Tool.CIRCLE:    "#40008833",
     Tool.LINE:      "#40AA2200",
+    Tool.ARROW:     "#40AA2200",
+    Tool.INK:       "#40003388",
 }
 
 STROKE_COLOR: dict[Tool, tuple[float, float, float]] = {
@@ -35,6 +39,8 @@ STROKE_COLOR: dict[Tool, tuple[float, float, float]] = {
     Tool.RECT:      (0.0,  0.33, 0.67),
     Tool.CIRCLE:    (0.0,  0.55, 0.0),
     Tool.LINE:      (0.70, 0.0,  0.0),
+    Tool.ARROW:     (0.70, 0.0,  0.0),
+    Tool.INK:       (0.0,  0.20, 0.70),
 }
 
 HIGHLIGHT_COLORS: list[tuple[str, tuple[float, float, float]]] = [
@@ -46,6 +52,33 @@ HIGHLIGHT_COLORS: list[tuple[str, tuple[float, float, float]]] = [
     ("Rojo",     (0.9, 0.2,  0.2)),
     ("Morado",   (0.6, 0.3,  1.0)),
 ]
+
+
+def _catmull_rom(pts: list[tuple[float, float]], steps: int = 5) -> list[tuple[float, float]]:
+    """Smooth a polyline with Catmull-Rom spline interpolation."""
+    if len(pts) < 3:
+        return list(pts)
+    out: list[tuple[float, float]] = []
+    for i in range(len(pts) - 1):
+        p0 = pts[max(0, i - 1)]
+        p1 = pts[i]
+        p2 = pts[i + 1]
+        p3 = pts[min(len(pts) - 1, i + 2)]
+        for s in range(steps):
+            t  = s / steps
+            t2 = t * t
+            t3 = t2 * t
+            x = 0.5 * ((2 * p1[0])
+                        + (-p0[0] + p2[0]) * t
+                        + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2
+                        + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3)
+            y = 0.5 * ((2 * p1[1])
+                        + (-p0[1] + p2[1]) * t
+                        + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2
+                        + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3)
+            out.append((x, y))
+    out.append(pts[-1])
+    return out
 
 
 def _word_rects(page: fitz.Page, clip: fitz.Rect) -> list[fitz.Rect]:
@@ -312,7 +345,38 @@ class AnnotationManager:
             self._history.append((page_num, annot.xref))
             return True, None
 
+        if self.tool == Tool.ARROW:
+            annot = page.add_line_annot(rect.tl, rect.br)
+            annot.set_colors(stroke=STROKE_COLOR[Tool.ARROW])
+            annot.set_border(width=2)
+            try:
+                annot.set_line_ends(0, 4)  # NONE at start, OPEN_ARROW at end
+            except Exception:
+                pass
+            annot.update()
+            self._history.append((page_num, annot.xref))
+            return True, None
+
         return False, None
+
+    def commit_ink(
+        self,
+        doc: fitz.Document,
+        page_num: int,
+        pdf_points: list[tuple[float, float]],
+    ) -> bool:
+        """Create a smoothed ink annotation from collected PDF-space points."""
+        if len(pdf_points) < 2:
+            return False
+        smoothed = _catmull_rom(pdf_points) if len(pdf_points) >= 3 else list(pdf_points)
+        fitz_pts = [fitz.Point(x, y) for x, y in smoothed]
+        page  = doc[page_num]
+        annot = page.add_ink_annot([fitz_pts])
+        annot.set_colors(stroke=STROKE_COLOR[Tool.INK])
+        annot.set_border(width=2)
+        annot.update()
+        self._history.append((page_num, annot.xref))
+        return True
 
     # ── undo ─────────────────────────────────────────────────────────────────
 

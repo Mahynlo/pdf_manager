@@ -187,14 +187,28 @@ class PDFViewerTab(
         self._sidebar_btn:    ft.IconButton | None = None
         self._right_sidebar:  ft.Container | None = None
 
-        # Sidebar mode: "ocr" | "redact" | "agent"
+        # Sidebar mode: "toc" | "ocr" | "redact" | "agent"
         self._sidebar_mode             = "ocr"
+        self._sidebar_toc_view:        ft.Container | None = None
         self._sidebar_ocr_view:        ft.Container | None = None
         self._sidebar_redact_view:     ft.Container | None = None
         self._sidebar_agent_view:      ft.Container | None = None
+        self._sidebar_tab_toc_btn:     ft.Container | None = None
         self._sidebar_tab_ocr_btn:     ft.Container | None = None
         self._sidebar_tab_redact_btn:  ft.Container | None = None
         self._sidebar_tab_agent_btn:   ft.Container | None = None
+
+        # Display mode: "continuous" | "single" | "double"
+        self._display_mode         = "continuous"
+        self._page_rows:     list  = []
+        self._mode_btn_continuous: ft.IconButton | None = None
+        self._mode_btn_single:     ft.IconButton | None = None
+        self._mode_btn_double:     ft.IconButton | None = None
+
+        # Ink / freehand drawing state
+        self._ink_points: list[tuple[float, float]] = []
+        self._ink_page:   int | None                = None
+        self._ink_canvases: list                    = []
 
         # Agent panel state
         self._agent_panel_open    = True
@@ -239,6 +253,20 @@ class PDFViewerTab(
         self.zoom_label   = ft.Text("100%", width=52, text_align=ft.TextAlign.CENTER, size=14)
         self.zoom_in_btn  = ft.IconButton(ft.Icons.ADD,    tooltip="Acercar",  on_click=self._zoom_in)
 
+        self._mode_btn_continuous = ft.IconButton(
+            ft.Icons.VIEW_STREAM, tooltip="Scroll continuo",
+            icon_color="#1565C0", bgcolor="#DDEEFF",
+            on_click=lambda e: self._set_display_mode("continuous"),
+        )
+        self._mode_btn_single = ft.IconButton(
+            ft.Icons.ARTICLE, tooltip="Página única",
+            on_click=lambda e: self._set_display_mode("single"),
+        )
+        self._mode_btn_double = ft.IconButton(
+            ft.Icons.BOOK, tooltip="Doble página",
+            on_click=lambda e: self._set_display_mode("double"),
+        )
+
         zoom_menu = ft.PopupMenuButton(
             icon=ft.Icons.ARROW_DROP_DOWN,
             tooltip="Nivel de zoom",
@@ -260,6 +288,9 @@ class PDFViewerTab(
                     self.prev_btn, self.page_input, self.total_label, self.next_btn,
                     _vdivider(),
                     self.zoom_out_btn, self.zoom_label, self.zoom_in_btn, zoom_menu,
+                    _vdivider(),
+                    _vdivider(),
+                    self._mode_btn_continuous, self._mode_btn_single, self._mode_btn_double,
                     _vdivider(),
                     ft.IconButton(ft.Icons.ROTATE_RIGHT, tooltip="Rotar 90°", on_click=self._rotate),
                     _vdivider(),
@@ -304,6 +335,33 @@ class PDFViewerTab(
                                 text="Tamaño real (100%)",
                                 icon=ft.Icons.CROP_FREE,
                                 on_click=lambda e: self._set_zoom(1.0),
+                            ),
+                            ft.PopupMenuItem(),
+                            ft.PopupMenuItem(
+                                text="Insertar página en blanco",
+                                icon=ft.Icons.NOTE_ADD_OUTLINED,
+                                on_click=self._insert_blank_page,
+                            ),
+                            ft.PopupMenuItem(
+                                text="Duplicar página actual",
+                                icon=ft.Icons.COPY_ALL_OUTLINED,
+                                on_click=self._duplicate_page,
+                            ),
+                            ft.PopupMenuItem(
+                                text="Eliminar página actual",
+                                icon=ft.Icons.DELETE_OUTLINE,
+                                on_click=self._delete_page,
+                            ),
+                            ft.PopupMenuItem(),
+                            ft.PopupMenuItem(
+                                text="Mover página arriba",
+                                icon=ft.Icons.ARROW_UPWARD,
+                                on_click=self._move_page_up,
+                            ),
+                            ft.PopupMenuItem(
+                                text="Mover página abajo",
+                                icon=ft.Icons.ARROW_DOWNWARD,
+                                on_click=self._move_page_down,
                             ),
                         ],
                     ),
@@ -375,12 +433,14 @@ class PDFViewerTab(
         )
 
         # ── sidebar panels (each mixin builds its own) ────────────────────────
+        toc_panel    = self._build_toc_sidebar_panel()
         ocr_panel    = self._build_ocr_sidebar_panel()
         redact_panel = self._build_redact_sidebar_panel()
         agent_panel  = self._build_agent_sidebar_panel()
 
-        # ── sidebar mode tab bar (3 tabs) ─────────────────────────────────────
+        # ── sidebar mode tab bar (4 tabs) ─────────────────────────────────────
         _TAB_DEFS = [
+            ("toc",    ft.Icons.LIST_ALT_OUTLINED,     "Índice",    "#1565C0", "#E3F2FD"),
             ("ocr",    ft.Icons.TEXT_SNIPPET_OUTLINED, "OCR",       "#2E7D32", "#E8F5E9"),
             ("redact", ft.Icons.EDIT_OFF_OUTLINED,     "Redacción", "#E65100", "#FFF3E0"),
             ("agent",  ft.Icons.SMART_TOY_OUTLINED,    "Agente IA", "#5C35C9", "#EDE7F6"),
@@ -413,13 +473,15 @@ class PDFViewerTab(
                 tooltip=label,
             )
 
-        self._sidebar_tab_ocr_btn    = _make_tab_btn(*_TAB_DEFS[0])
-        self._sidebar_tab_redact_btn = _make_tab_btn(*_TAB_DEFS[1])
-        self._sidebar_tab_agent_btn  = _make_tab_btn(*_TAB_DEFS[2])
+        self._sidebar_tab_toc_btn    = _make_tab_btn(*_TAB_DEFS[0])
+        self._sidebar_tab_ocr_btn    = _make_tab_btn(*_TAB_DEFS[1])
+        self._sidebar_tab_redact_btn = _make_tab_btn(*_TAB_DEFS[2])
+        self._sidebar_tab_agent_btn  = _make_tab_btn(*_TAB_DEFS[3])
 
         tab_bar = ft.Container(
             content=ft.Row(
-                [self._sidebar_tab_ocr_btn,
+                [self._sidebar_tab_toc_btn,
+                 self._sidebar_tab_ocr_btn,
                  self._sidebar_tab_redact_btn,
                  self._sidebar_tab_agent_btn],
                 spacing=0,
@@ -428,7 +490,12 @@ class PDFViewerTab(
             border=ft.border.only(bottom=ft.BorderSide(1, "#CCCCCC")),
         )
 
-        # ── three sidebar views (one visible at a time) ───────────────────────
+        # ── four sidebar views (one visible at a time) ────────────────────────
+        self._sidebar_toc_view = ft.Container(
+            content=toc_panel,
+            expand=(self._sidebar_mode == "toc"),
+            visible=(self._sidebar_mode == "toc"),
+        )
         self._sidebar_ocr_view = ft.Container(
             content=ocr_panel,
             expand=(self._sidebar_mode == "ocr"),
@@ -448,6 +515,7 @@ class PDFViewerTab(
         self._right_sidebar = ft.Container(
             content=ft.Column(
                 [tab_bar,
+                 self._sidebar_toc_view,
                  self._sidebar_ocr_view,
                  self._sidebar_redact_view,
                  self._sidebar_agent_view],
@@ -483,6 +551,203 @@ class PDFViewerTab(
             expand=True,
             spacing=0,
         )
+
+    # ── TOC panel ─────────────────────────────────────────────────────────────
+
+    def _build_toc_sidebar_panel(self) -> ft.Control:
+        from ._viewer_defs import _OCR_PANEL_BG
+        try:
+            with self._doc_lock:
+                toc = self.doc.get_toc()
+        except Exception:
+            toc = []
+
+        if not toc:
+            return ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Icon(ft.Icons.LIST_ALT_OUTLINED, size=40, color="#BDBDBD"),
+                        ft.Text(
+                            "Sin tabla de contenidos",
+                            color="#9E9E9E",
+                            text_align=ft.TextAlign.CENTER,
+                        ),
+                    ],
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=8,
+                ),
+                padding=ft.padding.all(24),
+                expand=True,
+                alignment=ft.alignment.center,
+            )
+
+        items: list[ft.Control] = []
+        for entry in toc:
+            level    = entry[0]
+            title    = entry[1]
+            page_num = entry[2]
+            indent   = (level - 1) * 14
+            is_top   = (level == 1)
+            items.append(
+                ft.Container(
+                    content=ft.Row(
+                        [
+                            ft.Container(width=indent),
+                            ft.Icon(
+                                ft.Icons.CIRCLE if is_top else ft.Icons.RADIO_BUTTON_UNCHECKED,
+                                size=7 if is_top else 5,
+                                color="#1565C0" if is_top else "#64B5F6",
+                            ),
+                            ft.Container(width=5),
+                            ft.Text(
+                                title,
+                                size=12 if is_top else 11,
+                                weight=ft.FontWeight.W_600 if is_top else ft.FontWeight.NORMAL,
+                                color="#1A237E" if is_top else "#424242",
+                                expand=True,
+                                max_lines=2,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                            ft.Text(str(page_num), size=11, color="#9E9E9E"),
+                        ],
+                        spacing=0,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                    on_click=lambda e, p=page_num - 1: self._scroll_to_page(
+                        max(0, min(p, len(self.doc) - 1))
+                    ),
+                    ink=True,
+                    border_radius=4,
+                )
+            )
+
+        return ft.Column(
+            [
+                ft.Container(
+                    content=ft.Text(
+                        "Tabla de Contenidos",
+                        size=12,
+                        weight=ft.FontWeight.W_600,
+                        color="#1A237E",
+                    ),
+                    padding=ft.padding.symmetric(horizontal=12, vertical=8),
+                    border=ft.border.only(bottom=ft.BorderSide(1, "#CCCCCC")),
+                ),
+                ft.ListView(items, expand=True, spacing=0),
+            ],
+            spacing=0,
+            expand=True,
+        )
+
+    # ── display mode ──────────────────────────────────────────────────────────
+
+    def _set_display_mode(self, mode: str) -> None:
+        self._display_mode = mode
+        _btns = {
+            "continuous": self._mode_btn_continuous,
+            "single":     self._mode_btn_single,
+            "double":     self._mode_btn_double,
+        }
+        for m, btn in _btns.items():
+            if btn is None:
+                continue
+            btn.icon_color = "#1565C0" if m == mode else None
+            btn.bgcolor    = "#DDEEFF" if m == mode else None
+            try:
+                btn.update()
+            except Exception:
+                pass
+
+        if not self._page_rows:
+            return
+
+        if mode == "continuous":
+            for row in self._page_rows:
+                row.visible = True
+            try:
+                self.viewer_scroll.update()
+            except Exception:
+                pass
+            self._scroll_to_page(self.current_page)
+        else:
+            self._scroll_to_page(self.current_page)
+
+    # ── page management ───────────────────────────────────────────────────────
+
+    def _insert_blank_page(self, e=None) -> None:
+        pn = self.current_page
+        with self._doc_lock:
+            p = self.doc[pn]
+            w, h = p.rect.width, p.rect.height
+            self.doc.new_page(pno=pn + 1, width=w, height=h)
+        self._annot._history = [
+            (pg if pg <= pn else pg + 1, xr) for pg, xr in self._annot._history
+        ]
+        self.total_label.value = f"/ {len(self.doc)}"
+        self._rebuild_scroll_content(scroll_back=False)
+        self.page_ref.update()
+        self._show_snack("Página en blanco insertada")
+
+    def _duplicate_page(self, e=None) -> None:
+        pn = self.current_page
+        with self._doc_lock:
+            self.doc.copy_page(pn, pn + 1)
+        self._annot._history = [
+            (pg if pg <= pn else pg + 1, xr) for pg, xr in self._annot._history
+        ]
+        self.total_label.value = f"/ {len(self.doc)}"
+        self._rebuild_scroll_content(scroll_back=False)
+        self.page_ref.update()
+        self._show_snack("Página duplicada")
+
+    def _delete_page(self, e=None) -> None:
+        if len(self.doc) <= 1:
+            self._show_snack("No se puede eliminar la única página")
+            return
+        pn = self.current_page
+        with self._doc_lock:
+            self.doc.delete_page(pn)
+        self._annot._history = [
+            (pg if pg < pn else pg - 1, xr)
+            for pg, xr in self._annot._history
+            if pg != pn
+        ]
+        self.current_page = min(pn, len(self.doc) - 1)
+        self.total_label.value = f"/ {len(self.doc)}"
+        self._rebuild_scroll_content(scroll_back=False)
+        self.page_ref.update()
+        self._show_snack("Página eliminada")
+
+    def _move_page_up(self, e=None) -> None:
+        pn = self.current_page
+        if pn == 0:
+            return
+        with self._doc_lock:
+            self.doc.move_page(pn, pn - 1)
+        self._annot._history = [
+            (pg - 1 if pg == pn else pg + 1 if pg == pn - 1 else pg, xr)
+            for pg, xr in self._annot._history
+        ]
+        self.current_page = pn - 1
+        self.total_label.value = f"/ {len(self.doc)}"
+        self._rebuild_scroll_content(scroll_back=False)
+        self.page_ref.update()
+
+    def _move_page_down(self, e=None) -> None:
+        pn = self.current_page
+        if pn >= len(self.doc) - 1:
+            return
+        with self._doc_lock:
+            self.doc.move_page(pn, pn + 1)
+        self._annot._history = [
+            (pg + 1 if pg == pn else pg - 1 if pg == pn + 1 else pg, xr)
+            for pg, xr in self._annot._history
+        ]
+        self.current_page = pn + 1
+        self.total_label.value = f"/ {len(self.doc)}"
+        self._rebuild_scroll_content(scroll_back=False)
+        self.page_ref.update()
 
     # ── tab / lifecycle ───────────────────────────────────────────────────────
 
@@ -523,6 +788,7 @@ class PDFViewerTab(
         self._sidebar_mode = mode
 
         _TAB_META = {
+            "toc":    ("#1565C0", "#E3F2FD", "_sidebar_tab_toc_btn",    "_sidebar_toc_view"),
             "ocr":    ("#2E7D32", "#E8F5E9", "_sidebar_tab_ocr_btn",    "_sidebar_ocr_view"),
             "redact": ("#E65100", "#FFF3E0", "_sidebar_tab_redact_btn", "_sidebar_redact_view"),
             "agent":  ("#5C35C9", "#EDE7F6", "_sidebar_tab_agent_btn",  "_sidebar_agent_view"),
