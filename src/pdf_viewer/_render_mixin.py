@@ -99,19 +99,6 @@ class _RenderMixin:
             sel_tr = ft.Container(**_HANDLE_STYLE)
             sel_bl = ft.Container(**_HANDLE_STYLE)
             sel_br = ft.Container(**_HANDLE_STYLE)
-            # Rotation handle: a small circle connected to the box by a vertical stem.
-            sel_rot_stem = ft.Container(
-                width=1, height=0,
-                bgcolor=_HANDLE_CLR,
-                left=0, top=0,
-            )
-            sel_rot = ft.Container(
-                width=_HS, height=_HS,
-                bgcolor="#FFFFFF",
-                border=ft.border.all(2, _HANDLE_CLR),
-                border_radius=_HS,
-                left=0, top=0,
-            )
             _ctx_btn = ft.ButtonStyle(
                 padding=ft.padding.all(5),
                 shape=ft.RoundedRectangleBorder(radius=4),
@@ -148,6 +135,40 @@ class _RenderMixin:
                         ),
                         ft.Container(width=1, height=22, bgcolor="#E0E0E0"),
                         ft.IconButton(
+                            ft.Icons.REMOVE_CIRCLE_OUTLINE,
+                            icon_color="#555555",
+                            icon_size=18,
+                            tooltip="Reducir",
+                            on_click=self._scale_down_selected,
+                            style=_ctx_btn,
+                        ),
+                        ft.IconButton(
+                            ft.Icons.ADD_CIRCLE_OUTLINE,
+                            icon_color="#555555",
+                            icon_size=18,
+                            tooltip="Agrandar",
+                            on_click=self._scale_up_selected,
+                            style=_ctx_btn,
+                        ),
+                        ft.Container(width=1, height=22, bgcolor="#E0E0E0"),
+                        ft.IconButton(
+                            ft.Icons.REMOVE_CIRCLE,
+                            icon_color="#8B4513",
+                            icon_size=18,
+                            tooltip="Más fino",
+                            on_click=self._thin_selected,
+                            style=_ctx_btn,
+                        ),
+                        ft.IconButton(
+                            ft.Icons.ADD_CIRCLE,
+                            icon_color="#8B4513",
+                            icon_size=18,
+                            tooltip="Más grueso",
+                            on_click=self._thicken_selected,
+                            style=_ctx_btn,
+                        ),
+                        ft.Container(width=1, height=22, bgcolor="#E0E0E0"),
+                        ft.IconButton(
                             ft.Icons.CLOSE,
                             icon_color="#9E9E9E",
                             icon_size=14,
@@ -160,12 +181,8 @@ class _RenderMixin:
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
             )
-            # Inner container that holds everything that should rotate with
-            # the annotation (border + corner handles + rotation knob). The
-            # sel_menu sits OUTSIDE this group so it stays axis-aligned and
-            # readable regardless of the annotation's rotation.
             sel_rot_group_inner = ft.Stack(
-                [sel_border, sel_rot_stem, sel_tl, sel_tr, sel_bl, sel_br, sel_rot],
+                [sel_border, sel_tl, sel_tr, sel_bl, sel_br],
                 clip_behavior=ft.ClipBehavior.NONE,
             )
             sel_rot_group = ft.Container(
@@ -189,8 +206,6 @@ class _RenderMixin:
                 "tr":        sel_tr,
                 "bl":        sel_bl,
                 "br":        sel_br,
-                "rot":       sel_rot,
-                "rot_stem":  sel_rot_stem,
                 "menu":      sel_menu,
                 "rot_group": sel_rot_group,
             })
@@ -378,8 +393,15 @@ class _RenderMixin:
     def _render_page_slot(self, pn: int) -> None:
         """Schedule a background render for one page (no-op if already rendered)."""
         if pn in self._rendered or pn in self._rendering:
+            if pn in self._rendering:
+                # Another render is in progress; request a follow-up render so
+                # changes committed while the current render runs are not lost.
+                getattr(self, "_pending_rerender", set()).add(pn)
             return
         self._rendering.add(pn)
+        # Cancel any stale pending-rerender request for this slot; we're
+        # starting fresh right now.
+        getattr(self, "_pending_rerender", set()).discard(pn)
         gen = self._render_gen
 
         def _worker() -> None:
@@ -401,8 +423,19 @@ class _RenderMixin:
                     slot.update()
                 except Exception:
                     pass
+                # Notify mixins that the page image is now up-to-date.
+                try:
+                    self._on_page_rendered(pn)
+                except Exception:
+                    pass
             finally:
                 self._rendering.discard(pn)
+                # If a re-render was requested while this one was running, start it.
+                pending = getattr(self, "_pending_rerender", set())
+                if pn in pending:
+                    pending.discard(pn)
+                    self._rendered.discard(pn)
+                    self._render_page_slot(pn)
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -443,7 +476,6 @@ class _RenderMixin:
         if not keep_selection and self._selected is not None and self._selected[0] == pn:
             self._selected = None
             self._sel_overlays[pn].visible = False
-            self._annot_action_bar.visible = False
         self._rendered.discard(pn)
         self._render_page_slot(pn)
         self._refresh_ocr_ui_for_page()

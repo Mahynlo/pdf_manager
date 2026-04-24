@@ -20,14 +20,7 @@ class _GestureMixin:
     # ── helpers ───────────────────────────────────────────────────────────────
 
     def _sel_handle_positions(self, pn: int):
-        """Return dict of display-space handle centres.
-
-        Returns None if there is no active selection on *pn*. Uses the
-        cached visual rect (pre-rotation) and rotates handle positions by
-        ``self._selected_rotation`` so the hit-test matches what the user
-        sees after the overlay ft.Rotate has been applied. Stays lock-free
-        so pan_start never blocks on a background render.
-        """
+        """Return dict of display-space handle centres (axis-aligned, no rotation)."""
         if self._selected is None or self._selected[0] != pn:
             return None
 
@@ -44,30 +37,21 @@ class _GestureMixin:
                 return None
 
         scale = self.zoom * BASE_SCALE
-        cx = (r.x0 + r.x1) / 2 * scale
-        cy = (r.y0 + r.y1) / 2 * scale
-        W  = r.width  * scale
-        H  = r.height * scale
-
-        rot_deg = float(self._selected_rotation or 0.0)
-        rad     = math.radians(rot_deg)
-        cos_a   = math.cos(rad)
-        sin_a   = math.sin(rad)
-
-        def rot(ox: float, oy: float) -> tuple[float, float]:
-            return (cx + ox * cos_a - oy * sin_a,
-                    cy + ox * sin_a + oy * cos_a)
+        x0 = r.x0 * scale
+        y0 = r.y0 * scale
+        x1 = r.x1 * scale
+        y1 = r.y1 * scale
+        cx = (x0 + x1) / 2
+        cy = (y0 + y1) / 2
 
         return {
-            "tl":  rot(-W / 2, -H / 2),
-            "tr":  rot( W / 2, -H / 2),
-            "bl":  rot(-W / 2,  H / 2),
-            "br":  rot( W / 2,  H / 2),
-            "rot": rot(0.0,    -H / 2 - 30),
-            "cx":  cx,
-            "cy":  cy,
-            "r":   r,
-            "rotation": rot_deg,
+            "tl": (x0, y0),
+            "tr": (x1, y0),
+            "bl": (x0, y1),
+            "br": (x1, y1),
+            "cx": cx,
+            "cy": cy,
+            "r":  r,
         }
 
     def _detect_drag_mode(self, pn: int, dx: float, dy: float) -> str:
@@ -76,29 +60,17 @@ class _GestureMixin:
         if positions is None:
             return "none"
 
-        # Rotation handle takes priority — it sits above the box outside the bbox.
-        rx, ry = positions["rot"]
-        if math.hypot(dx - rx, dy - ry) <= _HANDLE_HIT_R:
-            return "rotate"
-
-        # Check corner handles.
         for name in ("tl", "tr", "bl", "br"):
             hx, hy = positions[name]
             if math.hypot(dx - hx, dy - hy) <= _HANDLE_HIT_R:
                 return f"resize_{name}"
 
-        # Check inside the (possibly rotated) bounding box for move. Rotate
-        # the click back into the box's local frame before comparing.
         scale  = self.zoom * BASE_SCALE
         r      = positions["r"]
         cx, cy = positions["cx"], positions["cy"]
-        rot_deg = float(positions.get("rotation", 0.0))
-        rad     = math.radians(-rot_deg)
-        lx = (dx - cx) * math.cos(rad) - (dy - cy) * math.sin(rad)
-        ly = (dx - cx) * math.sin(rad) + (dy - cy) * math.cos(rad)
         half_w = r.width  * scale / 2 + 12
         half_h = r.height * scale / 2 + 12
-        if abs(lx) <= half_w and abs(ly) <= half_h:
+        if abs(dx - cx) <= half_w and abs(dy - cy) <= half_h:
             return "move"
 
         return "none"
@@ -183,19 +155,6 @@ class _GestureMixin:
                         and self._selected[0] == pn
                         and drag_seed is not None):
                     mode = self._detect_drag_mode(pn, e.local_x, e.local_y)
-                    if mode == "rotate":
-                        positions = self._sel_handle_positions(pn)
-                        if positions is None:
-                            return
-                        cx, cy = positions["cx"], positions["cy"]
-                        self._drag_mode = "rotate"
-                        self._drag_start_rect   = fitz.Rect(drag_seed)
-                        self._drag_current_rect = fitz.Rect(drag_seed)
-                        self._drag_rotate_start_angle = math.atan2(
-                            e.local_y - cy, e.local_x - cx,
-                        )
-                        self._drag_rotate_delta = 0.0
-                        return
                     if mode != "none":
                         self._drag_start_rect   = fitz.Rect(drag_seed)
                         self._drag_current_rect = fitz.Rect(drag_seed)
@@ -244,6 +203,8 @@ class _GestureMixin:
             self._text_sel_end_pdf   = (pdf_x, pdf_y)
             self._hide_text_sel_bar()
         self._annot.begin(pdf_x, pdf_y)
+        if self._annot.tool in (Tool.LINE, Tool.ARROW):
+            self._line_drag_start_disp = (e.local_x, e.local_y)
 
     def _on_pan_update(self, e: ft.DragUpdateEvent, pn: int) -> None:
         if self._annot.tool == Tool.CURSOR:
@@ -254,20 +215,6 @@ class _GestureMixin:
                     or self._drag_current_rect is None):
                 return
             if self._selected[0] != pn:
-                return
-
-            # Rotation branch: no pdf-coord deltas needed, just angle from centre.
-            if self._drag_mode == "rotate":
-                if self._drag_rotate_start_angle is None:
-                    return
-                positions = self._sel_handle_positions(pn)
-                if positions is None:
-                    return
-                cx, cy = positions["cx"], positions["cy"]
-                angle_now = math.atan2(e.local_y - cy, e.local_x - cx)
-                self._drag_rotate_delta = angle_now - self._drag_rotate_start_angle
-                self._ensure_drag_ghost_active(pn)
-                self._apply_rotation_preview(pn, self._drag_rotate_delta)
                 return
 
             if self._move_last_pdf is None:
@@ -295,18 +242,8 @@ class _GestureMixin:
 
                 elif self._drag_mode.startswith("resize_"):
                     handle   = self._drag_mode[len("resize_"):]   # "tl" | "tr" | "bl" | "br"
-                    # Transform the pointer delta into the rect's local
-                    # (unrotated) frame so corner drags feel intuitive when
-                    # the overlay is rotated.
-                    rot_deg = float(self._selected_rotation or 0.0)
-                    if abs(rot_deg) > 0.01:
-                        rad = math.radians(-rot_deg)
-                        ldx = dx * math.cos(rad) - dy * math.sin(rad)
-                        ldy = dx * math.sin(rad) + dy * math.cos(rad)
-                    else:
-                        ldx, ldy = dx, dy
                     new_rect = self._compute_resize_rect(
-                        self._drag_current_rect, handle, ldx, ldy,
+                        self._drag_current_rect, handle, dx, dy,
                     )
                     self._drag_current_rect = new_rect
                     self._move_last_pdf     = (pdf_x, pdf_y)
@@ -336,6 +273,13 @@ class _GestureMixin:
             self._update_text_selection(
                 pn, self._text_sel_start_pdf, (pdf_x, pdf_y), update_ui=True
             )
+        elif self._annot.tool in (Tool.LINE, Tool.ARROW):
+            start = getattr(self, "_line_drag_start_disp", None)
+            if start is not None:
+                self._update_line_canvas_preview(
+                    pn, start[0], start[1], e.local_x, e.local_y,
+                    is_arrow=(self._annot.tool == Tool.ARROW),
+                )
         else:
             dov = self._drag_overlays[pn]
             dov.left    = pdf_rect.x0    * scale
@@ -349,6 +293,59 @@ class _GestureMixin:
             except Exception:
                 pass
 
+    # ── committed-ink overlay helpers ─────────────────────────────────────────
+
+    def _add_committed_ink_stroke(self, pn: int, pdf_pts: list[tuple[float, float]]) -> None:
+        """Save *pdf_pts* as a committed (not-yet-rendered) ink stroke for *pn*."""
+        committed: dict = getattr(self, "_committed_ink_points", None)
+        if committed is None:
+            committed = {}
+            self._committed_ink_points = committed
+        committed.setdefault(pn, []).append(list(pdf_pts))
+
+    def _update_committed_ink_canvas(self, pn: int) -> None:
+        """Repaint the ink canvas to show all committed-but-not-yet-rendered strokes."""
+        canvases = getattr(self, "_ink_canvases", [])
+        if pn >= len(canvases):
+            return
+        import flet.canvas as cv
+        committed: dict = getattr(self, "_committed_ink_points", {})
+        pts_list = committed.get(pn, [])
+        shapes = []
+        scale = self.zoom * BASE_SCALE
+        for pts in pts_list:
+            if len(pts) < 2:
+                continue
+            disp = [(x * scale, y * scale) for x, y in pts]
+            shapes.append(cv.Path(
+                elements=[cv.Path.MoveTo(disp[0][0], disp[0][1])]
+                         + [cv.Path.LineTo(x, y) for x, y in disp[1:]],
+                paint=ft.Paint(stroke_width=2, color="#CC1155DD",
+                               style=ft.PaintingStyle.STROKE),
+            ))
+        canvases[pn].shapes = shapes
+        try:
+            canvases[pn].update()
+        except Exception:
+            pass
+
+    def _on_page_rendered(self, pn: int) -> None:
+        """Called by the render worker after slot.update() — clears committed overlay.
+
+        If another render is already queued for this page (pending_rerender),
+        keep the canvas: the queued render will include strokes committed after
+        this render started, and clearing now would make them flash invisible.
+        """
+        pending = getattr(self, "_pending_rerender", set())
+        if pn in pending:
+            return
+        committed: dict = getattr(self, "_committed_ink_points", {})
+        if pn in committed:
+            del committed[pn]
+            self._clear_ink_canvas_preview(pn)
+
+    # ─────────────────────────────────────────────────────────────────────────
+
     def _on_pan_end(self, e: ft.DragEndEvent, pn: int) -> None:
         if self._annot.tool == Tool.CURSOR:
             if self._drag_mode is not None:
@@ -356,72 +353,6 @@ class _GestureMixin:
                 self._drag_mode = None
                 self._move_last_pdf = None
                 was_hidden = self._drag_annot_hidden
-
-                # Rotation branch: commit the accumulated angle to the PDF, clear
-                # the visual preview transform.
-                if prev_mode == "rotate":
-                    angle_rad = self._drag_rotate_delta
-                    self._drag_rotate_start_angle = None
-                    self._drag_rotate_delta       = 0.0
-                    try:
-                        if self._selected is not None and abs(angle_rad) > 0.001:
-                            xref = self._selected[1]
-                            angle_deg = math.degrees(angle_rad)
-                            visual_rect = (
-                                fitz.Rect(self._selected_visual_rect)
-                                if self._selected_visual_rect is not None
-                                else None
-                            )
-                            with self._doc_lock:
-                                result = self._annot.rotate_annot(
-                                    self.doc, pn, xref, angle_deg,
-                                    visual_rect=visual_rect,
-                                )
-                                if was_hidden:
-                                    # Unhide using the (possibly new) xref so the
-                                    # annotation is visible again after rerender.
-                                    target_xref = result[1] if result else xref
-                                    self._annot.set_annot_hidden(
-                                        self.doc, pn, target_xref, False,
-                                    )
-                            self._drag_annot_hidden = False
-                            if result is not None:
-                                new_rect, new_xref, new_rotation = result
-                                self._selected = (pn, new_xref)
-                                self._selected_rotation = float(new_rotation)
-                                self._refresh_selected_overlay(pn, annot_rect=new_rect)
-                            else:
-                                # Rotation failed — snap overlay back to state.
-                                self._refresh_selected_overlay(pn)
-                            self._rerender_page_image(pn)
-                        else:
-                            # Tiny rotation — just unhide and refresh overlay
-                            # so any preview transform snaps back to the
-                            # persistent _selected_rotation value.
-                            if was_hidden and self._selected is not None:
-                                with self._doc_lock:
-                                    self._annot.set_annot_hidden(
-                                        self.doc, pn, self._selected[1], False,
-                                    )
-                                self._drag_annot_hidden = False
-                                self._rerender_page_image(pn)
-                            self._refresh_selected_overlay(pn)
-                    except Exception:
-                        if self._drag_annot_hidden and self._selected is not None:
-                            try:
-                                with self._doc_lock:
-                                    self._annot.set_annot_hidden(
-                                        self.doc, pn, self._selected[1], False,
-                                    )
-                            except Exception:
-                                pass
-                            self._drag_annot_hidden = False
-                            self._rerender_page_image(pn)
-                        self._refresh_selected_overlay(pn)
-                    finally:
-                        self._drag_start_rect   = None
-                        self._drag_current_rect = None
-                    return
 
                 try:
                     if (prev_mode == "move" or prev_mode.startswith("resize_")) \
@@ -450,16 +381,7 @@ class _GestureMixin:
                                 )
                                 wrote_doc = True
                             if result is not None:
-                                _, new_xref, rotation_deg = result
-                                # For move we keep the drag-tracked translated
-                                # rect (in the unrotated frame) as the visual
-                                # rect — move_annot's return is the expanded
-                                # bbox which would un-do the tight overlay.
-                                if prev_mode == "move":
-                                    pass  # final_rect already = translated visual
-                                else:
-                                    final_rect = fitz.Rect(final_rect)
-                                self._selected_rotation = float(rotation_deg)
+                                _, new_xref, _rotation = result
                             if was_hidden:
                                 # If xref changed (polygon delete+recreate), the
                                 # old annot is gone and the new one is not hidden.
@@ -500,20 +422,39 @@ class _GestureMixin:
             if ink_pg == pn and len(ink_pts) >= 2:
                 with self._doc_lock:
                     self._annot.commit_ink(self.doc, pn, ink_pts)
-                self._clear_ink_canvas_preview(pn)
-                self._refresh_page(pn)
+                # Keep the stroke visible on the ink canvas until the background
+                # page re-render completes (avoids a flash where the stroke
+                # appears to disappear between canvas-clear and render-done).
+                self._add_committed_ink_stroke(pn, ink_pts)
+                self._update_committed_ink_canvas(pn)
+                # Auto-switch to cursor and select the new ink annotation so
+                # the user can immediately move / style it.
+                self._select_tool(Tool.CURSOR, ft.MouseCursor.BASIC)
+                if self._annot._history:
+                    last_pn, last_xref = self._annot._history[-1]
+                    if last_pn == pn:
+                        with self._doc_lock:
+                            for a in self.doc[pn].annots():
+                                if a.xref == last_xref:
+                                    self._select_annot(pn, a)
+                                    break
+                self._rerender_page_image(pn)
             else:
                 self._clear_ink_canvas_preview(pn)
             self._ink_points = []
             self._ink_page   = None
             return
 
-        dov = self._drag_overlays[pn]
-        dov.visible = False
-        try:
-            dov.update()
-        except Exception:
-            pass
+        if self._annot.tool in (Tool.LINE, Tool.ARROW):
+            self._clear_ink_canvas_preview(pn)
+            self._line_drag_start_disp = None
+        else:
+            dov = self._drag_overlays[pn]
+            dov.visible = False
+            try:
+                dov.update()
+            except Exception:
+                pass
 
         tool = self._annot.tool  # save before commit changes state
         with self._doc_lock:
@@ -566,24 +507,6 @@ class _GestureMixin:
 
     # ── internal helpers ──────────────────────────────────────────────────────
 
-    def _apply_rotation_preview(self, pn: int, delta_rad: float) -> None:
-        """Apply a visual-only rotation to the inner rot_group during a
-        rotation-handle drag. Pivots around the bbox centre. The preview
-        accumulates on top of ``self._selected_rotation`` so a subsequent
-        rotation gesture starts from the current tilt.
-        """
-        if pn >= len(self._sel_handles):
-            return
-        h = self._sel_handles[pn]
-        if "rot_group" not in h:
-            return
-        total_rad = math.radians(float(self._selected_rotation or 0.0)) + delta_rad
-        h["rot_group"].rotate = ft.Rotate(angle=total_rad, alignment=ft.Alignment(0.0, 0.0))
-        try:
-            h["rot_group"].update()
-        except Exception:
-            pass
-
     def _ensure_drag_ghost_active(self, pn: int) -> None:
         """Hide the real annotation the first time a drag moves so the
         selection overlay looks like it is moving the annotation itself
@@ -623,7 +546,7 @@ class _GestureMixin:
         import flet.canvas as cv
         scale = self.zoom * BASE_SCALE
         disp  = [(x * scale, y * scale) for x, y in ink_pts]
-        path  = cv.Path(
+        current_path = cv.Path(
             elements=[cv.Path.MoveTo(disp[0][0], disp[0][1])]
                      + [cv.Path.LineTo(x, y) for x, y in disp[1:]],
             paint=ft.Paint(
@@ -632,7 +555,22 @@ class _GestureMixin:
                 style=ft.PaintingStyle.STROKE,
             ),
         )
-        canvases[pn].shapes = [path]
+        # Prepend any committed-but-not-yet-rendered strokes so they remain
+        # visible while the user is drawing the next stroke.
+        committed: dict = getattr(self, "_committed_ink_points", {})
+        shapes = []
+        for pts in committed.get(pn, []):
+            if len(pts) < 2:
+                continue
+            d = [(x * scale, y * scale) for x, y in pts]
+            shapes.append(cv.Path(
+                elements=[cv.Path.MoveTo(d[0][0], d[0][1])]
+                         + [cv.Path.LineTo(x, y) for x, y in d[1:]],
+                paint=ft.Paint(stroke_width=2, color="#CC1155DD",
+                               style=ft.PaintingStyle.STROKE),
+            ))
+        shapes.append(current_path)
+        canvases[pn].shapes = shapes
         try:
             canvases[pn].update()
         except Exception:
@@ -643,6 +581,40 @@ class _GestureMixin:
         if pn >= len(canvases):
             return
         canvases[pn].shapes = []
+        try:
+            canvases[pn].update()
+        except Exception:
+            pass
+
+    def _update_line_canvas_preview(
+        self, pn: int,
+        x0: float, y0: float, x1: float, y1: float,
+        is_arrow: bool = False,
+    ) -> None:
+        """Draw a line (optionally with arrowhead) on the ink canvas as preview."""
+        canvases = getattr(self, "_ink_canvases", [])
+        if pn >= len(canvases):
+            return
+        import flet.canvas as cv
+        color = "#CCAA2200"
+        stroke_w = 2.0
+        elements: list = [cv.Path.MoveTo(x0, y0), cv.Path.LineTo(x1, y1)]
+        if is_arrow:
+            dx, dy = x1 - x0, y1 - y0
+            length = math.hypot(dx, dy)
+            if length > 1:
+                arrow_len   = min(20.0, length * 0.35)
+                arrow_angle = math.pi / 6
+                angle       = math.atan2(dy, dx)
+                for side in (-1, 1):
+                    ax = x1 - arrow_len * math.cos(angle - side * arrow_angle)
+                    ay = y1 - arrow_len * math.sin(angle - side * arrow_angle)
+                    elements += [cv.Path.MoveTo(x1, y1), cv.Path.LineTo(ax, ay)]
+        path = cv.Path(
+            elements=elements,
+            paint=ft.Paint(stroke_width=stroke_w, color=color, style=ft.PaintingStyle.STROKE),
+        )
+        canvases[pn].shapes = [path]
         try:
             canvases[pn].update()
         except Exception:

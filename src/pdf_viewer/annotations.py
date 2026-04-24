@@ -176,6 +176,86 @@ def _apply_rot(annot: fitz.Annot, angle_deg: float) -> None:
     annot.set_apn_matrix(_rot_matrix(annot.rect, a))
 
 
+def _line_replace(
+    page: fitz.Page,
+    annot: fitz.Annot,
+    new_verts: list[fitz.Point],
+    new_width: float | None = None,
+) -> fitz.Annot:
+    """Delete a Line annotation and recreate it, preserving color, width, and line ends (arrow tip)."""
+    colors = {}
+    try:
+        colors = annot.colors or {}
+    except Exception:
+        pass
+    stroke = colors.get("stroke")
+    border = annot.border or {}
+    width  = new_width if new_width is not None else (border.get("width", 2) or 2)
+    line_ends = (0, 0)
+    try:
+        le = annot.line_ends
+        if le:
+            line_ends = (int(le[0]), int(le[1]))
+    except Exception:
+        pass
+
+    page.delete_annot(annot)
+    new_annot = page.add_line_annot(new_verts[0], new_verts[1])
+    if stroke is not None:
+        new_annot.set_colors(stroke=stroke)
+    new_annot.set_border(width=width)
+    if line_ends != (0, 0):
+        try:
+            new_annot.set_line_ends(*line_ends)
+        except Exception:
+            pass
+    _reset_ap(new_annot)
+    new_annot.update()
+    return new_annot
+
+
+def _ink_verts_from_annot(annot: fitz.Annot) -> list[list[fitz.Point]] | None:
+    """Extract ink strokes as list[list[fitz.Point]], or None if empty."""
+    raw = annot.vertices
+    if not raw:
+        return None
+    strokes = []
+    for stroke in raw:
+        pts = []
+        for pt in stroke:
+            try:
+                pts.append(fitz.Point(float(pt[0]), float(pt[1])))
+            except (TypeError, IndexError):
+                pts.append(fitz.Point(float(pt.x), float(pt.y)))
+        if pts:
+            strokes.append(pts)
+    return strokes or None
+
+
+def _ink_replace(
+    page: fitz.Page,
+    annot: fitz.Annot,
+    new_strokes: list[list[fitz.Point]],
+    new_width: float | None = None,
+) -> fitz.Annot:
+    """Delete an Ink annotation and recreate it preserving color and width."""
+    colors = {}
+    try:
+        colors = annot.colors or {}
+    except Exception:
+        pass
+    stroke_color = colors.get("stroke")
+    border = annot.border or {}
+    width  = new_width if new_width is not None else (border.get("width", 2) or 2)
+    page.delete_annot(annot)
+    new_annot = page.add_ink_annot(new_strokes)
+    if stroke_color is not None:
+        new_annot.set_colors(stroke=stroke_color)
+    new_annot.set_border(width=width)
+    new_annot.update()
+    return new_annot
+
+
 def _polygon_replace(
     page: fitz.Page,
     annot: fitz.Annot,
@@ -227,6 +307,9 @@ class AnnotationManager:
         self.highlight_color: tuple[float, float, float] = STROKE_COLOR[Tool.HIGHLIGHT]
         self._start: tuple[float, float] | None = None
         self._last_rect: fitz.Rect | None = None
+        # Raw (un-normalized) start/end points for LINE and ARROW tools.
+        self._raw_start: tuple[float, float] | None = None
+        self._raw_end:   tuple[float, float] | None = None
         # Saved after a SELECT drag so the viewer can offer deferred text actions.
         self.last_rect: fitz.Rect | None = None
         # Always-saved rect from the last SELECT drag (even when no native text found).
@@ -264,12 +347,15 @@ class AnnotationManager:
 
     def begin(self, x: float, y: float) -> None:
         self._start = (x, y)
+        self._raw_start = (x, y)
+        self._raw_end   = (x, y)
         self._last_rect = None
 
     def move(self, x: float, y: float) -> fitz.Rect | None:
         if self._start is None:
             return None
         sx, sy = self._start
+        self._raw_end   = (x, y)
         self._last_rect = fitz.Rect(
             min(sx, x), min(sy, y),
             max(sx, x), max(sy, y),
@@ -282,12 +368,18 @@ class AnnotationManager:
         Returns (page_was_modified, selected_text_or_None).
         """
         if self._start is None or self._last_rect is None:
-            self._start = None
+            self._start     = None
+            self._raw_start = None
+            self._raw_end   = None
             return False, None
 
-        rect = self._last_rect
-        self._start = None
+        rect      = self._last_rect
+        raw_start = self._raw_start
+        raw_end   = self._raw_end
+        self._start     = None
         self._last_rect = None
+        self._raw_start = None
+        self._raw_end   = None
 
         if rect.width < 3 and rect.height < 3:
             return False, None
@@ -338,7 +430,13 @@ class AnnotationManager:
             return True, None
 
         if self.tool == Tool.LINE:
-            annot = page.add_line_annot(rect.tl, rect.br)
+            if raw_start is None or raw_end is None:
+                return False, None
+            p1 = fitz.Point(*raw_start)
+            p2 = fitz.Point(*raw_end)
+            if math.hypot(p2.x - p1.x, p2.y - p1.y) < 5:
+                return False, None
+            annot = page.add_line_annot(p1, p2)
             annot.set_colors(stroke=STROKE_COLOR[Tool.LINE])
             annot.set_border(width=2)
             annot.update()
@@ -346,7 +444,13 @@ class AnnotationManager:
             return True, None
 
         if self.tool == Tool.ARROW:
-            annot = page.add_line_annot(rect.tl, rect.br)
+            if raw_start is None or raw_end is None:
+                return False, None
+            p1 = fitz.Point(*raw_start)
+            p2 = fitz.Point(*raw_end)
+            if math.hypot(p2.x - p1.x, p2.y - p1.y) < 5:
+                return False, None
+            annot = page.add_line_annot(p1, p2)
             annot.set_colors(stroke=STROKE_COLOR[Tool.ARROW])
             annot.set_border(width=2)
             try:
@@ -471,6 +575,22 @@ class AnnotationManager:
             if annot.xref != xref:
                 continue
             atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
+            if atype == "Ink":
+                strokes = _ink_verts_from_annot(annot)
+                if not strokes:
+                    return None
+                new_strokes = [[fitz.Point(pt.x + dx, pt.y + dy) for pt in s] for s in strokes]
+                try:
+                    new_annot = _ink_replace(page, annot, new_strokes)
+                except Exception:
+                    return None
+                self._history = [
+                    (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
+                    for (p, x) in self._history
+                ]
+                self._visual_rects.pop(xref, None)
+                self._rotations.pop(xref, None)
+                return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
             if atype in ("Line", "Polygon", "PolyLine"):
                 verts = annot.vertices
                 if not verts or len(verts) < 2:
@@ -482,7 +602,10 @@ class AnnotationManager:
                     except (TypeError, IndexError):
                         vx, vy = float(v.x), float(v.y)
                     new_verts.append(fitz.Point(vx + dx, vy + dy))
-                new_annot = _polygon_replace(page, annot, new_verts, atype)
+                if atype == "Line":
+                    new_annot = _line_replace(page, annot, new_verts)
+                else:
+                    new_annot = _polygon_replace(page, annot, new_verts, atype)
                 self._history = [
                     (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
                     for (p, x) in self._history
@@ -565,6 +688,26 @@ class AnnotationManager:
             if annot.xref != xref:
                 continue
             atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
+            if atype == "Ink":
+                strokes = _ink_verts_from_annot(annot)
+                if not strokes:
+                    return None
+                old_rect = annot.rect
+                new_strokes = [
+                    [_map_point(pt, old_rect, new_rect) for pt in s]
+                    for s in strokes
+                ]
+                try:
+                    new_annot = _ink_replace(page, annot, new_strokes)
+                except Exception:
+                    return None
+                self._history = [
+                    (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
+                    for (p, x) in self._history
+                ]
+                self._visual_rects.pop(xref, None)
+                self._rotations.pop(xref, None)
+                return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
             if atype in ("Line", "Polygon", "PolyLine"):
                 verts = annot.vertices
                 if not verts or len(verts) < 2:
@@ -577,7 +720,10 @@ class AnnotationManager:
                     except (TypeError, IndexError):
                         vx, vy = float(v.x), float(v.y)
                     new_verts.append(_map_point(fitz.Point(vx, vy), old_rect, new_rect))
-                new_annot = _polygon_replace(page, annot, new_verts, atype)
+                if atype == "Line":
+                    new_annot = _line_replace(page, annot, new_verts)
+                else:
+                    new_annot = _polygon_replace(page, annot, new_verts, atype)
                 self._history = [
                     (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
                     for (p, x) in self._history
@@ -742,10 +888,20 @@ class AnnotationManager:
             if atype == "Line":
                 verts = annot.vertices
                 if verts and len(verts) >= 2:
-                    p1 = _map_point(fitz.Point(verts[0].x, verts[0].y), r, new_rect)
-                    p2 = _map_point(fitz.Point(verts[1].x, verts[1].y), r, new_rect)
-                    annot.set_vertices([p1, p2])
-                    annot.update()
+                    try:
+                        vx0, vy0 = float(verts[0].x), float(verts[0].y)
+                        vx1, vy1 = float(verts[1].x), float(verts[1].y)
+                    except (AttributeError, TypeError):
+                        vx0, vy0 = float(verts[0][0]), float(verts[0][1])
+                        vx1, vy1 = float(verts[1][0]), float(verts[1][1])
+                    p1 = _map_point(fitz.Point(vx0, vy0), r, new_rect)
+                    p2 = _map_point(fitz.Point(vx1, vy1), r, new_rect)
+                    new_annot = _line_replace(page, annot, [p1, p2])
+                    self._history = [
+                        (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
+                        for (p, x) in self._history
+                    ]
+                    self._visual_rects.pop(xref, None)
                     return new_rect
 
             rotation = self._rotations.get(xref, 0.0)
@@ -759,6 +915,112 @@ class AnnotationManager:
                 return None
             self._visual_rects[annot.xref] = fitz.Rect(new_rect)
             return new_rect
+        return None
+
+    def change_annot_width(
+        self,
+        doc: fitz.Document,
+        page_num: int,
+        xref: int,
+        delta: float,
+    ) -> int | None:
+        """Increase or decrease the stroke width of an annotation by *delta*.
+
+        Returns the (possibly new) xref on success, or None on failure.
+        For Line annotations the xref changes because delete+recreate is
+        needed to preserve the arrow tip (line_ends).
+        """
+        page = doc[page_num]
+        for annot in page.annots():
+            if annot.xref != xref:
+                continue
+            atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
+            border = annot.border or {}
+            cur_w  = float(border.get("width") or 2)
+            new_w  = max(0.5, min(20.0, cur_w + delta))
+
+            if atype == "Ink":
+                strokes = _ink_verts_from_annot(annot)
+                if not strokes:
+                    return None
+                try:
+                    new_annot = _ink_replace(page, annot, strokes, new_width=new_w)
+                except Exception:
+                    return None
+                self._history = [
+                    (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
+                    for (p, x) in self._history
+                ]
+                self._visual_rects.pop(xref, None)
+                self._rotations.pop(xref, None)
+                return new_annot.xref
+
+            if atype == "Line":
+                verts = annot.vertices
+                if not verts or len(verts) < 2:
+                    return None
+                new_verts = []
+                for v in verts:
+                    try:
+                        new_verts.append(fitz.Point(float(v.x), float(v.y)))
+                    except (AttributeError, TypeError):
+                        new_verts.append(fitz.Point(float(v[0]), float(v[1])))
+                try:
+                    new_annot = _line_replace(page, annot, new_verts, new_width=new_w)
+                except Exception:
+                    return None
+                self._history = [
+                    (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
+                    for (p, x) in self._history
+                ]
+                self._visual_rects.pop(xref, None)
+                self._rotations.pop(xref, None)
+                return new_annot.xref
+
+            if atype == "Square":
+                colors = {}
+                try:
+                    colors = annot.colors or {}
+                except Exception:
+                    pass
+                stroke = colors.get("stroke")
+                rect = fitz.Rect(annot.rect)
+                rotation = self._rotations.get(xref, 0.0)
+                try:
+                    page.delete_annot(annot)
+                    new_annot = page.add_rect_annot(rect)
+                    if stroke is not None:
+                        new_annot.set_colors(stroke=stroke)
+                    new_annot.set_border(width=new_w)
+                    _reset_ap(new_annot)
+                    new_annot.update()
+                    if rotation:
+                        _apply_rot(new_annot, rotation)
+                except Exception:
+                    return None
+                new_xref = new_annot.xref
+                self._history = [
+                    (p, new_xref) if (p == page_num and x == xref) else (p, x)
+                    for (p, x) in self._history
+                ]
+                self._visual_rects.pop(xref, None)
+                if rotation:
+                    self._rotations[new_xref] = rotation
+                self._rotations.pop(xref, None)
+                return new_xref
+
+            rotation = self._rotations.get(xref, 0.0)
+            try:
+                existing = dict(annot.border or {})
+                existing["width"] = new_w
+                annot.set_border(existing)
+                _reset_ap(annot)
+                annot.update()
+                if rotation:
+                    _apply_rot(annot, rotation)
+            except Exception:
+                return None
+            return xref
         return None
 
     # ── deferred text annotation ──────────────────────────────────────────────

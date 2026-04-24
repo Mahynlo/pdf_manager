@@ -24,7 +24,7 @@ from .renderer import BASE_SCALE, ZOOM_LEVELS, display_to_pdf, render_page
 from ._viewer_defs import (
     _TOOL_DEFS,
     _TOOLBAR_BG, _ANNOT_BG, _DIVIDER_CLR, _VIEWER_BG,
-    _SEL_BAR_BG, _SEL_BAR_BDR, _OCR_PANEL_BG,
+    _OCR_PANEL_BG,
     _SELECTED_BG, _vdivider,
 )
 from ._render_mixin       import _RenderMixin
@@ -86,18 +86,6 @@ class PDFViewerTab(
         # Annotation subtype of the current selection (e.g. "Square", "Circle",
         # "Line", "Polygon") — drives overlay border-radius during resize.
         self._selected_atype:    str | None = None
-        # Live rotation state during a rotation-handle drag. Angle is the pointer
-        # angle relative to the box centre at pan_start; delta is accumulated
-        # so far. Applied to sel_ov via ft.Rotate for preview, written to the
-        # PDF at pan_end.
-        self._drag_rotate_start_angle: float | None = None
-        self._drag_rotate_delta:       float        = 0.0
-        # Persistent rotation of the current selection (degrees, 0–359). The
-        # selection overlay is rendered at `_selected_visual_rect` (the
-        # pre-rotation axis-aligned rect) with ft.Rotate applied, so the
-        # handles hug the rotated figure instead of tracking PyMuPDF's
-        # expanded bbox.
-        self._selected_rotation:    float           = 0.0
         self._selected_visual_rect: fitz.Rect | None = None
         # Per-page references to inner handle/menu controls inside sel_overlays
         self._sel_handles: list[dict] = []
@@ -122,8 +110,9 @@ class PDFViewerTab(
         self._rendered:         set[int]    = set()
 
         # Background rendering / eviction
-        self._doc_lock       = threading.Lock()
-        self._rendering:     set[int] = set()
+        self._doc_lock          = threading.Lock()
+        self._rendering:        set[int] = set()
+        self._pending_rerender: set[int] = set()
         self._render_gen     = 0
         self._last_evict_px  = -9999.0
 
@@ -405,33 +394,6 @@ class PDFViewerTab(
             border=ft.border.only(bottom=ft.BorderSide(1, _DIVIDER_CLR)),
         )
 
-        # ── annotation selection action bar ───────────────────────────────────
-        self._sel_label = ft.Text("Anotación seleccionada", size=12, color="#555555")
-        self._annot_action_bar = ft.Container(
-            ft.Row(
-                [
-                    ft.Icon(ft.Icons.TOUCH_APP, size=16, color="#888888"),
-                    self._sel_label,
-                    ft.TextButton("Eliminar",      icon=ft.Icons.DELETE_OUTLINE,
-                                  icon_color=ft.Colors.RED_600, on_click=self._delete_selected),
-                    ft.TextButton("Cambiar color", icon=ft.Icons.PALETTE_OUTLINED,
-                                  on_click=self._recolor_selected_menu),
-                    ft.TextButton("Reducir",       icon=ft.Icons.REMOVE_CIRCLE_OUTLINE,
-                                  on_click=self._scale_down_selected),
-                    ft.TextButton("Agrandar",      icon=ft.Icons.ADD_CIRCLE_OUTLINE,
-                                  on_click=self._scale_up_selected),
-                    ft.TextButton("Deseleccionar", icon=ft.Icons.CLOSE,
-                                  on_click=self._deselect_annot),
-                ],
-                spacing=4,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
-            padding=ft.padding.symmetric(horizontal=8, vertical=4),
-            bgcolor=_SEL_BAR_BG,
-            border=ft.border.only(bottom=ft.BorderSide(1, _SEL_BAR_BDR)),
-            visible=False,
-        )
-
         # ── sidebar panels (each mixin builds its own) ────────────────────────
         toc_panel    = self._build_toc_sidebar_panel()
         ocr_panel    = self._build_ocr_sidebar_panel()
@@ -547,7 +509,7 @@ class PDFViewerTab(
         main_content = ft.Row([viewer_body, self._right_sidebar], expand=True, spacing=0)
 
         self.view = ft.Column(
-            [nav_toolbar, annot_toolbar, self._annot_action_bar, main_content],
+            [nav_toolbar, annot_toolbar, main_content],
             expand=True,
             spacing=0,
         )

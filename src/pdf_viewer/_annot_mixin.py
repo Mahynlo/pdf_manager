@@ -1,8 +1,6 @@
 """Annotation selection, editing and text-action dialogs for PDFViewerTab."""
 from __future__ import annotations
 
-import math
-
 import flet as ft
 import fitz
 
@@ -16,8 +14,6 @@ _HHS = _HS / 2
 # Extra height added to sel_ov so the context menu (below the annotation) is
 # within the container's hit-test region (Flutter ignores clicks outside bounds).
 _MENU_EXTRA = 52
-# Distance from the top of the box to the centre of the rotation handle.
-_ROT_OFFSET = 30
 
 
 class _AnnotMixin:
@@ -146,20 +142,7 @@ class _AnnotMixin:
         h["bl"].left = -_HHS;     h["bl"].top = H - _HHS
         h["br"].left = W - _HHS;  h["br"].top = H - _HHS
 
-        # Rotation handle: centred above the box, connected by a short stem.
-        if "rot" in h:
-            h["rot"].left = W / 2 - _HHS
-            h["rot"].top  = -_ROT_OFFSET
-            h["rot"].visible = True
-        if "rot_stem" in h:
-            h["rot_stem"].left = W / 2 - 0.5
-            h["rot_stem"].top  = -_ROT_OFFSET + _HHS
-            h["rot_stem"].height = _ROT_OFFSET - _HHS
-            h["rot_stem"].visible = True
-
-        # Context menu: just below the bbox, left-aligned. Always visible —
-        # it lives outside the rotatable group, so rotation does not tilt
-        # it or push it off-screen.
+        # Context menu: just below the bbox, left-aligned.
         h["menu"].left = 0
         h["menu"].top  = H + 6
         h["menu"].visible = True
@@ -179,32 +162,13 @@ class _AnnotMixin:
                     pass
 
         self._selected = (pn, annot.xref)
-        annot_name = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else "Anotación"
-        self._sel_label.value = f"{annot_name} — arrastra para mover"
 
-        # Read rotation from AnnotationManager's cache — we track rotation
-        # ourselves via apn_matrix (not /Rotate), so ``annot.rotation`` is
-        # not the source of truth. For annotations edited this session the
-        # cache holds the live angle; for freshly-opened annotations with
-        # no entry, default to 0 (loaded-from-disk rotation is not yet
-        # recovered — would require decoding the apn_matrix).
-        rotation = self._annot.get_rotation(annot.xref)
-        self._selected_rotation = rotation
-
-        # annot.rect is now the visual (unrotated) rect — rotation is
-        # applied via the Form XObject's apn_matrix, not by expanding the
-        # bbox — so we can use it directly for the overlay.
         pdf_rect = fitz.Rect(annot.rect)
         self._selected_rect        = pdf_rect
         self._selected_visual_rect = fitz.Rect(pdf_rect)
 
         self._apply_overlay_style(pn, annot, 0, 0)
         self._refresh_selected_overlay(pn, annot_rect=self._selected_visual_rect)
-        self._annot_action_bar.visible = True
-        try:
-            self._annot_action_bar.update()
-        except Exception:
-            pass
 
     def _get_selected_annot(self) -> fitz.Annot | None:
         if self._selected is None:
@@ -218,15 +182,7 @@ class _AnnotMixin:
         return None
 
     def _refresh_selected_overlay(self, pn: int, annot_rect: fitz.Rect | None = None) -> None:
-        """Reposition the selection overlay for the annotation on page *pn*.
-
-        Pass *annot_rect* (the pre-rotation **visual** rect) to skip the
-        lock re-acquisition during drag loops. When omitted, falls back to
-        the cached ``self._selected_visual_rect`` (also lock-free) and only
-        hits the document as a last resort. The overlay is sized to the
-        visual rect and rotated by ``self._selected_rotation`` so the
-        handles hug the rotated figure.
-        """
+        """Reposition the selection overlay for the annotation on page *pn*."""
         if annot_rect is None:
             if self._selected is None:
                 return
@@ -246,8 +202,6 @@ class _AnnotMixin:
                     self._deselect_annot()
                     return
 
-        # Keep both caches in sync: _selected_visual_rect is what the user
-        # sees (unrotated); _selected_rect mirrors it for legacy callers.
         self._selected_visual_rect = fitz.Rect(annot_rect)
         self._selected_rect        = fitz.Rect(annot_rect)
 
@@ -264,21 +218,6 @@ class _AnnotMixin:
         sel_ov.visible = True
 
         self._update_sel_handles(pn, W, H)
-
-        # Rotate only the inner group (border + handles). The context menu
-        # sits outside it and stays axis-aligned / readable. Alignment
-        # (0, 0) pivots around the rot_group's geometric centre, which is
-        # the bbox centre since rot_group is sized exactly to (W, H).
-        rotation = float(self._selected_rotation or 0.0)
-        if pn < len(self._sel_handles) and "rot_group" in self._sel_handles[pn]:
-            rot_group = self._sel_handles[pn]["rot_group"]
-            if abs(rotation) > 0.01:
-                rot_group.rotate = ft.Rotate(
-                    angle=math.radians(rotation),
-                    alignment=ft.Alignment(0.0, 0.0),
-                )
-            else:
-                rot_group.rotate = None
 
         try:
             sel_ov.update()
@@ -305,7 +244,6 @@ class _AnnotMixin:
         self._selected = None
         self._selected_rect = None
         self._selected_visual_rect = None
-        self._selected_rotation = 0.0
         self._selected_atype = None
         self._drag_mode = None
         if pn < len(self._sel_overlays):
@@ -316,12 +254,6 @@ class _AnnotMixin:
                 self._sel_overlays[pn].update()
             except Exception:
                 pass
-        self._annot_action_bar.visible = False
-        try:
-            self._annot_action_bar.update()
-        except Exception:
-            pass
-        self._sel_label.value = "Anotación seleccionada"
 
     # ── edit operations ───────────────────────────────────────────────────────
 
@@ -367,35 +299,24 @@ class _AnnotMixin:
     def _scale_up_selected(self, e=None) -> None:
         self._scale_selected(1.15)
 
-    def _rotate_selected(self, angle_deg: float) -> None:
+    def _change_selected_width(self, delta: float) -> None:
         if self._selected is None:
             return
         pn, xref = self._selected
-        visual_rect = (
-            fitz.Rect(self._selected_visual_rect)
-            if self._selected_visual_rect is not None
-            else None
-        )
         with self._doc_lock:
-            result = self._annot.rotate_annot(
-                self.doc, pn, xref, angle_deg, visual_rect=visual_rect,
-            )
-        if result is None:
-            self._show_snack("No se pudo rotar esta anotación")
-            return
-        new_visual_rect, new_xref, new_rotation = result
-        # rotate_annot may replace the annot (Line/Polygon delete+recreate)
-        # with a new xref — keep selection pointing at the right object.
-        self._selected = (pn, new_xref)
-        self._selected_rotation = float(new_rotation)
-        self._refresh_selected_overlay(pn, annot_rect=new_visual_rect)
-        self._rerender_page_image(pn)
+            new_xref = self._annot.change_annot_width(self.doc, pn, xref, delta)
+        if new_xref is not None:
+            if new_xref != xref:
+                self._selected = (pn, new_xref)
+            self._rerender_page_image(pn)
+        else:
+            self._show_snack("No se pudo cambiar el grosor")
 
-    def _rotate_selected_left(self, e=None) -> None:
-        self._rotate_selected(-15.0)
+    def _thin_selected(self, e=None) -> None:
+        self._change_selected_width(-1.0)
 
-    def _rotate_selected_right(self, e=None) -> None:
-        self._rotate_selected(15.0)
+    def _thicken_selected(self, e=None) -> None:
+        self._change_selected_width(+1.0)
 
     def _recolor_selected_menu(self, e=None) -> None:
         if self._selected is None:
