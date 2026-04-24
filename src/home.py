@@ -8,7 +8,7 @@ from typing import Callable
 import flet as ft 
 import recent_files as rf 
 
-# ========[Dimensions]==============================================================
+# ========[Dimensions window]==============================================================
 _RECENT_W = 280  
 _CARD_W = 220
 _CARD_H = 195
@@ -31,19 +31,19 @@ class HomePage:
         on_open_picker: Callable[[], None],
         on_open_pdf: Callable[[str], None],
     ):
-        self._page              = page_ref
-        self._on_open_extractor = on_open_extractor
-        self._on_open_merge     = on_open_merge
-        self._on_open_picker    = on_open_picker
-        self._on_open_pdf       = on_open_pdf
+        self._page              = page_ref # para refernecia de página y navegación
+        self._on_open_extractor = on_open_extractor # callback para abrir el extractor de texto
+        self._on_open_merge     = on_open_merge # callback para abrir la función de combinación de PDFs
+        self._on_open_picker    = on_open_picker # callback para abrir el selector de archivos para OCR
+        self._on_open_pdf       = on_open_pdf # callback para abrir un PDF específico (usado en archivos recientes)
 
-        self._recent_list: ft.ListView | None = None
-        self._tab: ft.Tab | None = None
+        self._recent_list: ft.ListView | None = None # para almacenar la referencia a la lista de archivos recientes y actualizarla dinámicamente
+        self._tab: ft.Tab | None = None # para almacenar la instancia de la pestaña y evitar recrearla cada vez
 
-        self._build()
+        self._build() # construye la interfaz de usuario para la página de inicio
 
     # =======[Public API]================================================================
-    def refresh_recent(self) -> None:
+    def refresh_recent(self) -> None: 
         """Reload the recent-files list from disk and update the UI."""
         if self._recent_list is None:
             return

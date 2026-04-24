@@ -18,13 +18,19 @@ _SCALE_FOR_OCR = 2.0
 
 @dataclass
 class OCRSegment:
+    """
+    Represents a segment of text extracted from a page.
+    """
     text: str
     source: str  # native | ocr
     bbox: fitz.Rect
 
 
 @dataclass
-class OCRDetection:
+class OCRDetection: 
+    """
+    Represents a single OCR detection with confidence score.
+    """
     text: str
     score: float
     source: str  # ocr
@@ -33,6 +39,10 @@ class OCRDetection:
 
 @dataclass
 class OCRPageResult:
+    """
+    Represents the result of processing a single page, including its classification,
+    the segments of text found, and the time taken.
+    """
     page_kind: str  # scanned | native | hybrid
     doc_kind: str   # scanned | native | hybrid
     mode_label: str  # OCR | Nativo | Hibrido
@@ -42,6 +52,7 @@ class OCRPageResult:
 
 
 class OCRProcessor:
+
     def __init__(self, workspace_root: str):
         self.workspace_root = Path(workspace_root)
         self.model_root = self.workspace_root / "modelos"

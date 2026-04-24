@@ -58,6 +58,12 @@ def main(page: ft.Page) -> None:
         return 1 + (1 if extractor_tab is not None else 0) + (1 if merge_tab is not None else 0)
 
     def _rebuild_tabs(selected_index: int | None = None) -> None:
+        """
+        Reconstruye la las pestañas de la aplicacion en el orden correcto, asegurando que la pestaña 
+        de inicio siempre esté presente y que las pestañas de extractor, combinación y configuración 
+        se añadan o eliminen según su estado actual. Además, mantiene la selección de pestaña consistente 
+        después de cualquier cambio.
+        """
         base: list[ft.Tab] = [home.get_tab()]
         if extractor_tab is not None:
             base.append(extractor_tab.get_tab())
@@ -77,9 +83,12 @@ def main(page: ft.Page) -> None:
             )
         page.update()
 
-    # ── open PDF ─────────────────────────────────────────────────────────────
+    # ── Abrir pdf ─────────────────────────────────────────────────────────────
 
     def _open_pdf_path(path: str) -> None:
+        """
+        Funcion que se encarga de abrir un pdf usando el path.
+        """
         for i, existing in enumerate(open_tabs):
             if existing.path == path:
                 _rebuild_tabs(_fixed_count() + i)
@@ -104,6 +113,9 @@ def main(page: ft.Page) -> None:
     # ── extractor tab ─────────────────────────────────────────────────────────
 
     def _open_extractor() -> None:
+        """
+        Abre la pestaña de extracción de texto. Si ya está abierta, simplemente la selecciona.
+        """
         nonlocal extractor_tab
         if extractor_tab is None:
             extractor_tab = PDFExtractionTab(page, _open_pdf_path)
@@ -112,6 +124,7 @@ def main(page: ft.Page) -> None:
     # ── merge tab ─────────────────────────────────────────────────────────────
 
     def _open_merge() -> None:
+        """Abre la pestaña de combinación de PDFs. Si ya está abierta, simplemente la selecciona."""
         nonlocal merge_tab
         if merge_tab is not None:
             _rebuild_tabs(_merge_tab_idx())
@@ -120,6 +133,7 @@ def main(page: ft.Page) -> None:
         _rebuild_tabs(_merge_tab_idx())
 
     def _close_merge_tab(tab: MergePDFTab) -> None:
+        """Cierra la pestaña de combinación de PDFs y limpia su estado."""
         nonlocal merge_tab
         tab.close()
         merge_tab = None
@@ -128,6 +142,7 @@ def main(page: ft.Page) -> None:
     # ── settings tab ─────────────────────────────────────────────────────────
 
     def _open_settings() -> None:
+        """Abre la pestaña de configuración. Si ya está abierta, simplemente la selecciona."""
         nonlocal settings_tab
         if settings_tab is not None:
             _rebuild_tabs(_settings_tab_idx())
@@ -136,6 +151,7 @@ def main(page: ft.Page) -> None:
         _rebuild_tabs(_settings_tab_idx())
 
     def _close_settings_tab(tab: SettingsTab) -> None:
+        """Cierra la pestaña de configuración y limpia su estado."""
         nonlocal settings_tab
         settings_tab = None
         _rebuild_tabs(0)
@@ -143,6 +159,7 @@ def main(page: ft.Page) -> None:
     # ── close viewer tab ─────────────────────────────────────────────────────
 
     def _close_viewer_tab(viewer: PDFViewerTab) -> None:
+        """Cierra una pestaña de visor de PDF específica y actualiza la interfaz."""
         idx = open_tabs.index(viewer)
         viewer.close()
         open_tabs.remove(viewer)
@@ -155,6 +172,7 @@ def main(page: ft.Page) -> None:
     # ── file picker result ────────────────────────────────────────────────────
 
     def _on_file_picked(e: ft.FilePickerResultEvent) -> None:
+        """Maneja el resultado del selector de archivos, abriendo cada PDF seleccionado en una nueva pestaña o enfocando la pestaña existente si ya está abierta."""
         if not e.files:
             return
         last_new: int | None = None
@@ -183,31 +201,32 @@ def main(page: ft.Page) -> None:
     # ── keyboard shortcuts ────────────────────────────────────────────────────
 
     def _on_keyboard(e: ft.KeyboardEvent) -> None:
-        if e.ctrl and e.key.upper() == "O":
+        """Maneja los atajos de teclado globales para la aplicación, incluyendo abrir el selector de archivos, navegar entre pestañas, y realizar acciones específicas dentro de las pestañas de visor de PDF."""
+        if e.ctrl and e.key.upper() == "O": # Ctrl+O para abrir el selector de archivos
             _open_picker()
             return
-        if not open_tabs:
+        if not open_tabs:# Si no hay pestañas de visor de PDF abiertas, no se manejan otros atajos relacionados con la navegación o acciones dentro del visor.
             return
         idx = (tabs_ctrl.selected_index or 0) - _fixed_count()
-        if not (0 <= idx < len(open_tabs)):
+        if not (0 <= idx < len(open_tabs)): # Si la pestaña seleccionada no corresponde a un visor de PDF, no se manejan los atajos relacionados con el visor.
             return
         v = open_tabs[idx]
-        if e.ctrl and e.key.upper() == "Z":
+        if e.ctrl and e.key.upper() == "Z": # Ctrl+Z para deshacer la última acción de redacción en el visor de PDF
             v._undo()
             return
-        if e.ctrl and e.key.upper() == "A":
+        if e.ctrl and e.key.upper() == "A": # Ctrl+A para seleccionar todo el texto en la pestaña de visor de PDF activa
             v._select_all_page_text()
             return
         match e.key:
-            case "Arrow Left" | "Arrow Up":
+            case "Arrow Left" | "Arrow Up": # Flechas izquierda o arriba para navegar a la página anterior en la pestaña de visor de PDF activa
                 v._prev()
-            case "Arrow Right" | "Arrow Down":
+            case "Arrow Right" | "Arrow Down": # Flechas derecha o abajo para navegar a la página siguiente en la pestaña de visor de PDF activa
                 v._next()
             case "+" | "=":
-                if not e.ctrl:
+                if not e.ctrl: # Ctrl+Plus para acercar (zoom in) en la pestaña de visor de PDF activa
                     v._zoom_in()
             case "-":
-                if not e.ctrl:
+                if not e.ctrl: # Ctrl+Minus para alejar (zoom out) en la pestaña de visor de PDF activa
                     v._zoom_out()
 
     # ── persistent navbar ─────────────────────────────────────────────────────

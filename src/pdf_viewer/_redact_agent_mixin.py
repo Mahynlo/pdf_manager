@@ -714,17 +714,17 @@ class _RedactAgentMixin:
         return flat
 
     def _add_redact_term(self, e=None) -> None:
-        if self._redact_query_field is None:
+        if self._redact_query_field is None: # si aún no se ha inicializado el campo de búsqueda 
             return
         term = (self._redact_query_field.value or "").strip()
-        if not term:
+        if not term: # si no se escribio nada en el campo de busqueda
             return
-        if term in self._redact_terms:
+        if term in self._redact_terms: # si ya etsa la fsase 
             self._show_snack("Esa frase ya está en la lista")
             return
         case_sensitive = getattr(self, "_redact_case_sensitive", True)
         matches = self._find_term_matches(term, case_sensitive)
-        if not matches:
+        if not matches: # si no se encontr la frase 
             self._show_snack("No se encontró la frase en el documento")
             return
         self._redact_terms.append(term)
@@ -736,24 +736,24 @@ class _RedactAgentMixin:
         except Exception:
             pass
         self._rebuild_redact_terms_list()
-        if self._redact_preview:
+        if self._redact_preview: # vista vreria esta activada
             self._render_redact_preview(force_update=True)
         self.page_ref.update()
 
     def _remove_redact_term(self, term: str) -> None:
-        if term in self._redact_terms:
+        if term in self._redact_terms:# remueve el término de la lista de términos a redactar
             self._redact_terms.remove(term)
         self._redact_term_matches.pop(term, None)
         self._redact_matches = self._flatten_matches()
         self._rebuild_redact_terms_list()
-        if self._redact_preview:
+        if self._redact_preview: # si la vista previa esta activada fuerza la actualizacion de la fraces a redactar en el documento
             self._render_redact_preview(force_update=True)
         self.page_ref.update()
 
     def _rebuild_redact_terms_list(self) -> None:
-        if self._redact_terms_list is None:
+        if self._redact_terms_list is None: # si la liesta de términos a redactar no se ha inicializado
             return
-        _HDR = "#E65100"
+        _HDR = "#E65100" # color de fondo para el contador de coincidencias en cada término
         color = getattr(self, "_redact_box_color", "#000000")
 
         if not self._redact_terms:
@@ -919,7 +919,7 @@ class _RedactAgentMixin:
     # ── apply ─────────────────────────────────────────────────────────────────
 
     def _apply_redaction(self, e=None) -> None:
-        if not self._redact_matches:
+        if not self._redact_matches: # si no ay fraces a redactar no se puede aplicar la redacción
             self._show_snack("Agrega al menos un término antes de aplicar la redacción")
             return
         color = getattr(self, "_redact_box_color", "#000000")
@@ -932,7 +932,7 @@ class _RedactAgentMixin:
         failed_apply: list[int] = []
 
         with self._doc_lock:
-            # ── add annotations ───────────────────────────────────────────────
+            # ── añadir anotaciones ───────────────────────────────────────────────
             for pn, rect, _ in self._redact_matches:
                 # Explicit expansion: 2 pts on each side covers descenders/
                 # ascenders and OCR bbox inaccuracies.
@@ -995,7 +995,7 @@ class _RedactAgentMixin:
         self._show_snack(msg)
         self.page_ref.update()
 
-    def _clear_redact_state(self) -> None:
+    def _clear_redact_state(self) -> None: # clean up internal state after applying redaction
         self._redact_matches      = []
         self._redact_terms        = []
         self._redact_term_matches = {}
