@@ -228,13 +228,52 @@ class _TextSelMixin:
             self._show_snack(f'Copiado: "{short}"')
 
     def _text_sel_apply(self, tool: Tool) -> None:
-        pn = self._text_sel_pn
+        pn       = self._text_sel_pn
+        start_pt = self._text_sel_start_pdf
+        end_pt   = self._text_sel_end_pdf
         self._hide_text_sel_bar()
-        if pn is not None:
-            with self._doc_lock:
-                changed = self._annot.apply_text_tool(self.doc, pn, tool)
-            if changed:
-                self._refresh_page(pn)
+        if pn is None:
+            return
+        with self._doc_lock:
+            changed = self._annot.apply_text_tool(self.doc, pn, tool)
+        if changed:
+            self._refresh_page(pn)
+            return
+        # Fallback: native text lookup found nothing (scanned/OCR page).
+        # Use the word rects collected during text selection, which include
+        # OCR-detected words that don't exist in the native PDF content stream.
+        if start_pt is None or end_pt is None:
+            return
+        words = self._get_page_words(pn)
+        if not words:
+            return
+        si = self._nearest_word_index(words, start_pt)
+        ei = self._nearest_word_index(words, end_pt)
+        if si > ei:
+            si, ei = ei, si
+        from .annotations import STROKE_COLOR, _line_merged_rects
+        rects = [r for r, t in words[si : ei + 1] if t.strip()]
+        if not rects:
+            return
+        merged = _line_merged_rects(rects)
+        if not merged:
+            return
+        with self._doc_lock:
+            page = self.doc[pn]
+            if tool == Tool.HIGHLIGHT:
+                annot = page.add_highlight_annot(merged)
+                annot.set_colors(stroke=self._annot.highlight_color)
+            elif tool == Tool.UNDERLINE:
+                annot = page.add_underline_annot(merged)
+                annot.set_colors(stroke=STROKE_COLOR[Tool.UNDERLINE])
+            elif tool == Tool.STRIKEOUT:
+                annot = page.add_strikeout_annot(merged)
+                annot.set_colors(stroke=STROKE_COLOR[Tool.STRIKEOUT])
+            else:
+                return
+            annot.update()
+            self._annot._history.append((pn, annot.xref))
+        self._refresh_page(pn)
 
     def _text_sel_dismiss(self, e=None) -> None:
         self._hide_text_sel_bar()

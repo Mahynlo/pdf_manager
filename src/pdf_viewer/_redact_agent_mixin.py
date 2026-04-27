@@ -980,7 +980,31 @@ class _RedactAgentMixin:
                         pass
 
         for pn in affected_pages:
-            self._ocr_by_page.pop(pn, None)
+            if pn in self._ocr_by_page:
+                # Only remove OCR detections/segments that overlap with the
+                # redacted areas; keep the rest so the user can keep working
+                # with non-redacted OCR text on the same page.
+                redacted_rects = [
+                    fitz.Rect(r.x0 - 2, r.y0 - 2, r.x1 + 2, r.y1 + 2)
+                    for _pn, r, _ in self._redact_matches
+                    if _pn == pn
+                ]
+                result = self._ocr_by_page[pn]
+                result.detections = [
+                    det for det in result.detections
+                    if not det.bbox or not any(
+                        rr.intersects(det.bbox) for rr in redacted_rects
+                    )
+                ]
+                result.segments = [
+                    seg for seg in result.segments
+                    if not seg.bbox or not any(
+                        rr.intersects(seg.bbox) for rr in redacted_rects
+                    )
+                ]
+                if not result.detections and not result.segments:
+                    del self._ocr_by_page[pn]
+            self._page_words.pop(pn, None)  # flush cached words for this page
             self._rendered.discard(pn)
 
         self._clear_redact_state()
@@ -992,6 +1016,9 @@ class _RedactAgentMixin:
                    f"{', '.join(str(p+1) for p in failed_apply)})")
         else:
             msg = f"Redacción aplicada en {len(affected_pages)} página(s)"
+        # Refresh OCR sidebar so it reflects surviving detections (or shows
+        # "sin ejecutar" only when all OCR data for the current page was redacted).
+        self._refresh_ocr_ui_for_page()
         self._show_snack(msg)
         self.page_ref.update()
 
