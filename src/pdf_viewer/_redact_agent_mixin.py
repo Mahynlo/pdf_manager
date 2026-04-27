@@ -123,7 +123,7 @@ class _RedactAgentMixin:
             ft.Column(
                 [
                     # ── agregar término ───────────────────────────────────────
-                    _section_label("Agregar texto a redactar", ft.Icons.ADD_CIRCLE_OUTLINE),
+                    _section_label("Agregar texto a censurar", ft.Icons.ADD_CIRCLE_OUTLINE),
                     ft.Row(
                         [self._redact_query_field, self._redact_case_btn],
                         spacing=4,
@@ -134,7 +134,7 @@ class _RedactAgentMixin:
                     ft.Divider(height=1, color="#FFE0B2"),
                     ft.Row(
                         [
-                            _section_label("Lista de redacciones", ft.Icons.LIST_ALT_OUTLINED),
+                            _section_label("Lista de censuras", ft.Icons.LIST_ALT_OUTLINED),
                             ft.Container(expand=True),
                             self._redact_count_text,
                         ],
@@ -156,7 +156,7 @@ class _RedactAgentMixin:
                     ),
                     # ── aplicar ───────────────────────────────────────────────
                     ft.ElevatedButton(
-                        "Aplicar redacción al documento", icon=ft.Icons.EDIT_OFF,
+                        "Aplicar censura al documento", icon=ft.Icons.EDIT_OFF,
                         color="#FFFFFF", bgcolor=_REDACT_MID,
                         on_click=self._apply_redaction, expand=True,
                         style=ft.ButtonStyle(
@@ -175,7 +175,7 @@ class _RedactAgentMixin:
                     ft.Row(
                         [
                             ft.Icon(ft.Icons.EDIT_OFF, size=18, color=_REDACT_HDR),
-                            ft.Text("Redacción", size=14, weight=ft.FontWeight.W_600,
+                            ft.Text("Censura", size=14, weight=ft.FontWeight.W_600,
                                     color=_REDACT_HDR),
                         ],
                         spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -283,10 +283,10 @@ class _RedactAgentMixin:
                                 ),
                             ),
                             ft.OutlinedButton(
-                                "Redactar", icon=ft.Icons.EDIT_OFF_OUTLINED,
+                                "Censurar", icon=ft.Icons.EDIT_OFF_OUTLINED,
                                 style=_qbtn,
                                 on_click=lambda e: self._agent_quick(
-                                    "Identifica la información sensible que debería redactarse.",
+                                    "Identifica la información sensible que debería censurarse.",
                                     direct_action="redact",
                                 ),
                             ),
@@ -415,7 +415,7 @@ class _RedactAgentMixin:
                             ft.Text(t, size=11, expand=True),
                             ft.IconButton(
                                 ft.Icons.EDIT_OFF, icon_size=14,
-                                tooltip="Buscar para redactar",
+                                tooltip="Buscar para censurar",
                                 on_click=lambda e, _t=t: self._agent_apply_redaction_term(_t),
                             ),
                         ],
@@ -428,7 +428,7 @@ class _RedactAgentMixin:
         self._agent_chat_list.controls.append(
             ft.Container(
                 ft.Column([
-                    ft.Text("Términos sugeridos para redactar:", size=11,
+                    ft.Text("Términos sugeridos para censurar:", size=11,
                             weight=ft.FontWeight.W_600, color="#E65100"),
                     *chips,
                 ], spacing=4),
@@ -884,7 +884,7 @@ class _RedactAgentMixin:
                         height=max(2, r.height * scale),
                         bgcolor=fill,
                         border=ft.border.all(2, color),
-                        tooltip="Zona a redactar",
+                        tooltip="Zona a censurar",
                     )
                     for r in rects
                 ]
@@ -920,7 +920,7 @@ class _RedactAgentMixin:
 
     def _apply_redaction(self, e=None) -> None:
         if not self._redact_matches: # si no ay fraces a redactar no se puede aplicar la redacción
-            self._show_snack("Agrega al menos un término antes de aplicar la redacción")
+            self._show_snack("Agrega al menos un término antes de aplicar la censura")
             return
         color = getattr(self, "_redact_box_color", "#000000")
         r_f = int(color[1:3], 16) / 255
@@ -1011,11 +1011,11 @@ class _RedactAgentMixin:
         self._rebuild_scroll_content(scroll_back=False)
 
         if failed_apply:
-            msg = (f"Redacción aplicada en {len(affected_pages)} página(s)"
+            msg = (f"Censura aplicada en {len(affected_pages)} página(s)"
                    f" ({len(failed_apply)} página(s) con problemas: "
                    f"{', '.join(str(p+1) for p in failed_apply)})")
         else:
-            msg = f"Redacción aplicada en {len(affected_pages)} página(s)"
+            msg = f"Censura aplicada en {len(affected_pages)} página(s)"
         # Refresh OCR sidebar so it reflects surviving detections (or shows
         # "sin ejecutar" only when all OCR data for the current page was redacted).
         self._refresh_ocr_ui_for_page()

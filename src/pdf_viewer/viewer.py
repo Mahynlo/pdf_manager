@@ -404,7 +404,7 @@ class PDFViewerTab(
         _TAB_DEFS = [
             ("toc",    ft.Icons.LIST_ALT_OUTLINED,     "Índice",    "#1565C0", "#E3F2FD"),
             ("ocr",    ft.Icons.TEXT_SNIPPET_OUTLINED, "OCR",       "#2E7D32", "#E8F5E9"),
-            ("redact", ft.Icons.EDIT_OFF_OUTLINED,     "Redacción", "#E65100", "#FFF3E0"),
+            ("redact", ft.Icons.EDIT_OFF_OUTLINED,     "Censura",   "#E65100", "#FFF3E0"),
             ("agent",  ft.Icons.SMART_TOY_OUTLINED,    "Agente IA", "#5C35C9", "#EDE7F6"),
         ]
 
