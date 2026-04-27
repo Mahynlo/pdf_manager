@@ -118,6 +118,13 @@ class _AnnotMixin:
         border_ctl.bgcolor = None
         border_ctl.border  = ft.border.all(2, hex_color)
 
+        # Markup annotations (highlight/underline/strikeout) cannot be
+        # moved or resized — hide the corner handles so the user isn't
+        # tempted to try dragging them.
+        is_markup = atype in ("Highlight", "Underline", "StrikeOut", "Squiggly")
+        for name in ("tl", "tr", "bl", "br"):
+            self._sel_handles[pn][name].visible = not is_markup
+
     def _update_sel_handles(self, pn: int, W: float, H: float) -> None:
         """Position all handle/menu controls inside the sel_overlay Stack."""
         if pn >= len(self._sel_handles):
@@ -272,6 +279,8 @@ class _AnnotMixin:
     def _scale_selected(self, factor: float) -> None:
         if self._selected is None:
             return
+        if getattr(self, "_selected_atype", "") in ("Highlight", "Underline", "StrikeOut", "Squiggly"):
+            return
         pn, xref = self._selected
         with self._doc_lock:
             new_rect = self._annot.scale_annot(self.doc, pn, xref, factor)
@@ -301,6 +310,8 @@ class _AnnotMixin:
 
     def _change_selected_width(self, delta: float) -> None:
         if self._selected is None:
+            return
+        if getattr(self, "_selected_atype", "") in ("Highlight", "Underline", "StrikeOut", "Squiggly"):
             return
         pn, xref = self._selected
         with self._doc_lock:

@@ -129,11 +129,7 @@ class _GestureMixin:
             annot = self._annot.get_annot_at(page, pdf_x, pdf_y)
         if annot:
             self.current_page = pn
-            annot_type = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
-            if annot_type in ("Highlight", "Underline", "StrikeOut", "Squiggly"):
-                self._show_annot_popup(pn, annot.xref, annot.rect)
-            else:
-                self._select_annot(pn, annot)
+            self._select_annot(pn, annot)
         else:
             self._deselect_annot()
 
@@ -154,20 +150,25 @@ class _GestureMixin:
                 if (self._selected is not None
                         and self._selected[0] == pn
                         and drag_seed is not None):
-                    mode = self._detect_drag_mode(pn, e.local_x, e.local_y)
-                    if mode != "none":
-                        self._drag_start_rect   = fitz.Rect(drag_seed)
-                        self._drag_current_rect = fitz.Rect(drag_seed)
-                        self._drag_mode     = mode
-                        self._move_last_pdf = (pdf_x, pdf_y)
-                        return
-                    # Drag started outside annotation — keep selection, do nothing.
+                    # Markup annotations (highlight/underline/strikeout) cannot be
+                    # moved or resized — their quads are tied to text positions.
+                    sel_atype = getattr(self, "_selected_atype", "")
+                    if sel_atype not in ("Highlight", "Underline", "StrikeOut", "Squiggly"):
+                        mode = self._detect_drag_mode(pn, e.local_x, e.local_y)
+                        if mode != "none":
+                            self._drag_start_rect   = fitz.Rect(drag_seed)
+                            self._drag_current_rect = fitz.Rect(drag_seed)
+                            self._drag_mode     = mode
+                            self._move_last_pdf = (pdf_x, pdf_y)
+                            return
+                    # Drag started outside annotation (or on markup) — keep selection.
                     return
 
-                # No selection: try to auto-select any shape annotation under cursor
-                # so the user can drag it directly without tapping first.
+                # No selection: try to auto-select any annotation under cursor.
+                # For shape annotations, also set up immediate dragging.
                 cached_rect: fitz.Rect | None = None
                 found_annot = None
+                is_markup   = False
                 with self._doc_lock:
                     page  = self.doc[pn]
                     annot = self._annot.get_annot_at(page, pdf_x, pdf_y)
@@ -175,17 +176,17 @@ class _GestureMixin:
                         atype = (annot.type[1]
                                  if isinstance(annot.type, (tuple, list)) and len(annot.type) > 1
                                  else "")
-                        # Shape annotations only: text markup uses popup instead.
-                        if atype not in ("Highlight", "Underline", "StrikeOut", "Squiggly"):
-                            cached_rect = fitz.Rect(annot.rect)
-                            found_annot = annot
+                        cached_rect = fitz.Rect(annot.rect)
+                        found_annot = annot
+                        is_markup = atype in ("Highlight", "Underline", "StrikeOut", "Squiggly")
 
                 if found_annot is not None and cached_rect is not None:
                     self._select_annot(pn, found_annot)
-                    self._drag_mode         = "move"
-                    self._move_last_pdf     = (pdf_x, pdf_y)
-                    self._drag_start_rect   = cached_rect
-                    self._drag_current_rect = fitz.Rect(cached_rect)
+                    if not is_markup:
+                        self._drag_mode         = "move"
+                        self._move_last_pdf     = (pdf_x, pdf_y)
+                        self._drag_start_rect   = cached_rect
+                        self._drag_current_rect = fitz.Rect(cached_rect)
             except Exception:
                 pass
             return
@@ -489,7 +490,12 @@ class _GestureMixin:
                 self._clear_text_selection()
                 self._refresh_page(pn)
                 if new_markup is not None:
-                    self._show_annot_popup(pn, new_markup[0], new_markup[1])
+                    xref = new_markup[0]
+                    with self._doc_lock:
+                        for a in self.doc[pn].annots():
+                            if a.xref == xref:
+                                self._select_annot(pn, a)
+                                break
         elif self._annot.tool == Tool.SELECT:
             sel_text = self._update_text_selection(
                 pn, self._text_sel_start_pdf, self._text_sel_end_pdf, update_ui=True
