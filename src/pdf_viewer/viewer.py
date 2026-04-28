@@ -171,6 +171,22 @@ class PDFViewerTab(
         self._redact_preview_btn:  ft.IconButton | None = None
         self._redact_color_btns:   dict          = {}
 
+        # Profile state
+        from pdf_viewer._censorship_profiles import CensorshipProfile
+        self._active_profile:        CensorshipProfile | None = None
+        self._active_profile_label:  ft.Text       | None = None
+        self._profile_save_btn:      ft.Container  | None = None
+        self._profile_mgr_dlg:       ft.AlertDialog | None = None
+        self._profile_edit_dlg:      ft.AlertDialog | None = None
+        self._profile_search_field:  ft.TextField  | None = None
+        self._profile_list_view:     ft.ListView   | None = None
+        self._profile_edit_name:     ft.TextField  | None = None
+        self._profile_edit_term_input: ft.TextField | None = None
+        self._profile_edit_terms_list: ft.ListView  | None = None
+        self._profile_import_btn:    ft.TextButton  | None = None
+        self._profile_edit_terms:    list[str]      = []
+        self._profile_editing_id:    str | None     = None
+
         # Sidebar visibility
         self._sidebar_visible = True
         self._sidebar_btn:    ft.IconButton | None = None
