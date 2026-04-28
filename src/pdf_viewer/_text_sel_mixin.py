@@ -59,6 +59,55 @@ def _sort_words_column_aware(words: list[tuple], page_width: float) -> list[tupl
 class _TextSelMixin:
     """Flow-based text selection: word highlights + floating action popup."""
 
+    # ── visual sweep selection ────────────────────────────────────────────────
+
+    @staticmethod
+    def _words_in_sweep(
+        words: list[tuple], start_pt: tuple, end_pt: tuple
+    ) -> list[tuple]:
+        """Return words that fall within the visual sweep from start_pt to end_pt.
+
+        Uses bounding-box line-band logic instead of sorted-list index ranges,
+        so the result is always correct regardless of the column-aware sort order.
+        Words on the first line are filtered by start x, words on the last line
+        by end x, and all intermediate lines are included in full.
+        """
+        px_s, py_s = start_pt
+        px_e, py_e = end_pt
+        # Normalise: ensure the start point is above (or left of) the end point
+        if py_s > py_e or (abs(py_s - py_e) < 2 and px_s > px_e):
+            px_s, py_s, px_e, py_e = px_e, py_e, px_s, py_s
+
+        BAND = 5  # pt tolerance for line-band grouping
+        start_band = round(py_s / BAND) * BAND
+        end_band   = round(py_e / BAND) * BAND
+
+        result: list[tuple] = []
+        for r, t in words:
+            if not t.strip():
+                continue
+            word_band = round(r.y0 / BAND) * BAND
+            if word_band < start_band or word_band > end_band:
+                continue
+            if start_band == end_band:
+                # Single-line drag: include words whose rect overlaps [px_s, px_e]
+                lo, hi = min(px_s, px_e), max(px_s, px_e)
+                if r.x1 < lo - BAND or r.x0 > hi + BAND:
+                    continue
+            elif word_band == start_band:
+                # First line: only words to the right of (or touching) start x
+                if r.x1 < px_s - BAND:
+                    continue
+            elif word_band == end_band:
+                # Last line: only words to the left of (or touching) end x
+                if r.x0 > px_e + BAND:
+                    continue
+            result.append((r, t))
+
+        # Sort by (line-band, x) so text output is always in reading order
+        result.sort(key=lambda w: (round(w[0].y0 / BAND) * BAND, w[0].x0))
+        return result
+
     # ── word cache ────────────────────────────────────────────────────────────
 
     def _get_page_words(self, pn: int) -> list[tuple]:
@@ -120,30 +169,46 @@ class _TextSelMixin:
         if not words:
             return ""
 
-        si = self._nearest_word_index(words, start_pt)
-        ei = self._nearest_word_index(words, end_pt)
-        if si > ei:
-            si, ei = ei, si
+        # Bounding-box sweep: independent of column-sort order, so words are
+        # never incorrectly excluded because their sorted index falls outside [si:ei].
+        selected = self._words_in_sweep(words, start_pt, end_pt)
+        if not selected:
+            # Fallback for single-click or very small drag: nearest word
+            si = self._nearest_word_index(words, start_pt)
+            ei = self._nearest_word_index(words, end_pt)
+            if si > ei:
+                si, ei = ei, si
+            selected = [(r, t) for r, t in words[si : ei + 1] if t.strip()]
 
-        selected = words[si : ei + 1]
+        # Group word rects by line band (5 pt tolerance) so we render one
+        # Container per line instead of one per word.  This prevents Flet from
+        # dropping controls when updating a large Stack, and fills visual gaps
+        # between words on the same line.
+        from collections import defaultdict
+        line_bands: dict = defaultdict(list)
+        for word_rect, word_text in selected:
+            if not word_text.strip():
+                continue
+            band = round(word_rect.y0 / 5) * 5
+            line_bands[band].append(word_rect)
 
         boxes: list[ft.Control] = []
-        sel_rect = None
-        for word_rect, word_text in selected:
-            t = word_text.strip()
-            if not t:
-                continue
+        sel_rect: fitz.Rect | None = None
+        for band in sorted(line_bands):
+            rects = line_bands[band]
+            x0 = min(r.x0 for r in rects)
+            x1 = max(r.x1 for r in rects)
+            y0 = min(r.y0 for r in rects)
+            y1 = max(r.y1 for r in rects)
             boxes.append(ft.Container(
-                left   = word_rect.x0 * scale,
-                top    = word_rect.y0 * scale,
-                width  = max(2.0, word_rect.width  * scale),
-                height = max(2.0, word_rect.height * scale),
+                left   = x0 * scale,
+                top    = y0 * scale,
+                width  = max(2.0, (x1 - x0) * scale),
+                height = max(2.0, (y1 - y0) * scale),
                 bgcolor="#5500AAFF",
             ))
-            if sel_rect is None:
-                sel_rect = fitz.Rect(word_rect)
-            else:
-                sel_rect = sel_rect | word_rect
+            line_r = fitz.Rect(x0, y0, x1, y1)
+            sel_rect = line_r if sel_rect is None else sel_rect | line_r
 
         layer = self._text_sel_layers[pn]
         layer.controls = boxes
@@ -247,12 +312,15 @@ class _TextSelMixin:
         words = self._get_page_words(pn)
         if not words:
             return
-        si = self._nearest_word_index(words, start_pt)
-        ei = self._nearest_word_index(words, end_pt)
-        if si > ei:
-            si, ei = ei, si
         from .annotations import STROKE_COLOR, _line_merged_rects
-        rects = [r for r, t in words[si : ei + 1] if t.strip()]
+        selected = self._words_in_sweep(words, start_pt, end_pt)
+        if not selected:
+            si = self._nearest_word_index(words, start_pt)
+            ei = self._nearest_word_index(words, end_pt)
+            if si > ei:
+                si, ei = ei, si
+            selected = [(r, t) for r, t in words[si : ei + 1] if t.strip()]
+        rects = [r for r, t in selected if t.strip()]
         if not rects:
             return
         merged = _line_merged_rects(rects)
