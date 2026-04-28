@@ -210,6 +210,28 @@ class _TextSelMixin:
             line_r = fitz.Rect(x0, y0, x1, y1)
             sel_rect = line_r if sel_rect is None else sel_rect | line_r
 
+        # Draggable handles at the start and end of the selection
+        _H_R = 7  # handle circle radius in display px
+        if selected:
+            first_r = selected[0][0]
+            last_r  = selected[-1][0]
+            s_disp  = (first_r.x0 * scale, first_r.y1 * scale)
+            e_disp  = (last_r.x1  * scale, last_r.y1  * scale)
+            self._text_sel_handle_start_disp = s_disp
+            self._text_sel_handle_end_disp   = e_disp
+            _h = dict(
+                width=_H_R * 2, height=_H_R * 2,
+                border_radius=_H_R,
+                bgcolor="#0088FF",
+                border=ft.border.all(2, "#FFFFFF"),
+                shadow=ft.BoxShadow(blur_radius=4, color="#44000000"),
+            )
+            boxes.append(ft.Container(left=s_disp[0] - _H_R, top=s_disp[1] - _H_R, **_h))
+            boxes.append(ft.Container(left=e_disp[0] - _H_R, top=e_disp[1] - _H_R, **_h))
+        else:
+            self._text_sel_handle_start_disp = None
+            self._text_sel_handle_end_disp   = None
+
         layer = self._text_sel_layers[pn]
         layer.controls = boxes
         layer.visible  = bool(boxes)
@@ -233,8 +255,10 @@ class _TextSelMixin:
                 layer.update()
             except Exception:
                 pass
-        self._text_sel_pn   = None
-        self._text_sel_text = ""
+        self._text_sel_pn                = None
+        self._text_sel_text              = ""
+        self._text_sel_handle_start_disp = None
+        self._text_sel_handle_end_disp   = None
 
     # ── floating popup ────────────────────────────────────────────────────────
 
@@ -361,6 +385,24 @@ class _TextSelMixin:
                 if t:
                     parts.append(t)
         return " ".join(parts)
+
+    # ── word selection (double-tap) ───────────────────────────────────────────
+
+    def _select_word_at(self, pn: int, pdf_pt: tuple) -> None:
+        """Select the single word at (or nearest to) pdf_pt."""
+        words = self._get_page_words(pn)
+        if not words:
+            return
+        idx = self._nearest_word_index(words, pdf_pt)
+        r, _ = words[idx]
+        mid_y = (r.y0 + r.y1) / 2
+        start_pt = (r.x0, mid_y)
+        end_pt   = (r.x1, mid_y)
+        self._text_sel_start_pdf = start_pt
+        self._text_sel_end_pdf   = end_pt
+        sel_text = self._update_text_selection(pn, start_pt, end_pt, update_ui=True)
+        if sel_text:
+            self._show_text_sel_bar(sel_text)
 
     # ── paragraph selection (triple-tap) ──────────────────────────────────────
 

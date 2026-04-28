@@ -127,6 +127,10 @@ class PDFViewerTab(
         self._text_sel_sel_rect                = None
         self._text_sel_popups:    list[ft.Container] = []
         self._scroll_px:          float = 0.0
+        # Handle drag state ("start" | "end" | None) and display positions
+        self._sel_drag_handle:              str | None   = None
+        self._text_sel_handle_start_disp:   tuple | None = None
+        self._text_sel_handle_end_disp:     tuple | None = None
 
         # OCR state
         self._ocr_processor    = OCRProcessor(str(Path(__file__).resolve().parents[2]))

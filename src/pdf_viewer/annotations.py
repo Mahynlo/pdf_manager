@@ -859,13 +859,12 @@ class AnnotationManager:
         page_num: int,
         xref: int,
         factor: float,
-    ) -> fitz.Rect | None:
+    ) -> tuple[fitz.Rect, int] | None:
         """Scale the annotation around its centre by *factor*.
 
-        Returns the new visual rect on success, or None on failure. For
-        rotated annotations we scale the *pre-rotation* rect (cached)
-        instead of ``annot.rect`` — otherwise each click compounds the
-        bbox expansion caused by PyMuPDF's /Rotate handling.
+        Returns ``(new_visual_rect, new_xref)`` on success, or None on failure.
+        For Line/Arrow the xref changes (delete+recreate); for all other types
+        the xref is unchanged. Callers must update their cached xref accordingly.
         """
         if factor <= 0:
             return None
@@ -902,7 +901,7 @@ class AnnotationManager:
                         for (p, x) in self._history
                     ]
                     self._visual_rects.pop(xref, None)
-                    return new_rect
+                    return new_rect, new_annot.xref
 
             rotation = self._rotations.get(xref, 0.0)
             try:
@@ -914,7 +913,7 @@ class AnnotationManager:
             except Exception:
                 return None
             self._visual_rects[annot.xref] = fitz.Rect(new_rect)
-            return new_rect
+            return new_rect, annot.xref
         return None
 
     def change_annot_width(
