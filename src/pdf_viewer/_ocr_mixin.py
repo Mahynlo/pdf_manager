@@ -133,6 +133,7 @@ class _OCRMixin:
             return
 
         self._ocr_by_page[pn] = result
+        self._page_words.pop(pn, None)  # invalidate so OCR words are included on next selection
         self._ocr_active_index = 0
         self._refresh_ocr_ui_for_page()
         if self._agent_instance is not None:
@@ -210,8 +211,9 @@ class _OCRMixin:
             )
         ]
 
-    def _render_ocr_boxes(self, *, force_update: bool = False) -> None:
-        pn = self.current_page
+    def _render_ocr_boxes(self, *, force_update: bool = False, pn: int | None = None) -> None:
+        if pn is None:
+            pn = self.current_page
         if pn >= len(self._ocr_overlays):
             return
         ocr_ov = self._ocr_overlays[pn]

@@ -78,6 +78,8 @@ class _RenderMixin:
                 self._ocr_overlays[pn].controls      = []
                 self._text_sel_layers[pn].controls   = []
                 self._redact_overlays[pn].controls   = []
+                if getattr(self, "_ocr_show_boxes", False) and pn in self._ocr_by_page:
+                    self._render_ocr_boxes(pn=pn)
 
                 self._page_cum_offsets[pn] = cum
                 self._page_heights[pn]     = float(h)
