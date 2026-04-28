@@ -9,7 +9,7 @@ import flet.canvas as cv
 import fitz
 
 from .annotations import Tool
-from .renderer import BASE_SCALE, ZOOM_LEVELS, render_page
+from .renderer import BASE_SCALE, ZOOM_LEVELS, render_page, _RENDER_SEM
 from ._viewer_defs import (
     _PAGE_BG, _PAGE_GAP, _PRELOAD, _EVICT_MARGIN, _EVICT_THRESHOLD,
     _SELECTED_BG,
@@ -29,6 +29,99 @@ class _RenderMixin:
 
         with self._doc_lock:
             total = len(self.doc)
+            page_dims = [
+                (int(self.doc[pn].rect.width  * BASE_SCALE * self.zoom),
+                 int(self.doc[pn].rect.height * BASE_SCALE * self.zoom))
+                for pn in range(total)
+            ]
+
+        # ── Fast-resize path ──────────────────────────────────────────────────
+        # When the page count is unchanged (zoom / rotate), reuse all existing
+        # Flet controls and only update their dimensions + clear stale images.
+        # This avoids recreating ~20 controls × N pages on every zoom change.
+        if len(self._page_images) == total and total > 0:
+            self._rendered       = set()
+            self._selected       = None
+            self._page_words     = {}
+            self._text_sel_pn    = None
+            self._text_sel_text  = ""
+            self._text_sel_start_pdf = None
+            self._text_sel_end_pdf   = None
+            self._text_sel_sel_rect  = None
+            self._annot_popup_pn     = None
+
+            cum = 0.0
+            for pn, (w, h) in enumerate(page_dims):
+                img     = self._page_images[pn]
+                slot    = self._page_slots[pn]
+                ink     = self._ink_canvases[pn]
+                load_ov = self._loading_overlays[pn]
+
+                img.visible = False
+                img.width  = w
+                img.height = h
+                slot.width  = w
+                slot.height = h
+                slot.bgcolor = _PAGE_BG
+                ink.width  = w
+                ink.height = h
+
+                load_ov.width   = w
+                load_ov.height  = h
+                load_ov.visible = True
+
+                self._drag_overlays[pn].visible   = False
+                self._sel_overlays[pn].visible    = False
+                self._text_sel_popups[pn].visible = False
+                self._annot_popups[pn].visible    = False
+
+                self._ocr_overlays[pn].controls      = []
+                self._text_sel_layers[pn].controls   = []
+                self._redact_overlays[pn].controls   = []
+
+                self._page_cum_offsets[pn] = cum
+                self._page_heights[pn]     = float(h)
+                cum += h + _PAGE_GAP
+
+            display_mode = getattr(self, "_display_mode", "continuous")
+            if display_mode == "single":
+                for i, row in enumerate(self._page_rows):
+                    row.visible = (i == self.current_page)
+            elif display_mode == "double":
+                pair_start = (self.current_page // 2) * 2
+                for i, row in enumerate(self._page_rows):
+                    row.visible = (i == pair_start or i == pair_start + 1)
+            else:
+                for row in self._page_rows:
+                    row.visible = True
+
+            try:
+                self.viewer_scroll.update()
+            except Exception:
+                pass
+
+            if display_mode in ("single", "double"):
+                pair_start = (self.current_page // 2) * 2 if display_mode == "double" else self.current_page
+                for p in range(pair_start, min(pair_start + 2, total)):
+                    self._render_page_slot(p)
+            else:
+                for p in range(min(total, 1 + _PRELOAD)):
+                    self._render_page_slot(p)
+
+            if scroll_back and self._page_cum_offsets and display_mode == "continuous":
+                try:
+                    self.viewer_scroll.scroll_to(
+                        offset=self._page_cum_offsets[self.current_page], duration=0,
+                    )
+                except Exception:
+                    pass
+            return
+        # ── Full rebuild ──────────────────────────────────────────────────────
+        # Page indices may have shifted (insert/delete/move), so cached images
+        # are stale — clear the entire cache before rebuilding.
+        _cache = getattr(self, "_render_cache", None)
+        if _cache is not None:
+            _cache.clear()
 
         self._page_images      = []
         self._drag_overlays    = []
@@ -37,6 +130,7 @@ class _RenderMixin:
         self._ocr_overlays     = []
         self._text_sel_layers  = []
         self._redact_overlays  = []
+        self._loading_overlays = []
         self._ink_canvases     = []
         self._page_slots       = []
         self._page_gestures    = []
@@ -58,18 +152,12 @@ class _RenderMixin:
         cum   = 0.0
         rows: list[ft.Control] = []
 
-        with self._doc_lock:
-            page_dims = [
-                (int(self.doc[pn].rect.width  * BASE_SCALE * self.zoom),
-                 int(self.doc[pn].rect.height * BASE_SCALE * self.zoom))
-                for pn in range(total)
-            ]
-
         for pn in range(total):
             w, h = page_dims[pn]
 
             img = ft.Image(
                 width=w, height=h, fit=ft.ImageFit.NONE, gapless_playback=True,
+                visible=False,
                 color="#FFFFFFFF" if self._night_mode else None,
                 color_blend_mode=ft.BlendMode.DIFFERENCE if self._night_mode else None,
             )
@@ -323,12 +411,36 @@ class _RenderMixin:
 
             ink_canvas = cv.Canvas(shapes=[], width=w, height=h)
 
+            loading_ov = ft.Container(
+                content=ft.Column(
+                    [
+                        ft.ProgressRing(
+                            width=32, height=32, stroke_width=3,
+                            color="#B0BEC5",
+                        ),
+                        ft.Text(
+                            f"Pág. {pn + 1}",
+                            size=11, color="#9E9E9E",
+                            text_align=ft.TextAlign.CENTER,
+                        ),
+                    ],
+                    spacing=10, tight=True,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    alignment=ft.MainAxisAlignment.CENTER,
+                ),
+                left=0, top=0, width=w, height=h,
+                alignment=ft.alignment.center,
+                bgcolor=_PAGE_BG,
+                visible=True,
+            )
+
             self._page_images.append(img)
             self._drag_overlays.append(drag_ov)
             self._sel_overlays.append(sel_ov)
             self._ocr_overlays.append(ocr_ov)
             self._text_sel_layers.append(text_sel_ov)
             self._redact_overlays.append(redact_ov)
+            self._loading_overlays.append(loading_ov)
             self._ink_canvases.append(ink_canvas)
             self._text_sel_popups.append(popup_ov)
             self._annot_popups.append(annot_popup_ov)
@@ -338,7 +450,7 @@ class _RenderMixin:
 
             slot = ft.Container(
                 content=ft.Stack(
-                    [img, text_sel_ov, drag_ov, ink_canvas, sel_ov, ocr_ov, redact_ov, popup_ov, annot_popup_ov],
+                    [img, loading_ov, text_sel_ov, drag_ov, ink_canvas, sel_ov, ocr_ov, redact_ov, popup_ov, annot_popup_ov],
                     clip_behavior=ft.ClipBehavior.NONE,
                 ),
                 width=w, height=h,
@@ -404,12 +516,15 @@ class _RenderMixin:
         getattr(self, "_pending_rerender", set()).discard(pn)
         gen = self._render_gen
 
+        cache = getattr(self, "_render_cache", None)
+
         def _worker() -> None:
             try:
-                with self._doc_lock:
-                    if gen != self._render_gen or pn >= len(self._page_images):
-                        return
-                    b64, w, h = render_page(self.doc, pn, self.zoom)
+                with _RENDER_SEM:  # bound concurrent renders across all tabs
+                    with self._doc_lock:
+                        if gen != self._render_gen or pn >= len(self._page_images):
+                            return
+                        b64, w, h = render_page(self.doc, pn, self.zoom, cache)
                 if gen != self._render_gen or pn >= len(self._page_images):
                     return
                 img  = self._page_images[pn]
@@ -417,7 +532,11 @@ class _RenderMixin:
                 img.src_base64 = b64
                 img.width      = w
                 img.height     = h
+                img.visible    = True
                 slot.bgcolor   = None
+                loading_overlays = getattr(self, "_loading_overlays", [])
+                if pn < len(loading_overlays):
+                    loading_overlays[pn].visible = False
                 self._rendered.add(pn)
                 try:
                     slot.update()
@@ -450,14 +569,16 @@ class _RenderMixin:
     def _evict_distant(self, pixels: float, viewport_h: float) -> None:
         keep_top    = pixels - viewport_h * _EVICT_MARGIN
         keep_bottom = pixels + viewport_h * (1.0 + _EVICT_MARGIN)
+        loading_overlays = getattr(self, "_loading_overlays", [])
         for pn, (start, h) in enumerate(zip(self._page_cum_offsets, self._page_heights)):
             if pn not in self._rendered:
                 continue
             page_bottom = start + h
             if page_bottom < keep_top or start > keep_bottom:
                 self._rendered.discard(pn)
-                self._page_images[pn].src_base64 = None
-                self._page_slots[pn].bgcolor = _PAGE_BG
+                self._page_images[pn].visible = False
+                if pn < len(loading_overlays):
+                    loading_overlays[pn].visible = True
 
     # ── render / update ───────────────────────────────────────────────────────
 
@@ -469,6 +590,9 @@ class _RenderMixin:
         the new image is ready.  Use this after move / resize / scale so the
         UI doesn't flash.
         """
+        cache = getattr(self, "_render_cache", None)
+        if cache is not None:
+            cache.invalidate_page(pn)
         self._rendered.discard(pn)
         self._render_page_slot(pn)
 
@@ -476,6 +600,9 @@ class _RenderMixin:
         if not keep_selection and self._selected is not None and self._selected[0] == pn:
             self._selected = None
             self._sel_overlays[pn].visible = False
+        cache = getattr(self, "_render_cache", None)
+        if cache is not None:
+            cache.invalidate_page(pn)
         self._rendered.discard(pn)
         self._render_page_slot(pn)
         self._refresh_ocr_ui_for_page()

@@ -19,7 +19,7 @@ import fitz
 
 from .annotations import AnnotationManager, HIGHLIGHT_COLORS, Tool
 from .ocr import OCRPageResult, OCRProcessor
-from .renderer import BASE_SCALE, ZOOM_LEVELS, display_to_pdf, render_page
+from .renderer import BASE_SCALE, ZOOM_LEVELS, display_to_pdf, render_page, PageRenderCache
 
 from ._viewer_defs import (
     _TOOL_DEFS,
@@ -103,6 +103,7 @@ class PDFViewerTab(
         self._ocr_overlays:     list[ft.Stack]     = []
         self._text_sel_layers:  list[ft.Stack]     = []
         self._redact_overlays:  list[ft.Stack]     = []
+        self._loading_overlays: list[ft.Container] = []
         self._page_slots:       list[ft.Container] = []
         self._page_gestures:    list[ft.GestureDetector] = []
         self._page_cum_offsets: list[float] = []
@@ -111,6 +112,7 @@ class PDFViewerTab(
 
         # Background rendering / eviction
         self._doc_lock          = threading.Lock()
+        self._render_cache      = PageRenderCache()
         self._rendering:        set[int] = set()
         self._pending_rerender: set[int] = set()
         self._render_gen     = 0
@@ -227,6 +229,12 @@ class PDFViewerTab(
         self._agent_history:      list[dict]    = []
         self._agent_instance                    = None
         self._agent_running       = False
+        # Agent config extended state
+        self._agent_provider_selected: str | None = None
+        self._agent_provider_btns:     dict       = {}
+        self._agent_key_status:        ft.Text       | None = None
+        self._agent_config_section:    ft.Container  | None = None
+        self._agent_config_toggle_btn: ft.IconButton | None = None
 
         self._save_picker = ft.FilePicker(on_result=self._on_save_result)
         page_ref.overlay.append(self._save_picker)
@@ -752,6 +760,8 @@ class PDFViewerTab(
         return self._tab
 
     def close(self) -> None:
+        self._render_gen += 1  # signal running workers to exit before doc is closed
+        self._render_cache.clear()
         self.doc.close()
         try:
             self.page_ref.overlay.remove(self._save_picker)

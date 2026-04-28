@@ -266,11 +266,19 @@ class _RedactAgentMixin:
         _AGENT_BG   = "#F3F0FF"
         _AGENT_HDR  = "#5C35C9"
         _AGENT_LINE = "#D1C4E9"
+        _AGENT_SURF = "#EDE7F6"
+
+        # ── initialise selected provider ──────────────────────────────────────
+        try:
+            from agent.config import get_provider
+            self._agent_provider_selected = get_provider()
+        except Exception:
+            self._agent_provider_selected = "gemini"
 
         # ── chat list ─────────────────────────────────────────────────────────
         self._agent_chat_list = ft.ListView(
-            expand=True, spacing=10,
-            padding=ft.padding.symmetric(horizontal=6, vertical=8),
+            expand=True, spacing=8,
+            padding=ft.padding.symmetric(horizontal=4, vertical=6),
             auto_scroll=True,
         )
 
@@ -279,7 +287,7 @@ class _RedactAgentMixin:
             hint_text="Pregunta sobre el documento…",
             dense=True, expand=True, shift_enter=True,
             on_submit=self._agent_send,
-            content_padding=ft.padding.symmetric(horizontal=10, vertical=8),
+            content_padding=ft.padding.symmetric(horizontal=12, vertical=8),
             border_radius=20,
             filled=True,
             fill_color="#FFFFFF",
@@ -287,78 +295,127 @@ class _RedactAgentMixin:
             focused_border_color=_AGENT_HDR,
         )
 
-        # ── api key ───────────────────────────────────────────────────────────
+        # ── api key field ─────────────────────────────────────────────────────
         self._agent_key_field = ft.TextField(
-            hint_text="API Key (Google Gemini u OpenAI)",
+            hint_text="API Key…",
             dense=True, password=True, can_reveal_password=True, expand=True,
             content_padding=ft.padding.symmetric(horizontal=8, vertical=6),
+            border_radius=8,
             border_color=_AGENT_LINE,
             focused_border_color=_AGENT_HDR,
         )
 
+        # ── provider selector ─────────────────────────────────────────────────
+        def _prov_btn(provider: str, label: str) -> ft.Container:
+            is_sel = (self._agent_provider_selected == provider)
+            return ft.Container(
+                ft.Text(label, size=11, weight=ft.FontWeight.W_500,
+                        color=_AGENT_HDR if is_sel else "#757575"),
+                padding=ft.padding.symmetric(horizontal=10, vertical=4),
+                border_radius=12,
+                bgcolor=_AGENT_SURF if is_sel else None,
+                border=ft.border.all(1, _AGENT_HDR if is_sel else "#BDBDBD"),
+                on_click=lambda e, p=provider: self._agent_select_provider(p),
+                ink=True,
+            )
+
+        gemini_btn = _prov_btn("gemini", "Gemini")
+        openai_btn = _prov_btn("openai", "OpenAI")
+        self._agent_provider_btns = {"gemini": gemini_btn, "openai": openai_btn}
+
+        # ── key status label ──────────────────────────────────────────────────
+        self._agent_key_status = ft.Text("", size=10, color="#757575")
+        self._update_agent_key_status()
+
+        # ── config section ────────────────────────────────────────────────────
+        self._agent_config_section = ft.Container(
+            ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Text("Proveedor:", size=11, color="#616161"),
+                            gemini_btn,
+                            openai_btn,
+                        ],
+                        spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Row(
+                        [
+                            self._agent_key_field,
+                            ft.IconButton(
+                                ft.Icons.SAVE_ROUNDED, icon_size=18,
+                                tooltip="Guardar API Key",
+                                icon_color=_AGENT_HDR,
+                                on_click=self._agent_save_key,
+                                style=ft.ButtonStyle(padding=ft.padding.all(4)),
+                            ),
+                        ],
+                        spacing=4,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    self._agent_key_status,
+                ],
+                spacing=6, tight=True,
+            ),
+            bgcolor=_AGENT_SURF,
+            border_radius=8,
+            padding=ft.padding.all(10),
+            border=ft.border.all(1, _AGENT_LINE),
+            visible=True,
+        )
+
+        # ── quick actions ─────────────────────────────────────────────────────
         _qbtn = ft.ButtonStyle(
-            padding=ft.padding.symmetric(horizontal=6, vertical=4),
+            padding=ft.padding.symmetric(horizontal=8, vertical=4),
             text_style=ft.TextStyle(size=11),
+            shape=ft.RoundedRectangleBorder(radius=8),
+        )
+        quick_actions = ft.Row(
+            [
+                ft.OutlinedButton(
+                    "Resumir", icon=ft.Icons.SUMMARIZE_OUTLINED,
+                    style=_qbtn,
+                    on_click=lambda e: self._agent_quick(
+                        "Genera un resumen completo del documento.",
+                        direct_action="summarize",
+                    ),
+                ),
+                ft.OutlinedButton(
+                    "Estructura", icon=ft.Icons.ACCOUNT_TREE_OUTLINED,
+                    style=_qbtn,
+                    on_click=lambda e: self._agent_quick(
+                        "Analiza la estructura y el tipo de este documento.",
+                        direct_action="analyze",
+                    ),
+                ),
+                ft.OutlinedButton(
+                    "Censurar", icon=ft.Icons.EDIT_OFF_OUTLINED,
+                    style=_qbtn,
+                    on_click=lambda e: self._agent_quick(
+                        "Identifica la información sensible que debería censurarse.",
+                        direct_action="redact",
+                    ),
+                ),
+            ],
+            spacing=4, wrap=True,
         )
 
         # ── content area ──────────────────────────────────────────────────────
         self._agent_content_area = ft.Container(
             ft.Column(
                 [
-                    # API key row
-                    ft.Row(
-                        [
-                            self._agent_key_field,
-                            ft.IconButton(
-                                ft.Icons.KEY, icon_size=18,
-                                tooltip="Guardar API Key",
-                                icon_color=_AGENT_HDR,
-                                on_click=self._agent_save_key,
-                            ),
-                        ],
-                        spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    # Quick action buttons
-                    ft.Row(
-                        [
-                            ft.OutlinedButton(
-                                "Resumir", icon=ft.Icons.SUMMARIZE_OUTLINED,
-                                style=_qbtn,
-                                on_click=lambda e: self._agent_quick(
-                                    "Genera un resumen completo del documento.",
-                                    direct_action="summarize",
-                                ),
-                            ),
-                            ft.OutlinedButton(
-                                "Estructura", icon=ft.Icons.ACCOUNT_TREE_OUTLINED,
-                                style=_qbtn,
-                                on_click=lambda e: self._agent_quick(
-                                    "Analiza la estructura y el tipo de este documento.",
-                                    direct_action="analyze",
-                                ),
-                            ),
-                            ft.OutlinedButton(
-                                "Censurar", icon=ft.Icons.EDIT_OFF_OUTLINED,
-                                style=_qbtn,
-                                on_click=lambda e: self._agent_quick(
-                                    "Identifica la información sensible que debería censurarse.",
-                                    direct_action="redact",
-                                ),
-                            ),
-                        ],
-                        spacing=4, wrap=True,
-                    ),
+                    self._agent_config_section,
+                    quick_actions,
                     ft.Divider(height=1, color=_AGENT_LINE),
-                    # Chat bubble area — fills all remaining height
                     ft.Container(
                         self._agent_chat_list,
                         expand=True,
-                        bgcolor="#FAFAFA",
-                        border_radius=8,
+                        bgcolor="#FAFAFE",
+                        border_radius=10,
                         border=ft.border.all(1, _AGENT_LINE),
                         clip_behavior=ft.ClipBehavior.HARD_EDGE,
                     ),
-                    # Input row
                     ft.Row(
                         [
                             self._agent_input,
@@ -377,6 +434,15 @@ class _RedactAgentMixin:
             ),
             expand=True,
             padding=ft.padding.only(top=6),
+        )
+
+        # ── config toggle button ──────────────────────────────────────────────
+        self._agent_config_toggle_btn = ft.IconButton(
+            ft.Icons.SETTINGS_OUTLINED, icon_size=16,
+            tooltip="Mostrar/ocultar configuración",
+            icon_color=_AGENT_HDR,
+            on_click=self._agent_toggle_config,
+            style=ft.ButtonStyle(padding=ft.padding.all(4)),
         )
 
         # ── panel container ───────────────────────────────────────────────────
@@ -398,8 +464,9 @@ class _RedactAgentMixin:
                                 on_click=self._agent_clear_chat,
                                 style=ft.ButtonStyle(padding=ft.padding.all(4)),
                             ),
+                            self._agent_config_toggle_btn,
                         ],
-                        spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     self._agent_content_area,
                 ],
@@ -427,10 +494,12 @@ class _RedactAgentMixin:
         if not key:
             self._show_snack("Introduce una API Key válida")
             return
-        set_api_key(get_provider(), key)
+        provider = self._agent_provider_selected or get_provider()
+        set_api_key(provider, key)
         self._agent_key_field.value = ""
         self._agent_instance = None
-        self._show_snack("API Key guardada")
+        self._show_snack(f"API Key guardada para {provider.capitalize()}")
+        self._update_agent_key_status()
         try:
             self._agent_key_field.update()
         except Exception:
@@ -441,12 +510,15 @@ class _RedactAgentMixin:
             return self._agent_instance
         from agent.config import get_api_key, get_provider, get_model
         from agent.pdf_agent import PDFAgent
-        provider = get_provider()
+        provider = self._agent_provider_selected or get_provider()
         key      = get_api_key(provider)
         if not key:
             key = (self._agent_key_field.value or "").strip()
         if not key:
-            raise ValueError("No hay API Key configurada. Introduce una en el panel del agente.")
+            raise ValueError(
+                f"No hay API Key para {provider.capitalize()}. "
+                "Introdúcela en la sección de configuración del agente."
+            )
         self._agent_instance = PDFAgent(
             pdf_path=self.path,
             api_key=key,
@@ -460,34 +532,105 @@ class _RedactAgentMixin:
     def _agent_redact_callback(self, terms: list[str]) -> None:
         if not terms or self._agent_chat_list is None:
             return
-        chips = []
+
+        _WARN = "#E65100"
+        case_sensitive = getattr(self, "_redact_case_sensitive", True)
+
+        # Count occurrences per term — runs on background thread, safe to search
+        term_counts: list[tuple[str, int]] = []
         for term in terms[:20]:
+            count = len(self._find_term_matches(term, case_sensitive))
+            term_counts.append((term, count))
+
+        chips: list[ft.Control] = []
+        for term, count in term_counts:
             t = term
+            if count == 0:
+                count_label = "no hallada"
+                count_color = "#9E9E9E"
+                count_bg    = "#F5F5F5"
+            elif count == 1:
+                count_label = "1 coincid."
+                count_color = _WARN
+                count_bg    = "#FFE0B2"
+            else:
+                count_label = f"{count} coincid."
+                count_color = _WARN
+                count_bg    = "#FFE0B2"
+
             chips.append(
                 ft.Container(
                     ft.Row(
                         [
-                            ft.Text(t, size=11, expand=True),
+                            ft.Text(
+                                t, size=11, expand=True,
+                                overflow=ft.TextOverflow.ELLIPSIS, max_lines=1,
+                                color="#4E342E" if count > 0 else "#9E9E9E",
+                            ),
+                            ft.Container(
+                                ft.Text(
+                                    count_label, size=9,
+                                    color=count_color, weight=ft.FontWeight.W_500,
+                                ),
+                                bgcolor=count_bg, border_radius=4,
+                                padding=ft.padding.symmetric(horizontal=5, vertical=2),
+                            ),
                             ft.IconButton(
-                                ft.Icons.EDIT_OFF, icon_size=14,
-                                tooltip="Buscar para censurar",
+                                ft.Icons.ADD_CIRCLE_OUTLINE, icon_size=16,
+                                tooltip="Agregar a la lista de censura",
+                                icon_color=_WARN if count > 0 else "#BDBDBD",
+                                disabled=(count == 0),
                                 on_click=lambda e, _t=t: self._agent_apply_redaction_term(_t),
+                                style=ft.ButtonStyle(padding=ft.padding.all(2)),
                             ),
                         ],
-                        spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=4,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
-                    bgcolor="#FFE0B2", border_radius=6,
+                    bgcolor="#FFFFFF",
+                    border_radius=6,
                     padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                    border=ft.border.all(1, "#FFCCBC" if count > 0 else "#E0E0E0"),
                 )
             )
+
+        found_terms = [t for t, c in term_counts if c > 0]
+        header_controls: list[ft.Control] = [
+            ft.Text(
+                "Sugerencias de censura:", size=11,
+                weight=ft.FontWeight.W_600, color=_WARN, expand=True,
+            ),
+        ]
+        if len(found_terms) > 1:
+            _ft = found_terms
+            header_controls.append(
+                ft.TextButton(
+                    "Agregar todos",
+                    icon=ft.Icons.PLAYLIST_ADD,
+                    style=ft.ButtonStyle(
+                        color=_WARN,
+                        padding=ft.padding.symmetric(horizontal=4, vertical=0),
+                        text_style=ft.TextStyle(size=11),
+                    ),
+                    on_click=lambda e, terms=_ft: self._agent_add_all_redact_terms(terms),
+                )
+            )
+
         self._agent_chat_list.controls.append(
             ft.Container(
-                ft.Column([
-                    ft.Text("Términos sugeridos para censurar:", size=11,
-                            weight=ft.FontWeight.W_600, color="#E65100"),
-                    *chips,
-                ], spacing=4),
-                bgcolor="#FFF8F0", border_radius=8, padding=ft.padding.all(8),
+                ft.Column(
+                    [
+                        ft.Row(
+                            header_controls,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        *chips,
+                    ],
+                    spacing=4,
+                ),
+                bgcolor="#FFF8F0", border_radius=8,
+                padding=ft.padding.all(10),
+                border=ft.border.all(1, "#FFCCBC"),
             )
         )
         try:
@@ -512,7 +655,6 @@ class _RedactAgentMixin:
                 text, size=12, selectable=True, color="#1A237E",
             )
         else:
-            # Render assistant response as Markdown (JSON auto-wrapped in code block)
             body = ft.Markdown(
                 _format_agent_response(text),
                 selectable=True,
@@ -520,6 +662,17 @@ class _RedactAgentMixin:
                 code_theme="github",
                 on_tap_link=lambda e: self.page_ref.launch_url(e.data),
             )
+
+        avatar = ft.Container(
+            ft.Icon(
+                ft.Icons.PERSON_ROUNDED if is_user else ft.Icons.AUTO_AWESOME_ROUNDED,
+                size=13, color="#FFFFFF",
+            ),
+            bgcolor="#3949AB" if is_user else _AGENT_HDR,
+            border_radius=10,
+            width=26, height=26,
+            alignment=ft.alignment.center,
+        )
 
         bubble = ft.Container(
             content=body,
@@ -530,14 +683,25 @@ class _RedactAgentMixin:
                 bottom_right=12 if is_user else 2,
             ),
             padding=ft.padding.symmetric(horizontal=10, vertical=8),
-            margin=ft.margin.only(
-                left=32 if is_user else 0,
-                right=0  if is_user else 32,
-            ),
-            border=ft.border.all(1, "#C5CAE9" if is_user else "#E0E0E0"),
+            border=ft.border.all(1, "#C5CAE9" if is_user else "#E8EAF6"),
+            expand=True,
         )
+
+        if is_user:
+            row = ft.Row(
+                [ft.Container(width=20), bubble, avatar],
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+            )
+        else:
+            row = ft.Row(
+                [avatar, bubble, ft.Container(width=20)],
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+            )
+
         if self._agent_chat_list is not None:
-            self._agent_chat_list.controls.append(bubble)
+            self._agent_chat_list.controls.append(row)
             try:
                 self._agent_chat_list.update()
             except Exception:
@@ -550,6 +714,78 @@ class _RedactAgentMixin:
             self._agent_chat_list.controls = []
             try:
                 self._agent_chat_list.update()
+            except Exception:
+                pass
+
+    def _update_agent_key_status(self) -> None:
+        if self._agent_key_status is None:
+            return
+        try:
+            from agent.config import get_api_key, get_provider
+            provider = getattr(self, "_agent_provider_selected", None) or get_provider()
+            key = get_api_key(provider)
+            if key:
+                self._agent_key_status.value = f"✓ Clave configurada ({provider.capitalize()})"
+                self._agent_key_status.color = "#2E7D32"
+            else:
+                self._agent_key_status.value = f"✗ Sin clave para {provider.capitalize()}"
+                self._agent_key_status.color = "#C62828"
+        except Exception:
+            self._agent_key_status.value = "Módulo de agente no disponible"
+            self._agent_key_status.color = "#9E9E9E"
+        try:
+            self._agent_key_status.update()
+        except Exception:
+            pass
+
+    def _agent_select_provider(self, provider: str) -> None:
+        _AGENT_HDR  = "#5C35C9"
+        _AGENT_SURF = "#EDE7F6"
+        self._agent_provider_selected = provider
+        self._agent_instance = None
+        for p, btn in self._agent_provider_btns.items():
+            is_sel = (p == provider)
+            btn.bgcolor = _AGENT_SURF if is_sel else None
+            btn.border  = ft.border.all(1, _AGENT_HDR if is_sel else "#BDBDBD")
+            if isinstance(btn.content, ft.Text):
+                btn.content.color = _AGENT_HDR if is_sel else "#757575"
+            try:
+                btn.update()
+            except Exception:
+                pass
+        self._update_agent_key_status()
+
+    def _agent_toggle_config(self, e=None) -> None:
+        if self._agent_config_section is None:
+            return
+        self._agent_config_section.visible = not self._agent_config_section.visible
+        if self._agent_config_toggle_btn is not None:
+            self._agent_config_toggle_btn.icon_color = (
+                "#5C35C9" if self._agent_config_section.visible else "#9E9E9E"
+            )
+            try:
+                self._agent_config_toggle_btn.update()
+            except Exception:
+                pass
+        try:
+            self._agent_config_section.update()
+        except Exception:
+            pass
+
+    def _agent_add_all_redact_terms(self, terms: list[str]) -> None:
+        added = 0
+        for term in terms:
+            if term not in self._redact_terms:
+                self._add_term_direct(term)
+                added += 1
+        if added:
+            self._rebuild_redact_terms_list()
+            self._update_profile_save_btn()
+            if self._redact_preview:
+                self._render_redact_preview(force_update=True)
+            self._show_snack(f"{added} término(s) agregados a la lista de censura")
+            try:
+                self.page_ref.update()
             except Exception:
                 pass
 
