@@ -1313,6 +1313,13 @@ class _RedactAgentMixin:
             self._page_words.pop(pn, None)  # flush cached words for this page
             self._rendered.discard(pn)
 
+        # Invalidate the render cache for every redacted page so the fast-resize
+        # path in _rebuild_scroll_content doesn't return stale pre-redaction images.
+        _rcache = getattr(self, "_render_cache", None)
+        if _rcache is not None:
+            for pn in affected_pages:
+                _rcache.invalidate_page(pn)
+
         self._clear_redact_state()
         self._rebuild_scroll_content(scroll_back=False)
 
