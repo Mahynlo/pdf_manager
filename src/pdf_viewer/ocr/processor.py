@@ -64,6 +64,11 @@ class OCRProcessor:
     def predictor(self):
         if self._predictor is None:
             os.environ["DISABLE_MODEL_SOURCE_CHECK"] = "True"
+            # Use bundled models (src/onnxtr_cache/) so the compiled app works offline.
+            # Falls back to the default ~/.cache/onnxtr/ if the bundled folder is missing.
+            bundled = Path(__file__).resolve().parents[2] / "onnxtr_cache"
+            if bundled.exists():
+                os.environ["ONNXTR_CACHE_DIR"] = str(bundled)
             self._predictor = ocr_predictor(
                 det_arch="db_mobilenet_v3_large",
                 reco_arch="crnn_mobilenet_v3_small",

@@ -164,4 +164,5 @@ storage/
 claude.md
 .claude/
 modelos/
+src/onnxtr_cache/
 !uv.lock
