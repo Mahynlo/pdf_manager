@@ -96,18 +96,24 @@ class _GestureMixin:
         self._pending_tap_page = pn
 
     def _on_tap(self, e, pn: int) -> None:
-        # Triple-tap while SELECT tool is active → select paragraph under cursor.
+        # Multi-tap while SELECT tool is active.
         if self._annot.tool == Tool.SELECT:
-            if (self._tap_count >= 3
-                    and self._pending_tap is not None
+            if (self._pending_tap is not None
                     and self._pending_tap_page == pn):
                 x, y = self._pending_tap
-                pdf_x, pdf_y   = display_to_pdf(x, y, self.zoom)
+                pdf_x, pdf_y = display_to_pdf(x, y, self.zoom)
                 self._pending_tap      = None
                 self._pending_tap_page = None
-                self._hide_text_sel_bar()
-                self._select_paragraph_at(pn, (pdf_x, pdf_y))
-                return
+                if self._tap_count >= 3:
+                    # Triple-tap → select paragraph
+                    self._hide_text_sel_bar()
+                    self._select_paragraph_at(pn, (pdf_x, pdf_y))
+                    return
+                if self._tap_count == 2:
+                    # Double-tap → select word under cursor
+                    self._hide_text_sel_bar()
+                    self._select_word_at(pn, (pdf_x, pdf_y))
+                    return
             self._hide_text_sel_bar()
             self._pending_tap      = None
             self._pending_tap_page = None
@@ -200,6 +206,16 @@ class _GestureMixin:
             return
 
         if self._annot.tool == Tool.SELECT:
+            # Hit-test handles: if starting near start/end handle, drag it instead.
+            _H_HIT = 20  # px hit radius
+            for hname in ("start", "end"):
+                hpos = getattr(self, f"_text_sel_handle_{hname}_disp", None)
+                if (hpos is not None
+                        and self._text_sel_pn == pn
+                        and math.hypot(e.local_x - hpos[0], e.local_y - hpos[1]) <= _H_HIT):
+                    self._sel_drag_handle = hname
+                    return  # skip _annot.begin — not a new selection drag
+            self._sel_drag_handle    = None
             self._text_sel_start_pdf = (pdf_x, pdf_y)
             self._text_sel_end_pdf   = (pdf_x, pdf_y)
             self._hide_text_sel_bar()
@@ -262,6 +278,17 @@ class _GestureMixin:
             if ink_pts is not None and ink_pg == pn:
                 ink_pts.append((pdf_x, pdf_y))
                 self._update_ink_canvas_preview(pn)
+            return
+
+        # Handle drag: adjust start or end anchor without starting a new selection
+        if self._annot.tool == Tool.SELECT and self._sel_drag_handle is not None:
+            if self._sel_drag_handle == "start":
+                self._text_sel_start_pdf = (pdf_x, pdf_y)
+            else:
+                self._text_sel_end_pdf = (pdf_x, pdf_y)
+            self._update_text_selection(
+                pn, self._text_sel_start_pdf, self._text_sel_end_pdf, update_ui=True
+            )
             return
 
         pdf_rect = self._annot.move(pdf_x, pdf_y)
@@ -382,7 +409,12 @@ class _GestureMixin:
                                 )
                                 wrote_doc = True
                             if result is not None:
-                                _, new_xref, _rotation = result
+                                actual_rect, new_xref, _rotation = result
+                                # Use the rect PyMuPDF actually assigned so the
+                                # overlay always matches the annotation exactly
+                                # (Line/Arrow/Ink xref changes on delete+recreate,
+                                # so the returned bbox may differ from final_rect).
+                                final_rect = actual_rect
                             if was_hidden:
                                 # If xref changed (polygon delete+recreate), the
                                 # old annot is gone and the new one is not hidden.
@@ -415,6 +447,18 @@ class _GestureMixin:
                 finally:
                     self._drag_start_rect   = None
                     self._drag_current_rect = None
+            return
+
+        # Handle drag ended: show popup with updated selection
+        if self._annot.tool == Tool.SELECT and self._sel_drag_handle is not None:
+            self._sel_drag_handle = None
+            sel_text = self._update_text_selection(
+                pn, self._text_sel_start_pdf, self._text_sel_end_pdf, update_ui=True
+            )
+            if sel_text:
+                if self._text_sel_sel_rect is not None:
+                    self._annot.last_rect = self._text_sel_sel_rect
+                self._show_text_sel_bar(sel_text)
             return
 
         if self._annot.tool == Tool.INK:
@@ -625,6 +669,14 @@ class _GestureMixin:
             canvases[pn].update()
         except Exception:
             pass
+
+    def _on_secondary_tap(self, e, pn: int) -> None:
+        """Right-click: show the action popup for the active text selection."""
+        if self._annot.tool != Tool.SELECT:
+            return
+        if self._text_sel_pn != pn or not self._text_sel_text:
+            return
+        self._show_text_sel_bar(self._text_sel_text)
 
     @staticmethod
     def _compute_resize_rect(r: fitz.Rect, handle: str, dx: float, dy: float) -> fitz.Rect:

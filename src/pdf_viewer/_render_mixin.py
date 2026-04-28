@@ -193,6 +193,49 @@ class _RenderMixin:
                 padding=ft.padding.all(5),
                 shape=ft.RoundedRectangleBorder(radius=4),
             )
+            _mc_color_sep  = ft.Container(width=1, height=22, bgcolor="#E0E0E0")
+            _mc_color_btn  = ft.IconButton(
+                ft.Icons.PALETTE_OUTLINED,
+                icon_color="#7B1FA2",
+                icon_size=18,
+                tooltip="Cambiar color",
+                on_click=self._recolor_selected_menu,
+                style=_ctx_btn,
+            )
+            _mc_scale_sep  = ft.Container(width=1, height=22, bgcolor="#E0E0E0")
+            _mc_scale_down = ft.IconButton(
+                ft.Icons.REMOVE_CIRCLE_OUTLINE,
+                icon_color="#555555",
+                icon_size=18,
+                tooltip="Reducir",
+                on_click=self._scale_down_selected,
+                style=_ctx_btn,
+            )
+            _mc_scale_up   = ft.IconButton(
+                ft.Icons.ADD_CIRCLE_OUTLINE,
+                icon_color="#555555",
+                icon_size=18,
+                tooltip="Agrandar",
+                on_click=self._scale_up_selected,
+                style=_ctx_btn,
+            )
+            _mc_width_sep  = ft.Container(width=1, height=22, bgcolor="#E0E0E0")
+            _mc_width_down = ft.IconButton(
+                ft.Icons.REMOVE_CIRCLE,
+                icon_color="#8B4513",
+                icon_size=18,
+                tooltip="Más fino",
+                on_click=self._thin_selected,
+                style=_ctx_btn,
+            )
+            _mc_width_up   = ft.IconButton(
+                ft.Icons.ADD_CIRCLE,
+                icon_color="#8B4513",
+                icon_size=18,
+                tooltip="Más grueso",
+                on_click=self._thicken_selected,
+                style=_ctx_btn,
+            )
             sel_menu = ft.Container(
                 left=0, top=0,
                 visible=False,
@@ -214,49 +257,14 @@ class _RenderMixin:
                             on_click=self._delete_selected,
                             style=_ctx_btn,
                         ),
-                        ft.Container(width=1, height=22, bgcolor="#E0E0E0"),
-                        ft.IconButton(
-                            ft.Icons.PALETTE_OUTLINED,
-                            icon_color="#7B1FA2",
-                            icon_size=18,
-                            tooltip="Cambiar color",
-                            on_click=self._recolor_selected_menu,
-                            style=_ctx_btn,
-                        ),
-                        ft.Container(width=1, height=22, bgcolor="#E0E0E0"),
-                        ft.IconButton(
-                            ft.Icons.REMOVE_CIRCLE_OUTLINE,
-                            icon_color="#555555",
-                            icon_size=18,
-                            tooltip="Reducir",
-                            on_click=self._scale_down_selected,
-                            style=_ctx_btn,
-                        ),
-                        ft.IconButton(
-                            ft.Icons.ADD_CIRCLE_OUTLINE,
-                            icon_color="#555555",
-                            icon_size=18,
-                            tooltip="Agrandar",
-                            on_click=self._scale_up_selected,
-                            style=_ctx_btn,
-                        ),
-                        ft.Container(width=1, height=22, bgcolor="#E0E0E0"),
-                        ft.IconButton(
-                            ft.Icons.REMOVE_CIRCLE,
-                            icon_color="#8B4513",
-                            icon_size=18,
-                            tooltip="Más fino",
-                            on_click=self._thin_selected,
-                            style=_ctx_btn,
-                        ),
-                        ft.IconButton(
-                            ft.Icons.ADD_CIRCLE,
-                            icon_color="#8B4513",
-                            icon_size=18,
-                            tooltip="Más grueso",
-                            on_click=self._thicken_selected,
-                            style=_ctx_btn,
-                        ),
+                        _mc_color_sep,
+                        _mc_color_btn,
+                        _mc_scale_sep,
+                        _mc_scale_down,
+                        _mc_scale_up,
+                        _mc_width_sep,
+                        _mc_width_down,
+                        _mc_width_up,
                         ft.Container(width=1, height=22, bgcolor="#E0E0E0"),
                         ft.IconButton(
                             ft.Icons.CLOSE,
@@ -291,13 +299,21 @@ class _RenderMixin:
                 clip_behavior=ft.ClipBehavior.NONE,
             )
             self._sel_handles.append({
-                "border":    sel_border,
-                "tl":        sel_tl,
-                "tr":        sel_tr,
-                "bl":        sel_bl,
-                "br":        sel_br,
-                "menu":      sel_menu,
-                "rot_group": sel_rot_group,
+                "border":     sel_border,
+                "tl":         sel_tl,
+                "tr":         sel_tr,
+                "bl":         sel_bl,
+                "br":         sel_br,
+                "menu":       sel_menu,
+                "rot_group":  sel_rot_group,
+                "color_sep":  _mc_color_sep,
+                "color_btn":  _mc_color_btn,
+                "scale_sep":  _mc_scale_sep,
+                "scale_down": _mc_scale_down,
+                "scale_up":   _mc_scale_up,
+                "width_sep":  _mc_width_sep,
+                "width_down": _mc_width_down,
+                "width_up":   _mc_width_up,
             })
             ocr_ov      = ft.Stack([], visible=False)
             text_sel_ov = ft.Stack([], visible=False)
@@ -464,12 +480,13 @@ class _RenderMixin:
 
             gd = ft.GestureDetector(
                 content=slot,
-                on_tap_down   = lambda e, p=pn: self._on_tap_down(e, p),
-                on_tap        = lambda e, p=pn: self._on_tap(e, p),
-                on_pan_start  = lambda e, p=pn: self._on_pan_start(e, p),
-                on_pan_update = lambda e, p=pn: self._on_pan_update(e, p),
-                on_pan_end    = lambda e, p=pn: self._on_pan_end(e, p),
-                mouse_cursor  = self._current_cursor,
+                on_tap_down       = lambda e, p=pn: self._on_tap_down(e, p),
+                on_tap            = lambda e, p=pn: self._on_tap(e, p),
+                on_pan_start      = lambda e, p=pn: self._on_pan_start(e, p),
+                on_pan_update     = lambda e, p=pn: self._on_pan_update(e, p),
+                on_pan_end        = lambda e, p=pn: self._on_pan_end(e, p),
+                on_secondary_tap  = lambda e, p=pn: self._on_secondary_tap(e, p),
+                mouse_cursor      = self._current_cursor,
             )
             self._page_gestures.append(gd)
             row = ft.Row([gd], alignment=ft.MainAxisAlignment.CENTER)

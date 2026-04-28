@@ -102,28 +102,24 @@ class _AnnotMixin:
             return
         atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
         self._selected_atype = atype
-        colors = {}
-        try:
-            colors = annot.colors or {}
-        except Exception:
-            pass
-        stroke = colors.get("stroke") or (0.0, 0.33, 1.0)
-        try:
-            hex_color = _rgb_to_hex(*stroke)
-        except Exception:
-            hex_color = "#0055FF"
 
-        border_ctl = self._sel_handles[pn]["border"]
-        border_ctl.border_radius = 2
-        border_ctl.bgcolor = None
-        border_ctl.border  = ft.border.all(2, hex_color)
+        h = self._sel_handles[pn]
+
+        # Fixed neutral border regardless of annotation color
+        h["border"].border_radius = 2
+        h["border"].bgcolor = None
+        h["border"].border  = ft.border.all(2, "#555555")
 
         # Markup annotations (highlight/underline/strikeout) cannot be
-        # moved or resized — hide the corner handles so the user isn't
-        # tempted to try dragging them.
-        is_markup = atype in ("Highlight", "Underline", "StrikeOut", "Squiggly")
+        # moved or resized — hide corner handles and size/thickness buttons.
+        is_markup  = atype in ("Highlight", "Underline", "StrikeOut", "Squiggly")
+        no_recolor = atype in ("Underline", "StrikeOut", "Squiggly")
         for name in ("tl", "tr", "bl", "br"):
-            self._sel_handles[pn][name].visible = not is_markup
+            h[name].visible = not is_markup
+        for name in ("scale_sep", "scale_down", "scale_up", "width_sep", "width_down", "width_up"):
+            h[name].visible = not is_markup
+        for name in ("color_sep", "color_btn"):
+            h[name].visible = not no_recolor
 
     def _update_sel_handles(self, pn: int, W: float, H: float) -> None:
         """Position all handle/menu controls inside the sel_overlay Stack."""
@@ -283,8 +279,11 @@ class _AnnotMixin:
             return
         pn, xref = self._selected
         with self._doc_lock:
-            new_rect = self._annot.scale_annot(self.doc, pn, xref, factor)
-        if new_rect is not None:
+            result = self._annot.scale_annot(self.doc, pn, xref, factor)
+        if result is not None:
+            new_rect, new_xref = result
+            if new_xref != xref:
+                self._selected = (pn, new_xref)
             # scale_annot operates in PDF space; when rotated, the bbox it
             # returns is the expanded one — scale the visual rect by the
             # same factor so the overlay tracks the shape.
