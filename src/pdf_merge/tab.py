@@ -107,7 +107,13 @@ class MergePDFTab:
         self._output_path: str | None  = None
         self._last_merged: str | None  = None
         self._thumb_cache: dict[tuple[str, int], str] = {}
+        self._large_cache: dict[tuple[str, int], str] = {}  # 0.5x for lightbox
         self._merging = False
+
+        # Flat list of (entry, original_page_idx) for each result page, in order.
+        # Updated by _rebuild_preview; used by the lightbox dialog for navigation.
+        self._preview_items: list[tuple[_PDFEntry, int]] = []
+        self._dlg_cursor: int = 0
 
         # UI refs (set in _build)
         self._pdf_col:       ft.Column         | None = None
@@ -119,6 +125,14 @@ class MergePDFTab:
         self._merge_btn:     ft.ElevatedButton | None = None
         self._result_row:    ft.Container      | None = None
         self._progress_bar:  ft.ProgressBar    | None = None
+
+        # Lightbox dialog refs (set in _build_dialog)
+        self._dialog:      ft.AlertDialog | None = None
+        self._dlg_img:     ft.Image       | None = None
+        self._dlg_nav:     ft.Text        | None = None
+        self._dlg_info:    ft.Column      | None = None
+        self._dlg_prev:    ft.IconButton  | None = None
+        self._dlg_next:    ft.IconButton  | None = None
 
         self._pick_pdfs   = ft.FilePicker(on_result=self._on_pdfs_picked)
         self._save_picker = ft.FilePicker(on_result=self._on_save_picked)
@@ -162,6 +176,7 @@ class MergePDFTab:
         for entry in self._entries:
             entry.close()
         self._thumb_cache.clear()
+        self._large_cache.clear()
         for picker in (self._pick_pdfs, self._save_picker):
             try:
                 self.page_ref.overlay.remove(picker)
@@ -182,6 +197,23 @@ class MergePDFTab:
                 pix = doc[page].get_pixmap(matrix=mat, alpha=False)
                 b64 = base64.b64encode(pix.tobytes("png")).decode()
                 self._thumb_cache[key] = b64
+                return b64
+        except Exception:
+            return None
+
+    def _get_large_thumb(self, path: str, page: int) -> str | None:
+        """Return a cached base64 PNG at 0.5× scale — used by the lightbox dialog."""
+        key = (path, page)
+        if key in self._large_cache:
+            return self._large_cache[key]
+        try:
+            with fitz.open(path) as doc:
+                if page >= len(doc):
+                    return None
+                mat = fitz.Matrix(0.5, 0.5)
+                pix = doc[page].get_pixmap(matrix=mat, alpha=False)
+                b64 = base64.b64encode(pix.tobytes("png")).decode()
+                self._large_cache[key] = b64
                 return b64
         except Exception:
             return None
@@ -370,6 +402,85 @@ class MergePDFTab:
         )
 
         self._rebuild_pdf_list()
+        self._build_dialog()
+
+    def _build_dialog(self) -> None:
+        """Create the lightbox AlertDialog (opened on thumbnail click in preview)."""
+        self._dlg_img = ft.Image(
+            width=300, height=420,
+            fit=ft.ImageFit.CONTAIN,
+            src_base64="",
+        )
+        self._dlg_nav = ft.Text(
+            "", size=13, weight=ft.FontWeight.W_500,
+            text_align=ft.TextAlign.CENTER,
+        )
+        self._dlg_prev = ft.IconButton(
+            ft.Icons.CHEVRON_LEFT, icon_size=28,
+            tooltip="Página anterior en el resultado",
+            on_click=lambda e: self._dlg_navigate(-1),
+        )
+        self._dlg_next = ft.IconButton(
+            ft.Icons.CHEVRON_RIGHT, icon_size=28,
+            tooltip="Página siguiente en el resultado",
+            on_click=lambda e: self._dlg_navigate(+1),
+        )
+
+        # Two info lines updated on each navigation
+        self._dlg_info = ft.Column(
+            [
+                ft.Text("", size=13, weight=ft.FontWeight.W_500,
+                        overflow=ft.TextOverflow.ELLIPSIS, max_lines=1),
+                ft.Text("", size=12, color=ft.Colors.ON_SURFACE_VARIANT),
+                ft.Text("", size=12, color=ft.Colors.ON_SURFACE_VARIANT),
+            ],
+            spacing=2,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+        self._dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Row(
+                [
+                    ft.Icon(ft.Icons.PREVIEW, color=ft.Colors.PRIMARY, size=20),
+                    ft.Text("Vista previa", size=16, weight=ft.FontWeight.BOLD),
+                ],
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            content=ft.Container(
+                content=ft.Column(
+                    [
+                        # Page image
+                        ft.Container(
+                            content=self._dlg_img,
+                            bgcolor="#E8ECF0",
+                            border_radius=6,
+                            alignment=ft.alignment.center,
+                            width=300, height=420,
+                            clip_behavior=ft.ClipBehavior.HARD_EDGE,
+                        ),
+                        # Navigation row
+                        ft.Row(
+                            [self._dlg_prev, self._dlg_nav, self._dlg_next],
+                            alignment=ft.MainAxisAlignment.CENTER,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
+                        # Info
+                        self._dlg_info,
+                    ],
+                    spacing=8,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    tight=True,
+                ),
+                width=320,
+            ),
+            actions=[
+                ft.TextButton("Cerrar", on_click=lambda e: self.page_ref.close(self._dialog)),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
 
     # ── PDF list management ───────────────────────────────────────────────────
 
@@ -404,6 +515,7 @@ class MergePDFTab:
             entry.close()
         self._entries.clear()
         self._thumb_cache.clear()
+        self._large_cache.clear()
         self._rebuild_pdf_list()
         self._rebuild_preview()
         self.page_ref.update()
@@ -667,10 +779,12 @@ class MergePDFTab:
 
     def _rebuild_preview(self) -> None:
         items: list[ft.Control] = []
+        flat:  list[tuple[_PDFEntry, int]] = []
         total = 0
 
         for entry in self._entries:
             for pg in entry.selected_pages:
+                flat_idx = total   # 0-based index in result
                 total += 1
                 thumb_b64 = self._get_thumb(entry.path, pg)
 
@@ -713,6 +827,7 @@ class MergePDFTab:
                     border_radius=ft.border_radius.only(top_right=3),
                 )
 
+                flat.append((entry, pg))
                 items.append(
                     ft.Container(
                         content=ft.Stack([thumb_ctrl, seq_badge, pg_badge]),
@@ -721,9 +836,14 @@ class MergePDFTab:
                         border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
                         border_radius=4,
                         clip_behavior=ft.ClipBehavior.HARD_EDGE,
-                        tooltip=f"#{total} en resultado\n{entry.filename} — página {pg + 1}",
+                        ink=True,
+                        ink_color="#00000018",
+                        tooltip="Clic para ampliar",
+                        on_click=lambda e, i=flat_idx: self._open_preview_dialog(i),
                     )
                 )
+
+        self._preview_items = flat
 
         if not items:
             self._preview_col.controls = [self._preview_empty]
@@ -734,6 +854,55 @@ class MergePDFTab:
         if self._status_text is not None:
             self._status_text.value = f"{total} página(s)" if total > 0 else ""
         self._update_merge_btn()
+
+    # ── lightbox dialog ───────────────────────────────────────────────────────
+
+    def _open_preview_dialog(self, flat_idx: int) -> None:
+        if not self._preview_items or self._dialog is None:
+            return
+        self._dlg_cursor = max(0, min(flat_idx, len(self._preview_items) - 1))
+        self._dlg_update_content()
+        self.page_ref.open(self._dialog)
+
+    def _dlg_navigate(self, delta: int) -> None:
+        if not self._preview_items:
+            return
+        self._dlg_cursor = max(0, min(
+            self._dlg_cursor + delta, len(self._preview_items) - 1
+        ))
+        self._dlg_update_content()
+        self.page_ref.update()
+
+    def _dlg_update_content(self) -> None:
+        """Refresh the dialog image and info text for the current cursor position."""
+        if not self._preview_items or self._dialog is None:
+            return
+
+        total = len(self._preview_items)
+        idx   = self._dlg_cursor
+        entry, orig_pg = self._preview_items[idx]
+
+        # Load large thumbnail (synchronous — single page render is fast enough)
+        large_b64 = self._get_large_thumb(entry.path, orig_pg)
+        if large_b64:
+            self._dlg_img.src_base64 = large_b64
+            self._dlg_img.src        = None
+        else:
+            self._dlg_img.src_base64 = None
+            self._dlg_img.src        = None
+
+        # Navigation counter
+        self._dlg_nav.value = f"{idx + 1} / {total}"
+
+        # Prev / next button state
+        self._dlg_prev.disabled = idx == 0
+        self._dlg_next.disabled = idx == total - 1
+
+        # Info lines
+        info_controls = self._dlg_info.controls
+        info_controls[0].value = entry.filename
+        info_controls[1].value = f"Página original: {orig_pg + 1} de {entry.total}"
+        info_controls[2].value = f"Posición en resultado: {idx + 1} de {total}"
 
     def _update_merge_btn(self) -> None:
         if self._merge_btn is None:
