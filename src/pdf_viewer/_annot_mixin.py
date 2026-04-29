@@ -38,7 +38,7 @@ class _AnnotMixin:
 
     def _set_highlight_color(self, rgb: tuple[float, float, float]) -> None:
         self._annot.highlight_color = rgb
-        self._select_tool(Tool.HIGHLIGHT, ft.MouseCursor.PRECISE)
+        self._select_tool(Tool.HIGHLIGHT, ft.MouseCursor.TEXT)
         self._show_snack("Color de resaltado actualizado")
 
     # ── annotation floating popup (for text-markup annotations) ───────────────
