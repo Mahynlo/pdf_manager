@@ -2,15 +2,11 @@ name: Build & Package Windows Installer
 
 # Dispara el workflow:
 #   - Al hacer push de un tag vX.Y.Z  → compila + crea Release en GitHub
-#   - Al hacer push a main/master      → compila + sube artefacto (sin Release)
 #   - Manualmente desde la UI de GitHub (Actions → Run workflow)
 on:
   push:
     tags:
       - "v*"
-    branches:
-      - main
-      - master
   workflow_dispatch:
     inputs:
       version_override:
