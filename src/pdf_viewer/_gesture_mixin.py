@@ -804,7 +804,10 @@ class _GestureMixin:
                 pass
 
     def _point_has_text(self, pn: int, pdf_x: float, pdf_y: float) -> bool:
-        """Return True if (pdf_x, pdf_y) falls inside any text word on page pn."""
+        """Return True if (pdf_x, pdf_y) falls inside any text word on page pn
+        (native PDF text or OCR detections)."""
+        pt = fitz.Point(pdf_x, pdf_y)
+        # Native text (cached per page)
         cache = self._text_rects_cache
         if pn not in cache:
             try:
@@ -813,8 +816,15 @@ class _GestureMixin:
                 cache[pn] = [fitz.Rect(w[0], w[1], w[2], w[3]) for w in words]
             except Exception:
                 cache[pn] = []
-        pt = fitz.Point(pdf_x, pdf_y)
-        return any(r.contains(pt) for r in cache[pn])
+        if any(r.contains(pt) for r in cache[pn]):
+            return True
+        # OCR detections (already computed; bbox is in PDF space)
+        ocr_result = self._ocr_by_page.get(pn)
+        if ocr_result is not None:
+            for det in ocr_result.detections:
+                if det.bbox.contains(pt):
+                    return True
+        return False
 
     def _on_secondary_tap(self, e, pn: int) -> None:
         """Right-click: show the action popup for the active text selection."""
