@@ -54,7 +54,9 @@ classDiagram
         +_ocr_processor: OCRProcessor
         +__init__(path, page_ref, on_close)
         +close()
-        +get_tab() ft.Tab
+        +get_tab_info() dict
+        +on_focus()
+        +on_blur()
     }
 
     class _RenderMixin {
@@ -580,3 +582,31 @@ self._ocr_processor: OCRProcessor         # Instancia del motor ONNX
 self._ocr_by_page: dict[int, OCRPageResult]  # Resultados por página
 self._ocr_show_boxes: bool                # Mostrar cajas de detección
 ```
+
+---
+
+## 11. Integración con DocumentManagerUI
+
+`PDFViewerTab` no construye ni gestiona su propio `ft.Tab`. En su lugar expone:
+
+```python
+def get_tab_info(self) -> dict:
+    return {
+        "label":     Path(self.path).name,
+        "icon":      ft.Icons.PICTURE_AS_PDF,
+        "content":   self.view,          # ft.Column raíz
+        "closeable": True,
+        "close_cb":  lambda: self.on_close(self),
+        "viewer":    self,               # referencia a sí mismo
+    }
+
+def on_focus(self) -> None:
+    """Llamado por DocumentManagerUI al activar esta pestaña."""
+    # Re-registra el teclado, relanza renders pendientes, etc.
+
+def on_blur(self) -> None:
+    """Llamado por DocumentManagerUI al desactivar esta pestaña."""
+    # Detiene renders en vuelo, limpia estado de teclas.
+```
+
+`DocumentManagerUI.rebuild()` llama a `old_viewer.on_blur()` / `new_viewer.on_focus()` automáticamente al cambiar la pestaña activa, garantizando que el visor suspendido no compita por recursos con el activo.
