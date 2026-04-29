@@ -499,6 +499,7 @@ class _RenderMixin:
                 on_pan_end        = lambda e, p=pn: self._on_pan_end(e, p),
                 on_secondary_tap  = lambda e, p=pn: self._on_secondary_tap(e, p),
                 on_hover          = lambda e, p=pn: self._on_hover(e, p),
+                on_scroll         = lambda e, p=pn: self._on_page_scroll(e, p),
                 mouse_cursor      = self._current_cursor,
             )
             self._page_gestures.append(gd)
@@ -750,13 +751,38 @@ class _RenderMixin:
     def _apply_zoom(self) -> None:
         self.zoom_label.value = f"{int(round(self.zoom * 100))}%"
         saved = self.current_page
+        # Preserve fractional position within the current page so zooming
+        # keeps the same content centred in the viewport.
+        frac = 0.0
+        if saved < len(self._page_cum_offsets) and saved < len(self._page_heights):
+            page_h = self._page_heights[saved]
+            if page_h > 0:
+                within = self._scroll_px - self._page_cum_offsets[saved]
+                frac = max(0.0, min(1.0, within / page_h))
+
         self._rebuild_scroll_content(scroll_back=False)
         self.page_ref.update()
         try:
-            self.viewer_scroll.scroll_to(offset=self._page_cum_offsets[saved], duration=0)
+            if saved < len(self._page_cum_offsets) and saved < len(self._page_heights):
+                target = self._page_cum_offsets[saved] + frac * self._page_heights[saved]
+            else:
+                target = self._page_cum_offsets[saved] if saved < len(self._page_cum_offsets) else 0.0
+            self.viewer_scroll.scroll_to(offset=target, duration=0)
         except Exception:
             pass
         self.page_ref.update()
+
+    def _on_page_scroll(self, e, pn: int) -> None:
+        """Handle scroll-wheel events over a page. Ctrl+Scroll zooms in/out."""
+        if not getattr(self, "_ctrl_pressed", False):
+            return
+        delta = getattr(e, "scroll_delta_y", None)
+        if delta is None:
+            delta = getattr(e, "delta_y", 0)
+        if delta < 0:
+            self._zoom_in()
+        elif delta > 0:
+            self._zoom_out()
 
     def _zoom_out(self, e=None) -> None:
         candidates = [z for z in ZOOM_LEVELS if z < self.zoom - 0.01]

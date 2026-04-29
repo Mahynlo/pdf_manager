@@ -203,6 +203,9 @@ def main(page: ft.Page) -> None:
 
     def _on_keyboard(e: ft.KeyboardEvent) -> None:
         """Maneja los atajos de teclado globales para la aplicación, incluyendo abrir el selector de archivos, navegar entre pestañas, y realizar acciones específicas dentro de las pestañas de visor de PDF."""
+        # Keep all open viewers aware of the current Ctrl state (used for Ctrl+Scroll zoom).
+        for v in open_tabs:
+            v._ctrl_pressed = e.ctrl
         if e.ctrl and e.key.upper() == "O": # Ctrl+O para abrir el selector de archivos
             _open_picker()
             return
@@ -316,9 +319,15 @@ def main(page: ft.Page) -> None:
 
     # ── wiring ────────────────────────────────────────────────────────────────
 
+    def _on_keyboard_up(e: ft.KeyboardEvent) -> None:
+        """Clear Ctrl state on key-up so Ctrl+Scroll zoom stops after releasing Ctrl."""
+        for v in open_tabs:
+            v._ctrl_pressed = e.ctrl
+
     file_picker = ft.FilePicker(on_result=_on_file_picked)
     page.overlay.append(file_picker)
-    page.on_keyboard_event = _on_keyboard
+    page.on_keyboard_event    = _on_keyboard
+    page.on_keyboard_event_up = _on_keyboard_up
 
     home = HomePage(
         page_ref=page,
