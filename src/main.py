@@ -18,9 +18,10 @@ _NAVBAR_FG_DIM = "#90A4AE"
 
 
 def main(page: ft.Page) -> None:
-    page.title       = "Extraer PDFs"
-    page.theme_mode  = ft.ThemeMode.LIGHT
-    page.padding     = 0
+    page.title        = "Extraer PDFs"
+    page.theme_mode   = ft.ThemeMode.LIGHT
+    page.padding      = 0
+    page.window.icon  = "icon.png"
 
     open_tabs:     list[PDFViewerTab]      = []
     extractor_tab: PDFExtractionTab | None = None
