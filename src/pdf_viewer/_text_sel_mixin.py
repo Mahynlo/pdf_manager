@@ -367,6 +367,66 @@ class _TextSelMixin:
             self._annot._history.append((pn, annot.xref))
         self._refresh_page(pn)
 
+    def _text_sel_send_to_redact(self, e=None) -> None:
+        """Send the current text selection to the redaction panel as a candidate.
+
+        The region is added directly to _redact_term_matches so the user can
+        review it in the censorship panel and decide whether to apply it.
+        """
+        pn       = self._text_sel_pn
+        sel_rect = self._text_sel_sel_rect
+        text     = self._text_sel_text
+        self._hide_text_sel_bar()
+        if pn is None or sel_rect is None or not text:
+            return
+
+        # Build a display key — prefix distinguishes manual from keyword entries.
+        label    = text.strip()[:60]
+        term_key = f"[manual] {label}"
+
+        # If this exact key is already in the list, append page info to deduplicate.
+        existing = getattr(self, "_redact_terms", [])
+        if term_key in existing:
+            term_key = f"[manual] {label} (p.{pn + 1})"
+
+        # Inject directly into the redaction data structures.
+        if not hasattr(self, "_redact_terms"):
+            return
+        self._redact_terms.append(term_key)
+        matches = getattr(self, "_redact_term_matches", {})
+        matches[term_key] = [(pn, fitz.Rect(sel_rect), label)]
+        self._redact_term_matches = matches
+        self._redact_matches = self._flatten_matches()
+
+        # Rebuild redact panel UI
+        self._rebuild_redact_terms_list()
+        # Always enable preview so the zone is immediately visible in the viewer
+        if not getattr(self, "_redact_preview", False):
+            self._redact_preview = True
+            if self._redact_preview_btn is not None:
+                from ._viewer_defs import _SELECTED_BG
+                self._redact_preview_btn.bgcolor    = _SELECTED_BG
+                self._redact_preview_btn.icon_color = getattr(self, "_redact_box_color", "#E65100")
+                try:
+                    self._redact_preview_btn.update()
+                except Exception:
+                    pass
+        self._render_redact_preview(force_update=True)
+
+        # Switch sidebar to censorship tab and ensure it is visible
+        if hasattr(self, "_switch_sidebar_mode"):
+            self._switch_sidebar_mode("redact")
+        if not getattr(self, "_sidebar_visible", True):
+            self._toggle_sidebar()
+        if self._right_sidebar is not None:
+            try:
+                self._right_sidebar.update()
+            except Exception:
+                pass
+
+        short = label[:40] + ("…" if len(label) > 40 else "")
+        self._show_snack(f'Enviado a censura: "{short}"')
+
     def _text_sel_dismiss(self, e=None) -> None:
         self._hide_text_sel_bar()
 

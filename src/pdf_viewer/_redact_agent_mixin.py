@@ -1177,23 +1177,26 @@ class _RedactAgentMixin:
             color  = getattr(self, "_redact_box_color", "#000000")
             # Semi-transparent fill: color + "88" (53 % opacity) for preview
             fill   = color + "88"
-            by_page: dict[int, list[fitz.Rect]] = {}
-            for pn, rect, _ in self._redact_matches:
-                by_page.setdefault(pn, []).append(rect)
-            for pn, rects in by_page.items():
+            # Build per-page list keeping track of which term owns each rect
+            by_page: dict[int, list[tuple[fitz.Rect, str]]] = {}
+            for term in self._redact_terms:
+                for pn, rect, _ in self._redact_term_matches.get(term, []):
+                    by_page.setdefault(pn, []).append((rect, term))
+            for pn, rect_terms in by_page.items():
                 if pn >= len(self._redact_overlays):
                     continue
-                boxes: list[ft.Control] = [
-                    ft.Container(
+                boxes: list[ft.Control] = []
+                for r, term in rect_terms:
+                    boxes.append(ft.Container(
                         left=r.x0 * scale, top=r.y0 * scale,
                         width=max(2, r.width * scale),
                         height=max(2, r.height * scale),
                         bgcolor=fill,
                         border=ft.border.all(2, color),
-                        tooltip="Zona a censurar",
-                    )
-                    for r in rects
-                ]
+                        tooltip="Clic para eliminar esta zona de censura",
+                        ink=True,
+                        on_click=lambda e, _t=term, _p=pn, _r=r: self._remove_redact_match(_t, _p, _r),
+                    ))
                 ov = self._redact_overlays[pn]
                 ov.controls = boxes
                 ov.visible  = True
@@ -1206,6 +1209,35 @@ class _RedactAgentMixin:
                         self._redact_overlays[pn].update()
                     except Exception:
                         pass
+
+    def _remove_redact_match(self, term: str, pn: int, rect: fitz.Rect) -> None:
+        """Remove one specific redaction zone from the viewer and the terms list."""
+        if term not in self._redact_term_matches:
+            return
+        new_matches = [
+            (p, r, l)
+            for p, r, l in self._redact_term_matches[term]
+            if not (p == pn and r == rect)
+        ]
+        if not new_matches:
+            if term in self._redact_terms:
+                self._redact_terms.remove(term)
+            self._redact_term_matches.pop(term, None)
+        else:
+            self._redact_term_matches[term] = new_matches
+        self._redact_matches = self._flatten_matches()
+        self._rebuild_redact_terms_list()
+        if not self._redact_matches:
+            self._redact_preview = False
+            if self._redact_preview_btn is not None:
+                self._redact_preview_btn.bgcolor    = None
+                self._redact_preview_btn.icon_color = None
+                try:
+                    self._redact_preview_btn.update()
+                except Exception:
+                    pass
+        self._render_redact_preview(force_update=True)
+        self._show_snack("Zona de censura eliminada")
 
     def _toggle_redact_preview(self, e=None) -> None:
         if not self._redact_matches:
@@ -1238,12 +1270,23 @@ class _RedactAgentMixin:
         failed_apply: list[int] = []
 
         with self._doc_lock:
+            # Normalise each affected page's content stream before adding
+            # redact annotations.  Some PDFs have multiple content streams
+            # (an array in /Contents); clean_contents merges them into one so
+            # apply_redactions can locate all text in a single pass.
+            for pn in {p for p, _, _ in self._redact_matches}:
+                try:
+                    self.doc[pn].clean_contents()
+                except Exception:
+                    pass
+
             # ── añadir anotaciones ───────────────────────────────────────────────
             for pn, rect, _ in self._redact_matches:
-                # Explicit expansion: 2 pts on each side covers descenders/
-                # ascenders and OCR bbox inaccuracies.
-                r = fitz.Rect(rect.x0 - 2, rect.y0 - 2,
-                              rect.x1 + 2, rect.y1 + 2)
+                # No horizontal expansion: neighboring words can be 1-2 pt away
+                # and a wider rect causes apply_redactions to erase them too.
+                # 1 pt vertical expansion covers ascenders/descenders safely.
+                r = fitz.Rect(rect.x0, rect.y0 - 1,
+                              rect.x1, rect.y1 + 1)
                 try:
                     self.doc[pn].add_redact_annot(
                         r, fill=fill, cross_out=False,
@@ -1252,36 +1295,45 @@ class _RedactAgentMixin:
                 except Exception:
                     pass
 
-            # ── apply (permanently burns the fill into the content stream) ───
+            # ── apply (permanently removes text from the content stream) ──────
+            # PyMuPDF ≥1.24 renamed apply_redacts → apply_redactions.
             for pn in affected_pages:
                 page = self.doc[pn]
                 try:
-                    ok = page.apply_redacts(
-                        images=fitz.PDF_REDACT_IMAGE_PIXELS
+                    ok = page.apply_redactions(
+                        images=fitz.PDF_REDACT_IMAGE_PIXELS,
+                        text=fitz.PDF_REDACT_TEXT_REMOVE,
                     )
                     if not ok:
-                        # apply_redacts returns False on failure (no exception)
                         failed_apply.append(pn)
-                except Exception as ex:
-                    # Fallback: try without image-pixel redaction
+                except Exception:
+                    # Fallback for older PyMuPDF builds
                     try:
-                        page.apply_redacts()
+                        page.apply_redactions()
                     except Exception:
                         failed_apply.append(pn)
+                # Re-normalise after redaction so the content stream is clean
+                try:
+                    page.clean_contents()
+                except Exception:
+                    pass
 
-            # ── draw a solid rect as a guaranteed visual cover ────────────────
-            # apply_redacts modifies the content stream but on some PDFs the
-            # result may not re-render immediately.  Drawing an opaque rect on
-            # top ensures the area is always visually covered.
+            # ── draw a solid rect as guaranteed visual cover ──────────────────
+            # Even when apply_redactions succeeds some PDF viewers may still
+            # show remnants.  An opaque fill painted last in the stream is the
+            # final safeguard.
             for pn in affected_pages:
                 page = self.doc[pn]
                 by_page = [rect for _pn, rect, _ in self._redact_matches
                            if _pn == pn]
                 for rect in by_page:
-                    r = fitz.Rect(rect.x0 - 2, rect.y0 - 2,
-                                  rect.x1 + 2, rect.y1 + 2)
+                    # 1 pt horizontal / 2 pt vertical: visually covers the glyph
+                    # without eating into adjacent words on either side.
+                    r = fitz.Rect(rect.x0 - 1, rect.y0 - 2,
+                                  rect.x1 + 1, rect.y1 + 2)
                     try:
-                        page.draw_rect(r, color=fill, fill=fill, width=0)
+                        # color=None: no stroke border; fill only
+                        page.draw_rect(r, color=None, fill=fill, width=0)
                     except Exception:
                         pass
 
@@ -1321,7 +1373,13 @@ class _RedactAgentMixin:
                 _rcache.invalidate_page(pn)
 
         self._clear_redact_state()
-        self._rebuild_scroll_content(scroll_back=False)
+
+        # Re-render only the pages that were actually modified.
+        # Calling _rebuild_scroll_content would hide every page and show
+        # loading spinners across the whole document — unnecessary here
+        # because the page count and dimensions haven't changed.
+        for pn in sorted(affected_pages):
+            self._rerender_page_image(pn)
 
         if failed_apply:
             msg = (f"Censura aplicada en {len(affected_pages)} página(s)"
@@ -1329,8 +1387,6 @@ class _RedactAgentMixin:
                    f"{', '.join(str(p+1) for p in failed_apply)})")
         else:
             msg = f"Censura aplicada en {len(affected_pages)} página(s)"
-        # Refresh OCR sidebar so it reflects surviving detections (or shows
-        # "sin ejecutar" only when all OCR data for the current page was redacted).
         self._refresh_ocr_ui_for_page()
         self._show_snack(msg)
         self.page_ref.update()

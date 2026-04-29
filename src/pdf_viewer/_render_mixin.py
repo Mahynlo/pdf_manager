@@ -361,6 +361,14 @@ class _RenderMixin:
                     ),
                     ft.Container(width=1, height=20, bgcolor="#E0E0E0"),
                     ft.TextButton(
+                        "Censurar",
+                        icon=ft.Icons.VISIBILITY_OFF,
+                        icon_color="#B71C1C",
+                        on_click=lambda e: self._text_sel_send_to_redact(),
+                        style=_btn_style,
+                    ),
+                    ft.Container(width=1, height=20, bgcolor="#E0E0E0"),
+                    ft.TextButton(
                         "Buscar",
                         icon=ft.Icons.SEARCH,
                         icon_color="#1A73E8",
