@@ -68,6 +68,14 @@ class HomePage:
             )
         return self._tab
 
+    def get_tab_info(self) -> dict:
+        return {
+            "label": "Inicio",
+            "icon": ft.Icons.HOME_OUTLINED,
+            "content": self.view,
+            "closeable": False,
+        }
+
     # ========[Recent Files Panel]========================================================
     def _make_recent_rows(self) -> list[ft.Control]:
         files = rf.load()

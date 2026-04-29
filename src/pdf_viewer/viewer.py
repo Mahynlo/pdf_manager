@@ -247,6 +247,10 @@ class PDFViewerTab(
         # Ctrl key state — updated from main.py keyboard handler for Ctrl+Scroll zoom
         self._ctrl_pressed: bool = False
 
+        # Lazy-suspension state (cache-only — document stays open)
+        self._is_suspended:   bool                    = False
+        self._suspend_timer:  threading.Timer | None  = None
+
         self._save_picker = ft.FilePicker(on_result=self._on_save_result)
         page_ref.overlay.append(self._save_picker)
 
@@ -770,7 +774,61 @@ class PDFViewerTab(
             )
         return self._tab
 
+    def get_tab_info(self) -> dict:
+        return {
+            "label":     self.filename,
+            "icon":      ft.Icons.PICTURE_AS_PDF,
+            "content":   self.view,
+            "closeable": True,
+            "close_cb":  lambda: self.on_close(self),
+            "viewer":    self,
+        }
+
+    # ── lazy suspension ───────────────────────────────────────────────────────
+    #
+    # When this tab loses focus it starts a 60 s timer. On expiry the render
+    # cache is cleared (frees ~2–3 MB of base64 page images) while the
+    # fitz.Document stays open (avoids serialising unsaved annotations).
+    # On focus the timer is cancelled; if already suspended, a fast-resize
+    # rebuild re-renders the visible pages on demand.
+
+    _SUSPEND_DELAY = 60.0  # seconds of inactivity before freeing cache
+
+    def on_focus(self) -> None:
+        """Called by DocumentManagerUI when this tab becomes active."""
+        self._cancel_suspend_timer()
+        if self._is_suspended:
+            self._is_suspended = False
+            # fast-resize path: hides stale images, shows loading overlays,
+            # and triggers lazy re-render of the first visible pages.
+            self._rebuild_scroll_content(scroll_back=False)
+
+    def on_blur(self) -> None:
+        """Called by DocumentManagerUI when another tab becomes active."""
+        self._start_suspend_timer()
+
+    def _start_suspend_timer(self) -> None:
+        self._cancel_suspend_timer()
+        t = threading.Timer(self._SUSPEND_DELAY, self._do_suspend)
+        t.daemon = True
+        t.start()
+        self._suspend_timer = t
+
+    def _cancel_suspend_timer(self) -> None:
+        if self._suspend_timer is not None:
+            self._suspend_timer.cancel()
+            self._suspend_timer = None
+
+    def _do_suspend(self) -> None:
+        """Background-thread callback: free render cache, keep doc open."""
+        if self._is_suspended:
+            return
+        self._render_gen += 1      # abort any in-flight renders
+        self._render_cache.clear() # release cached page images
+        self._is_suspended = True
+
     def close(self) -> None:
+        self._cancel_suspend_timer()
         self._render_gen += 1  # signal running workers to exit before doc is closed
         self._render_cache.clear()
         self.doc.close()

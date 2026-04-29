@@ -98,6 +98,15 @@ class MergePDFTab:
             )
         return self._tab
 
+    def get_tab_info(self) -> dict:
+        return {
+            "label": "Combinar PDFs",
+            "icon": ft.Icons.MERGE_TYPE,
+            "content": self.view,
+            "closeable": True,
+            "close_cb": lambda: self.on_close(self),
+        }
+
     def close(self) -> None:
         """Called by main.py when the tab is closed — clean up resources."""
         for entry in self._entries:

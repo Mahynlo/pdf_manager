@@ -248,7 +248,11 @@ def _ink_replace(
     border = annot.border or {}
     width  = new_width if new_width is not None else (border.get("width", 2) or 2)
     page.delete_annot(annot)
-    new_annot = page.add_ink_annot(new_strokes)
+    flat = [
+        [(float(p.x if hasattr(p, "x") else p[0]), float(p.y if hasattr(p, "y") else p[1])) for p in s]
+        for s in new_strokes
+    ]
+    new_annot = page.add_ink_annot(flat)
     if stroke_color is not None:
         new_annot.set_colors(stroke=stroke_color)
     new_annot.set_border(width=width)
@@ -473,9 +477,8 @@ class AnnotationManager:
         if len(pdf_points) < 2:
             return False
         smoothed = _catmull_rom(pdf_points) if len(pdf_points) >= 3 else list(pdf_points)
-        fitz_pts = [fitz.Point(x, y) for x, y in smoothed]
         page  = doc[page_num]
-        annot = page.add_ink_annot([fitz_pts])
+        annot = page.add_ink_annot([smoothed])
         annot.set_colors(stroke=STROKE_COLOR[Tool.INK])
         annot.set_border(width=2)
         annot.update()
@@ -894,6 +897,24 @@ class AnnotationManager:
             half_w = max(1.0, r.width * factor / 2)
             half_h = max(1.0, r.height * factor / 2)
             new_rect = fitz.Rect(cx - half_w, cy - half_h, cx + half_w, cy + half_h)
+
+            if atype == "Ink":
+                strokes = _ink_verts_from_annot(annot)
+                if not strokes:
+                    return None
+                old_rect = fitz.Rect(annot.rect)
+                new_strokes = [[_map_point(pt, old_rect, new_rect) for pt in s] for s in strokes]
+                try:
+                    new_annot = _ink_replace(page, annot, new_strokes)
+                except Exception:
+                    return None
+                self._history = [
+                    (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
+                    for (p, x) in self._history
+                ]
+                self._visual_rects.pop(xref, None)
+                self._rotations.pop(xref, None)
+                return new_rect, new_annot.xref
 
             if atype == "Line":
                 verts = annot.vertices

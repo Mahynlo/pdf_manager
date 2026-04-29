@@ -77,6 +77,15 @@ class SettingsTab:
             )
         return self._tab
 
+    def get_tab_info(self) -> dict:
+        return {
+            "label": "Configuración",
+            "icon": ft.Icons.SETTINGS_OUTLINED,
+            "content": self.view,
+            "closeable": True,
+            "close_cb": lambda: self.on_close(self),
+        }
+
     # ── build ─────────────────────────────────────────────────────────────────
 
     def _build(self) -> None:
