@@ -161,6 +161,32 @@ class _GestureMixin:
                 self._hide_text_sel_bar()
             return
 
+        if self._annot.tool in (Tool.HIGHLIGHT, Tool.UNDERLINE, Tool.STRIKEOUT):
+            if (self._pending_tap is None or self._pending_tap_page != pn):
+                self._pending_tap      = None
+                self._pending_tap_page = None
+                return
+            x, y = self._pending_tap
+            self._pending_tap      = None
+            self._pending_tap_page = None
+            pdf_x, pdf_y = display_to_pdf(x, y, self.zoom)
+            if self._tap_count >= 3:
+                self._hide_text_sel_bar()
+                self._select_paragraph_at(pn, (pdf_x, pdf_y))
+                active_tool = self._annot.tool
+                self._text_sel_apply(active_tool)
+                self._select_last_annot(pn)
+                return
+            if self._tap_count == 2:
+                self._hide_text_sel_bar()
+                self._select_word_at(pn, (pdf_x, pdf_y))
+                active_tool = self._annot.tool
+                self._text_sel_apply(active_tool)
+                self._select_last_annot(pn)
+                return
+            self._hide_text_sel_bar()
+            return
+
         self._pending_tap      = None
         self._pending_tap_page = None
 
@@ -250,6 +276,21 @@ class _GestureMixin:
         self.current_page = pn
         pdf_x, pdf_y = display_to_pdf(e.local_x, e.local_y, self.zoom)
 
+        if self._annot.tool in (Tool.HIGHLIGHT, Tool.UNDERLINE, Tool.STRIKEOUT):
+            self._sel_drag_handle       = None
+            self._smart_text_sel_active = True
+            self._text_sel_pn           = pn
+            self._text_sel_start_pdf    = (pdf_x, pdf_y)
+            self._text_sel_end_pdf      = (pdf_x, pdf_y)
+            self._hide_text_sel_bar()
+            for gd in self._page_gestures:
+                gd.mouse_cursor = ft.MouseCursor.TEXT
+                try:
+                    gd.update()
+                except Exception:
+                    pass
+            return
+
         if self._annot.tool == Tool.INK:
             self._ink_points = [(pdf_x, pdf_y)]
             self._ink_page   = pn
@@ -332,6 +373,14 @@ class _GestureMixin:
             return
 
         pdf_x, pdf_y = display_to_pdf(e.local_x, e.local_y, self.zoom)
+
+        if self._annot.tool in (Tool.HIGHLIGHT, Tool.UNDERLINE, Tool.STRIKEOUT):
+            if getattr(self, "_smart_text_sel_active", False):
+                self._text_sel_end_pdf = (pdf_x, pdf_y)
+                self._update_text_selection(
+                    pn, self._text_sel_start_pdf, self._text_sel_end_pdf, update_ui=True
+                )
+            return
 
         if self._annot.tool == Tool.INK:
             ink_pts = getattr(self, "_ink_points", None)
@@ -443,6 +492,19 @@ class _GestureMixin:
                 gd.update()
             except Exception:
                 pass
+
+    def _select_last_annot(self, pn: int) -> None:
+        """Select the most-recently created annotation on *pn* (shows color/delete bar)."""
+        if not self._annot._history:
+            return
+        last_pn, last_xref = self._annot._history[-1]
+        if last_pn != pn:
+            return
+        with self._doc_lock:
+            for a in self.doc[pn].annots():
+                if a.xref == last_xref:
+                    self._select_annot(pn, a)
+                    break
 
     def _on_pan_end(self, e: ft.DragEndEvent, pn: int) -> None:
         if self._annot.tool == Tool.CURSOR:
@@ -564,6 +626,28 @@ class _GestureMixin:
                 if self._text_sel_sel_rect is not None:
                     self._annot.last_rect = self._text_sel_sel_rect
                 self._show_text_sel_bar(sel_text)
+            return
+
+        if self._annot.tool in (Tool.HIGHLIGHT, Tool.UNDERLINE, Tool.STRIKEOUT):
+            if getattr(self, "_smart_text_sel_active", False):
+                self._smart_text_sel_active = False
+                sel_text = self._update_text_selection(
+                    pn, self._text_sel_start_pdf, self._text_sel_end_pdf, update_ui=True
+                )
+                if not sel_text:
+                    sel_rect = self._text_sel_sel_rect
+                    if sel_rect is None and self._text_sel_start_pdf and self._text_sel_end_pdf:
+                        sx, sy = self._text_sel_start_pdf
+                        ex, ey = self._text_sel_end_pdf
+                        sel_rect = fitz.Rect(min(sx, ex), min(sy, ey), max(sx, ex), max(sy, ey))
+                    sel_text = self._ocr_text_in_rect(pn, sel_rect)
+                if sel_text:
+                    if self._text_sel_sel_rect is not None:
+                        self._annot.last_rect = self._text_sel_sel_rect
+                    active_tool = self._annot.tool
+                    self._text_sel_apply(active_tool)
+                    self._select_last_annot(pn)
+                self._restore_smart_cursor()
             return
 
         if self._annot.tool == Tool.INK:
