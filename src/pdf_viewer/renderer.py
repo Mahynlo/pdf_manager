@@ -70,7 +70,14 @@ def render_page(
     # JPEG does not support alpha; flatten to RGB if needed.
     if pix.alpha:
         pix = fitz.Pixmap(fitz.csRGB, pix)
-    b64 = base64.b64encode(pix.tobytes("jpeg", jpg_quality=92)).decode()
+    # PNG for low zoom (text is small — lossless avoids visible compression blur);
+    # JPEG at high quality for high zoom (large pixmaps keep reasonable size).
+    if zoom <= 1.0:
+        img_bytes = pix.tobytes("png")
+    else:
+        jpg_q = 95 if zoom <= 2.0 else 92
+        img_bytes = pix.tobytes("jpeg", jpg_quality=jpg_q)
+    b64 = base64.b64encode(img_bytes).decode()
     result = b64, pix.width, pix.height
 
     if cache is not None:

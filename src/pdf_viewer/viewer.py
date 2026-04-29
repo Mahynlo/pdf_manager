@@ -244,6 +244,9 @@ class PDFViewerTab(
         self._agent_config_section:    ft.Container  | None = None
         self._agent_config_toggle_btn: ft.IconButton | None = None
 
+        # Ctrl key state — updated from main.py keyboard handler for Ctrl+Scroll zoom
+        self._ctrl_pressed: bool = False
+
         self._save_picker = ft.FilePicker(on_result=self._on_save_result)
         page_ref.overlay.append(self._save_picker)
 
