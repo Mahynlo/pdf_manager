@@ -508,9 +508,11 @@ class AnnotationManager:
     # ── annotation hit-test & editing ─────────────────────────────────────────
 
     def get_annot_at(self, page: fitz.Page, x: float, y: float) -> fitz.Annot | None:
-        """Return the topmost annotation at PDF point (x, y), or None."""
+        """Return the annotation at PDF point (x, y), preferring shapes over markup."""
+        _MARKUP = {"Highlight", "Underline", "StrikeOut", "Squiggly"}
         pt = fitz.Point(x, y)
-        result = None
+        shape_result  = None
+        markup_result = None
         for annot in page.annots():
             # Expand hit-area so lines and small annotations are easier to pick.
             hit = fitz.Rect(annot.rect)
@@ -518,9 +520,18 @@ class AnnotationManager:
             hit.y0 -= 6
             hit.x1 += 6
             hit.y1 += 6
-            if hit.contains(pt):
-                result = annot
-        return result
+            if not hit.contains(pt):
+                continue
+            atype = (annot.type[1]
+                     if isinstance(annot.type, (tuple, list)) and len(annot.type) > 1
+                     else "")
+            if atype in _MARKUP:
+                markup_result = annot
+            else:
+                shape_result = annot
+        # Shapes (rect/circle/line/etc.) take priority over markup overlays so
+        # that a shape drawn under a highlight/underline remains selectable.
+        return shape_result if shape_result is not None else markup_result
 
     def delete_annot(self, doc: fitz.Document, page_num: int, xref: int) -> bool:
         page = doc[page_num]

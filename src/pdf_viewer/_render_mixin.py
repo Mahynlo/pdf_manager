@@ -45,10 +45,12 @@ class _RenderMixin:
             self._page_words     = {}
             self._text_sel_pn    = None
             self._text_sel_text  = ""
-            self._text_sel_start_pdf = None
-            self._text_sel_end_pdf   = None
-            self._text_sel_sel_rect  = None
-            self._annot_popup_pn     = None
+            self._text_sel_start_pdf    = None
+            self._text_sel_end_pdf      = None
+            self._text_sel_sel_rect     = None
+            self._annot_popup_pn        = None
+            self._smart_text_sel_active = False
+            self._sel_drag_handle       = None
 
             cum = 0.0
             for pn, (w, h) in enumerate(page_dims):
@@ -147,6 +149,8 @@ class _RenderMixin:
         self._text_sel_start_pdf   = None
         self._text_sel_end_pdf     = None
         self._text_sel_sel_rect    = None
+        self._smart_text_sel_active = False
+        self._sel_drag_handle      = None
         self._text_sel_popups      = []
         self._annot_popups         = []
         self._annot_popup_pn       = None
@@ -486,6 +490,7 @@ class _RenderMixin:
                 on_pan_update     = lambda e, p=pn: self._on_pan_update(e, p),
                 on_pan_end        = lambda e, p=pn: self._on_pan_end(e, p),
                 on_secondary_tap  = lambda e, p=pn: self._on_secondary_tap(e, p),
+                on_hover          = lambda e, p=pn: self._on_hover(e, p),
                 mouse_cursor      = self._current_cursor,
             )
             self._page_gestures.append(gd)

@@ -27,9 +27,8 @@ _EVICT_THRESHOLD = 400   # scroll px between eviction passes
 
 # ── Tool button definitions ───────────────────────────────────────────────────
 _TOOL_DEFS: list[tuple[Tool, str, str, ft.MouseCursor]] = [
-    (Tool.CURSOR,    ft.Icons.NEAR_ME,             "Cursor (seleccionar anotación)", ft.MouseCursor.BASIC),
-    (Tool.SELECT,    ft.Icons.TEXT_FIELDS,          "Seleccionar texto",              ft.MouseCursor.TEXT),
-    (Tool.HIGHLIGHT, ft.Icons.HIGHLIGHT,            "Resaltar",                       ft.MouseCursor.PRECISE),
+    (Tool.CURSOR,    ft.Icons.NEAR_ME,             "Seleccionar texto y anotaciones", ft.MouseCursor.BASIC),
+    (Tool.HIGHLIGHT, ft.Icons.HIGHLIGHT,            "Resaltar",                        ft.MouseCursor.PRECISE),
     (Tool.UNDERLINE, ft.Icons.FORMAT_UNDERLINE,     "Subrayar",                       ft.MouseCursor.PRECISE),
     (Tool.STRIKEOUT, ft.Icons.FORMAT_STRIKETHROUGH, "Tachar",                         ft.MouseCursor.PRECISE),
     (Tool.RECT,      ft.Icons.CROP_DIN,             "Rectángulo",                     ft.MouseCursor.PRECISE),

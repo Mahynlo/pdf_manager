@@ -22,7 +22,9 @@ class _AnnotMixin:
     # ── tool selection ────────────────────────────────────────────────────────
 
     def _select_tool(self, tool: Tool, cursor: ft.MouseCursor) -> None:
-        if tool != Tool.SELECT:
+        # CURSOR is the smart pointer (text + annotation); keep text selection
+        # visible when switching between annotation drawing tools and back to it.
+        if tool not in (Tool.SELECT, Tool.CURSOR):
             self._hide_text_sel_bar()
         self._hide_annot_popup()
         self._annot.set_tool(tool)
@@ -113,7 +115,7 @@ class _AnnotMixin:
         # Markup annotations (highlight/underline/strikeout) cannot be
         # moved or resized — hide corner handles and size/thickness buttons.
         is_markup  = atype in ("Highlight", "Underline", "StrikeOut", "Squiggly")
-        no_recolor = atype in ("Underline", "StrikeOut", "Squiggly")
+        no_recolor = atype in ("Squiggly",)
         for name in ("tl", "tr", "bl", "br"):
             h[name].visible = not is_markup
         for name in ("scale_sep", "scale_down", "scale_up", "width_sep", "width_down", "width_up"):
