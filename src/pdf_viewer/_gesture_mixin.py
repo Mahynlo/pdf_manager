@@ -173,6 +173,8 @@ class _GestureMixin:
             if self._tap_count >= 3:
                 self._hide_text_sel_bar()
                 self._select_paragraph_at(pn, (pdf_x, pdf_y))
+                if self._text_sel_sel_rect is not None:
+                    self._annot.last_rect = self._text_sel_sel_rect
                 active_tool = self._annot.tool
                 self._text_sel_apply(active_tool)
                 self._select_last_annot(pn)
@@ -180,10 +182,13 @@ class _GestureMixin:
             if self._tap_count == 2:
                 self._hide_text_sel_bar()
                 self._select_word_at(pn, (pdf_x, pdf_y))
+                if self._text_sel_sel_rect is not None:
+                    self._annot.last_rect = self._text_sel_sel_rect
                 active_tool = self._annot.tool
                 self._text_sel_apply(active_tool)
                 self._select_last_annot(pn)
                 return
+            self._deselect_annot()
             self._hide_text_sel_bar()
             return
 
@@ -277,6 +282,7 @@ class _GestureMixin:
         pdf_x, pdf_y = display_to_pdf(e.local_x, e.local_y, self.zoom)
 
         if self._annot.tool in (Tool.HIGHLIGHT, Tool.UNDERLINE, Tool.STRIKEOUT):
+            self._deselect_annot()
             self._sel_drag_handle       = None
             self._smart_text_sel_active = True
             self._text_sel_pn           = pn
