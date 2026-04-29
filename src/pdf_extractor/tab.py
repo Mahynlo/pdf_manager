@@ -207,6 +207,14 @@ class PDFExtractionTab:
             )
         return self._tab
 
+    def get_tab_info(self) -> dict:
+        return {
+            "label": "Extraer PDF",
+            "icon": ft.Icons.FIND_IN_PAGE,
+            "content": self.view,
+            "closeable": False,
+        }
+
     # ------------------------------------------------------------------ Events
 
     def _on_reference_picked(self, e: ft.FilePickerResultEvent) -> None:
