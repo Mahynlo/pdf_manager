@@ -3,28 +3,74 @@ from __future__ import annotations
 
 import base64
 import threading
+import time
 from pathlib import Path
 from typing import Callable
 
 import flet as ft
 import fitz
 
-# Number of page chips shown before "show more" toggle
 _CHIPS_PREVIEW = 30
-# Hard cap: never render more than this many thumbnail chips at once
-_CHIPS_MAX = 120
+_CHIPS_MAX     = 120
 
+
+# ── range helpers ─────────────────────────────────────────────────────────────
+
+def _selection_to_range(selected: list[bool]) -> str:
+    """Boolean list → compact 1-based range string, e.g. '1-5, 8, 10-15'."""
+    pages = [i + 1 for i, s in enumerate(selected) if s]
+    if not pages:
+        return ""
+    ranges: list[str] = []
+    start = end = pages[0]
+    for p in pages[1:]:
+        if p == end + 1:
+            end = p
+        else:
+            ranges.append(str(start) if start == end else f"{start}-{end}")
+            start = end = p
+    ranges.append(str(start) if start == end else f"{start}-{end}")
+    return ", ".join(ranges)
+
+
+def _parse_range(text: str, total: int) -> list[bool]:
+    """'1-5, 8, 10-15' (1-based, semicolons allowed) → boolean selection list."""
+    selected = [False] * total
+    for part in text.replace(";", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            try:
+                lo_s, hi_s = part.split("-", 1)
+                lo, hi = int(lo_s.strip()), int(hi_s.strip())
+                lo, hi = min(lo, hi), max(lo, hi)
+                for i in range(max(1, lo), min(total, hi) + 1):
+                    selected[i - 1] = True
+            except ValueError:
+                pass
+        else:
+            try:
+                n = int(part)
+                if 1 <= n <= total:
+                    selected[n - 1] = True
+            except ValueError:
+                pass
+    return selected
+
+
+# ── model ─────────────────────────────────────────────────────────────────────
 
 class _PDFEntry:
     """One source PDF added to the merge list."""
 
     def __init__(self, path: str):
-        self.path = path
+        self.path     = path
         self.filename = Path(path).name
-        self.doc = fitz.open(path)
-        self.total = len(self.doc)
-        self.selected = [True] * self.total   # all pages selected by default
-        self.chips_expanded = False                  # show all chips or just first _CHIPS_PREVIEW
+        self.doc      = fitz.open(path)
+        self.total    = len(self.doc)
+        self.selected = [True] * self.total
+        self.chips_expanded = False
 
     def close(self) -> None:
         try:
@@ -40,6 +86,8 @@ class _PDFEntry:
     def selected_count(self) -> int:
         return sum(self.selected)
 
+
+# ── tab ───────────────────────────────────────────────────────────────────────
 
 class MergePDFTab:
     """Singleton, closeable tab for combining multiple PDFs."""
@@ -58,17 +106,20 @@ class MergePDFTab:
         self._entries: list[_PDFEntry] = []
         self._output_path: str | None  = None
         self._last_merged: str | None  = None
-        self._thumb_cache: dict[tuple[str, int], str] = {}  # (path, page) -> base64 PNG
+        self._thumb_cache: dict[tuple[str, int], str] = {}
+        self._merging = False
 
         # UI refs (set in _build)
-        self._pdf_col:      ft.Column         | None = None
-        self._preview_list: ft.ListView       | None = None
-        self._status_text:  ft.Text           | None = None
-        self._output_label: ft.Text           | None = None
-        self._merge_btn:    ft.ElevatedButton | None = None
-        self._result_row:   ft.Container      | None = None
+        self._pdf_col:       ft.Column         | None = None
+        self._preview_wrap:  ft.Row            | None = None
+        self._preview_col:   ft.Column         | None = None
+        self._preview_empty: ft.Container      | None = None
+        self._status_text:   ft.Text           | None = None
+        self._output_label:  ft.Text           | None = None
+        self._merge_btn:     ft.ElevatedButton | None = None
+        self._result_row:    ft.Container      | None = None
+        self._progress_bar:  ft.ProgressBar    | None = None
 
-        # File pickers
         self._pick_pdfs   = ft.FilePicker(on_result=self._on_pdfs_picked)
         self._save_picker = ft.FilePicker(on_result=self._on_save_picked)
         self.page_ref.overlay.extend([self._pick_pdfs, self._save_picker])
@@ -108,7 +159,6 @@ class MergePDFTab:
         }
 
     def close(self) -> None:
-        """Called by main.py when the tab is closed — clean up resources."""
         for entry in self._entries:
             entry.close()
         self._thumb_cache.clear()
@@ -118,8 +168,9 @@ class MergePDFTab:
             except ValueError:
                 pass
 
+    # ── thumbnail helpers ─────────────────────────────────────────────────────
+
     def _get_thumb(self, path: str, page: int) -> str | None:
-        """Return a cached base64 PNG thumbnail (opens its own fitz doc — thread-safe)."""
         key = (path, page)
         if key in self._thumb_cache:
             return self._thumb_cache[key]
@@ -136,7 +187,6 @@ class MergePDFTab:
             return None
 
     def _render_thumbs_async(self, path: str, pages: list[int]) -> None:
-        """Render uncached thumbnails in a daemon thread, then refresh the UI once."""
         uncached = [p for p in pages if (path, p) not in self._thumb_cache]
         if not uncached:
             return
@@ -144,7 +194,6 @@ class MergePDFTab:
         def _worker() -> None:
             for pg in uncached:
                 self._get_thumb(path, pg)
-            # Rebuild once all thumbnails for this batch are ready
             self._rebuild_pdf_list()
             self._rebuild_preview()
             try:
@@ -157,7 +206,7 @@ class MergePDFTab:
     # ── build ─────────────────────────────────────────────────────────────────
 
     def _build(self) -> None:
-        # ── left panel: PDF source list ───────────────────────────────────────
+        # ── left panel ────────────────────────────────────────────────────────
         self._pdf_col = ft.Column([], spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
 
         left_panel = ft.Container(
@@ -171,6 +220,16 @@ class MergePDFTab:
                                 color=ft.Colors.ON_SURFACE,
                             ),
                             ft.Container(expand=True),
+                            ft.TextButton(
+                                "Limpiar todo",
+                                icon=ft.Icons.CLEAR_ALL,
+                                style=ft.ButtonStyle(
+                                    color=ft.Colors.ERROR,
+                                    text_style=ft.TextStyle(size=12),
+                                ),
+                                on_click=self._clear_all,
+                                tooltip="Quitar todos los PDFs de la lista",
+                            ),
                             ft.ElevatedButton(
                                 "Agregar PDF", icon=ft.Icons.ADD,
                                 on_click=lambda e: self._pick_pdfs.pick_files(
@@ -195,10 +254,37 @@ class MergePDFTab:
             border=ft.border.only(right=ft.BorderSide(1, ft.Colors.OUTLINE_VARIANT)),
         )
 
-        # ── right panel: preview + output controls ────────────────────────────
-        self._preview_list = ft.ListView([], spacing=2, expand=True)
-        self._status_text  = ft.Text("", size=12, color=ft.Colors.ON_SURFACE_VARIANT)
+        # ── right panel ───────────────────────────────────────────────────────
+        self._preview_wrap = ft.Row([], wrap=True, spacing=4, run_spacing=4)
+        self._preview_empty = ft.Container(
+            content=ft.Column(
+                [
+                    ft.Icon(ft.Icons.PREVIEW, size=40, color=ft.Colors.OUTLINE),
+                    ft.Text(
+                        "Sin páginas seleccionadas",
+                        size=12, color=ft.Colors.OUTLINE, italic=True,
+                        text_align=ft.TextAlign.CENTER,
+                    ),
+                ],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=8,
+                alignment=ft.MainAxisAlignment.CENTER,
+            ),
+            expand=True,
+            alignment=ft.alignment.center,
+            visible=True,
+        )
+        self._preview_col = ft.Column(
+            [self._preview_empty],
+            scroll=ft.ScrollMode.AUTO,
+            expand=True,
+        )
 
+        self._status_text  = ft.Text("", size=12, color=ft.Colors.ON_SURFACE_VARIANT)
+        self._progress_bar = ft.ProgressBar(
+            visible=False, color=ft.Colors.PRIMARY,
+            bgcolor=ft.Colors.OUTLINE_VARIANT,
+        )
         self._output_label = ft.Text(
             "Sin ruta de salida seleccionada",
             size=12, color=ft.Colors.ON_SURFACE_VARIANT,
@@ -211,7 +297,6 @@ class MergePDFTab:
             on_click=self._on_merge,
             disabled=True,
         )
-        # Result banner (shown after a successful merge)
         self._result_row = ft.Container(
             content=ft.Row(
                 [
@@ -249,7 +334,8 @@ class MergePDFTab:
                         spacing=8,
                     ),
                     ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
-                    ft.Container(self._preview_list, expand=True),
+                    ft.Container(self._preview_col, expand=True),
+                    self._progress_bar,
                     ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT),
                     ft.Row(
                         [
@@ -295,7 +381,14 @@ class MergePDFTab:
             if any(en.path == f.path for en in self._entries):
                 continue
             try:
-                self._entries.append(_PDFEntry(f.path))
+                entry = _PDFEntry(f.path)
+                self._entries.append(entry)
+                # Auto-suggest output path from the directory of the first PDF added
+                if self._output_path is None:
+                    suggested = str(Path(f.path).parent / "combinado.pdf")
+                    self._output_path = suggested
+                    if self._output_label is not None:
+                        self._output_label.value = suggested
                 added = True
             except Exception as ex:
                 self.page_ref.snack_bar = ft.SnackBar(
@@ -306,16 +399,32 @@ class MergePDFTab:
             self._rebuild_preview()
         self.page_ref.update()
 
+    def _clear_all(self, e=None) -> None:
+        for entry in self._entries:
+            entry.close()
+        self._entries.clear()
+        self._thumb_cache.clear()
+        self._rebuild_pdf_list()
+        self._rebuild_preview()
+        self.page_ref.update()
+
     def _rebuild_pdf_list(self) -> None:
         if not self._entries:
             self._pdf_col.controls = [
                 ft.Container(
-                    ft.Text(
-                        'Agrega PDFs con el botón "Agregar PDF"',
-                        size=13, color=ft.Colors.OUTLINE, italic=True,
-                        text_align=ft.TextAlign.CENTER,
+                    ft.Column(
+                        [
+                            ft.Icon(ft.Icons.UPLOAD_FILE, size=48, color=ft.Colors.OUTLINE),
+                            ft.Text(
+                                'Agrega PDFs con el botón "Agregar PDF"',
+                                size=13, color=ft.Colors.OUTLINE, italic=True,
+                                text_align=ft.TextAlign.CENTER,
+                            ),
+                        ],
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=10,
                     ),
-                    padding=ft.padding.symmetric(vertical=40, horizontal=16),
+                    padding=ft.padding.symmetric(vertical=60, horizontal=16),
                     alignment=ft.alignment.center,
                 )
             ]
@@ -327,9 +436,7 @@ class MergePDFTab:
         self._update_merge_btn()
 
     def _make_entry_card(self, idx: int, entry: _PDFEntry) -> ft.Container:
-        """Build the interactive card for one source PDF."""
-
-        _TW, _TH = 54, 72  # thumbnail chip dimensions
+        _TW, _TH = 54, 72
 
         def _chip(pg: int) -> ft.Container:
             sel = entry.selected[pg]
@@ -337,29 +444,24 @@ class MergePDFTab:
 
             if thumb_b64:
                 thumb: ft.Control = ft.Image(
-                    src_base64=thumb_b64,
-                    width=_TW, height=_TH,
+                    src_base64=thumb_b64, width=_TW, height=_TH,
                     fit=ft.ImageFit.COVER,
                 )
             else:
                 thumb = ft.Container(
-                    width=_TW, height=_TH,
-                    bgcolor="#D0D0D0",
+                    width=_TW, height=_TH, bgcolor="#D0D0D0",
                     content=ft.Icon(ft.Icons.PICTURE_AS_PDF, size=20, color=ft.Colors.OUTLINE),
                     alignment=ft.alignment.center,
                 )
 
-            # Semi-transparent blue overlay when selected
-            sel_overlay = ft.Container(
-                bgcolor="#1976D244" if sel else None,
+            # Blue tint when selected, dark tint when excluded
+            overlay = ft.Container(
+                bgcolor="#1976D244" if sel else "#00000066",
                 left=0, right=0, top=0, bottom=0,
             )
-
-            # Page number badge pinned to the bottom
             num_badge = ft.Container(
                 content=ft.Text(
-                    str(pg + 1), size=9,
-                    color="white",
+                    str(pg + 1), size=9, color="white",
                     text_align=ft.TextAlign.CENTER,
                     weight=ft.FontWeight.BOLD,
                 ),
@@ -370,7 +472,7 @@ class MergePDFTab:
             )
 
             return ft.Container(
-                content=ft.Stack([thumb, sel_overlay, num_badge]),
+                content=ft.Stack([thumb, overlay, num_badge]),
                 width=_TW, height=_TH,
                 border_radius=4,
                 border=ft.border.all(
@@ -388,8 +490,6 @@ class MergePDFTab:
             visible_n = min(_CHIPS_PREVIEW, entry.total)
 
         chips: list[ft.Control] = [_chip(p) for p in range(visible_n)]
-
-        # Dispatch background rendering for chips not yet in cache
         self._render_thumbs_async(entry.path, list(range(visible_n)))
 
         if entry.total > _CHIPS_PREVIEW:
@@ -407,22 +507,34 @@ class MergePDFTab:
                     on_click=lambda e, i=idx: self._toggle_chips_expand(i),
                 )
             )
-            # If the PDF exceeds the hard cap, show a notice
             if entry.chips_expanded and entry.total > _CHIPS_MAX:
                 hidden = entry.total - _CHIPS_MAX
                 chips.append(
                     ft.Text(
-                        f"... y {hidden} páginas más — usa «Todas» o «Ninguna» para incluirlas.",
-                        size=10,
-                        color=ft.Colors.ON_SURFACE_VARIANT,
-                        italic=True,
+                        f"... y {hidden} páginas más — usa el campo de rango para incluirlas.",
+                        size=10, color=ft.Colors.ON_SURFACE_VARIANT, italic=True,
                     )
                 )
+
+        range_field = ft.TextField(
+            value=_selection_to_range(entry.selected),
+            hint_text="Ej: 1-5, 8, 10-15",
+            label="Rango de páginas (1-based)",
+            label_style=ft.TextStyle(size=11),
+            text_size=12,
+            dense=True,
+            border_radius=6,
+            content_padding=ft.padding.symmetric(horizontal=10, vertical=6),
+            expand=True,
+            tooltip="Escribe un rango y presiona Enter o haz clic fuera para aplicar",
+            on_blur=lambda e, i=idx: self._apply_range(i, e.control.value),
+            on_submit=lambda e, i=idx: self._apply_range(i, e.control.value),
+        )
 
         return ft.Container(
             content=ft.Column(
                 [
-                    # ── header row ────────────────────────────────────────────
+                    # header row
                     ft.Row(
                         [
                             ft.Icon(ft.Icons.PICTURE_AS_PDF, color=ft.Colors.ERROR, size=18),
@@ -453,7 +565,7 @@ class MergePDFTab:
                         spacing=2,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
-                    # ── quick-select row ──────────────────────────────────────
+                    # quick-select row
                     ft.Row(
                         [
                             ft.TextButton(
@@ -466,6 +578,12 @@ class MergePDFTab:
                                 style=ft.ButtonStyle(text_style=ft.TextStyle(size=11)),
                                 on_click=lambda e, i=idx: self._select_all_pages(i, False),
                             ),
+                            ft.TextButton(
+                                "Invertir", icon=ft.Icons.SWAP_HORIZ,
+                                style=ft.ButtonStyle(text_style=ft.TextStyle(size=11)),
+                                on_click=lambda e, i=idx: self._invert_pages(i),
+                                tooltip="Invertir la selección de páginas",
+                            ),
                             ft.Container(expand=True),
                             ft.Text(
                                 f"{entry.selected_count}/{entry.total} págs.",
@@ -475,7 +593,9 @@ class MergePDFTab:
                         spacing=0,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
-                    # ── page chips ────────────────────────────────────────────
+                    # page range input
+                    ft.Row([range_field], spacing=0),
+                    # page chips
                     ft.Row(chips, wrap=True, spacing=4, run_spacing=4),
                 ],
                 spacing=4,
@@ -501,6 +621,20 @@ class MergePDFTab:
     def _select_all_pages(self, entry_idx: int, value: bool) -> None:
         entry = self._entries[entry_idx]
         entry.selected = [value] * entry.total
+        self._rebuild_pdf_list()
+        self._rebuild_preview()
+        self.page_ref.update()
+
+    def _invert_pages(self, entry_idx: int) -> None:
+        entry = self._entries[entry_idx]
+        entry.selected = [not s for s in entry.selected]
+        self._rebuild_pdf_list()
+        self._rebuild_preview()
+        self.page_ref.update()
+
+    def _apply_range(self, entry_idx: int, text: str) -> None:
+        entry = self._entries[entry_idx]
+        entry.selected = _parse_range(text, entry.total)
         self._rebuild_pdf_list()
         self._rebuild_preview()
         self.page_ref.update()
@@ -532,88 +666,71 @@ class MergePDFTab:
     # ── preview panel ─────────────────────────────────────────────────────────
 
     def _rebuild_preview(self) -> None:
-        rows: list[ft.Control] = []
+        items: list[ft.Control] = []
         total = 0
+
         for entry in self._entries:
             for pg in entry.selected_pages:
                 total += 1
                 thumb_b64 = self._get_thumb(entry.path, pg)
+
                 if thumb_b64:
                     thumb_ctrl: ft.Control = ft.Image(
                         src_base64=thumb_b64,
-                        width=58,
-                        height=78,
-                        fit=ft.ImageFit.CONTAIN,
-                        border_radius=3,
+                        width=56, height=76,
+                        fit=ft.ImageFit.COVER,
                     )
                 else:
                     thumb_ctrl = ft.Container(
-                        width=58, height=78,
-                        bgcolor="#E0E0E0",
-                        border_radius=3,
+                        width=56, height=76, bgcolor="#E0E0E0",
                         content=ft.Icon(
-                            ft.Icons.PICTURE_AS_PDF, size=22,
-                            color=ft.Colors.OUTLINE,
+                            ft.Icons.PICTURE_AS_PDF, size=18, color=ft.Colors.OUTLINE,
                         ),
                         alignment=ft.alignment.center,
                     )
 
-                rows.append(
+                # Sequential number badge (top-right)
+                seq_badge = ft.Container(
+                    content=ft.Text(
+                        str(total), size=8, color="white",
+                        weight=ft.FontWeight.BOLD,
+                        text_align=ft.TextAlign.CENTER,
+                    ),
+                    bgcolor="#000000CC",
+                    padding=ft.padding.symmetric(horizontal=3, vertical=1),
+                    right=0, top=0,
+                    border_radius=ft.border_radius.only(bottom_left=3),
+                )
+                # Original page badge (bottom-left)
+                pg_badge = ft.Container(
+                    content=ft.Text(
+                        f"p{pg + 1}", size=7, color="white",
+                        text_align=ft.TextAlign.CENTER,
+                    ),
+                    bgcolor="#1976D2CC",
+                    padding=ft.padding.symmetric(horizontal=3, vertical=1),
+                    left=0, bottom=0,
+                    border_radius=ft.border_radius.only(top_right=3),
+                )
+
+                items.append(
                     ft.Container(
-                        content=ft.Row(
-                            [
-                                ft.Text(
-                                    str(total), size=11, width=26,
-                                    color=ft.Colors.ON_SURFACE_VARIANT,
-                                    text_align=ft.TextAlign.RIGHT,
-                                ),
-                                ft.Container(
-                                    content=thumb_ctrl,
-                                    border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
-                                    border_radius=3,
-                                ),
-                                ft.Column(
-                                    [
-                                        ft.Text(
-                                            entry.filename, size=11,
-                                            weight=ft.FontWeight.W_500,
-                                            max_lines=1,
-                                            overflow=ft.TextOverflow.ELLIPSIS,
-                                            color=ft.Colors.ON_SURFACE,
-                                        ),
-                                        ft.Text(
-                                            f"Página {pg + 1}", size=10,
-                                            color=ft.Colors.ON_SURFACE_VARIANT,
-                                        ),
-                                    ],
-                                    expand=True,
-                                    spacing=3,
-                                    alignment=ft.MainAxisAlignment.CENTER,
-                                ),
-                            ],
-                            spacing=8,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        ),
-                        padding=ft.padding.symmetric(horizontal=8, vertical=6),
-                        border_radius=6,
-                        bgcolor="#F0F0F0" if total % 2 == 0 else None,
+                        content=ft.Stack([thumb_ctrl, seq_badge, pg_badge]),
+                        width=60,
+                        height=80,
+                        border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                        border_radius=4,
+                        clip_behavior=ft.ClipBehavior.HARD_EDGE,
+                        tooltip=f"#{total} en resultado\n{entry.filename} — página {pg + 1}",
                     )
                 )
 
-        if not rows:
-            rows.append(
-                ft.Container(
-                    ft.Text(
-                        "Sin páginas seleccionadas",
-                        size=12, color=ft.Colors.OUTLINE,
-                        italic=True, text_align=ft.TextAlign.CENTER,
-                    ),
-                    padding=ft.padding.symmetric(vertical=24),
-                    alignment=ft.alignment.center,
-                )
-            )
+        if not items:
+            self._preview_col.controls = [self._preview_empty]
+        else:
+            self._preview_wrap.controls = items
+            self._preview_col.controls  = [self._preview_wrap]
 
-        self._preview_list.controls = rows
         if self._status_text is not None:
             self._status_text.value = f"{total} página(s)" if total > 0 else ""
         self._update_merge_btn()
@@ -621,7 +738,11 @@ class MergePDFTab:
     def _update_merge_btn(self) -> None:
         if self._merge_btn is None:
             return
-        self._merge_btn.disabled = sum(en.selected_count for en in self._entries) == 0
+        total = sum(en.selected_count for en in self._entries)
+        self._merge_btn.disabled = total == 0 or self._merging
+        self._merge_btn.text = (
+            f"Combinar {total} páginas" if total > 0 else "Combinar y guardar"
+        )
 
     # ── output path ───────────────────────────────────────────────────────────
 
@@ -648,54 +769,104 @@ class MergePDFTab:
         if not self._output_path:
             self._on_choose_output()
             return
-        if sum(en.selected_count for en in self._entries) == 0:
+
+        total_selected = sum(en.selected_count for en in self._entries)
+        if total_selected == 0:
             self.page_ref.snack_bar = ft.SnackBar(
                 ft.Text("No hay páginas seleccionadas"), open=True,
             )
             self.page_ref.update()
             return
 
+        # Prevent overwriting an input file
+        for en in self._entries:
+            if Path(en.path).resolve() == Path(self._output_path).resolve():
+                self.page_ref.snack_bar = ft.SnackBar(
+                    ft.Text(
+                        f"El archivo de salida no puede ser igual a un archivo de entrada ({en.filename})"
+                    ),
+                    open=True,
+                )
+                self.page_ref.update()
+                return
+
+        self._merging = True
         if self._merge_btn:
             self._merge_btn.disabled = True
         if self._status_text:
-            self._status_text.value = "Combinando…"
+            self._status_text.value = "Preparando…"
         if self._result_row:
             self._result_row.visible = False
+        if self._progress_bar:
+            self._progress_bar.value = None   # indeterminate spinner
+            self._progress_bar.visible = True
         self.page_ref.update()
 
-        out_path = self._output_path
-        # Snapshot paths + pages before threading (avoids cross-thread access to _entries)
-        snapshot = [(en.path, list(en.selected_pages)) for en in self._entries]
+        out_path   = self._output_path
+        snapshot   = [(en.path, list(en.selected_pages)) for en in self._entries]
+        total_pages = sum(len(pages) for _, pages in snapshot)
 
         def _worker() -> None:
             try:
                 out_doc = fitz.open()
+                done = 0
+                last_update = time.monotonic()
+
                 for src_path, pages in snapshot:
                     with fitz.open(src_path) as src:
                         for pg in pages:
                             out_doc.insert_pdf(src, from_page=pg, to_page=pg, start_at=-1)
+                            done += 1
+                            now = time.monotonic()
+                            if now - last_update >= 0.2:
+                                last_update = now
+                                pct = done / total_pages
+                                if self._progress_bar:
+                                    self._progress_bar.value = pct
+                                if self._status_text:
+                                    self._status_text.value = (
+                                        f"Combinando… {done}/{total_pages} páginas"
+                                    )
+                                try:
+                                    self.page_ref.update()
+                                except Exception:
+                                    pass
+
                 out_doc.save(out_path, garbage=4, deflate=True)
                 out_doc.close()
 
                 self._last_merged = out_path
+                self._merging = False
+                if self._progress_bar:
+                    self._progress_bar.value = 1.0
                 if self._status_text:
-                    self._status_text.value = "Combinación completada"
-                # Update result banner
+                    self._status_text.value = f"Completado — {total_pages} páginas"
                 if self._result_row is not None and self._result_row.content is not None:
-                    label = self._result_row.content.controls[1]
-                    label.value = f"Guardado: {Path(out_path).name}"
+                    self._result_row.content.controls[1].value = (
+                        f"Guardado: {Path(out_path).name}"
+                    )
                     self._result_row.visible = True
                 self._update_merge_btn()
                 self.page_ref.snack_bar = ft.SnackBar(
-                    ft.Text(f"PDF combinado guardado: {Path(out_path).name}"),
-                    open=True,
+                    ft.Text(f"PDF combinado guardado: {Path(out_path).name}"), open=True,
                 )
                 try:
                     self.page_ref.update()
                 except Exception:
                     pass
 
+                time.sleep(1.5)
+                if self._progress_bar:
+                    self._progress_bar.visible = False
+                try:
+                    self.page_ref.update()
+                except Exception:
+                    pass
+
             except Exception as ex:
+                self._merging = False
+                if self._progress_bar:
+                    self._progress_bar.visible = False
                 if self._status_text:
                     self._status_text.value = "Error al combinar"
                 self._update_merge_btn()
