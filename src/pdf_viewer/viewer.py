@@ -131,6 +131,10 @@ class PDFViewerTab(
         self._sel_drag_handle:              str | None   = None
         self._text_sel_handle_start_disp:   tuple | None = None
         self._text_sel_handle_end_disp:     tuple | None = None
+        # True while the smart pointer is performing a text-selection drag
+        self._smart_text_sel_active: bool = False
+        # Cache of text word rects per page (PDF space, invalidated on doc change)
+        self._text_rects_cache: dict[int, list] = {}
 
         # OCR state
         self._ocr_processor    = OCRProcessor(str(Path(__file__).resolve().parents[2]))

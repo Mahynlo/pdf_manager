@@ -96,7 +96,7 @@ class _GestureMixin:
         self._pending_tap_page = pn
 
     def _on_tap(self, e, pn: int) -> None:
-        # Multi-tap while SELECT tool is active.
+        # Legacy SELECT tool (still usable programmatically).
         if self._annot.tool == Tool.SELECT:
             if (self._pending_tap is not None
                     and self._pending_tap_page == pn):
@@ -105,12 +105,10 @@ class _GestureMixin:
                 self._pending_tap      = None
                 self._pending_tap_page = None
                 if self._tap_count >= 3:
-                    # Triple-tap → select paragraph
                     self._hide_text_sel_bar()
                     self._select_paragraph_at(pn, (pdf_x, pdf_y))
                     return
                 if self._tap_count == 2:
-                    # Double-tap → select word under cursor
                     self._hide_text_sel_bar()
                     self._select_word_at(pn, (pdf_x, pdf_y))
                     return
@@ -118,26 +116,53 @@ class _GestureMixin:
             self._pending_tap      = None
             self._pending_tap_page = None
             return
-        if (
-            self._annot.tool != Tool.CURSOR
-            or self._pending_tap is None
-            or self._pending_tap_page != pn
-        ):
+
+        # Smart pointer: unified annotation + text selection.
+        if self._annot.tool == Tool.CURSOR:
+            if (self._pending_tap is None or self._pending_tap_page != pn):
+                self._pending_tap      = None
+                self._pending_tap_page = None
+                return
+            x, y = self._pending_tap
             self._pending_tap      = None
             self._pending_tap_page = None
+            pdf_x, pdf_y = display_to_pdf(x, y, self.zoom)
+
+            if self._tap_count >= 3:
+                # Triple-tap → select paragraph
+                self._deselect_annot()
+                self._select_paragraph_at(pn, (pdf_x, pdf_y))
+                return
+
+            if self._tap_count == 2:
+                # Double-tap → word select (or keep annotation if tapped on one)
+                with self._doc_lock:
+                    page  = self.doc[pn]
+                    annot = self._annot.get_annot_at(page, pdf_x, pdf_y)
+                if annot:
+                    self._hide_text_sel_bar()
+                    self.current_page = pn
+                    self._select_annot(pn, annot)
+                else:
+                    self._deselect_annot()
+                    self._select_word_at(pn, (pdf_x, pdf_y))
+                return
+
+            # Single tap
+            with self._doc_lock:
+                page  = self.doc[pn]
+                annot = self._annot.get_annot_at(page, pdf_x, pdf_y)
+            if annot:
+                self._hide_text_sel_bar()
+                self.current_page = pn
+                self._select_annot(pn, annot)
+            else:
+                self._deselect_annot()
+                self._hide_text_sel_bar()
             return
-        x, y = self._pending_tap
+
         self._pending_tap      = None
         self._pending_tap_page = None
-        pdf_x, pdf_y = display_to_pdf(x, y, self.zoom)
-        with self._doc_lock:
-            page  = self.doc[pn]
-            annot = self._annot.get_annot_at(page, pdf_x, pdf_y)
-        if annot:
-            self.current_page = pn
-            self._select_annot(pn, annot)
-        else:
-            self._deselect_annot()
 
     # ── pan events ────────────────────────────────────────────────────────────
 
@@ -148,30 +173,36 @@ class _GestureMixin:
         if self._annot.tool == Tool.CURSOR:
             try:
                 pdf_x, pdf_y = display_to_pdf(e.local_x, e.local_y, self.zoom)
+                _H_HIT = 20  # px hit radius for handles
 
-                # If there is already a selection on this page, try handles first.
-                # Lock-free path: use the cached visual rect so we don't block
-                # waiting for the background render worker to release the doc lock.
+                # ── 1. Active annotation: check resize/move handles ───────────
                 drag_seed = self._selected_visual_rect or self._selected_rect
                 if (self._selected is not None
                         and self._selected[0] == pn
                         and drag_seed is not None):
-                    # Markup annotations (highlight/underline/strikeout) cannot be
-                    # moved or resized — their quads are tied to text positions.
                     sel_atype = getattr(self, "_selected_atype", "")
                     if sel_atype not in ("Highlight", "Underline", "StrikeOut", "Squiggly"):
                         mode = self._detect_drag_mode(pn, e.local_x, e.local_y)
                         if mode != "none":
                             self._drag_start_rect   = fitz.Rect(drag_seed)
                             self._drag_current_rect = fitz.Rect(drag_seed)
-                            self._drag_mode     = mode
-                            self._move_last_pdf = (pdf_x, pdf_y)
+                            self._drag_mode         = mode
+                            self._move_last_pdf     = (pdf_x, pdf_y)
                             return
-                    # Drag started outside annotation (or on markup) — keep selection.
-                    return
+                    # Click outside active annotation (or on markup): deselect,
+                    # then fall through to text-selection / new annotation.
+                    self._deselect_annot()
 
-                # No selection: try to auto-select any annotation under cursor.
-                # For shape annotations, also set up immediate dragging.
+                # ── 2. Text-selection handles (extend existing selection) ─────
+                for hname in ("start", "end"):
+                    hpos = getattr(self, f"_text_sel_handle_{hname}_disp", None)
+                    if (hpos is not None
+                            and self._text_sel_pn == pn
+                            and math.hypot(e.local_x - hpos[0], e.local_y - hpos[1]) <= _H_HIT):
+                        self._sel_drag_handle = hname
+                        return
+
+                # ── 3. Annotation under cursor → select and prepare to drag ──
                 cached_rect: fitz.Rect | None = None
                 found_annot = None
                 is_markup   = False
@@ -187,12 +218,31 @@ class _GestureMixin:
                         is_markup = atype in ("Highlight", "Underline", "StrikeOut", "Squiggly")
 
                 if found_annot is not None and cached_rect is not None:
+                    self._hide_text_sel_bar()
+                    self.current_page = pn
                     self._select_annot(pn, found_annot)
                     if not is_markup:
                         self._drag_mode         = "move"
                         self._move_last_pdf     = (pdf_x, pdf_y)
                         self._drag_start_rect   = cached_rect
                         self._drag_current_rect = fitz.Rect(cached_rect)
+                    return
+
+                # ── 4. Nothing found → start smart text-selection drag ────────
+                self._sel_drag_handle        = None
+                self._smart_text_sel_active  = True
+                self._text_sel_pn            = pn
+                self._text_sel_start_pdf     = (pdf_x, pdf_y)
+                self._text_sel_end_pdf       = (pdf_x, pdf_y)
+                self._hide_text_sel_bar()
+                # Temporarily switch to text cursor for visual feedback
+                for gd in self._page_gestures:
+                    gd.mouse_cursor = ft.MouseCursor.TEXT
+                    try:
+                        gd.update()
+                    except Exception:
+                        pass
+
             except Exception:
                 pass
             return
@@ -206,15 +256,15 @@ class _GestureMixin:
             return
 
         if self._annot.tool == Tool.SELECT:
-            # Hit-test handles: if starting near start/end handle, drag it instead.
-            _H_HIT = 20  # px hit radius
+            # Legacy SELECT tool — hit-test handles first.
+            _H_HIT = 20
             for hname in ("start", "end"):
                 hpos = getattr(self, f"_text_sel_handle_{hname}_disp", None)
                 if (hpos is not None
                         and self._text_sel_pn == pn
                         and math.hypot(e.local_x - hpos[0], e.local_y - hpos[1]) <= _H_HIT):
                     self._sel_drag_handle = hname
-                    return  # skip _annot.begin — not a new selection drag
+                    return
             self._sel_drag_handle    = None
             self._text_sel_start_pdf = (pdf_x, pdf_y)
             self._text_sel_end_pdf   = (pdf_x, pdf_y)
@@ -225,49 +275,60 @@ class _GestureMixin:
 
     def _on_pan_update(self, e: ft.DragUpdateEvent, pn: int) -> None:
         if self._annot.tool == Tool.CURSOR:
-            # Lock-free drag: compute new rect from cached rect + delta, update only
-            # the selection overlay.  The PDF document is written once at pan_end.
-            if (self._drag_mode is None
-                    or self._selected is None
-                    or self._drag_current_rect is None):
+            # ── Handle drag (extend existing text selection) ──────────────────
+            if self._sel_drag_handle is not None:
+                pdf_x, pdf_y = display_to_pdf(e.local_x, e.local_y, self.zoom)
+                if self._sel_drag_handle == "start":
+                    self._text_sel_start_pdf = (pdf_x, pdf_y)
+                else:
+                    self._text_sel_end_pdf = (pdf_x, pdf_y)
+                self._update_text_selection(
+                    pn, self._text_sel_start_pdf, self._text_sel_end_pdf, update_ui=True
+                )
                 return
-            if self._selected[0] != pn:
+
+            # ── Annotation drag (lock-free: only overlay moves, PDF at end) ──
+            if (self._drag_mode is not None
+                    and self._selected is not None
+                    and self._drag_current_rect is not None
+                    and self._drag_start_rect is not None
+                    and self._selected[0] == pn
+                    and self._move_last_pdf is not None):
+                try:
+                    pdf_x, pdf_y   = display_to_pdf(e.local_x, e.local_y, self.zoom)
+                    last_x, last_y = self._move_last_pdf
+                    dx = pdf_x - last_x
+                    dy = pdf_y - last_y
+                    if math.isclose(dx, 0.0, abs_tol=0.01) and math.isclose(dy, 0.0, abs_tol=0.01):
+                        return
+                    if self._drag_mode == "move":
+                        r = self._drag_current_rect
+                        new_rect = fitz.Rect(r.x0+dx, r.y0+dy, r.x1+dx, r.y1+dy)
+                        self._drag_current_rect = new_rect
+                        self._move_last_pdf     = (pdf_x, pdf_y)
+                        self._ensure_drag_ghost_active(pn)
+                        self._refresh_selected_overlay(pn, annot_rect=new_rect)
+                    elif self._drag_mode.startswith("resize_"):
+                        handle   = self._drag_mode[len("resize_"):]
+                        new_rect = self._compute_resize_rect(self._drag_current_rect, handle, dx, dy)
+                        self._drag_current_rect = new_rect
+                        self._move_last_pdf     = (pdf_x, pdf_y)
+                        self._ensure_drag_ghost_active(pn)
+                        self._refresh_selected_overlay(pn, annot_rect=new_rect)
+                except Exception:
+                    pass
                 return
 
-            if self._move_last_pdf is None:
-                return
-
-            try:
-                pdf_x, pdf_y   = display_to_pdf(e.local_x, e.local_y, self.zoom)
-                last_x, last_y = self._move_last_pdf
-                dx = pdf_x - last_x
-                dy = pdf_y - last_y
-
-                if math.isclose(dx, 0.0, abs_tol=0.01) and math.isclose(dy, 0.0, abs_tol=0.01):
-                    return
-
-                if self._drag_mode == "move":
-                    r = self._drag_current_rect
-                    new_rect = fitz.Rect(
-                        r.x0 + dx, r.y0 + dy,
-                        r.x1 + dx, r.y1 + dy,
+            # ── Smart text-selection drag ─────────────────────────────────────
+            if getattr(self, "_smart_text_sel_active", False):
+                try:
+                    pdf_x, pdf_y = display_to_pdf(e.local_x, e.local_y, self.zoom)
+                    self._text_sel_end_pdf = (pdf_x, pdf_y)
+                    self._update_text_selection(
+                        pn, self._text_sel_start_pdf, self._text_sel_end_pdf, update_ui=True
                     )
-                    self._drag_current_rect = new_rect
-                    self._move_last_pdf     = (pdf_x, pdf_y)
-                    self._ensure_drag_ghost_active(pn)
-                    self._refresh_selected_overlay(pn, annot_rect=new_rect)
-
-                elif self._drag_mode.startswith("resize_"):
-                    handle   = self._drag_mode[len("resize_"):]   # "tl" | "tr" | "bl" | "br"
-                    new_rect = self._compute_resize_rect(
-                        self._drag_current_rect, handle, dx, dy,
-                    )
-                    self._drag_current_rect = new_rect
-                    self._move_last_pdf     = (pdf_x, pdf_y)
-                    self._ensure_drag_ghost_active(pn)
-                    self._refresh_selected_overlay(pn, annot_rect=new_rect)
-            except Exception:
-                pass
+                except Exception:
+                    pass
             return
 
         pdf_x, pdf_y = display_to_pdf(e.local_x, e.local_y, self.zoom)
@@ -280,7 +341,7 @@ class _GestureMixin:
                 self._update_ink_canvas_preview(pn)
             return
 
-        # Handle drag: adjust start or end anchor without starting a new selection
+        # Legacy SELECT tool handle drag
         if self._annot.tool == Tool.SELECT and self._sel_drag_handle is not None:
             if self._sel_drag_handle == "start":
                 self._text_sel_start_pdf = (pdf_x, pdf_y)
@@ -374,8 +435,31 @@ class _GestureMixin:
 
     # ─────────────────────────────────────────────────────────────────────────
 
+    def _restore_smart_cursor(self) -> None:
+        """Restore the GestureDetector cursor after a smart text-selection drag."""
+        for gd in self._page_gestures:
+            gd.mouse_cursor = self._current_cursor
+            try:
+                gd.update()
+            except Exception:
+                pass
+
     def _on_pan_end(self, e: ft.DragEndEvent, pn: int) -> None:
         if self._annot.tool == Tool.CURSOR:
+            # ── Text-selection handle drag end ────────────────────────────────
+            if self._sel_drag_handle is not None:
+                self._sel_drag_handle = None
+                sel_text = self._update_text_selection(
+                    pn, self._text_sel_start_pdf, self._text_sel_end_pdf, update_ui=True
+                )
+                if sel_text:
+                    if self._text_sel_sel_rect is not None:
+                        self._annot.last_rect = self._text_sel_sel_rect
+                    self._show_text_sel_bar(sel_text)
+                self._restore_smart_cursor()
+                return
+
+            # ── Annotation drag end ───────────────────────────────────────────
             if self._drag_mode is not None:
                 prev_mode       = self._drag_mode
                 self._drag_mode = None
@@ -447,9 +531,30 @@ class _GestureMixin:
                 finally:
                     self._drag_start_rect   = None
                     self._drag_current_rect = None
+                return
+
+            # ── Smart text-selection drag end ─────────────────────────────────
+            if getattr(self, "_smart_text_sel_active", False):
+                self._smart_text_sel_active = False
+                sel_text = self._update_text_selection(
+                    pn, self._text_sel_start_pdf, self._text_sel_end_pdf, update_ui=True
+                )
+                if not sel_text:
+                    # OCR fallback for image-only pages
+                    sel_rect = self._text_sel_sel_rect
+                    if sel_rect is None and self._text_sel_start_pdf and self._text_sel_end_pdf:
+                        sx, sy = self._text_sel_start_pdf
+                        ex, ey = self._text_sel_end_pdf
+                        sel_rect = fitz.Rect(min(sx,ex), min(sy,ey), max(sx,ex), max(sy,ey))
+                    sel_text = self._ocr_text_in_rect(pn, sel_rect)
+                if sel_text:
+                    if self._text_sel_sel_rect is not None:
+                        self._annot.last_rect = self._text_sel_sel_rect
+                    self._show_text_sel_bar(sel_text)
+                self._restore_smart_cursor()
             return
 
-        # Handle drag ended: show popup with updated selection
+        # Legacy SELECT tool handle drag end
         if self._annot.tool == Tool.SELECT and self._sel_drag_handle is not None:
             self._sel_drag_handle = None
             sel_text = self._update_text_selection(
@@ -670,9 +775,50 @@ class _GestureMixin:
         except Exception:
             pass
 
+    def _on_hover(self, e: ft.HoverEvent, pn: int) -> None:
+        """Update the mouse cursor as it moves over a page in CURSOR tool mode."""
+        if self._annot.tool != Tool.CURSOR:
+            return
+        # Don't override cursor during an active drag or text-selection
+        if (getattr(self, "_smart_text_sel_active", False)
+                or self._sel_drag_handle is not None
+                or self._drag_mode is not None):
+            return
+        try:
+            pdf_x, pdf_y = display_to_pdf(e.local_x, e.local_y, self.zoom)
+            with self._doc_lock:
+                page  = self.doc[pn]
+                annot = self._annot.get_annot_at(page, pdf_x, pdf_y)
+            if annot is not None:
+                new_cursor = ft.MouseCursor.BASIC
+            else:
+                new_cursor = ft.MouseCursor.TEXT if self._point_has_text(pn, pdf_x, pdf_y) else ft.MouseCursor.BASIC
+        except Exception:
+            return
+        gd = self._page_gestures[pn] if pn < len(self._page_gestures) else None
+        if gd is not None and gd.mouse_cursor != new_cursor:
+            gd.mouse_cursor = new_cursor
+            try:
+                gd.update()
+            except Exception:
+                pass
+
+    def _point_has_text(self, pn: int, pdf_x: float, pdf_y: float) -> bool:
+        """Return True if (pdf_x, pdf_y) falls inside any text word on page pn."""
+        cache = self._text_rects_cache
+        if pn not in cache:
+            try:
+                with self._doc_lock:
+                    words = self.doc[pn].get_text("words")
+                cache[pn] = [fitz.Rect(w[0], w[1], w[2], w[3]) for w in words]
+            except Exception:
+                cache[pn] = []
+        pt = fitz.Point(pdf_x, pdf_y)
+        return any(r.contains(pt) for r in cache[pn])
+
     def _on_secondary_tap(self, e, pn: int) -> None:
         """Right-click: show the action popup for the active text selection."""
-        if self._annot.tool != Tool.SELECT:
+        if self._annot.tool not in (Tool.SELECT, Tool.CURSOR):
             return
         if self._text_sel_pn != pn or not self._text_sel_text:
             return
