@@ -1,30 +1,23 @@
 
-import './App.css'
-import { PDFViewer } from '@embedpdf/react-pdf-viewer'
-import type { PDFViewerRef } from '@embedpdf/react-pdf-viewer'
-import { useRef, useEffect } from 'react'
+import { Routes, Route } from 'react-router-dom'
+import { TabBar } from './components/TabBar'
+import { TopBar } from './components/TopBar'
+import { ExtractPage } from './pages/ExtractPage'
+import { HomePage } from './pages/HomePage'
+import { MergePage } from './pages/MergePage'
+import { OcrPage } from './pages/OcrPage'
 
-interface AppProps {
-  themePreference?: 'light' | 'dark'
-}
-
-export default function App({ themePreference = 'light' }: AppProps) {
-  const viewerRef = useRef<PDFViewerRef | null>(null)
-
-  useEffect(() => {
-    viewerRef.current?.container?.setTheme({ preference: themePreference })
-  }, [themePreference])
-
+export default function App() {
   return (
-    <div className="h-[760px] w-full overflow-hidden rounded-xl border border-gray-300 shadow-lg dark:border-gray-600">
-      <PDFViewer
-        ref={viewerRef}
-        config={{
-          src: 'https://snippet.embedpdf.com/ebook.pdf',
-          theme: { preference: themePreference },
-        }}
-        style={{ width: '100%', height: '100%' }}
-      />
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_#f6f7fb_0%,_#eef2f7_45%,_#e9eef5_100%)] text-[#0f1824]">
+      <TopBar />
+      <TabBar />
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/extract" element={<ExtractPage />} />
+        <Route path="/merge" element={<MergePage />} />
+        <Route path="/ocr" element={<OcrPage />} />
+      </Routes>
     </div>
   )
 }
