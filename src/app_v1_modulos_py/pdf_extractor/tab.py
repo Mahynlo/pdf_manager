@@ -10,7 +10,7 @@ from typing import Callable
 import flet as ft
 import fitz
 
-from pdf_viewer.ocr import OCRProcessor
+from ..pdf_viewer.ocr import OCRProcessor
 
 
 @dataclass

@@ -10,4 +10,5 @@ export default defineConfig({
     babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
   ],
+  base: './', // Establece la base para que los recursos se carguen correctamente en producción
 })

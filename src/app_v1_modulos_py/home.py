@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable 
 
 import flet as ft 
-import recent_files as rf 
+from . import recent_files as rf 
 
 # ========[Dimensions window]==============================================================
 _RECENT_W = 280  

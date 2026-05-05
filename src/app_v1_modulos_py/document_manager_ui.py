@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Callable
 import flet as ft
 
 if TYPE_CHECKING:
-    from pdf_viewer import PDFViewerTab
+    from .pdf_viewer import PDFViewerTab
 
 _TAB_H       = 36
 _TAB_W       = 180

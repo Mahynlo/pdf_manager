@@ -182,7 +182,7 @@ class PDFViewerTab(
         self._redact_color_btns:   dict          = {}
 
         # Profile state
-        from pdf_viewer._censorship_profiles import CensorshipProfile
+        from ._censorship_profiles import CensorshipProfile
         self._active_profile:        CensorshipProfile | None = None
         self._active_profile_label:  ft.Text       | None = None
         self._profile_save_btn:      ft.Container  | None = None

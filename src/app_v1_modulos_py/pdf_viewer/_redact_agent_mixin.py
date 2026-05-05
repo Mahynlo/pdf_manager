@@ -270,7 +270,7 @@ class _RedactAgentMixin:
 
         # ── initialise selected provider ──────────────────────────────────────
         try:
-            from agent.config import get_provider
+            from ..agent.config import get_provider
             self._agent_provider_selected = get_provider()
         except Exception:
             self._agent_provider_selected = "gemini"
@@ -489,7 +489,7 @@ class _RedactAgentMixin:
     # ── AI agent ──────────────────────────────────────────────────────────────
 
     def _agent_save_key(self, e=None) -> None:
-        from agent.config import get_provider, set_api_key
+        from ..agent.config import get_provider, set_api_key
         key = (self._agent_key_field.value or "").strip()
         if not key:
             self._show_snack("Introduce una API Key válida")
@@ -508,8 +508,8 @@ class _RedactAgentMixin:
     def _agent_get_or_create(self):
         if self._agent_instance is not None:
             return self._agent_instance
-        from agent.config import get_api_key, get_provider, get_model
-        from agent.pdf_agent import PDFAgent
+        from ..agent.config import get_api_key, get_provider, get_model
+        from ..agent.pdf_agent import PDFAgent
         provider = self._agent_provider_selected or get_provider()
         key      = get_api_key(provider)
         if not key:
@@ -721,7 +721,7 @@ class _RedactAgentMixin:
         if self._agent_key_status is None:
             return
         try:
-            from agent.config import get_api_key, get_provider
+            from ..agent.config import get_api_key, get_provider
             provider = getattr(self, "_agent_provider_selected", None) or get_provider()
             key = get_api_key(provider)
             if key:
