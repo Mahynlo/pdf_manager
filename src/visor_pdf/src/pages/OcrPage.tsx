@@ -1,4 +1,3 @@
-
 import { PDFViewer } from '@embedpdf/react-pdf-viewer'
 import type { PDFViewerRef } from '@embedpdf/react-pdf-viewer'
 import { useEffect, useRef, useState } from 'react'
@@ -32,8 +31,11 @@ export function OcrPage({ themePreference = 'light' }: AppProps) {
   }
 
   return (
-    <div className="flex min-h-[calc(100vh-120px)] flex-col gap-4 px-6 py-6">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#e3e8ef] bg-white/70 px-5 py-3">
+    // 1. Cambiamos a h-full (o h-screen si es la raíz de la vista) para tomar todo el alto
+    <div className="flex h-full min-h-screen flex-col gap-4 p-6">
+      
+      {/* Barra de herramientas (mantiene su tamaño natural) */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#e3e8ef] bg-white/70 px-5 py-3 shrink-0">
         <div>
           <h2 className="text-sm font-semibold text-[#0f1824]">OCR de PDF</h2>
           <p className="text-xs text-[#5a6b7f]">{status}</p>
@@ -42,20 +44,21 @@ export function OcrPage({ themePreference = 'light' }: AppProps) {
           <button
             type="button"
             onClick={handleOpen}
-            className="rounded-full border border-[#cfd7e2] bg-white px-4 py-2 text-xs font-semibold text-[#3a4c64]"
+            className="rounded-full border border-[#cfd7e2] bg-white px-4 py-2 text-xs font-semibold text-[#3a4c64] hover:bg-gray-50 transition-colors"
           >
             Abrir PDF
           </button>
           <button
             type="button"
-            className="rounded-full bg-[#365b89] px-4 py-2 text-xs font-semibold text-white"
+            className="rounded-full bg-[#365b89] px-4 py-2 text-xs font-semibold text-white hover:bg-[#2a476b] transition-colors"
           >
             Iniciar OCR
           </button>
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden rounded-2xl border border-[#e3e8ef] bg-white shadow-sm">
+      {/* 2. flex-1 para absorber el espacio restante y min-h-0 para evitar desbordamientos */}
+      <div style={{ height: '100vh' }}>
         <PDFViewer
           ref={viewerRef}
           config={{

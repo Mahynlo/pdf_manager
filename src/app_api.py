@@ -37,13 +37,12 @@ class AppAPI:
 
     def pick_files(self, options: dict[str, Any]) -> list[str]:
         window = webview.windows[0]
-        title = options.get("title") or "Seleccionar archivos"
         multiple = bool(options.get("multiple"))
         result = window.create_file_dialog(
             webview.OPEN_DIALOG,
+            directory=options.get("directory", "") or "",
             allow_multiple=multiple,
             file_types=("PDF (*.pdf)",),
-            dialog_title=title,
         )
         if not result:
             return []
@@ -53,7 +52,7 @@ class AppAPI:
         window = webview.windows[0]
         result = window.create_file_dialog(
             webview.FOLDER_DIALOG,
-            dialog_title=title or "Seleccionar carpeta",
+            directory="",
         )
         if not result:
             return None
