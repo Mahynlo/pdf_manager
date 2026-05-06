@@ -39,8 +39,7 @@ class AppAPI:
         window = webview.windows[0]
         multiple = bool(options.get("multiple"))
         result = window.create_file_dialog(
-            webview.OPEN_DIALOG,
-            directory=options.get("directory", "") or "",
+            webview.FileDialog.OPEN,
             allow_multiple=multiple,
             file_types=("PDF (*.pdf)",),
         )
@@ -51,8 +50,7 @@ class AppAPI:
     def pick_directory(self, title: str) -> str | None:
         window = webview.windows[0]
         result = window.create_file_dialog(
-            webview.FOLDER_DIALOG,
-            directory="",
+            webview.FileDialog.FOLDER,
         )
         if not result:
             return None
@@ -177,6 +175,7 @@ class AppAPI:
         finally:
             out_doc.close()
 
+        recent_files.push(str(output_path))
         return {
             "summary": f"Finalizado: {len(matches)} coincidencia(s).",
             "outputPath": str(output_path),
@@ -202,6 +201,8 @@ class AppAPI:
             out_doc.save(str(out_path), garbage=4, deflate=True)
         finally:
             out_doc.close()
+
+        recent_files.push(str(out_path))
 
         return {"outputPath": str(out_path), "message": "PDF combinado creado."}
 

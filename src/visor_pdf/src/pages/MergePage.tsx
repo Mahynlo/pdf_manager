@@ -1,9 +1,11 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { mergePdfs, pickFiles } from '../services/api'
 import { useAppState } from '../state/AppContext'
 import { openPdf } from '../services/api'
 
 export function MergePage() {
+  const navigate = useNavigate()
   const [paths, setPaths] = useState<string[]>([])
   const [outputPath, setOutputPath] = useState<string | null>(null)
   const [message, setMessage] = useState('Sin paginas seleccionadas')
@@ -38,6 +40,7 @@ export function MergePage() {
     const result = await openPdf(outputPath)
     if (result) {
       setCurrentPdf(result)
+      navigate('/ocr')
     }
   }
 

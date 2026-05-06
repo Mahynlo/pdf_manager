@@ -1,5 +1,6 @@
 
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { extractPdf, openPdf, pickDirectory, pickFiles } from '../services/api'
 import { useAppState } from '../state/AppContext'
 
@@ -16,6 +17,7 @@ const levelStyles: Record<LogEntry['level'], string> = {
 }
 
 export function ExtractPage() {
+  const navigate = useNavigate()
   const [referencePath, setReferencePath] = useState<string | null>(null)
   const [targetPaths, setTargetPaths] = useState<string[]>([])
   const [destinationDir, setDestinationDir] = useState<string | null>(null)
@@ -54,20 +56,50 @@ export function ExtractPage() {
   }
 
   const handleRun = async () => {
-    const result = await extractPdf({
-      referencePath,
-      referencePages,
-      hintPages,
-      keywords,
-      targetPaths,
-      destinationDir,
-    })
-    if (!result) {
+    // Validaciones básicas en frontend
+    if (!targetPaths || targetPaths.length === 0) {
+      const err: LogEntry = { level: 'error', text: 'Selecciona al menos un PDF objetivo.' }
+      setSummary('Falta seleccionar PDFs objetivo.')
+      setLog([err])
       return
     }
-    setSummary(result.summary)
-    setLog(result.log as LogEntry[])
-    setOutputPath(result.outputPath ?? null)
+
+    if (!keywords || !keywords.trim()) {
+      const err: LogEntry = { level: 'error', text: 'Introduce al menos una palabra clave para la búsqueda.' }
+      setSummary('Faltan palabras clave.')
+      setLog([err])
+      return
+    }
+
+    setSummary('Ejecutando búsqueda...')
+    setLog([])
+
+    try {
+      const result = await extractPdf({
+        referencePath,
+        referencePages,
+        hintPages,
+        keywords,
+        targetPaths,
+        destinationDir,
+      })
+
+      if (!result) {
+        const err: LogEntry = { level: 'error', text: 'API no disponible.' }
+        setSummary('Error: API no disponible')
+        setLog([err])
+        return
+      }
+
+      setSummary(result.summary)
+      setLog(result.log as LogEntry[])
+      setOutputPath(result.outputPath ?? null)
+    } catch (ex: any) {
+      const msg = ex?.message ? ex.message : String(ex)
+      const err: LogEntry = { level: 'error', text: `Error ejecutando extracción: ${msg}` }
+      setSummary('Error en la operación')
+      setLog([err])
+    }
   }
 
   const handlePreview = async () => {
@@ -79,6 +111,7 @@ export function ExtractPage() {
       return
     }
     setCurrentPdf(result)
+    navigate('/ocr')
   }
 
   return (

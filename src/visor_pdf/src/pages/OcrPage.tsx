@@ -17,6 +17,12 @@ export function OcrPage({ themePreference = 'light' }: AppProps) {
     viewerRef.current?.container?.setTheme({ preference: themePreference })
   }, [themePreference])
 
+  useEffect(() => {
+    if (currentPdf) {
+      setStatus(`Documento cargado: ${currentPdf.name}`)
+    }
+  }, [currentPdf])
+
   const handleOpen = async () => {
     const files = await pickFiles({ multiple: false, title: 'Seleccionar PDF' })
     if (!files.length) {
@@ -31,11 +37,8 @@ export function OcrPage({ themePreference = 'light' }: AppProps) {
   }
 
   return (
-    // 1. Cambiamos a h-full (o h-screen si es la raíz de la vista) para tomar todo el alto
-    <div className="flex h-full min-h-screen flex-col gap-4 p-6">
-      
-      {/* Barra de herramientas (mantiene su tamaño natural) */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#e3e8ef] bg-white/70 px-5 py-3 shrink-0">
+    <div className="flex min-h-[calc(100vh-120px)] flex-col gap-4 p-6">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#e3e8ef] bg-white/70 px-5 py-3">
         <div>
           <h2 className="text-sm font-semibold text-[#0f1824]">OCR de PDF</h2>
           <p className="text-xs text-[#5a6b7f]">{status}</p>
@@ -57,16 +60,21 @@ export function OcrPage({ themePreference = 'light' }: AppProps) {
         </div>
       </div>
 
-      {/* 2. flex-1 para absorber el espacio restante y min-h-0 para evitar desbordamientos */}
-      <div style={{ height: '100vh' }}>
-        <PDFViewer
-          ref={viewerRef}
-          config={{
-            src: currentPdf?.dataUrl ?? '',
-            theme: { preference: themePreference },
-          }}
-          style={{ width: '100%', height: '100%' }}
-        />
+      <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-[#e3e8ef] bg-white shadow-sm">
+        {currentPdf ? (
+          <PDFViewer
+            ref={viewerRef}
+            config={{
+              src: currentPdf.dataUrl,
+              theme: { preference: themePreference },
+            }}
+            style={{ width: '100%', height: '100%' }}
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center text-sm text-[#5a6b7f]">
+            No hay PDF cargado
+          </div>
+        )}
       </div>
     </div>
   )

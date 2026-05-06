@@ -32,7 +32,7 @@ export function Sidebar({ files, onSelect }: SidebarProps) {
               <p className="text-[12px] font-semibold text-[#2d3c4f]">{file.name}</p>
               <p className="text-[10px] text-[#5a6b7f]">{file.path}</p>
             </div>
-            <button className="text-sm text-[#5a6b7f]">↗</button>
+            <span className="text-sm text-[#5a6b7f]">↗</span>
           </button>
         ))}
       </div>
