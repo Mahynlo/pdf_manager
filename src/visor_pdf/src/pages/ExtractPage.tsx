@@ -1,17 +1,104 @@
 
+import { useMemo, useState } from 'react'
+import { extractPdf, openPdf, pickDirectory, pickFiles } from '../services/api'
+import { useAppState } from '../state/AppContext'
+
+type LogEntry = {
+  level: 'info' | 'warn' | 'error' | 'success'
+  text: string
+}
+
+const levelStyles: Record<LogEntry['level'], string> = {
+  info: 'text-[#5a6b7f]',
+  warn: 'text-[#d97706]',
+  error: 'text-[#dc2626]',
+  success: 'text-[#16a34a]',
+}
+
 export function ExtractPage() {
+  const [referencePath, setReferencePath] = useState<string | null>(null)
+  const [targetPaths, setTargetPaths] = useState<string[]>([])
+  const [destinationDir, setDestinationDir] = useState<string | null>(null)
+  const [referencePages, setReferencePages] = useState('')
+  const [hintPages, setHintPages] = useState('')
+  const [keywords, setKeywords] = useState('')
+  const [summary, setSummary] = useState('Sin busqueda ejecutada')
+  const [log, setLog] = useState<LogEntry[]>([])
+  const [outputPath, setOutputPath] = useState<string | null>(null)
+  const { setCurrentPdf } = useAppState()
+
+  const referenceLabel = useMemo(
+    () => (referencePath ? `Referencia: ${referencePath.split('\\').pop()}` : 'Referencia: sin archivo'),
+    [referencePath],
+  )
+
+  const handlePickReference = async () => {
+    const files = await pickFiles({ multiple: false, title: 'Seleccionar PDF referencia' })
+    if (files.length) {
+      setReferencePath(files[0])
+    }
+  }
+
+  const handlePickTargets = async () => {
+    const files = await pickFiles({ multiple: true, title: 'Seleccionar PDFs objetivo' })
+    if (files.length) {
+      setTargetPaths(files)
+    }
+  }
+
+  const handlePickDestination = async () => {
+    const dir = await pickDirectory('Seleccionar carpeta destino')
+    if (dir) {
+      setDestinationDir(dir)
+    }
+  }
+
+  const handleRun = async () => {
+    const result = await extractPdf({
+      referencePath,
+      referencePages,
+      hintPages,
+      keywords,
+      targetPaths,
+      destinationDir,
+    })
+    if (!result) {
+      return
+    }
+    setSummary(result.summary)
+    setLog(result.log as LogEntry[])
+    setOutputPath(result.outputPath ?? null)
+  }
+
+  const handlePreview = async () => {
+    if (!outputPath) {
+      return
+    }
+    const result = await openPdf(outputPath)
+    if (!result) {
+      return
+    }
+    setCurrentPdf(result)
+  }
+
   return (
     <div className="flex min-h-[calc(100vh-120px)] flex-col gap-6 px-6 py-6 lg:flex-row">
       <section className="w-full max-w-sm rounded-2xl border border-[#e3e8ef] bg-white/70 p-6 shadow-sm">
         <h2 className="text-sm font-semibold text-[#0f1824]">Referencia</h2>
-        <button className="mt-4 rounded-full border border-[#cfd7e2] bg-white px-4 py-2 text-xs font-semibold text-[#3a4c64]">
+        <button
+          type="button"
+          onClick={handlePickReference}
+          className="mt-4 rounded-full border border-[#cfd7e2] bg-white px-4 py-2 text-xs font-semibold text-[#3a4c64]"
+        >
           Abrir PDF referencia
         </button>
         <div className="mt-4 space-y-2 text-xs text-[#5a6b7f]">
-          <p>Referencia: sin archivo</p>
+          <p>{referenceLabel}</p>
           <p>Tipo: -</p>
         </div>
         <input
+          value={referencePages}
+          onChange={(event) => setReferencePages(event.target.value)}
           className="mt-4 w-full rounded-lg border border-[#d8dee8] bg-[#f7f9fc] px-3 py-2 text-xs"
           placeholder="Paginas de referencia (ej: 1,3-5)"
         />
@@ -19,6 +106,8 @@ export function ExtractPage() {
         <div className="mt-6">
           <h3 className="text-xs font-semibold text-[#0f1824]">Patron de busqueda</h3>
           <textarea
+            value={keywords}
+            onChange={(event) => setKeywords(event.target.value)}
             className="mt-3 h-28 w-full rounded-lg border border-[#d8dee8] bg-[#f7f9fc] px-3 py-2 text-xs"
             placeholder="Palabras clave / titulos / nombres de formato"
           />
@@ -27,6 +116,8 @@ export function ExtractPage() {
         <div className="mt-6">
           <h3 className="text-xs font-semibold text-[#0f1824]">Opciones avanzadas</h3>
           <input
+            value={hintPages}
+            onChange={(event) => setHintPages(event.target.value)}
             className="mt-3 w-full rounded-lg border border-[#d8dee8] bg-[#f7f9fc] px-3 py-2 text-xs"
             placeholder="Pagina sugerida en cada objetivo (ej: 1,2)"
           />
@@ -37,30 +128,53 @@ export function ExtractPage() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <h2 className="text-sm font-semibold text-[#0f1824]">Objetivos y extraccion</h2>
           <div className="flex flex-wrap gap-3">
-            <button className="rounded-full border border-[#cfd7e2] bg-white px-4 py-2 text-xs font-semibold text-[#3a4c64]">
+            <button
+              type="button"
+              onClick={handlePickTargets}
+              className="rounded-full border border-[#cfd7e2] bg-white px-4 py-2 text-xs font-semibold text-[#3a4c64]"
+            >
               Cargar PDFs objetivo
             </button>
-            <button className="rounded-full border border-[#cfd7e2] bg-white px-4 py-2 text-xs font-semibold text-[#3a4c64]">
+            <button
+              type="button"
+              onClick={handlePickDestination}
+              className="rounded-full border border-[#cfd7e2] bg-white px-4 py-2 text-xs font-semibold text-[#3a4c64]"
+            >
               Carpeta destino
             </button>
           </div>
         </div>
         <div className="mt-4 space-y-2 text-xs text-[#5a6b7f]">
-          <p>Archivos objetivo: 0</p>
-          <p>Destino: C:\Users\CFE\AppData\Roaming\Flet\extraer-pdfs\storage\temp</p>
+          <p>Archivos objetivo: {targetPaths.length}</p>
+          <p>Destino: {destinationDir ?? 'sin definir'}</p>
         </div>
         <div className="mt-5 flex flex-wrap gap-3">
-          <button className="flex items-center gap-2 rounded-full bg-[#365b89] px-5 py-2 text-xs font-semibold text-white shadow-sm">
+          <button
+            type="button"
+            onClick={handleRun}
+            className="flex items-center gap-2 rounded-full bg-[#365b89] px-5 py-2 text-xs font-semibold text-white shadow-sm"
+          >
             Buscar y extraer
           </button>
-          <button className="rounded-full border border-[#cfd7e2] px-5 py-2 text-xs font-semibold text-[#9aa6b2]">
+          <button
+            type="button"
+            onClick={handlePreview}
+            className="rounded-full border border-[#cfd7e2] px-5 py-2 text-xs font-semibold text-[#9aa6b2]"
+          >
             Abrir vista previa
           </button>
         </div>
-        <div className="mt-6 text-xs text-[#5a6b7f]">Sin busqueda ejecutada</div>
+        <div className="mt-6 text-xs text-[#5a6b7f]">{summary}</div>
         <div className="mt-5">
           <h3 className="text-xs font-semibold text-[#0f1824]">Registro de operacion</h3>
-          <div className="mt-2 h-60 rounded-xl border border-[#d8dee8] bg-white" />
+          <div className="mt-2 h-60 overflow-auto rounded-xl border border-[#d8dee8] bg-white p-3 text-xs">
+            {log.length === 0 && <p className="text-[#9aa6b2]">Sin registros</p>}
+            {log.map((entry, idx) => (
+              <p key={`${entry.text}-${idx}`} className={levelStyles[entry.level]}>
+                {entry.text}
+              </p>
+            ))}
+          </div>
         </div>
       </section>
     </div>

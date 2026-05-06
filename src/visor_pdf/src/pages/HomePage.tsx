@@ -1,7 +1,10 @@
+import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { QuickActions } from '../components/QuickActions'
 import { Sidebar } from '../components/Sidebar'
 import { MagnifyIcon, MergeIcon, OcrIcon } from '../components/icons'
+import { getRecentFiles, openPdf } from '../services/api'
+import { useAppState } from '../state/AppContext'
 
 const quickActions = [
   {
@@ -27,25 +30,26 @@ const quickActions = [
   },
 ]
 
-const recentFiles = [
-  { name: 'OFICIO_CARLOS_CA...', path: 'C:\\Users\\CFE\\Downloads' },
-  { name: 'combinado_de_100...', path: 'C:\\Users\\CFE\\Document...' },
-  { name: 'ejemplo_PDFjs.pdf', path: 'C:\\Users\\CFE\\Document...' },
-  { name: 'AURELIANO_HERN...', path: 'C:\\Users\\CFE\\Document...' },
-  { name: 'documento_1.pdf', path: 'C:\\Users\\CFE\\Document...' },
-  { name: 'redes_de_computad...', path: 'E:\\Programas_exe' },
-  { name: '26 Vigesima sexta s...', path: 'C:\\Users\\CFE\\Document...' },
-  { name: '130006633 CARLOS ...', path: 'C:\\Users\\CFE\\Document...' },
-  { name: 'MAR 113 2022 SAUL...', path: 'C:\\Users\\CFE\\Document...' },
-  { name: 'OFICIO_CARLOS_CA...', path: 'C:\\Users\\CFE\\Desktop' },
-]
-
 export function HomePage() {
   const navigate = useNavigate()
+  const { recentFiles, setRecentFiles, setCurrentPdf } = useAppState()
+
+  useEffect(() => {
+    getRecentFiles().then(setRecentFiles).catch(() => setRecentFiles([]))
+  }, [setRecentFiles])
+
+  const handleOpenRecent = async (path: string) => {
+    const result = await openPdf(path)
+    if (!result) {
+      return
+    }
+    setCurrentPdf(result)
+    navigate('/ocr')
+  }
 
   return (
     <main className="grid min-h-[calc(100vh-120px)] grid-cols-1 lg:grid-cols-[280px_1fr]">
-      <Sidebar files={recentFiles} />
+      <Sidebar files={recentFiles} onSelect={handleOpenRecent} />
       <QuickActions actions={quickActions} onSelect={(action) => navigate(action.to)} />
     </main>
   )

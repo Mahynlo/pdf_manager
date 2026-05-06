@@ -9,6 +9,8 @@ from pathlib import Path
 
 import webview
 
+from app_api import AppAPI
+
 from app_config import load_config
 
 APP_ROOT = Path(__file__).resolve().parent
@@ -77,11 +79,13 @@ def _stop_process(proc: subprocess.Popen | None) -> None:
 
 
 def _open_window(url: str, config, on_close=None) -> None:
+	api = AppAPI()
 	kwargs = {
 		"title": config.window.title,
 		"url": url,
 		"width": config.window.width,
 		"height": config.window.height,
+		"js_api": api,
 	}
 	if config.window.icon:
 		kwargs["icon"] = str(config.window.icon)
