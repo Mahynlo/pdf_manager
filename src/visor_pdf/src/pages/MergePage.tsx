@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { mergePdfs, pickFiles, openPdf } from '../services/api'
+import { mergePdfs, pickFiles, openPdf, openPageThumb, pickDirectory } from '../services/api'
+import toast, { Toaster } from 'react-hot-toast'
 import { useAppState } from '../state/AppContext'
 
 type FileItem = { path: string; name: string; pageCount?: number; dataUrl?: string; thumbDataUrls?: string[]; selected?: boolean[] }
@@ -15,15 +16,19 @@ export function MergePage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [modalIndex, setModalIndex] = useState(0)
   const [isRunning, setIsRunning] = useState(false)
+  const [modalThumbs, setModalThumbs] = useState<Record<string, string>>({})
+  const THUMBS_PER_PAGE = 9
+  const [thumbPage, setThumbPage] = useState<Record<string, number>>({})
 
   const selectedPreviewItems: Array<{
     key: string
     thumb: string
     sourceName: string
     sourcePage: number
+    sourcePath: string
     resultPos: number
   }> = (() => {
-    const out: Array<{ key: string; thumb: string; sourceName: string; sourcePage: number; resultPos: number }> = []
+    const out: Array<{ key: string; thumb: string; sourceName: string; sourcePage: number; sourcePath: string; resultPos: number }> = []
     let resultPos = 1
     for (const item of paths) {
       const total = item.pageCount ?? 0
@@ -35,6 +40,7 @@ export function MergePage() {
           thumb: item.thumbDataUrls?.[idx] ?? '',
           sourceName: item.name,
           sourcePage: idx + 1,
+          sourcePath: item.path,
           resultPos,
         })
         resultPos += 1
@@ -42,6 +48,25 @@ export function MergePage() {
     }
     return out
   })()
+
+  useEffect(() => {
+    if (!modalOpen) return
+    const item = selectedPreviewItems[modalIndex]
+    if (!item) return
+    const key = item.key
+    if (modalThumbs[key]) return
+    // request a higher-resolution thumbnail for the page (scale 1.8)
+    ;(async () => {
+      try {
+        const res = await openPageThumb(item.sourcePath, item.sourcePage - 1, 1.8)
+        if (res?.thumbDataUrl) {
+          setModalThumbs((prev) => ({ ...prev, [key]: res.thumbDataUrl }))
+        }
+      } catch (_err) {
+        // ignore errors, keep using small thumb
+      }
+    })()
+  }, [modalOpen, modalIndex])
 
   const handleAdd = async () => {
     const files = await pickFiles({ multiple: true, title: 'Seleccionar PDFs para combinar' })
@@ -67,7 +92,16 @@ export function MergePage() {
       setPaths((prev) => {
         const existing = new Map(prev.map((it) => [it.path, it]))
         for (const it of items) existing.set(it.path, it)
-        return Array.from(existing.values())
+        const out = Array.from(existing.values())
+        // initialize thumbPage for new items
+        setThumbPage((tp) => {
+          const copy = { ...tp }
+          for (const it of out) {
+            if (!(it.path in copy)) copy[it.path] = 0
+          }
+          return copy
+        })
+        return out
       })
     }
   }
@@ -94,17 +128,35 @@ export function MergePage() {
     try {
       const result = await mergePdfs({ paths: paths.map((p) => p.path), pages, outputPath })
       if (!result) {
+        toast.error('Error desconocido al combinar PDFs')
         return
       }
       setOutputPath(result.outputPath ?? null)
       setMessage(result.message)
+      if (result.outputPath) {
+        toast.success(result.message ?? 'PDF combinado creado')
+      } else {
+        toast.error(result.message ?? 'Error al crear PDF')
+      }
+    } catch (err: any) {
+      toast.error('Error al combinar: ' + (err?.message ?? String(err)))
     } finally {
       setIsRunning(false)
     }
   }
 
+  const handlePickDirectory = async () => {
+    const dir = await pickDirectory('Selecciona carpeta de destino')
+    if (dir) {
+      setOutputPath(dir)
+      const name = (dir || '').split(/\\|\//).pop() || dir
+      toast.success(`Carpeta seleccionada: ${name}`)
+    }
+  }
+
   const handleOpenResult = async () => {
     if (!outputPath) {
+      toast.error('No hay resultado para abrir')
       return
     }
     const result = await openPdf(outputPath)
@@ -116,6 +168,7 @@ export function MergePage() {
 
   return (
     <div className="grid min-h-[calc(100vh-120px)] grid-cols-1 gap-6 px-6 py-6 lg:grid-cols-[1fr_320px]">
+      <Toaster position="top-right" />
       <section className="rounded-2xl border border-[#e3e8ef] bg-white/70 p-6 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <h2 className="text-sm font-semibold text-[#0f1824]">PDFs a combinar</h2>
@@ -196,44 +249,96 @@ export function MergePage() {
                 </div>
               </div>
 
-              <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
-                {Array.from({ length: item.pageCount ?? 0 }).map((_, idx) => {
-                  const selected = item.selected ? item.selected[idx] : false
-                  const thumb = item.thumbDataUrls?.[idx] ?? ''
-                  return (
-                    <button
-                      key={idx}
-                      onClick={() => {
-                        setPaths((prev) =>
-                          prev.map((p) => {
-                            if (p.path !== item.path) return p
-                            const sel = (p.selected ?? Array.from({ length: p.pageCount ?? 0 }, () => true)).slice()
-                            sel[idx] = !sel[idx]
-                            return { ...p, selected: sel }
-                          }),
-                        )
-                      }}
-                      onDoubleClick={() => {
-                        const orderedIndex = selectedPreviewItems.findIndex(
-                          (p) => p.sourceName === item.name && p.sourcePage === idx + 1,
-                        )
-                        if (orderedIndex >= 0) {
-                          setModalIndex(orderedIndex)
-                          setModalOpen(true)
-                        }
-                      }}
-                      className={`relative h-16 w-12 flex-shrink-0 overflow-hidden rounded border ${selected ? 'border-[#10b981] bg-[#e6f4ea]' : 'border-[#e2e8f0] bg-white'}`}
-                      title={`Página ${idx + 1}`}
-                    >
-                      {thumb ? (
-                        <img src={thumb} alt={`${item.name} p${idx + 1}`} className="h-full w-full object-cover" />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-[10px] text-[#7b8793]">P{idx + 1}</div>
-                      )}
-                      <span className="absolute bottom-0 left-0 right-0 bg-black/40 text-[10px] font-semibold text-white">{idx + 1}</span>
-                    </button>
-                  )
-                })}
+              <div className="mt-2">
+                {/* Thumbnails grid with pagination */}
+                {/* Thumbnails: load successive chunks vertically (Load more) */}
+                <div className="flex flex-col gap-2">
+                  {(() => {
+                    const total = item.pageCount ?? 0
+                    const per = THUMBS_PER_PAGE
+                    const pagesToShow = (thumbPage[item.path] ?? 0) + 1
+                    const rows = [] as any[]
+                    for (let p = 0; p < pagesToShow; p += 1) {
+                      const start = p * per
+                      const end = Math.min(start + per, total)
+                      const row = (
+                        <div key={`row-${p}`} className="flex gap-2">
+                          {Array.from({ length: end - start }).map((_, i) => {
+                            const idx = start + i
+                            const selected = item.selected ? item.selected[idx] : false
+                            const thumb = item.thumbDataUrls?.[idx] ?? ''
+                            return (
+                              <button
+                                key={idx}
+                                onClick={() => {
+                                  setPaths((prev) =>
+                                    prev.map((q) => {
+                                      if (q.path !== item.path) return q
+                                      const sel = (q.selected ?? Array.from({ length: q.pageCount ?? 0 }, () => true)).slice()
+                                      sel[idx] = !sel[idx]
+                                      return { ...q, selected: sel }
+                                    }),
+                                  )
+                                }}
+                                onDoubleClick={() => {
+                                  const orderedIndex = selectedPreviewItems.findIndex(
+                                    (p2) => p2.sourceName === item.name && p2.sourcePage === idx + 1,
+                                  )
+                                  if (orderedIndex >= 0) {
+                                    setModalIndex(orderedIndex)
+                                    setModalOpen(true)
+                                  }
+                                }}
+                                className={`relative h-16 w-[90px] flex-shrink-0 overflow-hidden rounded border ${selected ? 'border-[#10b981] bg-[#e6f4ea]' : 'border-[#e2e8f0] bg-white'}`}
+                                title={`Página ${idx + 1}`}
+                              >
+                                {thumb ? (
+                                  <img src={thumb} alt={`${item.name} p${idx + 1}`} className="mx-auto h-full w-auto object-contain" />
+                                ) : (
+                                  <div className="flex h-full w-full items-center justify-center text-[10px] text-[#7b8793]">P{idx + 1}</div>
+                                )}
+                                <span className="absolute bottom-0 left-0 right-0 bg-black/40 text-[10px] font-semibold text-white">{idx + 1}</span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )
+                      rows.push(row)
+                    }
+                    return rows
+                  })()}
+
+                  {/* Load more / Show less buttons */}
+                  {(() => {
+                    const total = item.pageCount ?? 0
+                    const per = THUMBS_PER_PAGE
+                    const pages = Math.ceil(total / per)
+                    const cur = (thumbPage[item.path] ?? 0) + 1
+                    return (
+                      <div className="mt-2 flex gap-2">
+                        {cur > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setThumbPage((tp) => ({ ...tp, [item.path]: Math.max(0, (tp[item.path] ?? 0) - 1) }))}
+                            className="px-3 py-1 rounded border bg-white text-[11px]"
+                          >
+                            Mostrar menos
+                          </button>
+                        )}
+                        {cur < pages && (
+                          <button
+                            type="button"
+                            onClick={() => setThumbPage((tp) => ({ ...tp, [item.path]: (tp[item.path] ?? 0) + 1 }))}
+                            className="px-3 py-1 rounded border bg-white text-[11px]"
+                          >
+                            Cargar más
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })()}
+
+                </div>
               </div>
             </div>
           ))}
@@ -275,8 +380,17 @@ export function MergePage() {
         <div className="text-[11px] text-[#4b5563]">{selectedPreviewItems.length} página(s) seleccionada(s)</div>
         <div className="text-[11px] text-[#64748b]">{message}</div>
         <div className="mt-auto flex flex-col gap-3 text-xs text-[#5a6b7f]">
-          <div className="rounded-lg border border-[#d8dee8] bg-white px-3 py-2">
-            {outputPath ?? 'Selecciona ruta de salida'}
+          <div className="flex items-center gap-2">
+            <div className="flex-1 rounded-lg border border-[#d8dee8] bg-white px-3 py-2 truncate text-[11px]">
+              {outputPath ? outputPath.split('/').pop() || outputPath : 'Selecciona carpeta'}
+            </div>
+            <button
+              type="button"
+              onClick={handlePickDirectory}
+              className="flex-shrink-0 rounded-lg border border-[#cfd7e2] bg-white px-3 py-2 text-[11px] font-semibold text-[#3a4c64] hover:bg-[#f7f9fc]"
+            >
+              Seleccionar
+            </button>
           </div>
           <button
             type="button"
@@ -317,15 +431,16 @@ export function MergePage() {
                 ◀
               </button>
               <div className="flex-1 rounded border border-[#e2e8f0] bg-[#f8fafc] p-3">
-                {selectedPreviewItems[modalIndex]?.thumb ? (
-                  <img
-                    src={selectedPreviewItems[modalIndex].thumb}
-                    alt={`${selectedPreviewItems[modalIndex].sourceName} p${selectedPreviewItems[modalIndex].sourcePage}`}
-                    className="mx-auto h-[420px] max-w-full object-contain"
-                  />
-                ) : (
-                  <div className="grid h-[420px] place-items-center text-sm text-[#7b8793]">Sin miniatura</div>
-                )}
+                {(() => {
+                  const cur = selectedPreviewItems[modalIndex]
+                  const src = cur ? modalThumbs[cur.key] ?? cur.thumb : ''
+                  if (src) {
+                    return (
+                      <img src={src} alt={`${cur.sourceName} p${cur.sourcePage}`} className="mx-auto h-[420px] max-w-full object-contain" />
+                    )
+                  }
+                  return <div className="grid h-[420px] place-items-center text-sm text-[#7b8793]">Sin miniatura</div>
+                })()}
               </div>
               <button
                 type="button"

@@ -43,6 +43,7 @@ export type OpenPdfResult = {
 type PyWebviewApi = {
   get_recent_files: () => Promise<RecentFile[]>
   open_pdf: (path: string) => Promise<OpenPdfResult>
+  open_page_thumb: (path: string, pageIndex: number, scale?: number) => Promise<{ thumbDataUrl: string }>
   pick_files: (options: { multiple: boolean; title: string }) => Promise<string[]>
   pick_directory: (title: string) => Promise<string | null>
   extract_pdf: (payload: ExtractPayload) => Promise<ExtractResult>
@@ -68,6 +69,14 @@ export async function openPdf(path: string): Promise<OpenPdfResult | null> {
     return null
   }
   return api.open_pdf(path)
+}
+
+export async function openPageThumb(path: string, pageIndex: number, scale: number = 1): Promise<{ thumbDataUrl: string } | null> {
+  const api = getApi()
+  if (!api) {
+    return null
+  }
+  return api.open_page_thumb(path, pageIndex, scale)
 }
 
 export async function pickFiles(options: { multiple: boolean; title: string }): Promise<string[]> {

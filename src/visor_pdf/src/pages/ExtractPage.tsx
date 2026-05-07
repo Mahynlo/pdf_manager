@@ -2,6 +2,7 @@
 import { useMemo, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { extractPdf, openPdf, pickDirectory, pickFiles } from '../services/api'
+import toast, { Toaster } from 'react-hot-toast'
 import { useAppState } from '../state/AppContext'
 
 type LogEntry = {
@@ -45,6 +46,7 @@ export function ExtractPage() {
     }
   }, [])
 
+
   const referenceLabel = useMemo(
     () => (referencePath ? `Referencia: ${referencePath.split('\\').pop()}` : 'Referencia: sin archivo'),
     [referencePath],
@@ -61,6 +63,7 @@ export function ExtractPage() {
     const files = await pickFiles({ multiple: true, title: 'Seleccionar PDFs objetivo' })
     if (files.length) {
       setTargetPaths(files)
+      toast.success(`${files.length} archivo(s) cargado(s)`)
     }
   }
 
@@ -68,6 +71,8 @@ export function ExtractPage() {
     const dir = await pickDirectory('Seleccionar carpeta destino')
     if (dir) {
       setDestinationDir(dir)
+      const name = (dir || '').split(/\\|\//).pop() || dir
+      toast.success(`Carpeta destino seleccionada: ${name}`)
     }
   }
 
@@ -104,22 +109,30 @@ export function ExtractPage() {
         const err: LogEntry = { level: 'error', text: 'API no disponible.' }
         setSummary('Error: API no disponible')
         setLog([err])
+        toast.error('API no disponible')
         return
       }
 
       setSummary(result.summary)
       setLog(result.log as LogEntry[])
       setOutputPath(result.outputPath ?? null)
+      if (result.outputPath) {
+        toast.success(result.summary ?? 'Extracción completada')
+      } else {
+        toast.error(result.summary ?? 'No se generó resultado')
+      }
     } catch (ex: any) {
       const msg = ex?.message ? ex.message : String(ex)
       const err: LogEntry = { level: 'error', text: `Error ejecutando extracción: ${msg}` }
       setSummary('Error en la operación')
       setLog([err])
+      toast.error(`Error: ${msg}`)
     }
   }
 
   const handlePreview = async () => {
     if (!outputPath) {
+      toast.error('No hay resultado para previsualizar')
       return
     }
     const result = await openPdf(outputPath)
@@ -132,6 +145,7 @@ export function ExtractPage() {
 
   return (
     <div className="flex min-h-[calc(100vh-120px)] flex-col gap-6 px-6 py-6 lg:flex-row">
+      <Toaster position="top-right" />
       <section className="w-full max-w-sm rounded-2xl border border-[#e3e8ef] bg-white/70 p-6 shadow-sm">
         <h2 className="text-sm font-semibold text-[#0f1824]">Referencia</h2>
         <button

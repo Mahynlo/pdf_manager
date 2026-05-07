@@ -32,6 +32,28 @@ class AppAPI:
         ]
 
     def open_pdf(self, path: str) -> dict[str, Any]:
+        path_obj = Path(path)
+        
+        # Validate it's a file, not a directory
+        if path_obj.is_dir():
+            return {
+                "path": path,
+                "name": path_obj.name,
+                "dataUrl": "",
+                "pageCount": 0,
+                "thumbDataUrls": [],
+            }
+        
+        # Validate file exists and is PDF
+        if not path_obj.is_file():
+            return {
+                "path": path,
+                "name": path_obj.name,
+                "dataUrl": "",
+                "pageCount": 0,
+                "thumbDataUrls": [],
+            }
+        
         recent_files.push(path)
         data_url = self._read_pdf_data_url(path)
         # contar páginas y generar miniaturas (PNGs) para cada página
@@ -61,6 +83,26 @@ class AppAPI:
             "pageCount": page_count,
             "thumbDataUrls": thumb_data_urls,
         }
+
+    def open_page_thumb(self, path: str, page_index: int, scale: float = 1.0) -> dict[str, Any]:
+        """Genera una miniatura PNG de una sola página con la escala solicitada.
+
+        Devuelve un dict con clave `thumbDataUrl` (data:image/png;base64,...)
+        o cadena vacía si ocurre un error.
+        """
+        try:
+            with fitz.open(path) as doc:
+                total = len(doc)
+                if page_index < 0 or page_index >= total:
+                    return {"thumbDataUrl": ""}
+                page = doc[page_index]
+                mat = fitz.Matrix(float(scale), float(scale))
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+                img_bytes = pix.tobytes("png")
+                b64 = base64.b64encode(img_bytes).decode("ascii")
+                return {"thumbDataUrl": f"data:image/png;base64,{b64}"}
+        except Exception:
+            return {"thumbDataUrl": ""}
 
     def _emit_log(self, entry: LogEntry) -> None:
         """Envía un log incremental al frontend si está registrado el callback."""
@@ -265,6 +307,9 @@ class AppAPI:
 
         if output_path:
             out_path = Path(output_path)
+            # if output_path is a directory, generate filename inside it
+            if out_path.is_dir():
+                out_path = out_path / "combinado.pdf"
         else:
             out_path = Path(paths[0]).parent / "combinado.pdf"
 
@@ -284,7 +329,11 @@ class AppAPI:
                 except Exception as exc:
                     # skip problematic file but continue
                     continue
-            out_doc.save(str(out_path), garbage=4, deflate=True)
+            try:
+                out_doc.save(str(out_path), garbage=4, deflate=True)
+            except Exception as exc:
+                out_doc.close()
+                return {"outputPath": None, "message": f"Error al guardar: {str(exc)[:100]}"}
         finally:
             out_doc.close()
 
