@@ -1,5 +1,5 @@
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { extractPdf, openPdf, pickDirectory, pickFiles } from '../services/api'
 import { useAppState } from '../state/AppContext'
@@ -28,6 +28,22 @@ export function ExtractPage() {
   const [log, setLog] = useState<LogEntry[]>([])
   const [outputPath, setOutputPath] = useState<string | null>(null)
   const { setCurrentPdf } = useAppState()
+
+  useEffect(() => {
+    // Registrar callback global para recibir logs incrementales desde Python
+    const anyWindow = window as any
+    anyWindow.__app_on_log = (entry: LogEntry) => {
+      // Añadir entrada incrementalmente
+      setLog((prev) => [...prev, entry])
+    }
+    return () => {
+      try {
+        delete anyWindow.__app_on_log
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  }, [])
 
   const referenceLabel = useMemo(
     () => (referencePath ? `Referencia: ${referencePath.split('\\').pop()}` : 'Referencia: sin archivo'),

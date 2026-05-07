@@ -5,7 +5,7 @@ declare global {
     pywebview?: {
       api: {
         get_recent_files: () => Promise<{ name: string; path: string }[]>
-        open_pdf: (path: string) => Promise<{ name: string; path: string; dataUrl: string }>
+        open_pdf: (path: string) => Promise<{ name: string; path: string; dataUrl: string; pageCount?: number; thumbDataUrls?: string[] }>
         pick_files: (options: { multiple: boolean; title: string }) => Promise<string[]>
         pick_directory: (title: string) => Promise<string | null>
         extract_pdf: (payload: {
@@ -18,6 +18,7 @@ declare global {
         }) => Promise<{ summary: string; outputPath?: string | null; log: { level: string; text: string }[] }>
         merge_pdfs: (payload: {
           paths: string[]
+          pages?: Record<string, number[]>
           outputPath?: string | null
         }) => Promise<{ outputPath?: string | null; message: string }>
       }

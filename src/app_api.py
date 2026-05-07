@@ -8,6 +8,7 @@ from typing import Any
 
 import fitz
 import webview
+import json
 
 from app_v1_modulos_py import recent_files
 from app_v1_modulos_py.pdf_viewer.ocr import OCRProcessor
@@ -30,10 +31,52 @@ class AppAPI:
             for path in recent_files.load()
         ]
 
-    def open_pdf(self, path: str) -> dict[str, str]:
+    def open_pdf(self, path: str) -> dict[str, Any]:
         recent_files.push(path)
         data_url = self._read_pdf_data_url(path)
-        return {"path": path, "name": Path(path).name, "dataUrl": data_url}
+        # contar páginas y generar miniaturas (PNGs) para cada página
+        page_count = 0
+        thumb_data_urls: list[str] = []
+        try:
+            with fitz.open(path) as doc:
+                page_count = len(doc)
+                # generate thumbs for all pages (scale down to fit in UI)
+                mat = fitz.Matrix(0.2, 0.2)
+                for i in range(page_count):
+                    try:
+                        page = doc[i]
+                        pix = page.get_pixmap(matrix=mat, alpha=False)
+                        img_bytes = pix.tobytes("png")
+                        b64 = base64.b64encode(img_bytes).decode("ascii")
+                        thumb_data_urls.append(f"data:image/png;base64,{b64}")
+                    except Exception:
+                        thumb_data_urls.append("")
+        except Exception:
+            page_count = 0
+
+        return {
+            "path": path,
+            "name": Path(path).name,
+            "dataUrl": data_url,
+            "pageCount": page_count,
+            "thumbDataUrls": thumb_data_urls,
+        }
+
+    def _emit_log(self, entry: LogEntry) -> None:
+        """Envía un log incremental al frontend si está registrado el callback."""
+        try:
+            window = webview.windows[0]
+        except Exception:
+            return
+
+        try:
+            payload = json.dumps(entry.__dict__)
+            # Llama a la función JS global `window.__app_on_log` si existe
+            js = f"window.__app_on_log && window.__app_on_log({payload})"
+            window.evaluate_js(js)
+        except Exception:
+            # No bloquear la ejecución si la emisión falla
+            pass
 
     def pick_files(self, options: dict[str, Any]) -> list[str]:
         window = webview.windows[0]
@@ -66,7 +109,9 @@ class AppAPI:
 
         log: list[LogEntry] = []
         if not target_paths:
-            log.append(LogEntry("error", "Selecciona al menos un PDF objetivo."))
+            entry = LogEntry("error", "Selecciona al menos un PDF objetivo.")
+            log.append(entry)
+            self._emit_log(entry)
             return {
                 "summary": "Falta seleccionar PDFs objetivo.",
                 "outputPath": None,
@@ -75,7 +120,9 @@ class AppAPI:
 
         keywords = self._collect_keywords(keywords_raw)
         if not keywords:
-            log.append(LogEntry("error", "Define al menos una palabra clave para la busqueda."))
+            entry = LogEntry("error", "Define al menos una palabra clave para la busqueda.")
+            log.append(entry)
+            self._emit_log(entry)
             return {
                 "summary": "Faltan palabras clave.",
                 "outputPath": None,
@@ -92,30 +139,57 @@ class AppAPI:
                     for idx in pages_to_use:
                         text, _, _, _ = self._extract_page_text(ref_doc, idx)
                         ref_tokens |= self._normalize_words(text)
-                    log.append(
-                        LogEntry(
-                            "info",
-                            f"Referencia: {Path(reference_path).name} — {len(ref_tokens)} tokens",
-                        )
+                    entry = LogEntry(
+                        "info",
+                        f"Referencia: {Path(reference_path).name} — {len(ref_tokens)} tokens",
                     )
+                    log.append(entry)
+                    self._emit_log(entry)
             except Exception as exc:
-                log.append(LogEntry("warn", f"Referencia no procesada: {exc}"))
+                entry = LogEntry("warn", f"Referencia no procesada: {exc}")
+                log.append(entry)
+                self._emit_log(entry)
 
         matches: list[dict[str, Any]] = []
-        for path in target_paths:
+        total_targets = len(target_paths)
+        for i, path in enumerate(target_paths, start=1):
+            # Emitir inicio de procesamiento del archivo
+            try:
+                fname_tmp = Path(path).name
+            except Exception:
+                fname_tmp = str(path)
+            self._emit_log(LogEntry("info", f"Archivo {i} de {total_targets}: {fname_tmp}"))
+
+        # Re-iterate for actual processing (keeping order)
+        for i, path in enumerate(target_paths, start=1):
             fname = Path(path).name
             try:
                 doc = fitz.open(path)
             except Exception as exc:
-                log.append(LogEntry("error", f"{fname}: error al abrir — {exc}"))
+                entry = LogEntry("error", f"{fname}: error al abrir — {exc}")
+                log.append(entry)
+                self._emit_log(entry)
                 continue
 
             with doc:
                 total_pages = len(doc)
                 hint_set = self._parse_pages(hint_pages, total_pages)
+                if hint_set:
+                    pages_suggested = ", ".join(str(p + 1) for p in sorted(hint_set))
+                    entry = LogEntry("info", f"Páginas sugeridas verificadas primero: {pages_suggested}")
+                    log.append(entry)
+                    self._emit_log(entry)
+
+                # Emit info sobre total de páginas
+                entry = LogEntry("info", f"{fname} — {total_pages} página(s)")
+                log.append(entry)
+                self._emit_log(entry)
+
                 scan_order = sorted(hint_set) + [i for i in range(total_pages) if i not in hint_set]
 
                 for idx in scan_order:
+                    # Emitir progreso por página
+                    self._emit_log(LogEntry("info", f"Analizando: {fname} — página {idx + 1}/{total_pages}"))
                     text, mode, elapsed_ms, used_ocr = self._extract_page_text(doc, idx)
                     page_text = text.lower()
                     if not page_text.strip():
@@ -142,12 +216,12 @@ class AppAPI:
                             }
                         )
                         tag = "OCR" if used_ocr else "texto"
-                        log.append(
-                            LogEntry(
-                                "success",
-                                f"{fname} pag {idx + 1} [{mode} | {elapsed_ms:.0f}ms | {tag}]",
-                            )
+                        entry = LogEntry(
+                            "success",
+                            f"{fname} pag {idx + 1} [{mode} | {elapsed_ms:.0f}ms | {tag}]",
                         )
+                        log.append(entry)
+                        self._emit_log(entry)
 
         if not matches:
             return {
@@ -184,6 +258,7 @@ class AppAPI:
 
     def merge_pdfs(self, payload: dict[str, Any]) -> dict[str, Any]:
         paths = payload.get("paths") or []
+        pages_map = payload.get("pages") or {}
         output_path = payload.get("outputPath")
         if not paths:
             return {"outputPath": None, "message": "Selecciona al menos un PDF."}
@@ -196,8 +271,19 @@ class AppAPI:
         out_doc = fitz.open()
         try:
             for path in paths:
-                with fitz.open(path) as doc:
-                    out_doc.insert_pdf(doc)
+                sel_pages = pages_map.get(path)
+                try:
+                    with fitz.open(path) as doc:
+                        total = len(doc)
+                        if sel_pages and len(sel_pages) > 0:
+                            # ensure valid indexes
+                            for pidx in sorted(set([int(i) for i in sel_pages if 0 <= int(i) < total])):
+                                out_doc.insert_pdf(doc, from_page=pidx, to_page=pidx)
+                        else:
+                            out_doc.insert_pdf(doc)
+                except Exception as exc:
+                    # skip problematic file but continue
+                    continue
             out_doc.save(str(out_path), garbage=4, deflate=True)
         finally:
             out_doc.close()

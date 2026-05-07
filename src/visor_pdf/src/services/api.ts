@@ -22,6 +22,8 @@ export type ExtractResult = {
 
 export type MergePayload = {
   paths: string[]
+  // pages: optional map of path -> selected 0-based page indexes
+  pages?: Record<string, number[]>
   outputPath?: string | null
 }
 
@@ -34,6 +36,8 @@ export type OpenPdfResult = {
   name: string
   path: string
   dataUrl: string
+  pageCount?: number
+  thumbDataUrls?: string[]
 }
 
 type PyWebviewApi = {

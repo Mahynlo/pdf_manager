@@ -1,20 +1,74 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { mergePdfs, pickFiles } from '../services/api'
+import { mergePdfs, pickFiles, openPdf } from '../services/api'
 import { useAppState } from '../state/AppContext'
-import { openPdf } from '../services/api'
+
+type FileItem = { path: string; name: string; pageCount?: number; dataUrl?: string; thumbDataUrls?: string[]; selected?: boolean[] }
 
 export function MergePage() {
   const navigate = useNavigate()
-  const [paths, setPaths] = useState<string[]>([])
+  const [paths, setPaths] = useState<FileItem[]>([])
   const [outputPath, setOutputPath] = useState<string | null>(null)
   const [message, setMessage] = useState('Sin paginas seleccionadas')
   const { setCurrentPdf } = useAppState()
 
+  const [modalOpen, setModalOpen] = useState(false)
+  const [modalIndex, setModalIndex] = useState(0)
+  const [isRunning, setIsRunning] = useState(false)
+
+  const selectedPreviewItems: Array<{
+    key: string
+    thumb: string
+    sourceName: string
+    sourcePage: number
+    resultPos: number
+  }> = (() => {
+    const out: Array<{ key: string; thumb: string; sourceName: string; sourcePage: number; resultPos: number }> = []
+    let resultPos = 1
+    for (const item of paths) {
+      const total = item.pageCount ?? 0
+      const sel = item.selected ?? Array.from({ length: total }, () => true)
+      for (let idx = 0; idx < total; idx += 1) {
+        if (!sel[idx]) continue
+        out.push({
+          key: `${item.path}-${idx}`,
+          thumb: item.thumbDataUrls?.[idx] ?? '',
+          sourceName: item.name,
+          sourcePage: idx + 1,
+          resultPos,
+        })
+        resultPos += 1
+      }
+    }
+    return out
+  })()
+
   const handleAdd = async () => {
     const files = await pickFiles({ multiple: true, title: 'Seleccionar PDFs para combinar' })
     if (files.length) {
-      setPaths((prev) => Array.from(new Set([...prev, ...files])))
+      // Obtener metadata de cada PDF (nombre y número de páginas)
+      const items: FileItem[] = []
+      for (const p of files) {
+        try {
+          const info = await openPdf(p)
+          const pc = info?.pageCount ?? 0
+          items.push({
+            path: p,
+            name: info?.name ?? p.split('/').pop() ?? p,
+            pageCount: pc,
+            dataUrl: info?.dataUrl,
+            thumbDataUrls: info?.thumbDataUrls ?? [],
+            selected: Array.from({ length: pc }, () => true),
+          })
+        } catch (_) {
+          items.push({ path: p, name: p.split('/').pop() ?? p, thumbDataUrls: [], selected: [] })
+        }
+      }
+      setPaths((prev) => {
+        const existing = new Map(prev.map((it) => [it.path, it]))
+        for (const it of items) existing.set(it.path, it)
+        return Array.from(existing.values())
+      })
     }
   }
 
@@ -25,12 +79,28 @@ export function MergePage() {
   }
 
   const handleMerge = async () => {
-    const result = await mergePdfs({ paths, outputPath })
-    if (!result) {
-      return
+    // Build pages map: include only files where selection differs from all-selected
+    const pages: Record<string, number[]> = {}
+    for (const it of paths) {
+      const sel = it.selected ?? []
+      if (sel.length === 0) continue
+      const allTrue = sel.every(Boolean)
+      if (!allTrue) {
+        pages[it.path] = sel.map((v, i) => v ? i : -1).filter((i) => i >= 0)
+      }
     }
-    setOutputPath(result.outputPath ?? null)
-    setMessage(result.message)
+
+    setIsRunning(true)
+    try {
+      const result = await mergePdfs({ paths: paths.map((p) => p.path), pages, outputPath })
+      if (!result) {
+        return
+      }
+      setOutputPath(result.outputPath ?? null)
+      setMessage(result.message)
+    } finally {
+      setIsRunning(false)
+    }
   }
 
   const handleOpenResult = async () => {
@@ -71,9 +141,100 @@ export function MergePage() {
               Agrega PDFs con el boton "Agregar PDF"
             </div>
           )}
-          {paths.map((path) => (
-            <div key={path} className="rounded-lg border border-[#d8dee8] bg-white px-3 py-2">
-              {path}
+          {paths.map((item) => (
+            <div key={item.path} className="rounded-lg border border-[#d8dee8] bg-white px-3 py-2">
+              <div className="flex items-start gap-3">
+                <div className="flex-1 text-xs text-[#334155]">
+                  <div className="font-semibold">{item.name}</div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <div className="flex gap-2 text-[11px] text-[#3a4c64]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaths((prev) =>
+                            prev.map((p) =>
+                              p.path === item.path ? { ...p, selected: Array.from({ length: p.pageCount ?? 0 }, () => true) } : p,
+                            ),
+                          )
+                        }}
+                        className="px-2 py-1 rounded bg-white border"
+                      >
+                        Todas
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaths((prev) =>
+                            prev.map((p) =>
+                              p.path === item.path ? { ...p, selected: Array.from({ length: p.pageCount ?? 0 }, () => false) } : p,
+                            ),
+                          )
+                        }}
+                        className="px-2 py-1 rounded bg-white border"
+                      >
+                        Ninguna
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaths((prev) => prev.map((p) => (p.path === item.path ? { ...p, selected: (p.selected ?? []).map((v) => !v) } : p)))
+                        }}
+                        className="px-2 py-1 rounded bg-white border"
+                      >
+                        Invertir
+                      </button>
+                    </div>
+                    <span className="text-[11px] text-[#64748b]">
+                      {(item.selected ?? []).filter(Boolean).length}/{item.pageCount ?? 0} págs.
+                    </span>
+                  </div>
+                </div>
+                <div className="flex flex-col items-center gap-1">
+                  <button type="button" onClick={() => { setPaths(prev => { const idx = prev.findIndex(p => p.path === item.path); if (idx <= 0) return prev; const copy = prev.slice(); [copy[idx-1], copy[idx]] = [copy[idx], copy[idx-1]]; return copy }) }} className="text-xs text-[#6b7280] px-2">↑</button>
+                  <button type="button" onClick={() => { setPaths(prev => { const idx = prev.findIndex(p => p.path === item.path); if (idx < 0 || idx === prev.length - 1) return prev; const copy = prev.slice(); [copy[idx+1], copy[idx]] = [copy[idx], copy[idx+1]]; return copy }) }} className="text-xs text-[#6b7280] px-2">↓</button>
+                  <button type="button" onClick={() => { setPaths(prev => prev.filter(p => p.path !== item.path)) }} className="text-xs text-[#e11d48] px-2">🗑️</button>
+                </div>
+              </div>
+
+              <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+                {Array.from({ length: item.pageCount ?? 0 }).map((_, idx) => {
+                  const selected = item.selected ? item.selected[idx] : false
+                  const thumb = item.thumbDataUrls?.[idx] ?? ''
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        setPaths((prev) =>
+                          prev.map((p) => {
+                            if (p.path !== item.path) return p
+                            const sel = (p.selected ?? Array.from({ length: p.pageCount ?? 0 }, () => true)).slice()
+                            sel[idx] = !sel[idx]
+                            return { ...p, selected: sel }
+                          }),
+                        )
+                      }}
+                      onDoubleClick={() => {
+                        const orderedIndex = selectedPreviewItems.findIndex(
+                          (p) => p.sourceName === item.name && p.sourcePage === idx + 1,
+                        )
+                        if (orderedIndex >= 0) {
+                          setModalIndex(orderedIndex)
+                          setModalOpen(true)
+                        }
+                      }}
+                      className={`relative h-16 w-12 flex-shrink-0 overflow-hidden rounded border ${selected ? 'border-[#10b981] bg-[#e6f4ea]' : 'border-[#e2e8f0] bg-white'}`}
+                      title={`Página ${idx + 1}`}
+                    >
+                      {thumb ? (
+                        <img src={thumb} alt={`${item.name} p${idx + 1}`} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-[10px] text-[#7b8793]">P{idx + 1}</div>
+                      )}
+                      <span className="absolute bottom-0 left-0 right-0 bg-black/40 text-[10px] font-semibold text-white">{idx + 1}</span>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           ))}
         </div>
@@ -81,10 +242,38 @@ export function MergePage() {
 
       <aside className="flex flex-col gap-4 rounded-2xl border border-[#e3e8ef] bg-white/70 p-6 shadow-sm">
         <h3 className="text-sm font-semibold text-[#0f1824]">Vista previa del resultado</h3>
-        <div className="flex h-36 flex-col items-center justify-center gap-2 rounded-xl border border-[#d8dee8] bg-[#f7f9fc] text-xs text-[#9aa6b2]">
-          <div className="grid h-10 w-10 place-items-center rounded-lg border border-[#d5dce6] bg-white">◎</div>
-          {message}
+        <div className="h-[420px] overflow-auto rounded-xl border border-[#d8dee8] bg-[#f7f9fc] p-2">
+          {selectedPreviewItems.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-[#9aa6b2]">
+              <div className="grid h-10 w-10 place-items-center rounded-lg border border-[#d5dce6] bg-white">◎</div>
+              Sin páginas seleccionadas
+            </div>
+          ) : (
+            <div className="grid grid-cols-4 gap-2">
+              {selectedPreviewItems.map((it, idx) => (
+                <button
+                  key={it.key}
+                  type="button"
+                  className="relative overflow-hidden rounded border border-[#c7d2df] bg-white"
+                  title={`${it.sourceName} — pág ${it.sourcePage} — pos ${it.resultPos}`}
+                  onClick={() => {
+                    setModalIndex(idx)
+                    setModalOpen(true)
+                  }}
+                >
+                  {it.thumb ? (
+                    <img src={it.thumb} alt={`${it.sourceName} p${it.sourcePage}`} className="h-20 w-full object-cover" />
+                  ) : (
+                    <div className="flex h-20 w-full items-center justify-center text-[10px] text-[#7b8793]">P{it.sourcePage}</div>
+                  )}
+                  <div className="absolute bottom-0 left-0 right-0 bg-black/45 px-1 text-[10px] font-semibold text-white">{it.resultPos}</div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
+        <div className="text-[11px] text-[#4b5563]">{selectedPreviewItems.length} página(s) seleccionada(s)</div>
+        <div className="text-[11px] text-[#64748b]">{message}</div>
         <div className="mt-auto flex flex-col gap-3 text-xs text-[#5a6b7f]">
           <div className="rounded-lg border border-[#d8dee8] bg-white px-3 py-2">
             {outputPath ?? 'Selecciona ruta de salida'}
@@ -92,9 +281,10 @@ export function MergePage() {
           <button
             type="button"
             onClick={handleMerge}
-            className="rounded-full bg-[#365b89] px-4 py-2 text-xs font-semibold text-white"
+            disabled={isRunning}
+            className={`rounded-full px-4 py-2 text-xs font-semibold text-white ${isRunning ? 'bg-[#94b3d7] cursor-not-allowed' : 'bg-[#365b89]'}`}
           >
-            Combinar y guardar
+            {isRunning ? 'Combinando...' : 'Combinar y guardar'}
           </button>
           <button
             type="button"
@@ -105,6 +295,55 @@ export function MergePage() {
           </button>
         </div>
       </aside>
+      {modalOpen && selectedPreviewItems.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="mx-4 w-[720px] max-w-[95%] overflow-hidden rounded-2xl bg-white p-4">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-[#0f1824]">Vista previa de páginas seleccionadas</div>
+              <button
+                onClick={() => setModalOpen(false)}
+                className="rounded bg-[#f2f4f7] px-3 py-1 text-xs"
+              >
+                Cerrar
+              </button>
+            </div>
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                className="rounded border border-[#d1d9e6] px-2 py-1 text-xs"
+                onClick={() => setModalIndex((prev) => Math.max(0, prev - 1))}
+                disabled={modalIndex <= 0}
+              >
+                ◀
+              </button>
+              <div className="flex-1 rounded border border-[#e2e8f0] bg-[#f8fafc] p-3">
+                {selectedPreviewItems[modalIndex]?.thumb ? (
+                  <img
+                    src={selectedPreviewItems[modalIndex].thumb}
+                    alt={`${selectedPreviewItems[modalIndex].sourceName} p${selectedPreviewItems[modalIndex].sourcePage}`}
+                    className="mx-auto h-[420px] max-w-full object-contain"
+                  />
+                ) : (
+                  <div className="grid h-[420px] place-items-center text-sm text-[#7b8793]">Sin miniatura</div>
+                )}
+              </div>
+              <button
+                type="button"
+                className="rounded border border-[#d1d9e6] px-2 py-1 text-xs"
+                onClick={() => setModalIndex((prev) => Math.min(selectedPreviewItems.length - 1, prev + 1))}
+                disabled={modalIndex >= selectedPreviewItems.length - 1}
+              >
+                ▶
+              </button>
+            </div>
+            <div className="mt-3 text-xs text-[#334155]">
+              <div><strong>PDF origen:</strong> {selectedPreviewItems[modalIndex]?.sourceName}</div>
+              <div><strong>Página origen:</strong> {selectedPreviewItems[modalIndex]?.sourcePage}</div>
+              <div><strong>Posición en resultado:</strong> {selectedPreviewItems[modalIndex]?.resultPos} de {selectedPreviewItems.length}</div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
