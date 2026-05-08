@@ -6,6 +6,18 @@ declare global {
       api: {
         get_recent_files: () => Promise<{ name: string; path: string }[]>
         open_pdf: (path: string) => Promise<{ name: string; path: string; dataUrl: string; pageCount?: number; thumbDataUrls?: string[] }>
+        ocr_pdf: (payload: { path: string; pages?: number[] }) => Promise<{
+          summary: string
+          pages: {
+            pageIndex: number
+            pageNumber: number
+            text: string
+            mode: string
+            elapsedMs: number
+            usedOcr: boolean
+          }[]
+          fullText: string
+        }>
         pick_files: (options: { multiple: boolean; title: string }) => Promise<string[]>
         pick_directory: (title: string) => Promise<string | null>
         extract_pdf: (payload: {

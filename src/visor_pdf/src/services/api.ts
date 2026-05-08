@@ -40,10 +40,26 @@ export type OpenPdfResult = {
   thumbDataUrls?: string[]
 }
 
+export type OcrPageEntry = {
+  pageIndex: number
+  pageNumber: number
+  text: string
+  mode: string
+  elapsedMs: number
+  usedOcr: boolean
+}
+
+export type OcrPdfResult = {
+  summary: string
+  pages: OcrPageEntry[]
+  fullText: string
+}
+
 type PyWebviewApi = {
   get_recent_files: () => Promise<RecentFile[]>
   open_pdf: (path: string) => Promise<OpenPdfResult>
   open_page_thumb: (path: string, pageIndex: number, scale?: number) => Promise<{ thumbDataUrl: string }>
+  ocr_pdf: (payload: { path: string; pages?: number[] }) => Promise<OcrPdfResult>
   pick_files: (options: { multiple: boolean; title: string }) => Promise<string[]>
   pick_directory: (title: string) => Promise<string | null>
   extract_pdf: (payload: ExtractPayload) => Promise<ExtractResult>
@@ -77,6 +93,14 @@ export async function openPageThumb(path: string, pageIndex: number, scale: numb
     return null
   }
   return api.open_page_thumb(path, pageIndex, scale)
+}
+
+export async function ocrPdf(payload: { path: string; pages?: number[] }): Promise<OcrPdfResult | null> {
+  const api = getApi()
+  if (!api) {
+    return null
+  }
+  return api.ocr_pdf(payload)
 }
 
 export async function pickFiles(options: { multiple: boolean; title: string }): Promise<string[]> {

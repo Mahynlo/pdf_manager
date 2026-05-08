@@ -341,6 +341,57 @@ class AppAPI:
 
         return {"outputPath": str(out_path), "message": "PDF combinado creado."}
 
+    def ocr_pdf(self, payload: dict[str, Any]) -> dict[str, Any]:
+        path = payload.get("path")
+        pages = payload.get("pages")
+
+        if not path:
+            return {"summary": "Falta ruta del PDF.", "pages": [], "fullText": ""}
+
+        path_obj = Path(path)
+        if not path_obj.exists() or not path_obj.is_file():
+            return {"summary": "Archivo no válido.", "pages": [], "fullText": ""}
+
+        page_results: list[dict[str, Any]] = []
+        try:
+            with fitz.open(path) as doc:
+                total = len(doc)
+                if isinstance(pages, list) and pages:
+                    target_pages = sorted(set(int(i) for i in pages if isinstance(i, int) or str(i).isdigit()))
+                    target_pages = [i for i in target_pages if 0 <= i < total]
+                else:
+                    target_pages = list(range(total))
+
+                for idx in target_pages:
+                    text, mode, elapsed_ms, used_ocr = self._extract_page_text(doc, idx)
+                    page_results.append(
+                        {
+                            "pageIndex": idx,
+                            "pageNumber": idx + 1,
+                            "text": text,
+                            "mode": mode,
+                            "elapsedMs": elapsed_ms,
+                            "usedOcr": used_ocr,
+                        }
+                    )
+        except Exception as exc:
+            return {
+                "summary": f"Error ejecutando OCR: {exc}",
+                "pages": [],
+                "fullText": "",
+            }
+
+        full_text = "\n\n".join(
+            f"[Página {p['pageNumber']}]\n{p['text'].strip()}" for p in page_results if str(p.get("text", "")).strip()
+        )
+        found = sum(1 for p in page_results if str(p.get("text", "")).strip())
+
+        return {
+            "summary": f"OCR finalizado: {found}/{len(page_results)} páginas con texto.",
+            "pages": page_results,
+            "fullText": full_text,
+        }
+
     def _read_pdf_data_url(self, path: str) -> str:
         data = Path(path).read_bytes()
         b64 = base64.b64encode(data).decode("ascii")
