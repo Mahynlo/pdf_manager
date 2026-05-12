@@ -10,8 +10,17 @@ const tabs = [
 export function TabBar() {
   return (
     <section className="flex items-center gap-3 border-b border-[#d5dce6] bg-[#eef2f7] px-5 py-2">
-      <button className="text-sm text-[#5a6b7f]">◀</button>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-3 font-semibold ">
+        <span className="grid h-9 w-9 place-items-center rounded-lg bg-[#ef5350] text-gray-100 text-[10px] font-bold uppercase tracking-[0.2em]">
+          pdf
+        </span>
+        <div>
+          <p className="text-sm font-semibold">Extraer PDFs</p>
+          <p className="text-[11px] text-gray-500">Centro de gestion documental</p>
+        </div>
+      </div>
+      
+      <div className="flex flex-wrap items-center gap-2 px-12">
         {tabs.map((tab) => (
           <NavLink
             key={tab.label}

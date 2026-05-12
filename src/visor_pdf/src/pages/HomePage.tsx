@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import toast from 'react-hot-toast' // Importamos toast para dar feedback visual
 import { QuickActions } from '../components/QuickActions'
 import { Sidebar } from '../components/Sidebar'
 import { MagnifyIcon, MergeIcon, OcrIcon } from '../components/icons'
@@ -34,23 +35,50 @@ export function HomePage() {
   const navigate = useNavigate()
   const { recentFiles, setRecentFiles, setCurrentPdf } = useAppState()
 
+  // Cargar archivos recientes al montar
   useEffect(() => {
-    getRecentFiles().then(setRecentFiles).catch(() => setRecentFiles([]))
+    getRecentFiles()
+      .then(setRecentFiles)
+      .catch((err) => {
+        console.error('Error al cargar archivos recientes:', err)
+        setRecentFiles([]) // Asegura que el estado no quede roto
+      })
   }, [setRecentFiles])
 
+  // Manejo robusto de apertura de archivos recientes
   const handleOpenRecent = async (path: string) => {
-    const result = await openPdf(path)
-    if (!result) {
-      return
+    const loadingToast = toast.loading('Abriendo archivo...')
+    
+    try {
+      const result = await openPdf(path)
+      
+      if (!result) {
+        throw new Error('No se pudo leer el archivo')
+      }
+      
+      setCurrentPdf(result)
+      toast.dismiss(loadingToast) // Quitamos el loading si fue exitoso
+      
+      // Al navegar a /ocr (tu visor principal con pestañas), el archivo
+      // se agregará automáticamente al DocumentManager gracias a nuestro useEffect allá.
+      navigate('/ocr')
+      
+    } catch (error) {
+      toast.error('Error al abrir. ¿El archivo fue movido o borrado?', { 
+        id: loadingToast 
+      })
     }
-    setCurrentPdf(result)
-    navigate('/ocr')
   }
 
   return (
-    <main className="grid min-h-[calc(100vh-120px)] grid-cols-1 lg:grid-cols-[280px_1fr]">
+    // Se usa div en lugar de main porque App.tsx ya provee el <main>
+    // h-full y w-full respetan el layout flexbox global sin desbordarse
+    <div className="grid h-full w-full grid-cols-1 lg:grid-cols-[280px_1fr]">
       <Sidebar files={recentFiles} onSelect={handleOpenRecent} />
-      <QuickActions actions={quickActions} onSelect={(action) => navigate(action.to)} />
-    </main>
+      <QuickActions 
+        actions={quickActions} 
+        onSelect={(action) => navigate(action.to)} 
+      />
+    </div>
   )
 }
