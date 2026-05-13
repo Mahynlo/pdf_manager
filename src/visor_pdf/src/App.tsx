@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { TabBar } from './components/TabBar'
+import { TopBar } from './components/TopBar' // <- Ya lo vamos a utilizar
 import { ExtractPage } from './pages/ExtractPage'
 import { HomePage } from './pages/HomePage'
 import { MergePage } from './pages/MergePage'
@@ -12,7 +13,7 @@ export default function App() {
     <div className="flex h-screen w-full flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,_#f6f7fb_0%,_#eef2f7_45%,_#e9eef5_100%)] text-[#0f1824]">
       
       {/* 2. Añadimos el TopBar que tenías importado */}
-
+      <TopBar />
       
       {/* 3. El TabBar (shrink-0 asegura que las barras no se aplasten) */}
       <div className="shrink-0">

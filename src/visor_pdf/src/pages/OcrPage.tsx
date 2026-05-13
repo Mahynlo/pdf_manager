@@ -1,6 +1,7 @@
 import { PDFViewer } from '@embedpdf/react-pdf-viewer'
 import type { PDFViewerRef } from '@embedpdf/react-pdf-viewer'
 import { useEffect, useRef, useState } from 'react'
+import { useDocumentManagerCapability, useActiveDocument } from '@embedpdf/plugin-document-manager/react'
 import toast, { Toaster } from 'react-hot-toast'
 import { ocrPdf, openPdf, pickFiles } from '../services/api'
 import type { OpenPdfResult } from '../services/api'
@@ -70,34 +71,47 @@ export function OcrPage({ themePreference = 'light' }: AppProps) {
   const [ocrResultsByDoc, setOcrResultsByDoc] = useState<Record<string, OcrPageData[]>>({})
   const [activeOcrIdxByDoc, setActiveOcrIdxByDoc] = useState<Record<string, number>>({})
 
+  // NUEVO: Estado para controlar la visibilidad del panel lateral
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+
+  // document-manager hooks (provides + active state)
+  const { provides: docProvides } = useDocumentManagerCapability()
+  const { activeDocumentId: pluginActiveDocumentId } = useActiveDocument()
+
+  const getDocMgr = () => {
+    return (docProvides as any) ?? registryRef.current?.getPlugin('document-manager')
+  }
+
   useEffect(() => {
-    if (!currentPdf || !registryRef.current) return
+    if (!currentPdf) return
+    const docMgr = getDocMgr()
+    if (!docMgr) return
     if (openedDocPathsRef.current.has(currentPdf.path)) return
 
-    const docMgr = registryRef.current.getPlugin('document-manager') as DocumentManagerCapability
     const docId = `doc-${++docIdCounterRef.current}`
 
     openedDocPathsRef.current.add(currentPdf.path)
     docIdToPathRef.current.set(docId, currentPdf.path)
     docIdToDocRef.current.set(docId, currentPdf)
 
-    docMgr.openDocumentUrl({
+    void docMgr.openDocumentUrl({
       url: currentPdf.dataUrl,
       name: currentPdf.name,
       documentId: docId,
-      autoActivate: true
+      autoActivate: true,
     })
 
     setActiveDocumentId(docId)
-  }, [currentPdf])
+  }, [currentPdf, docProvides])
 
   useEffect(() => {
-    if (!activeDocumentId) return
-    const activeDoc = docIdToDocRef.current.get(activeDocumentId)
+    if (!pluginActiveDocumentId) return
+    const activeDoc = docIdToDocRef.current.get(pluginActiveDocumentId)
     if (activeDoc && currentPdf?.path !== activeDoc.path) {
       setCurrentPdf(activeDoc)
     }
-  }, [activeDocumentId, currentPdf, setCurrentPdf])
+    setActiveDocumentId(pluginActiveDocumentId)
+  }, [pluginActiveDocumentId, currentPdf, setCurrentPdf])
 
   useEffect(() => {
     viewerRef.current?.container?.setTheme({ preference: themePreference })
@@ -117,8 +131,11 @@ export function OcrPage({ themePreference = 'light' }: AppProps) {
       const files = await pickFiles({ multiple: true, title: 'Seleccionar PDF(s)' })
       if (!files?.length) return
 
-      const docMgr = registryRef.current?.getPlugin('document-manager') as DocumentManagerCapability
-      if (!docMgr) throw new Error('DocumentManager no disponible')
+      const docMgr = getDocMgr()
+      if (!docMgr) {
+        toast.error('DocumentManager no disponible — espere a que cargue el visor')
+        return
+      }
 
       const loaded = await Promise.all(files.map((path) => openPdf(path)))
       const valid = loaded.filter((doc): doc is OpenPdfResult => Boolean(doc?.path && doc?.dataUrl))
@@ -140,11 +157,11 @@ export function OcrPage({ themePreference = 'light' }: AppProps) {
         docIdToPathRef.current.set(docId, doc.path)
         docIdToDocRef.current.set(docId, doc)
 
-        docMgr.openDocumentUrl({
+        void docMgr.openDocumentUrl({
           url: doc.dataUrl,
           name: doc.name,
           documentId: docId,
-          autoActivate: isLast
+          autoActivate: isLast,
         })
 
         if (isLast) setActiveDocumentId(docId)
@@ -181,6 +198,11 @@ export function OcrPage({ themePreference = 'light' }: AppProps) {
         ...prev,
         [targetDocumentId]: 0
       }))
+      
+      // Abrir el panel automáticamente si estaba cerrado y se ejecutó OCR
+      if (!isSidebarOpen) {
+        setIsSidebarOpen(true)
+      }
 
       toast.success(result.summary || 'OCR completado', { id: loadingToast })
     } catch (err) {
@@ -206,70 +228,41 @@ export function OcrPage({ themePreference = 'light' }: AppProps) {
 
   const handleViewerReady = (registry: PluginRegistry) => {
     registryRef.current = registry
-
-    try {
-      const docMgr = registry.getPlugin('document-manager') as DocumentManagerCapability
-
-      if (docMgr.onActiveDocumentChanged?.subscribe) {
-        docMgr.onActiveDocumentChanged.subscribe(({ currentDocumentId }: { currentDocumentId: string }) => {
-          setActiveDocumentId(currentDocumentId)
-        })
-      }
-
-      if (docMgr.onDocumentOpened?.subscribe) {
-        docMgr.onDocumentOpened.subscribe(({ documentId, name }: { documentId: string; name: string }) => {
-          console.log(`📄 Documento abierto: ${name} (${documentId})`)
-        })
-      }
-
-      if (docMgr.onDocumentClosed?.subscribe) {
-        docMgr.onDocumentClosed.subscribe(({ documentId }: { documentId: string }) => {
-          console.log(`❌ Documento cerrado: ${documentId}`)
-
-          const path = docIdToPathRef.current.get(documentId)
-          if (path) {
-            openedDocPathsRef.current.delete(path)
-            docIdToPathRef.current.delete(documentId)
-          }
-
-          setOcrResultsByDoc(prev => {
-            const next = { ...prev }
-            delete next[documentId]
-            return next
-          })
-          setActiveOcrIdxByDoc(prev => {
-            const next = { ...prev }
-            delete next[documentId]
-            return next
-          })
-          docIdToDocRef.current.delete(documentId)
-        })
-      }
-    } catch (error) {
-      console.warn('⚠️ Error configurando DocumentManager:', error)
-    }
   }
 
   return (
-    // 1. Contenedor Maestro: h-screen y overflow-hidden bloquean el scroll de la página completa
     <div className="flex h-full w-full flex-col gap-4 p-4 lg:flex-row lg:gap-5 bg-slate-100/50 box-border overflow-hidden">
       <Toaster position="top-right" />
 
-      {/* 2. Main flex area: min-h-0 es crítico para que sus hijos no lo desborden */}
       <main className="flex flex-1 min-h-0 flex-col lg:flex-row gap-4 lg:gap-5">
 
         {/* === SECCIÓN DEL VISOR PDF === */}
         <section className="flex flex-col flex-1 min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
 
-          {/* Header Superior del Visor (Tamaño fijo, no se aplasta) */}
-          <header className="shrink-0 border-b border-slate-100 bg-slate-50/50 px-4 py-3 flex justify-between items-center z-10">
+          <header className="shrink-0 border-b border-slate-100 bg-slate-50/50 px-4 py-3 flex justify-between items-center z-10 flex-wrap gap-2">
             <div className="flex items-center gap-2">
               <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
               <h2 className="text-[12px] font-bold uppercase tracking-wider text-slate-600">
                 Gestor de Documentos
               </h2>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              
+              {/* BOTÓN PARA OCULTAR/MOSTRAR PANEL OCR */}
+              <button
+                type="button"
+                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-bold transition-all shadow-sm ${
+                  isSidebarOpen 
+                    ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:border-blue-300' 
+                    : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+                title={isSidebarOpen ? "Ocultar panel de resultados" : "Mostrar panel de resultados"}
+              >
+                <span>{isSidebarOpen ? '▶' : '◀'}</span> 
+                {isSidebarOpen ? 'Ocultar OCR' : 'Mostrar OCR'}
+              </button>
+
               <button
                 type="button"
                 onClick={handleRunActiveOcr}
@@ -288,7 +281,6 @@ export function OcrPage({ themePreference = 'light' }: AppProps) {
             </div>
           </header>
 
-          {/* Contenedor estricto del visor PDF (min-h-0 previene el desbordamiento de Flexbox) */}
           <div className="relative flex-1 min-h-0 w-full overflow-hidden bg-slate-200/40">
             <PDFViewer
               ref={viewerRef}
@@ -297,79 +289,72 @@ export function OcrPage({ themePreference = 'light' }: AppProps) {
                 tabBar: 'multiple',
                 theme: { preference: themePreference },
                 disabledCategories: ['document-open', 'document-close'],
-                documentManager: { maxDocuments: 10 },
-                i18n: {
-                  defaultLocale: 'es',
-                }
+                documentManager: { maxDocuments: 2 },
+                i18n: { defaultLocale: 'es' }
               }}
-              // Bloquear el display block ayuda a ciertos iframes/canvas a no generar espacio residual abajo
               style={{ width: '100%', height: '100%', display: 'block' }}
             />
           </div>
         </section>
 
-       {/* === SECCIÓN DE BARRA LATERAL OCR === */}
-        {/* shrink-0 evita que flexbox la haga más delgada de lo necesario */}
-        <aside className="flex flex-col shrink-0 w-full lg:w-[380px] h-[40vh] lg:h-full min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        {/* === SECCIÓN DE BARRA LATERAL OCR (CONDICIONAL) === */}
+        {isSidebarOpen && (
+          <aside className="flex flex-col shrink-0 w-full lg:w-[380px] h-[40vh] lg:h-full min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm animate-in fade-in slide-in-from-right-4 duration-300">
+            
+            <header className="shrink-0 flex items-center justify-between mb-4">
+              <h3 className="text-xs font-extrabold text-slate-800 truncate pr-2 uppercase tracking-wide">
+                Resultado OCR {activeDocument?.name ? `· ${activeDocument.name}` : ''}
+              </h3>
+              {ocrPages.length > 0 && (
+                <button
+                  onClick={copyToClipboard}
+                  className="rounded px-2 py-1 text-[11px] font-semibold text-blue-600 transition hover:bg-blue-50"
+                >
+                  Copiar todo
+                </button>
+              )}
+            </header>
 
-          <header className="shrink-0 flex items-center justify-between mb-4">
-            <h3 className="text-xs font-extrabold text-slate-800 truncate pr-2 uppercase tracking-wide">
-              Resultado OCR {activeDocument?.name ? `· ${activeDocument.name}` : ''}
-            </h3>
-            {ocrPages.length > 0 && (
-              <button
-                onClick={copyToClipboard}
-                className="rounded px-2 py-1 text-[11px] font-semibold text-blue-600 transition hover:bg-blue-50"
-              >
-                Copiar todo
-              </button>
-            )}
-          </header>
-
-          {!activeDocumentId ? (
-            // CORRECCIÓN 1: quitamos h-dvh, usamos min-h-0
-            <div className="flex flex-1 min-h-0 items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs text-slate-500">
-              Abre un documento para ver los resultados del reconocimiento de texto.
-            </div>
-          ) : ocrPages.length === 0 ? (
-            // CORRECCIÓN 2: quitamos h-dvh, usamos min-h-0
-            <div className="flex flex-1 min-h-0 items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs text-slate-500">
-              Aún no hay datos. Haz clic en <strong className="mx-1 text-slate-700">"Procesar OCR"</strong> en la barra superior.
-            </div>
-          ) : (
-            // CORRECCIÓN 3: quitamos h-dvh, usamos min-h-0
-            <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-
-              {/* Paginador limitando su altura máxima y con scroll */}
-              <div className="shrink-0 mb-3 flex flex-wrap gap-1.5 overflow-y-auto max-h-32 pr-2 custom-scrollbar">
-                {ocrPages.map((p, idx) => (
-                  <button
-                    key={p.pageNumber}
-                    onClick={() => setActiveOcrIdx(idx)}
-                    className={`h-8 w-10 shrink-0 rounded-md text-[11px] font-bold transition-all border ${activeOcrIdx === idx
-                        ? 'border-blue-600 bg-blue-600 text-white shadow-md'
-                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+            {!activeDocumentId ? (
+              <div className="flex flex-1 min-h-0 items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs text-slate-500">
+                Abre un documento para ver los resultados del reconocimiento de texto.
+              </div>
+            ) : ocrPages.length === 0 ? (
+              <div className="flex flex-1 min-h-0 items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs text-slate-500">
+                Aún no hay datos. Haz clic en <strong className="mx-1 text-slate-700">"Procesar OCR"</strong> en la barra superior.
+              </div>
+            ) : (
+              <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                <div className="shrink-0 mb-3 flex flex-wrap gap-1.5 overflow-y-auto max-h-32 pr-2 custom-scrollbar">
+                  {ocrPages.map((p, idx) => (
+                    <button
+                      key={p.pageNumber}
+                      onClick={() => setActiveOcrIdx(idx)}
+                      className={`h-8 w-10 shrink-0 rounded-md text-[11px] font-bold transition-all border ${
+                        activeOcrIdx === idx
+                          ? 'border-blue-600 bg-blue-600 text-white shadow-md'
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
                       }`}
-                  >
-                    {p.pageNumber}
-                  </button>
-                ))}
-              </div>
+                    >
+                      {p.pageNumber}
+                    </button>
+                  ))}
+                </div>
 
-              <div className="shrink-0 mb-3 flex items-center justify-between text-[10px] font-mono font-semibold text-slate-500 bg-slate-100/50 px-3 py-2 rounded-lg border border-slate-100">
-                <span className="uppercase">Modo: {ocrPages[activeOcrIdx]?.mode}</span>
-                <span className="uppercase">Origen: {ocrPages[activeOcrIdx]?.usedOcr ? 'Proceso OCR' : 'Nativo'}</span>
-              </div>
+                <div className="shrink-0 mb-3 flex items-center justify-between text-[10px] font-mono font-semibold text-slate-500 bg-slate-100/50 px-3 py-2 rounded-lg border border-slate-100">
+                  <span className="uppercase">Modo: {ocrPages[activeOcrIdx]?.mode}</span>
+                  <span className="uppercase">Origen: {ocrPages[activeOcrIdx]?.usedOcr ? 'Proceso OCR' : 'Nativo'}</span>
+                </div>
 
-              {/* Área de texto que consume el resto del espacio disponible */}
-              <textarea
-                readOnly
-                value={ocrPages[activeOcrIdx]?.text ?? ''}
-                className="flex-1 min-h-0 h-full w-full overflow-y-auto resize-none rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-relaxed text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 custom-scrollbar shadow-inner"
-              />
-            </div>
-          )}
-        </aside>
+                <textarea
+                  readOnly
+                  value={ocrPages[activeOcrIdx]?.text ?? ''}
+                  className="flex-1 min-h-0 h-full w-full overflow-y-auto resize-none rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-relaxed text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 custom-scrollbar shadow-inner"
+                />
+              </div>
+            )}
+          </aside>
+        )}
 
       </main>
     </div>
