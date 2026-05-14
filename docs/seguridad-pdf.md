@@ -1,396 +1,425 @@
-# Módulo de Seguridad de PDFs
+# Módulo de Seguridad de PDFs — Arquitectura y funcionamiento
 
-## Descripción General
+## Índice
 
-El módulo `pdf_security` proporciona funcionalidades **completas** para gestionar PDFs protegidos:
+1. [Visión general](#1-visión-general)
+2. [Flujo de desbloqueo](#2-flujo-de-desbloqueo)
+3. [Flujo de protección](#3-flujo-de-protección)
+4. [Estructura de componentes](#4-estructura-de-componentes)
+5. [Gestor de Seguridad](#5-gestor-de-seguridad-pdfsecuritymanager)
+6. [Interfaz de usuario](#6-interfaz-de-usuario-pdfsecuritytab)
+7. [Integración con la aplicación](#7-integración-con-la-aplicación)
+8. [Niveles de protección](#8-niveles-de-protección)
 
-### Funcionalidades Principales
+---
 
-✅ **Desbloquear PDFs**
-- Detectar si un PDF está protegido
-- Validar y desbloquear con contraseña
-- Abrir directamente en el visor
-- Guardar copia sin protección
+## 1. Visión general
 
-✅ **Crear PDFs Protegidos** 
-- Proteger PDFs existentes con contraseña
-- Asignar diferentes niveles de permisos
-- Usar presets predefinidos o permisos personalizados
-- Contraseña de propietario para cambios futuros
+El módulo `pdf_security` gestiona el ciclo de vida completo de PDFs protegidos: **detección**, **desbloqueo**, **visualización** e **integración con el visor**.
 
-✅ **Gestionar Permisos**
-- Impresión (normal y alta calidad)
-- Modificación de contenido
-- Copia de contenido
-- Anotaciones
-- Llenar formularios
-- Ensamblaje de páginas
-- Cambiar permisos de PDFs existentes
 
-## Estructura
 
+### Funcionalidades principales
+
+- ✅ Detectar si un PDF está protegido sin abrirlo completamente
+- ✅ Desbloquear PDFs y abrirlos directamente en el visor
+- ✅ Guardar copias desbloqueadas
+- ✅ Crear PDFs protegidos con contraseña
+- ✅ Asignar niveles de permisos (presets o personalizados)
+- ✅ Validar permisos al guardar cambios en el visor
+
+| Capa | Tecnología | Responsabilidad |
+|------|-----------|-----------------|
+| **Lógica** | PyMuPDF (`fitz`), métodos de cifrado | Detectar protección, desbloquear, crear permisos, validar contraseñas |
+| **Interfaz** | Flet / Flutter | Pestaña con dos secciones (desbloquear / proteger) |
+| **Integración** | Main app (`main.py`) | Abrir PDFs desbloqueados en el visor, validar permisos al guardar |
+
+---
+
+## 2. Flujo de desbloqueo
+
+```mermaid
+sequenceDiagram
+    participant Usuario
+    participant UI as PDFSecurityTab
+    participant Manager as PDFSecurityManager
+    participant PDF as PyMuPDF<br/>(fitz)
+    participant Visor as PDFViewerTab
+
+    Usuario->>UI: 1. Hace clic en "Seguridad"
+    UI->>UI: Abre pestaña "🔓 Desbloquear"
+    
+    Usuario->>UI: 2. Selecciona PDF
+    UI->>Manager: is_protected(ruta)
+    Manager->>PDF: Abre sin contraseña
+    PDF-->>Manager: ¿Protegido?
+    Manager-->>UI: bool
+    
+    alt PDF Protegido
+        UI->>Manager: get_security_info(ruta)
+        Manager-->>UI: Muestra permisos
+        UI->>UI: Mostrar campo contraseña
+        
+        Usuario->>UI: 3. Ingresa contraseña
+        Usuario->>UI: 4. Hace clic "Desbloquear y Abrir"
+        
+        UI->>Manager: unlock_pdf(ruta, password)
+        Manager->>PDF: Desbloquea con contraseña
+        alt Contraseña correcta
+            PDF-->>Manager: Document (desbloqueado)
+            Manager-->>UI: Document object
+            UI->>Visor: Abre en visor
+            Visor-->>Usuario: PDF visible y editable
+        else Contraseña incorrecta
+            PDF-->>Manager: None
+            Manager-->>UI: None
+            UI->>UI: Mostrar error
+        end
+    else PDF sin protección
+        UI->>UI: Habilitar solo "Guardar"
+    end
 ```
-src/pdf_security/
-├── __init__.py           # Exportación de componentes
-├── security.py           # Lógica de seguridad y desbloqueo
-└── tab.py               # UI (pestaña en la aplicación)
+
+**Pasos clave:**
+1. **Detección**: Verifica si el PDF necesita contraseña
+2. **Información**: Obtiene permisos y método de cifrado
+3. **Validación**: Intenta desbloquear con la contraseña ingresada
+4. **Apertura**: Si es exitoso, abre directamente en el visor
+
+---
+
+## 3. Flujo de protección
+
+```mermaid
+sequenceDiagram
+    participant Usuario
+    participant UI as PDFSecurityTab
+    participant Manager as PDFSecurityManager
+    participant PDF as PyMuPDF<br/>(fitz)
+
+    Usuario->>UI: 1. Hace clic en "Seguridad"
+    UI->>UI: Abre pestaña "🔒 Proteger"
+    
+    Usuario->>UI: 2. Selecciona PDF sin protección
+    
+    Usuario->>UI: 3. Ingresa contraseña de usuario
+    Usuario->>UI: 4. (Opcional) Contraseña propietario
+    Usuario->>UI: 5. Elige nivel de protección
+    alt Usar preset
+        UI->>UI: Aplica permisos predefinidos
+    else Personalizar
+        Usuario->>UI: Configura permisos individuales
+    end
+    
+    Usuario->>UI: 6. Hace clic "Crear PDF Protegido"
+    UI->>Manager: protect_pdf_with_permissions(...)
+    
+    Manager->>PDF: Abre PDF original
+    Manager->>PDF: Aplica cifrado AES
+    Manager->>PDF: Asigna permisos
+    Manager->>PDF: Guarda como archivo nuevo
+    PDF-->>Manager: OK
+    
+    Manager-->>UI: Éxito
+    UI->>UI: Muestra "✓ PDF protegido: doc_protegido.pdf"
+    UI-->>Usuario: Archivo guardado
 ```
 
-## Componentes Principales
+**Pasos clave:**
+1. **Selección**: Elige PDF original sin protección
+2. **Configuración**: Define contraseñas y permisos
+3. **Creación**: Genera archivo protegido con extensión `_protegido.pdf`
+4. **Resultado**: Nuevo archivo guardado en la misma carpeta
 
-### 1. `PDFSecurityManager` (security.py)
+---
 
-Clase que maneja todas las operaciones de seguridad:
+## 4. Estructura de componentes
 
-#### Métodos Principales
+```mermaid
+graph TB
+    subgraph src/pdf_security
+        A["security.py<br/>PDFSecurityManager"]
+        B["tab.py<br/>PDFSecurityTab"]
+        C["__init__.py<br/>Exports"]
+    end
+    
+    subgraph Integración
+        D["main.py<br/>Abre/Cierra tab"]
+        E["_render_mixin.py<br/>Valida permisos al guardar"]
+        F["PDFViewerTab<br/>Recibe PDF desbloqueado"]
+    end
+    
+    A -->|opera sobre| G["Archivos PDF<br/>protegidos"]
+    B -->|usa| A
+    C -->|expone| A
+    C -->|expone| B
+    D -->|crea instancia| B
+    E -->|consulta| A
+    B -->|abre en| F
+    A -->|produce| G
+    
+    style A fill:#e1f5ff
+    style B fill:#f3e5f5
+    style C fill:#fff3e0
+    style D fill:#c8e6c9
+    style E fill:#c8e6c9
+    style F fill:#ffccbc
+```
 
-**`get_security_info(path: str) -> PDFSecurityInfo`**
-- Obtiene información de seguridad de un PDF sin abrirlo completamente
-- Retorna un objeto `PDFSecurityInfo` con detalles de cifrado y permisos
+---
 
-**`is_protected(path: str) -> bool`**
-- Verifica si un PDF está protegido con contraseña
-- Retorna `True` si está protegido, `False` en caso contrario
+## 5. Gestor de Seguridad (PDFSecurityManager)
 
-**`unlock_pdf(path: str, password: str) -> Optional[fitz.Document]`**
-- Intenta desbloquear un PDF con la contraseña proporcionada
-- Retorna el documento abierto si es exitoso, `None` si falla
+Clase central que proporciona todas las operaciones de seguridad. Abstrae PyMuPDF y maneja el cifrado.
 
-**`unlock_pdf_to_file(path: str, password: str, output_path: str) -> bool`**
-- Desbloquea un PDF y lo guarda sin protección en una nueva ubicación
-- Retorna `True` si es exitoso
+### Métodos de consulta
 
-**`check_permissions(path: str, password: Optional[str] = None) -> PDFSecurityInfo`**
-- Obtiene información detallada de permisos del PDF
+**`is_protected(ruta: str) -> bool`**
+- Verifica si un PDF necesita contraseña para abrirse
+- No abre el PDF completamente; solo detecta protección
+- Retorna `True` si protegido, `False` si no
+
+**`get_security_info(ruta: str) -> PDFSecurityInfo`**
+- Obtiene detalles de seguridad sin abrir completamente
+- Retorna: estado de protección, método de cifrado, lista de permisos
+- Se muestra en la UI para informar al usuario
+
+**`check_permissions(ruta: str, password: str | None = None) -> PDFSecurityInfo`**
+- Valida permisos detallados del PDF
 - Si está protegido, requiere la contraseña correcta
+- Se usa al guardar en el visor para validar cambios permitidos
 
-**`protect_pdf(...)`** ✨ NUEVO
-- Protege un PDF existente con contraseña
-- Permite asignar permisos específicos
-- Soporta contraseña de propietario
+### Métodos de desbloqueo
 
-**`protect_pdf_with_permissions(...)`** ✨ NUEVO
-- Protege PDF con permisos específicos por nombre
-- Más legible que especificar códigos binarios
+**`unlock_pdf(ruta: str, password: str) -> Document | None`**
+- Intenta desbloquear un PDF con la contraseña proporcionada
+- Retorna documento abierto si es exitoso, `None` si falla
+- El documento permanece en memoria para usar en el visor
 
-**`change_pdf_permissions(...)`** ✨ NUEVO
-- Cambia permisos de un PDF ya protegido
-- Requiere contraseña de propietario
+**`unlock_pdf_to_file(ruta: str, password: str, salida: str) -> bool`**
+- Desbloquea y guarda una copia sin protección
+- Crea nuevo archivo sin cifrado
+- Se usa cuando el usuario hace clic en "Guardar Desbloqueado"
 
-**`remove_protection(...)`** ✨ NUEVO
-- Elimina totalmente la protección de un PDF
-- Requiere contraseña de propietario
+### Métodos de protección
 
-**`get_default_permissions()`** ✨ NUEVO
-- Retorna diccionario con presets de permisos:
-  - `sin_restricciones`: Acceso completo
-  - `solo_lectura`: No puede mcon **dos pestañas**:
+**`protect_pdf_with_permissions(entrada: str, salida: str, password_usuario: str, ...)`**
+- Protege un PDF existente con cifrado AES
+- Asigna permisos específicos
+- Soporta contraseña de propietario (para cambios futuros)
+- Crea nuevo archivo con sufijo `_protegido.pdf`
 
-#### Pestaña 1: 🔓 Desbloquear
+**`get_default_permissions() -> dict`**
+- Retorna presets de niveles de protección
+- Incluye: sin_restricciones, solo_lectura, solo_impresion, impresion_y_lectura, muy_restrictivo
+- Se usa en el dropdown de la UI para elegir nivel predefinido
 
-Permite:
-- Seleccionar un PDF protegido
-- Ver información de seguridad y permisos
-- Ingresar contraseña para desbloquear
-- Abrir el PDF directamente en el visor
-- Guardar una copia desbloqueada
+### Clase PDFSecurityInfo
 
-#### Pestaña 2: 🔒 Proteger
+Objeto de datos que encapsula información de seguridad:
 
-Permite:
-- Seleccionar un PDF sin protección
-- Elegir nivel de protección (presets)
-- Ingresar contraseña de usuario
-- Ingresar contraseña de propietario (opcional)
-- Configurar permisos individuales (expandible)
-- Crear copia protegida
+- **`is_protected`**: bool — PDF necesita contraseña
+- **`is_encrypted`**: bool — PDF usa cifrado (AES, etc.)
+- **`encryption_method`**: str — Tipo de cifrado (ej. "AES")
+- **`permissions`**: dict — Mapa de permisos booleanos
+- **`get_permissions_text()`**: Retorna lista legible de permisos activos
 
-#### Interfaz
+---
 
-```
-┌──────────────────────────────────────┐
-│ 🔐 Gestión de Seguridad de PDFs      │
-├──────────────────────────────────────┤
-│  [🔓 Desbloquear]  [🔒 Proteger]     │
-│                                       │
-│ Pestaña: Desbloquear                 │
-│ ─────────────────────────────         │
-│ [Seleccionar PDF Protegido]          │
-│                                       │
-│ 📄 Archivo: documento.pdf 🔒         │
-│ 🔒 Protegido por contraseña          │
-│ Método: AES                    PDF
+## 6. Interfaz de usuario (PDFSecurityTab)
 
-1. Usuario hace clic en "🔐 Seguridad" en navbar
-2. Va a pestaña "🔓 Desbloquear"
-3. Selecciona un PDF protegido
-4. La aplicación muestra información de seguridad y permisos
-5. Usuario ingresa la contraseña
-6. Al hacer clic "Desbloquear y Abrir", se abre en el visor
+Pestaña Flet que implementa dos secciones principales: desbloquear y proteger.
 
-### Flujo 2: Guardar PDF Sin Protección
+### Arquitectura de la pestaña
 
-1. Selecciona PDF protegido o sin protección
-2. Si protegido, ingresa contraseña
-3. Hace clic en "Guardar Desbloqueado"
-4. Se guarda copia: `{nombre}_desbloqueado.pdf`
-
-### Flujo 3: Crear PDF Protegido ✨
-
-1. Usuario hace clic en "🔐 Seguridad" en navbar
-2. Va a pestaña "🔒 Proteger"
-3. Selecciona un PDF sin protección
-4. Ingresa contraseña de usuario (requerida)
-5. Ingresa contraseña de propietario (opcional)
-6. Elige nivel de protección:
-   - **Sin restricciones**: Acceso completo
-   - **Solo lectura**: No puede modificar
-   - **Solo impresión**: Sin copia
-   - **Impresión y lectura**: Permisos limitados
-   - **Muy restrictivo**: Solo visualización
-7. Opcionalmente, personaliza permisos individuales
-8. Hace clic "Crear PDF Protegido"
-9. Se guarda copia: `{nombre}_protegido.pdf`
-
-### Flujo 4: Cambiar Permisos Existentes (Programático)
-
-```python
-PDFSecurityManager.change_pdf_permissions(
-    "documento_protegido.pdf",
-    "documento_nuevos_perms.pdf",
-    current_owner_password="adminpass",
-    new_user_password="newpass123",
-    permissions=PDFSecurityManager.PDF_PERM_PRINT
-)
-``
-│ 📄 Archivo: documento.pdf            │
-│                                       │
-│ Contraseñas:                         │
-│ [Contraseña de usuario]              │
-│ [Contraseña de propietario]          │
-│                                       │
-│ Nivel de protección:                 │
-│ [Solo lectura ▼]                     │
-│                                       │
-│ [Permisos personalizados ▼]          │
-│   ☐ Permitir impresión               │
-│   ☐ Permitir modificación            │
-│   ☐ Permitir copia de contenido      │
-│   ...                                │
-│                                       │
-│ [Crear PDF Protegido]                │
-│ ✓ PDF protegido creado: doc_pro...  │
-└PDF directamente en el visor
-- Guardar una copia desbloqueada
-
-#### Interfaz
-
-```
-┌────────────────────────────────────────────────┐
-│ Gestión de Seguridad de PDFs                   │
-├────────────────────────────────────────────────┤
-│ [Seleccionar PDF Protegido]                    │
-│                                                 │
-│ 📄 Archivo: documento.pdf 🔒 (Protegido)       │
-│                                                 │
-│ 🔒 Protegido por contraseña                    │
-│ Método de cifrado: AES                         │
-│ Permisos:                                       │
-│   ✓ Impresión permitida                        │
-│   ✗ Copia de contenido bloqueada               │
-│   ✗ Modificación bloqueada                     │
-│   ✓ Anotaciones permitidas                     │
-│                                                 │
-│ [Contraseña] [Desbloquear y Abrir]             │
-│              [Guardar Desbloqueado]            │
-│                                                 │
-│ ✓ PDF desbloqueado exitosamente                │
-└────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    Tab["🔐 Gestión de Seguridad de PDFs<br/>(PDFSecurityTab)"]
+    
+    Tab -->|contiene| Header["Encabezado<br/>Icono + Título + Subtítulo"]
+    Tab -->|contiene| Tabs["Tabs<br/>Selector de sección"]
+    
+    Tabs -->|Tab 1| Unlock["🔓 Desbloquear<br/>(Column: left/right)"]
+    Tabs -->|Tab 2| Protect["🔒 Proteger<br/>(Column: left/right)"]
+    
+    Unlock -->|left| UL1["Selector PDF"]
+    Unlock -->|left| UL2["Info archivo"]
+    Unlock -->|right| UR1["Información seguridad"]
+    Unlock -->|right| UR2["Campo contraseña"]
+    Unlock -->|right| UR3["Botones acción"]
+    
+    Protect -->|left| PL1["Selector PDF"]
+    Protect -->|left| PL2["Nivel protección"]
+    Protect -->|left| PL3["Permisos expandibles"]
+    Protect -->|right| PR1["Contraseñas"]
+    Protect -->|right| PR2["Botón proteger"]
+    
+    style Tab fill:#ffd700
+    style Header fill:#e1f5ff
+    style Unlock fill:#c8e6c9
+    style Protect fill:#ffccbc
 ```
 
-## Flujo de Uso
+### Flujo de estados - Sección Desbloquear
 
-### Flujo 1: Desbloquear y Abrir PDF
-
-1. Usuario hace clic en "🔐 Seguridad" en navbar
-2. Va a pestaña "🔓 Desbloquear"
-3. Selecciona un PDF protegido
-4. La aplicación muestra información de seguridad y permisos
-5. Usuario ingresa la contraseña
-6. Al hacer clic "Desbloquear y Abrir", se abre en el visor
-
-### Flujo 2: Guardar PDF Sin Protección
-
-1. Selecciona PDF protegido o sin protección
-2. Si protegido, ingresa contraseña
-3. Hace clic en "Guardar Desbloqueado"
-4. Se guarda copia: `{nombre}_desbloqueado.pdf`
-
-### Flujo 3: Crear PDF Protegido ✨
-
-1. Usuario hace clic en "🔐 Seguridad" en navbar
-2. Va a pestaña "🔒 Proteger"
-3. Selecciona un PDF sin protección
-4. Ingresa contraseña de usuario (requerida)
-5. Ingresa contraseña de propietario (opcional)
-6. Elige nivel de protección:
-   - **Sin restricciones**: Acceso completo
-   - **Solo lectura**: No puede modificar
-   - **Solo impresión**: Sin copia
-   - **Impresión y lectura**: Permisos limitados
-   - **Muy restrictivo**: Solo visualización
-7. Opcionalmente, personaliza permisos individuales
-8. Hace clic "Crear PDF Protegido"
-9. Se guarda copia: `{nombre}_protegido.pdf`
-
-### Flujo 4: Cambiar Permisos Existentes (Programático)
-
-```python
-PDFSecurityManager.change_pdf_permissions(
-    "documento_protegido.pdf",
-    "documento_nuevos_perms.pdf",
-    current_owner_password="adminpass",
-    new_user_password="newpass123",
-    permissions=PDFSecurityManager.PDF_PERM_PRINT
-)
+```mermaid
+stateDiagram-v2
+    [*] --> Inicial: Abre pestaña
+    
+    Inicial: No hay PDF seleccionado
+    Inicial: Campos ocultos
+    Inicial: "Mostrar botón: Seleccionar PDF"
+    
+    Inicial --> VerificandoTipo: Usuario selecciona PDF
+    
+    VerificandoTipo: Sistema verifica si está protegido
+    
+    VerificandoTipo --> Protegido: ✓ PDF está protegido
+    VerificandoTipo --> NoProtegido: ✓ PDF sin protección
+    
+    Protegido: "Mostrar campo contraseña"
+    Protegido: "Mostrar botón: Desbloquear"
+    Protegido: "Mostrar información de seguridad"
+    
+    NoProtegido: "Ocultar campo contraseña"
+    NoProtegido: "Ocultar desbloquear"
+    NoProtegido: "Habilitar: Guardar"
+    
+    Protegido --> EsperandoPassword: Usuario ingresa password
+    
+    EsperandoPassword: Usuario hace clic "Desbloquear"
+    
+    EsperandoPassword --> Validando: Intenta desbloquear
+    
+    Validando --> Exito: ✓ Contraseña correcta
+    Validando --> Error: ✗ Contraseña incorrecta
+    
+    Exito: "✓ PDF desbloqueado exitosamente"
+    Exito: Abre en visor
+    
+    Error: "❌ Contraseña incorrecta"
+    Error --> EsperandoPassword: Usuario reintenta
+    
+    NoProtegido --> Guardando: Usuario hace clic "Guardar"
+    Guardando --> Final: ✓ Copia guardada
+    
+    style Inicial fill:#fff9c4
+    style Exito fill:#c8e6c9
+    style Error fill:#ffccbc
+    style Final fill:#c8e6c9
 ```
 
-## Integración con Aplicación Principal
+### Componentes principales
+
+**Sección Desbloquear:**
+- **Columna izquierda** (ancho fijo 300px): Selector PDF, info del archivo
+- **Columna derecha** (expandible): Información de seguridad, campo contraseña, botones
+
+**Sección Proteger:**
+- **Columna izquierda** (ancho 340px): Selector PDF, nivel de protección, permisos personalizados
+- **Columna derecha** (expandible): Contraseñas, botón proteger
+
+---
+
+## 7. Integración con la aplicación
 
 ### Cambios en `main.py`
 
-1. **Importación**: Se importa `PDFSecurityTab` del módulo
-2. **Variable**: Se añade `security_tab` al estado global
-3. **Funciones**: Se añaden `_open_security()` y `_close_security_tab()`
-4. **Callback**: `_on_pdf_unlocked()` abre el PDF desbloqueado en el visor
-5. **Botón Navbar**: Se añade botón "🔐 Seguridad" entre Combinar y Configuración
+El módulo de seguridad se integra en el flujo principal mediante:
 
-## Manejo de Errores
+1. **Variable de estado**: Se mantiene referencia a `security_tab` para abrirla/cerrarla
+2. **Función `_open_security()`**: Crea la pestaña si no existe o la enfoca si existe
+3. **Función `_close_security_tab(tab)`**: Elimina la pestaña y limpia recursos
+4. **Callback `_on_pdf_unlocked(ruta, password)`**: Abre el PDF desbloqueado en el visor
+5. **Botón navbar**: Acceso rápido a la pestaña "🔐 Seguridad"
 
-La aplicación maneja los siguientes errores:
+### Validación al guardar - `_render_mixin.py`
 
-- **Contraseña incorrecta**: Mensaje "❌ Contraseña incorrecta"
-- **PDF no legible**: Se muestra excepción
-- **Archivo no seleccionado**: Se solicita seleccionar primero
-- **Contraseña vacía**: Se valida entrada
+Cuando el usuario guarda cambios en un PDF abierto en el visor:
 
-## Permisos Soportados
+1. Sistema verifica si el PDF está protegido
+2. Si es protegido, consulta permisos mediante `can_save_changes()`
+3. Si los permisos no lo permiten, muestra error y bloquea guardado
+4. Si los permisos lo permiten, procede con guardado normal
 
-El módulo detecta y muestra estos permisos PDF:
+### Flujo completo: usuario abre PDF protegido
 
-| Permiso | Descripción |
-|---------|-------------|
-| `PDF_PERM_PRINT` | Permite impresión |
-| `PDF_PERM_MODIFY` | Permite modificación del contenido |
-| `PDF_PERM_COPY` | Permite copia de contenido |
-| `PDF_PERM_ANNOTATE` | Permite anotaciones |
-| `PDF_PERM_FORMS` | Permite llenar formularios |
-| `PDF_PERM_ASSEMBLY` | Permite ensamblaje de páginas |
-| `PDF_PERM_PRINT_HQ` | Permite impresión de alta calidad |
+```mermaid
+sequenceDiagram
+    participant Usuario
+    participant NavBar as Navbar
+    participant Main as main.py
+    participant Security as PDFSecurityTab
+    participant Viewer as PDFViewerTab
 
-## Ejemplos de Uso
+    Usuario->>NavBar: Hace clic "🔐 Seguridad"
+    NavBar->>Main: _open_security()
+    Main->>Security: Crear PDFSecurityTab
+    Security-->>Main: ✓ Pestaña creada
+    
+    Usuario->>Security: Selecciona PDF protegido
+    Usuario->>Security: Ingresa contraseña
+    Usuario->>Security: Clic "Desbloquear y Abrir"
+    
+    Security->>Main: _on_pdf_unlocked(ruta, password)
+    Main->>Security: Obtiene Document desbloqueado
+    Main->>Viewer: Abre con Document
+    Viewer-->>Usuario: PDF visible y editable
 
-### Uso Programático
-
-```python
-from pdf_security import PDFSecurityManager
-
-# ─── Verificar si PDF está protegido ───
-if PDFSecurityManager.is_protected("documento.pdf"):
-    print("PDF está protegido")
-
-# ─── Obtener información de seguridad ───
-info = PDFSecurityManager.get_security_info("documento.pdf")
-print(f"Cifrado: {info.is_encrypted}")
-print(f"Permisos: {info.get_permissions_text()}")
-
-# ─── Desbloquear PDF ───
-doc = PDFSecurityManager.unlock_pdf("documento.pdf", "contraseña123")
-if doc:
-    print("PDF desbloqueado exitosamente")
-    doc.close()
-
-# ─── Desbloquear y guardar sin protección ───
-PDFSecurityManager.unlock_pdf_to_file(
-    "documento.pdf",
-    "contraseña123",
-    "documento_desbloqueado.pdf"
-)
-
-# ─── CREAR PDF PROTEGIDO ✨ ───
-# Opción 1: Usar presets
-PDFSecurityManager.protect_pdf_with_permissions(
-    "documento.pdf",
-    "documento_protegido.pdf",
-    user_password="contraseña123",
-    owner_password="adminpass",
-    allow_print=True,
-    allow_copy=False,
-    allow_modify=False,
-    allow_annotate=False
-)
-
-# Opción 2: Usar presets disponibles
-presets = PDFSecurityManager.get_default_permissions()
-print(presets)  # Muestra: solo_lectura, sin_restricciones, etc.
-
-# ─── Cambiar permisos de PDF protegido ───
-PDFSecurityManager.change_pdf_permissions(
-    "documento_viejo.pdf",
-    "documento_nuevo.pdf",
-    current_owner_password="adminpass",
-    new_user_password="nuevapass",
-    permissions=PDFSecurityManager.PDF_PERM_PRINT | 
-               PDFSecurityManager.PDF_PERM_COPY
-)
-
-# ─── Remover protección ───
-PDFSecurityManager.remove_protection(
-    "documento_protegido.pdf",
-    "documento_sin_proteccion.pdf",
-    owner_password="adminpass"
-)
+    rect rgb(200, 230, 201)
+    Note over Viewer: Usuario edita en el visor
+    Usuario->>Viewer: Hace cambios (anotaciones, etc.)
+    Usuario->>Viewer: Clic "Guardar"
+    Viewer->>Main: Intenta guardar
+    Main->>Security: can_save_changes()?
+    alt Permisos permiten
+        Security-->>Main: ✓ Permitido
+        Main->>Viewer: Guarda normalmente
+    else Permisos no permiten
+        Security-->>Main: ✗ Bloqueado
+        Main->>Viewer: Mostrar error
+    end
+    end
 ```
 
-### Uso en UI
+---
 
-```python
-from pdf_security import PDFSecurityTab
+## 8. Niveles de protección
 
-# Crear pestaña de seguridad
-def on_pdf_unlocked(path, password):
-    print(f"PDF desbloqueado: {path}")
+### Presets disponibles
 
-security_tab = PDFSecurityTab(page, on_pdf_unlocked)
-```
+| Nombre | Contraseña | Impresión | Modificación | Copia | Anotaciones | Uso típico |
+|--------|-----------|-----------|--------------|-------|-------------|-----------|
+| **Sin restricciones** | Sí | Sí | Sí | Sí | Sí | Acceso completo (usa password de propietario) |
+| **Solo lectura** | Sí | Sí | No | No | Sí | Documentos finales sin edición |
+| **Solo impresión** | Sí | Sí | No | No | No | Evitar descargas, permitir impresos |
+| **Impresión y lectura** | Sí | Sí | No | Sí | No | Lecturas académicas, reportes |
+| **Muy restrictivo** | Sí | No | No | No | No | Máxima seguridad, solo visualización |
 
-## Notas de Seguridad
+### Permisos individuales
 
-- Las contraseñas se procesan en memoria y no se almacenan
-- Los PDFs desbloqueados se guardan solo en la ubicación especificada por el usuario
-- No se recopilan ni transmiten datos de contraseñas
-- La validación usa PyMuPDF (fitz) que implementa estándares PDF
+Cada PDF protegido puede configurar estos permisos de forma independiente:
 
-## Dependencias
+- **`allow_print`**: Usuario puede imprimir el PDF
+- **`allow_modify`**: Usuario puede editar contenido (anotaciones, cambios)
+- **`allow_copy`**: Usuario puede copiar/extraer texto e imágenes
+- **`allow_annotate`**: Usuario puede añadir anotaciones (comentarios, marcas)
+- **`allow_forms`**: Usuario puede llenar formularios interactivos
+- **`allow_assembly`**: Usuario puede reordenar/insertar/eliminar páginas
+- **`allow_print_hq`**: Usuario puede imprimir en alta calidad (sin `allow_print`, la copia es borrosa)
 
-- `pymupdf>=1.26.5`: Manejo de PDF y operaciones de cifrado
-- `flet[all]==0.28.3`: Framework UI
+---
 
-## Limitaciones Actuales
+## Resumen de operaciones
 
-1. No soporta PDFs con certificados digitales especiales
-2. Solo soporta contraseñas de usuario básicas
-3. No muestra detalles específicos del algoritmo AES
-4. La exportación sin protección puede no preservar algunos metadatos avanzados
-5. No hay GUI para cambiar permisos de PDFs ya protegidos (solo API)
+| Operación | Función | Entrada | Salida |
+|-----------|---------|---------|--------|
+| Detectar protección | `is_protected()` | Ruta PDF | bool |
+| Obtener información | `get_security_info()` | Ruta PDF | PDFSecurityInfo |
+| Desbloquear en memoria | `unlock_pdf()` | Ruta, contraseña | Document object |
+| Guardar desbloqueado | `unlock_pdf_to_file()` | Ruta entrada, password, ruta salida | bool |
+| Proteger archivo | `protect_pdf_with_permissions()` | Ruta entrada, ruta salida, passwords, permisos | bool |
+| Obtener presets | `get_default_permissions()` | — | dict de presets |
+| Validar al guardar | `can_save_changes()` | Ruta PDF, password (si protegido) | bool |
 
-## Futuras Mejoras
 
-- [ ] GUI para cambiar permisos de PDFs existentes
-- [ ] Soporte para múltiples contraseñas
-- [ ] Batch processing de múltiples PDFs
-- [ ] Historial de PDFs desbloqueados/protegidos
-- [ ] Integración con gestor de contraseñas
-- [ ] Opción de desbloqueo sin guardar (solo lectura temporal)
-- [ ] Exportación de información de seguridad (reporte PDF)
-- [ ] Soporte para certificados digitales
