@@ -46,11 +46,14 @@ Añade comentarios y marcas en tus documentos PDF
 
 ### 📄 Fusión de PDF
 Combina múltiples archivos PDF en uno solo
+![combinar pdf](src/assets/app_imagenes/combinar_pdf.png)
+![combinar pdf](src/assets/app_imagenes/combinar_pdf_vista_previa.png)
 
 📚 [Más información sobre Combinar PDF](docs/combinar-pdf.md)
 
 ### 📊 Extracción de Datos
 Extrae información de tus documentos PDF
+![combinar pdf](src/assets/app_imagenes/extraccion_pdf.png)
 
 📚 [Más información sobre Extracción de PDF](docs/extraer-pdf.md)
 
