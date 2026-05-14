@@ -12,7 +12,7 @@ Visualiza y navega por documentos PDF con soporte para:
 - Zoom y navegación fluida
 - Selección de texto
 
-![Visor PDF](src/assets/app_imagenes/visor_abierto.png)
+![Visor PDF](src/assets/app_imagenes/home_page.png)
 
 📚 [Más información sobre el Visor de PDF](docs/visor-pdf.md)
 
