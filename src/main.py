@@ -10,6 +10,7 @@ from document_manager_ui import DocumentManagerUI
 from home import HomePage
 from pdf_extractor import PDFExtractionTab
 from pdf_merge import MergePDFTab
+from pdf_security import PDFSecurityTab
 from pdf_viewer import PDFViewerTab
 from settings_tab import SettingsTab
 
@@ -27,6 +28,7 @@ def main(page: ft.Page) -> None:
     open_tabs:     list[PDFViewerTab]      = []
     extractor_tab: PDFExtractionTab | None = None
     merge_tab:     MergePDFTab      | None = None
+    security_tab:  PDFSecurityTab   | None = None
     settings_tab:  SettingsTab      | None = None
 
     doc_mgr = DocumentManagerUI(page)
@@ -44,6 +46,8 @@ def main(page: ft.Page) -> None:
             n += 1
         if merge_tab is not None:
             n += 1
+        if security_tab is not None:
+            n += 1
         if settings_tab is not None:
             n += 1
         return n
@@ -51,8 +55,11 @@ def main(page: ft.Page) -> None:
     def _merge_tab_idx() -> int:
         return 1 + (1 if extractor_tab is not None else 0)
 
-    def _settings_tab_idx() -> int:
+    def _security_tab_idx() -> int:
         return 1 + (1 if extractor_tab is not None else 0) + (1 if merge_tab is not None else 0)
+
+    def _settings_tab_idx() -> int:
+        return 1 + (1 if extractor_tab is not None else 0) + (1 if merge_tab is not None else 0) + (1 if security_tab is not None else 0)
 
     def _rebuild_tabs(selected_index: int | None = None) -> None:
         if selected_index is None:
@@ -63,6 +70,8 @@ def main(page: ft.Page) -> None:
             infos.append(extractor_tab.get_tab_info())
         if merge_tab is not None:
             infos.append(merge_tab.get_tab_info())
+        if security_tab is not None:
+            infos.append(security_tab.get_tab_info())
         if settings_tab is not None:
             infos.append(settings_tab.get_tab_info())
         for v in open_tabs:
@@ -116,6 +125,26 @@ def main(page: ft.Page) -> None:
         nonlocal merge_tab
         tab.close()
         merge_tab = None
+        _rebuild_tabs(0)
+
+    # ── security tab ──────────────────────────────────────────────────────────
+
+    def _on_pdf_unlocked(path: str, password: str) -> None:
+        """Callback when a PDF is unlocked in the security tab."""
+        _open_pdf_path(path)
+
+    def _open_security() -> None:
+        nonlocal security_tab
+        if security_tab is not None:
+            _rebuild_tabs(_security_tab_idx())
+            return
+        security_tab = PDFSecurityTab(page, _on_pdf_unlocked)
+        _rebuild_tabs(_security_tab_idx())
+
+    def _close_security_tab(tab: PDFSecurityTab) -> None:
+        nonlocal security_tab
+        tab.close()
+        security_tab = None
         _rebuild_tabs(0)
 
     # ── settings tab ─────────────────────────────────────────────────────────
@@ -267,6 +296,12 @@ def main(page: ft.Page) -> None:
                     "Combinar PDFs",
                     lambda e: _open_merge(),
                     tooltip="Combinar múltiples PDFs en uno",
+                ),
+                _nav_btn(
+                    ft.Icons.LOCK,
+                    "Seguridad",
+                    lambda e: _open_security(),
+                    tooltip="Desbloquear PDFs protegidos",
                 ),
                 ft.Container(width=4),
                 ft.Container(
