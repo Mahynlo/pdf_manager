@@ -2,7 +2,7 @@
 
 Una aplicación de escritorio completa para gestionar, visualizar y manipular archivos PDF con capacidades avanzadas de seguridad, OCR y anotaciones.
 
-![Inicio de la aplicación](src/assets/app_imagenes/inicio_aplicacion.png)
+![Inicio de la aplicación](src/assets/app_imagenes/home_page.png)
 
 ## Características
 
@@ -12,7 +12,7 @@ Visualiza y navega por documentos PDF con soporte para:
 - Zoom y navegación fluida
 - Selección de texto
 
-![Visor PDF](src/assets/app_imagenes/home_page.png)
+![Visor PDF](src/assets/app_imagenes/visor_abierto.png)
 
 📚 [Más información sobre el Visor de PDF](docs/visor-pdf.md)
 
