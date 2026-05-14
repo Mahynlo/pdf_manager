@@ -15,8 +15,8 @@ _CARD_H = 195
 
 # ========[Helper Functions]========================================================
 def _row_hover(e: ft.HoverEvent) -> None:
-    # SECONDARY_CONTAINER es nativo y seguro para estados de hover sutiles en M3
-    e.control.bgcolor = ft.Colors.SECONDARY_CONTAINER if e.data == "true" else None
+    # Usamos un color hexadecimal en lugar de ft.Colors para evitar errores
+    e.control.bgcolor = "#F0F4F8" if e.data == "true" else None
     e.control.update()
 
 # ========[Main Class Home page]==============================================================
@@ -29,20 +29,22 @@ class HomePage:
         on_open_extractor: Callable[[], None],
         on_open_merge: Callable[[], None],
         on_open_picker: Callable[[], None],
+        on_open_security: Callable[[], None],
         on_open_pdf: Callable[[str], None],
     ):
-        self._page              = page_ref # para refernecia de página y navegación
-        self._on_open_extractor = on_open_extractor # callback para abrir el extractor de texto
-        self._on_open_merge     = on_open_merge # callback para abrir la función de combinación de PDFs
-        self._on_open_picker    = on_open_picker # callback para abrir el selector de archivos para OCR
-        self._on_open_pdf       = on_open_pdf # callback para abrir un PDF específico (usado en archivos recientes)
+        self._page              = page_ref 
+        self._on_open_extractor = on_open_extractor 
+        self._on_open_merge     = on_open_merge 
+        self._on_open_picker    = on_open_picker 
+        self._on_open_security  = on_open_security
+        self._on_open_pdf       = on_open_pdf 
 
-        self._recent_list: ft.ListView | None = None # para almacenar la referencia a la lista de archivos recientes y actualizarla dinámicamente
-        self._tab: ft.Tab | None = None # para almacenar la instancia de la pestaña y evitar recrearla cada vez
+        self._recent_list: ft.ListView | None = None 
+        self._tab: ft.Tab | None = None 
 
-        self._build() # construye la interfaz de usuario para la página de inicio
+        self._build() 
 
-    # =======[Public API]================================================================
+    # ========[Public API]================================================================
     def refresh_recent(self) -> None: 
         """Reload the recent-files list from disk and update the UI."""
         if self._recent_list is None:
@@ -58,8 +60,8 @@ class HomePage:
             self._tab = ft.Tab(
                 tab_content=ft.Row(
                     [
-                        ft.Icon(ft.Icons.HOME_OUTLINED, size=18),
-                        ft.Text("Inicio", size=14, weight=ft.FontWeight.W_500),
+                        ft.Icon(ft.Icons.HOME_OUTLINED, size=18, color="#1565C0"),
+                        ft.Text("Inicio", size=14, weight="w500"),
                     ],
                     spacing=8,
                     tight=True,
@@ -85,7 +87,7 @@ class HomePage:
                     ft.Text(
                         "Sin archivos recientes",
                         size=13,
-                        color=ft.Colors.OUTLINE,
+                        color="#999999",
                         italic=True,
                     ),
                     padding=ft.padding.symmetric(horizontal=12, vertical=20),
@@ -96,7 +98,7 @@ class HomePage:
         rows: list[ft.Control] = []
         for path in files:
             p     = Path(path)
-            _path = path  # capture for lambda
+            _path = path  
 
             rows.append(
                 ft.Container(
@@ -104,7 +106,7 @@ class HomePage:
                         [
                             ft.Icon(
                                 ft.Icons.PICTURE_AS_PDF,
-                                color=ft.Colors.ERROR,
+                                color="#D32F2F",
                                 size=22
                             ),
                             ft.Column(
@@ -112,17 +114,17 @@ class HomePage:
                                     ft.Text(
                                         p.name,
                                         size=13,
-                                        weight=ft.FontWeight.W_500,
+                                        weight="w500",
                                         max_lines=1,
-                                        overflow=ft.TextOverflow.ELLIPSIS,
-                                        color=ft.Colors.ON_SURFACE,
+                                        overflow="ellipsis",
+                                        color="#1E2A38",
                                     ),
                                     ft.Text(
                                         str(p.parent),
                                         size=11,
-                                        color=ft.Colors.ON_SURFACE_VARIANT,
+                                        color="#666666",
                                         max_lines=1,
-                                        overflow=ft.TextOverflow.ELLIPSIS,
+                                        overflow="ellipsis",
                                     ),
                                 ],
                                 spacing=2,
@@ -132,12 +134,12 @@ class HomePage:
                                 ft.Icons.OPEN_IN_NEW,
                                 icon_size=16,
                                 tooltip="Abrir",
-                                icon_color=ft.Colors.ON_SURFACE_VARIANT,
+                                icon_color="#666666",
                                 on_click=lambda e, p=_path: self._on_open_pdf(p),
                             ),
                         ],
                         spacing=12,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        vertical_alignment="center",
                     ),
                     padding=ft.padding.symmetric(horizontal=10, vertical=8),
                     border_radius=8,
@@ -162,18 +164,18 @@ class HomePage:
                 [
                     ft.Row(
                         [
-                            ft.Icon(ft.Icons.HISTORY, size=20, color=ft.Colors.PRIMARY),
+                            ft.Icon(ft.Icons.HISTORY, size=20, color="#1565C0"),
                             ft.Text(
                                 "Archivos recientes",
                                 size=15,
-                                weight=ft.FontWeight.BOLD,
-                                color=ft.Colors.ON_SURFACE,
+                                weight="bold",
+                                color="#1E2A38",
                             ),
                         ],
                         spacing=8,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        vertical_alignment="center",
                     ),
-                    ft.Divider(height=1, color=ft.Colors.OUTLINE),
+                    ft.Divider(height=1, color="#E0E0E0"),
                     ft.Container(self._recent_list, expand=True),
                 ],
                 spacing=12,
@@ -181,9 +183,8 @@ class HomePage:
             ),
             width=_RECENT_W,
             padding=ft.padding.all(20),
-            # Cambiado a SURFACE puro (BACKGROUND fue removido de la API de Flet 0.28)
-            bgcolor=ft.Colors.SURFACE, 
-            border=ft.border.only(right=ft.BorderSide(1, ft.Colors.OUTLINE)),
+            bgcolor="#FAFAFA", 
+            border=ft.border.only(right=ft.BorderSide(1, "#E0E0E0")),
         )
 
         # ========[Action Cards]============================================================
@@ -203,37 +204,37 @@ class HomePage:
                             content=ft.Icon(icon, size=36, color=on_container_color),
                             bgcolor=container_color,
                             border_radius=12,
-                            padding=ft.padding.all(16),
+                            padding=16,
                         ),
                         ft.Text(
                             title,
                             size=15,
-                            weight=ft.FontWeight.BOLD,
-                            text_align=ft.TextAlign.CENTER,
-                            color=ft.Colors.ON_SURFACE,
+                            weight="bold",
+                            text_align="center",
+                            color="#1E2A38",
                         ),
                         ft.Text(
                             subtitle,
                             size=12,
-                            color=ft.Colors.ON_SURFACE_VARIANT,
-                            text_align=ft.TextAlign.CENTER,
+                            color="#666666",
+                            text_align="center",
                         ),
                     ],
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    alignment="center",
+                    horizontal_alignment="center",
                     spacing=12,
                 ),
                 width=_CARD_W,
                 height=_CARD_H,
-                padding=ft.padding.all(20),
-                bgcolor=ft.Colors.SURFACE,
+                padding=20,
+                bgcolor="#FFFFFF",
                 border_radius=16,
-                border=ft.border.all(1, ft.Colors.OUTLINE),
+                border=ft.border.all(1, "#E0E0E0"),
                 shadow=ft.BoxShadow(
                     spread_radius=0,
                     blur_radius=10,
-                    color=ft.Colors.SHADOW,
-                    offset=ft.Offset(0, 2),
+                    color="#1A000000",  # Sombra negra muy transparente (10% opacidad)
+                    offset=ft.Offset(0, 4),
                 ),
                 on_click=on_click,
                 ink=True,
@@ -243,52 +244,61 @@ class HomePage:
             [
                 _card(
                     icon=ft.Icons.FIND_IN_PAGE,
-                    container_color=ft.Colors.PRIMARY_CONTAINER,
-                    on_container_color=ft.Colors.ON_PRIMARY_CONTAINER,
+                    container_color="#E3F2FD",  # Azul muy claro
+                    on_container_color="#1565C0", # Azul fuerte
                     title="Extraer texto de PDF",
                     subtitle="Busca y extrae páginas\npor palabras clave",
                     on_click=lambda e: self._on_open_extractor(),
                 ),
                 _card(
                     icon=ft.Icons.MERGE_TYPE,
-                    container_color=ft.Colors.SECONDARY_CONTAINER,
-                    on_container_color=ft.Colors.ON_SECONDARY_CONTAINER,
+                    container_color="#E8F5E9",  # Verde muy claro
+                    on_container_color="#2E7D32", # Verde fuerte
                     title="Combinar PDFs",
                     subtitle="Une varios PDFs\neligiendo las páginas",
                     on_click=lambda e: self._on_open_merge(),
                 ),
                 _card(
                     icon=ft.Icons.DOCUMENT_SCANNER,
-                    container_color=ft.Colors.TERTIARY_CONTAINER,
-                    on_container_color=ft.Colors.ON_TERTIARY_CONTAINER,
+                    container_color="#FFF3E0",  # Naranja muy claro
+                    on_container_color="#E65100", # Naranja fuerte
                     title="OCR de PDF",
                     subtitle="Abre un PDF y ejecuta\nreconocimiento de texto",
                     on_click=lambda e: self._on_open_picker(),
                 ),
+                _card(
+                    icon=ft.Icons.SECURITY,
+                    container_color="#FFF8E1",  # Amarillo muy claro
+                    on_container_color="#F9A825", # Naranja/Dorado fuerte
+                    title="Gestión de Seguridad",
+                    subtitle="Desbloquea y protege\ntus documentos",
+                    on_click=lambda e: self._on_open_security(),
+                ),
             ],
-            alignment=ft.MainAxisAlignment.CENTER,
+            alignment="center",
             spacing=24,
             wrap=True,
         )
 
         center_panel = ft.Column(
             [
+                ft.Icon(ft.Icons.GRID_VIEW, size=48, color="#E0E0E0"),
                 ft.Text(
-                    "¿Qué quieres hacer?",
+                    "¿Qué quieres hacer hoy?",
                     size=26,
-                    weight=ft.FontWeight.W_800,
-                    color=ft.Colors.ON_SURFACE,
+                    weight="w800",
+                    color="#1E2A38",
                 ),
                 ft.Text(
-                    "Selecciona una opción para comenzar",
+                    "Selecciona una herramienta para comenzar a trabajar",
                     size=14,
-                    color=ft.Colors.ON_SURFACE_VARIANT,
+                    color="#666666",
                 ),
-                ft.Container(height=24), 
+                ft.Container(height=32), 
                 cards_row,
             ],
-            alignment=ft.MainAxisAlignment.CENTER,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            alignment="center",
+            horizontal_alignment="center",
             spacing=4,
             expand=True,
         )
@@ -298,11 +308,11 @@ class HomePage:
             [recent_panel, center_panel],
             expand=True,
             spacing=0,
-            vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+            vertical_alignment="stretch",
         )
 
-        self.view = ft.Column(
-            [main_row],
-            spacing=0,
+        self.view = ft.Container(
+            content=main_row,
+            bgcolor="#FFFFFF",
             expand=True,
         )

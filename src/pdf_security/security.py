@@ -1,10 +1,21 @@
 """PDF security operations: detection, unlocking, and permission reading."""
 
-from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
 
 import fitz
+
+
+class PDFSecurityError(ValueError):
+    """Base exception for PDF security operations."""
+
+
+class PDFPasswordRequiredError(PDFSecurityError):
+    """Raised when an encrypted PDF needs a password to be opened."""
+
+
+class PDFInvalidPasswordError(PDFSecurityError):
+    """Raised when password authentication fails for an encrypted PDF."""
 
 
 @dataclass
@@ -79,6 +90,13 @@ class PDFSecurityManager:
     PDF_PERM_FORMS = 256
     PDF_PERM_ASSEMBLY = 1024
     PDF_PERM_PRINT_HQ = 2048
+
+    @staticmethod
+    def _has_permission(permissions: int, *flags: int) -> bool:
+        """Return True when any provided permission flag is present."""
+        if permissions < 0:
+            return True
+        return any(bool(permissions & flag) for flag in flags)
     
     @staticmethod
     def get_security_info(path: str) -> PDFSecurityInfo:
@@ -87,16 +105,13 @@ class PDFSecurityManager:
             doc = fitz.open(path)
             is_protected = doc.is_pdf and doc.is_encrypted
             
-            # Get metadata about encryption
-            meta = doc.metadata
-            
             info = PDFSecurityInfo(
                 is_protected=is_protected,
                 is_encrypted=doc.is_encrypted,
                 permissions=doc.permissions,
                 has_user_password=is_protected,  # User password present if encrypted
                 has_owner_password=is_protected,  # Owner password present if encrypted
-                encryption_method=f"AES" if is_protected else "None"
+                encryption_method="PDF Standard Encryption" if is_protected else "None"
             )
             
             doc.close()
@@ -139,6 +154,34 @@ class PDFSecurityManager:
             
         except Exception as e:
             raise ValueError(f"Error al desbloquear PDF: {e}")
+
+    @staticmethod
+    def open_for_viewer(path: str, password: Optional[str] = None) -> fitz.Document:
+        """
+        Open a PDF for visualization, authenticating if it is encrypted.
+
+        Returns an opened fitz.Document ready to be used by the viewer.
+        Raises ValueError when password is required or invalid.
+        """
+        doc = None
+        try:
+            doc = fitz.open(path)
+
+            if not doc.is_encrypted:
+                return doc
+
+            if not password:
+                raise PDFPasswordRequiredError("PDF protegido requiere contraseña")
+
+            if not doc.authenticate(password):
+                raise PDFInvalidPasswordError("Contraseña incorrecta")
+
+            return doc
+
+        except Exception:
+            if doc is not None:
+                doc.close()
+            raise
     
     @staticmethod
     def unlock_pdf_to_file(path: str, password: str, output_path: str) -> bool:
@@ -191,13 +234,27 @@ class PDFSecurityManager:
             
             return info
             
-        except Exception as e:
-            if doc is not None:
-                doc.close()
+        except Exception:
             raise
         finally:
             if doc is not None:
                 doc.close()
+
+    @staticmethod
+    def can_save_changes(doc: fitz.Document) -> bool:
+        """
+        Return whether the current opened document has enough permissions to save edits.
+        """
+        if not doc.is_encrypted:
+            return True
+
+        return PDFSecurityManager._has_permission(
+            doc.permissions,
+            PDFSecurityManager.PDF_PERM_MODIFY,
+            PDFSecurityManager.PDF_PERM_ANNOTATE,
+            PDFSecurityManager.PDF_PERM_ASSEMBLY,
+            PDFSecurityManager.PDF_PERM_FORMS,
+        )
     
     @staticmethod
     def protect_pdf(
