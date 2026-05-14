@@ -15,6 +15,7 @@ dependencies = [
   "langchain-openai>=0.3.35",
   "onnxruntime>=1.20.1",
   "onnxtr[cpu,cpu-headless]>=0.5.1",
+  "opencv-python-headless>=4.13.0.92",
   "pydantic>=2.12.5",
   "pymupdf>=1.26.5",
   "pymupdf4llm>=0.0.27",
