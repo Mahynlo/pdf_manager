@@ -7,13 +7,9 @@ from typing import Callable
 import flet as ft
 
 
-_PANEL_BG    = "#F8F9FB"
-_SECTION_CLR = ft.Colors.PRIMARY
-_DIVIDER_CLR = ft.Colors.OUTLINE_VARIANT
-
-
 def _section_label(text: str) -> ft.Text:
-    return ft.Text(text, size=12, weight=ft.FontWeight.BOLD, color=_SECTION_CLR)
+    # Usamos "primary" en texto para que Flet lo adapte al tema sin usar Enums
+    return ft.Text(text, size=14, weight="bold", color="primary")
 
 
 def _row_setting(
@@ -23,13 +19,20 @@ def _row_setting(
     control: ft.Control,
 ) -> ft.Container:
     return ft.Container(
-        ft.Row(
+        content=ft.Row(
             [
-                ft.Icon(icon, size=22, color=ft.Colors.ON_SURFACE_VARIANT),
+                # Contenedor del ícono que adapta su fondo automáticamente
+                ft.Container(
+                    content=ft.Icon(icon, size=24, color="primary"),
+                    bgcolor="primaryContainer",
+                    padding=10,
+                    border_radius=8,
+                ),
                 ft.Column(
                     [
-                        ft.Text(title,    size=14, weight=ft.FontWeight.W_500),
-                        ft.Text(subtitle, size=12, color=ft.Colors.ON_SURFACE_VARIANT),
+                        # Al no ponerle color, Flet lo hace negro en día y blanco en noche
+                        ft.Text(title, size=15, weight="w600"),
+                        ft.Text(subtitle, size=13, color="onSurfaceVariant"),
                     ],
                     spacing=2,
                     expand=True,
@@ -37,9 +40,10 @@ def _row_setting(
                 control,
             ],
             spacing=16,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            vertical_alignment="center",
         ),
-        padding=ft.padding.symmetric(horizontal=0, vertical=10),
+        padding=ft.padding.symmetric(horizontal=10, vertical=12),
+        border_radius=8,
     )
 
 
@@ -59,19 +63,19 @@ class SettingsTab:
             self._tab = ft.Tab(
                 tab_content=ft.Row(
                     [
-                        ft.Icon(ft.Icons.SETTINGS_OUTLINED, size=16),
-                        ft.Text("Configuración", size=13, weight=ft.FontWeight.W_500),
+                        ft.Icon(ft.Icons.SETTINGS_OUTLINED, size=16, color="primary"),
+                        ft.Text("Configuración", size=13, weight="w500"),
                         ft.IconButton(
                             ft.Icons.CLOSE,
                             icon_size=14,
                             tooltip="Cerrar pestaña",
                             on_click=lambda e: self.on_close(self),
-                            style=ft.ButtonStyle(padding=ft.padding.all(0)),
+                            style=ft.ButtonStyle(padding=0),
                         ),
                     ],
-                    spacing=4,
+                    spacing=6,
                     tight=True,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    vertical_alignment="center",
                 ),
                 content=self.view,
             )
@@ -89,72 +93,68 @@ class SettingsTab:
     # ── build ─────────────────────────────────────────────────────────────────
 
     def _build(self) -> None:
-        is_dark = self._page.theme_mode == ft.ThemeMode.DARK
+        current_theme = str(self._page.theme_mode).lower()
+        is_dark = "dark" in current_theme
 
         self._dark_switch = ft.Switch(
             value=is_dark,
             on_change=self._on_dark_toggle,
+            active_color="primary"
+        )
+
+        # ─── HEADER ────────────────────────────────────────────────────────
+        header = ft.Container(
+            content=ft.Row(
+                [
+                    ft.Icon(ft.Icons.SETTINGS, size=32, color="primary"),
+                    ft.Column([
+                        ft.Text("Configuración General", size=22, weight="bold"),
+                        ft.Text("Administra las preferencias y la apariencia de la aplicación", size=13, color="onSurfaceVariant"),
+                    ], spacing=2)
+                ],
+                alignment="start",
+                spacing=16,
+            ),
+            padding=ft.padding.only(left=20, top=20, right=20, bottom=10)
         )
 
         settings_card = ft.Container(
-            ft.Column(
+            content=ft.Column(
                 [
                     _section_label("Apariencia"),
-                    ft.Divider(height=1, color=_DIVIDER_CLR),
+                    ft.Divider(height=1, color="outlineVariant"),
                     _row_setting(
                         ft.Icons.DARK_MODE_OUTLINED,
                         "Modo oscuro",
-                        "Cambia entre tema claro y oscuro",
+                        "Cambia entre tema claro y oscuro para mayor comodidad visual",
                         self._dark_switch,
                     ),
                 ],
-                spacing=8,
+                spacing=12,
             ),
-            padding=ft.padding.all(20),
-            bgcolor=ft.Colors.SURFACE,
+            padding=20,
+            # "surfaceVariant" es el string clave: es blanco grisáceo en día y gris oscuro de noche
+            bgcolor="surfaceVariant",
             border_radius=12,
-            border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+            border=ft.border.all(1, "outlineVariant"),
         )
 
-        self.view = ft.Column(
-            [
-                ft.Container(
-                    ft.Row(
-                        [
-                            ft.Icon(
-                                ft.Icons.SETTINGS_OUTLINED,
-                                size=28,
-                                color=ft.Colors.PRIMARY,
-                            ),
-                            ft.Text(
-                                "Configuración",
-                                size=24,
-                                weight=ft.FontWeight.W_800,
-                                color=ft.Colors.ON_SURFACE,
-                            ),
-                        ],
-                        spacing=12,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    padding=ft.padding.only(left=32, top=28, bottom=8),
-                ),
-                ft.Container(
-                    ft.Column(
-                        [settings_card],
-                        spacing=16,
-                    ),
-                    padding=ft.padding.symmetric(horizontal=32, vertical=8),
-                    expand=True,
-                ),
-            ],
-            spacing=0,
+        tabs_container = ft.Container(
+            content=ft.Column([settings_card], spacing=16),
+            padding=30,
             expand=True,
+        )
+
+        self.view = ft.Card(
+            content=ft.Column([header, ft.Divider(height=1, color="outlineVariant"), tabs_container], spacing=0),
+            elevation=2,
+            margin=10,
+            expand=True
         )
 
     # ── handlers ─────────────────────────────────────────────────────────────
 
     def _on_dark_toggle(self, e: ft.ControlEvent) -> None:
-        self._page.theme_mode = (
-            ft.ThemeMode.DARK if e.control.value else ft.ThemeMode.LIGHT
-        )
+        # Se actualiza el modo de la app
+        self._page.theme_mode = "dark" if e.control.value else "light"
         self._page.update()

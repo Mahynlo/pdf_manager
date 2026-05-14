@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 
 import flet as ft
 import fitz
@@ -45,12 +45,18 @@ class PDFViewerTab(
 ):
     """Manages state and UI for a single open PDF document."""
 
-    def __init__(self, path: str, page_ref: ft.Page, on_close: Callable):
+    def __init__(
+        self,
+        path: str,
+        page_ref: ft.Page,
+        on_close: Callable,
+        doc: Optional[fitz.Document] = None,
+    ):
         self.path     = path
         self.page_ref = page_ref
         self.on_close = on_close
         self.filename = Path(path).name
-        self.doc      = fitz.open(path)
+        self.doc      = doc if doc is not None else fitz.open(path)
 
         self.current_page    = 0
         self.zoom            = 1.0

@@ -1,31 +1,23 @@
-"""PDFSecurityTab: UI for managing password-protected PDFs."""
-
 from pathlib import Path
 import flet as ft
+from typing import Optional, Callable, Any
 
 from .security import PDFSecurityManager, PDFSecurityInfo
-
 
 class PDFSecurityTab:
     """Tab for unlocking/creating/managing password-protected PDFs."""
     
-    def __init__(self, page: ft.Page, on_pdf_unlocked: callable):
-        """
-        Initialize the security tab.
-        
-        Args:
-            page: Flet page reference
-            on_pdf_unlocked: Callback when PDF is successfully unlocked
-        """
+    def __init__(self, page: ft.Page, on_pdf_unlocked: Callable[..., Any], on_close: Optional[Callable[..., Any]] = None):
         self.page = page
         self.on_pdf_unlocked = on_pdf_unlocked
+        self._on_close = on_close
         
         # Current state for unlocking
-        self.protected_pdf_path: str | None = None
-        self.security_info: PDFSecurityInfo | None = None
+        self.protected_pdf_path: Optional[str] = None
+        self.security_info: Optional[PDFSecurityInfo] = None
         
         # Current state for protecting
-        self.unprotected_pdf_path: str | None = None
+        self.unprotected_pdf_path: Optional[str] = None
         
         # Presets
         self.presets = PDFSecurityManager.get_default_permissions()
@@ -47,180 +39,174 @@ class PDFSecurityTab:
         # ─── SECTION 2: PROTEGER ───────────────────────────────────────
         protect_section = self._build_protect_section()
         
-        # Build main container with two sections
-        self._tab = ft.Container(
-            content=ft.Column(
-                controls=[
-                    ft.Container(
-                        content=ft.Text(
-                            "🔐 Gestión de Seguridad de PDFs",
-                            size=24,
-                            weight="bold",
-                            color="#1E2A38"
-                        ),
-                        padding=20,
-                        bgcolor="#F5F5F5",
+        # Build main container with two sections using a card and clearer header
+        header = ft.Container(
+            content=ft.Row(
+                [
+                    ft.Icon(ft.Icons.SECURITY, size=32, color="#F9A825"),
+                    ft.Column([
+                        ft.Text("Gestión de Seguridad de PDFs", size=22, weight="bold", color="#1E2A38"),
+                        ft.Text("Desbloquea archivos encriptados y protege tus documentos confidenciales", size=13, color="#666666"),
+                    ], spacing=2)
+                ],
+                alignment="start",
+                spacing=16,
+            ),
+            padding=ft.padding.only(left=20, top=20, right=20, bottom=10)
+        )
+
+        tabs_container = ft.Container(
+            content=ft.Tabs(
+                selected_index=0,
+                animation_duration=300,
+                tabs=[
+                    ft.Tab(
+                        tab_content=ft.Row([ft.Icon(ft.Icons.LOCK_OPEN), ft.Text("Desbloquear")]), 
+                        content=ft.Container(content=unlock_section, padding=20)
                     ),
-                    ft.Tabs(
-                        selected_index=0,
-                        tabs=[
-                            ft.Tab(
-                                text="🔓 Desbloquear",
-                                content=unlock_section
-                            ),
-                            ft.Tab(
-                                text="🔒 Proteger",
-                                content=protect_section
-                            ),
-                        ]
+                    ft.Tab(
+                        tab_content=ft.Row([ft.Icon(ft.Icons.LOCK), ft.Text("Proteger")]), 
+                        content=ft.Container(content=protect_section, padding=20)
                     ),
                 ],
-                spacing=0,
-                expand=True
+                expand=True,
             ),
-            expand=True
+            expand=True,
+        )
+
+        self._tab = ft.Card(
+            content=ft.Column([header, ft.Divider(height=1, color="#E0E0E0"), tabs_container], spacing=0), 
+            elevation=2,
+            margin=10
         )
     
     def _build_unlock_section(self) -> ft.Container:
         """Build the unlock section UI."""
-        # Select PDF button
+        
         select_btn = ft.ElevatedButton(
             "Seleccionar PDF Protegido",
-            icon=ft.icons.FOLDER_OPEN,
+            icon=ft.Icons.FOLDER_OPEN,
             on_click=lambda _: self.unlock_file_picker.pick_files(
                 allowed_extensions=["pdf"],
                 dialog_title="Seleccionar PDF Protegido"
-            )
+            ),
+            style=ft.ButtonStyle(padding=20)
         )
         
-        # File info display
-        self.unlock_file_info_text = ft.Text(
-            "No hay PDF seleccionado",
-            size=11,
-            color="#999999"
+        self.unlock_file_info_text = ft.Text("No hay PDF seleccionado", size=13, color="#999999")
+        file_info_container = ft.Container(
+            content=ft.Row([ft.Icon(ft.Icons.PICTURE_AS_PDF, color="#999999"), self.unlock_file_info_text], expand=True),
+            padding=15,
+            bgcolor="#F5F5F5",
+            border_radius=8,
         )
         
-        # Security info display
-        self.unlock_security_info_column = ft.Column(
-            controls=[],
-            spacing=8,
+        self.unlock_security_info_column = ft.Column(spacing=6, visible=False)
+        security_info_card = ft.Container(
+            content=self.unlock_security_info_column,
+            padding=15,
+            border=ft.border.all(1, "#E0E0E0"),
+            border_radius=8,
             visible=False
         )
+        self.unlock_security_card_ref = security_info_card
         
-        # Password input
         self.unlock_password_field = ft.TextField(
-            label="Contraseña",
+            label="Contraseña del Documento",
             password=True,
-            width=250,
+            can_reveal_password=True,
+            prefix_icon=ft.Icons.PASSWORD,
+            width=300,
             visible=False,
+            border_color="#1E2A38",
             on_submit=lambda _: self._try_unlock()
         )
         
-        # Buttons
         self.unlock_btn = ft.ElevatedButton(
             "Desbloquear y Abrir",
-            icon=ft.icons.LOCK_OPEN,
+            icon=ft.Icons.LOCK_OPEN,
             on_click=lambda _: self._try_unlock(),
-            visible=False
+            visible=False,
+            style=ft.ButtonStyle(padding=15)
         )
         
         self.unlock_export_btn = ft.ElevatedButton(
-            "Guardar Desbloqueado",
-            icon=ft.icons.SAVE,
+            "Guardar Sin Contraseña",
+            icon=ft.Icons.SAVE_ALT,
             on_click=lambda _: self._export_unlocked(),
-            visible=False
+            visible=False,
+            style=ft.ButtonStyle(padding=15)
         )
         
-        # Error/success messages
-        self.unlock_message_text = ft.Text(
-            "",
-            size=11,
-            color="#D32F2F",
-            visible=False
+        self.unlock_message_text = ft.Text("", size=13, weight="w500")
+        self.unlock_message_container = ft.Container(
+            content=ft.Row([ft.Icon(ft.Icons.INFO), self.unlock_message_text]),
+            padding=10,
+            border_radius=8,
+            visible=False,
         )
         
+        left_col = ft.Column([
+            ft.Text("Paso 1: Archivo", weight="bold", size=16, color="#1E2A38"),
+            select_btn,
+            file_info_container,
+        ], spacing=15)
+
+        right_col = ft.Column([
+            ft.Text("Paso 2: Acciones", weight="bold", size=16, color="#1E2A38"),
+            security_info_card,
+            self.unlock_password_field,
+            ft.Row([self.unlock_btn, self.unlock_export_btn], spacing=10, wrap=True),
+            self.unlock_message_container,
+        ], spacing=15)
+
         return ft.Container(
-            content=ft.Column(
-                controls=[
-                    ft.Container(
-                        content=ft.Text(
-                            "Desbloquea PDFs protegidos con contraseña",
-                            size=12,
-                            color="#666666",
-                            italic=True
-                        ),
-                        padding=ft.padding.symmetric(horizontal=20, vertical=10),
-                    ),
-                    ft.Container(
-                        content=ft.Column(
-                            controls=[
-                                select_btn,
-                                ft.Divider(),
-                                self.unlock_file_info_text,
-                                ft.Container(height=20),
-                                self.unlock_security_info_column,
-                                ft.Container(height=20),
-                                ft.Row(
-                                    controls=[
-                                        self.unlock_password_field,
-                                        ft.Column(
-                                            controls=[
-                                                self.unlock_btn,
-                                                self.unlock_export_btn,
-                                            ],
-                                            spacing=8
-                                        )
-                                    ],
-                                    spacing=10
-                                ),
-                                self.unlock_message_text,
-                            ],
-                            spacing=12
-                        ),
-                        padding=20,
-                        expand=True
-                    ),
-                ],
-                spacing=0,
-                expand=True
-            ),
-            expand=True
+            content=ft.Row([
+                ft.Container(left_col, expand=1, padding=ft.padding.only(right=20)), 
+                ft.VerticalDivider(width=1, color="#E0E0E0"),
+                ft.Container(right_col, expand=2, padding=ft.padding.only(left=10))
+            ], spacing=0, vertical_alignment="start"),
+            expand=True,
         )
     
     def _build_protect_section(self) -> ft.Container:
         """Build the protect section UI."""
-        # Select PDF button
+        
         select_btn = ft.ElevatedButton(
-            "Seleccionar PDF para Proteger",
-            icon=ft.icons.FOLDER_OPEN,
+            "Seleccionar PDF a Proteger",
+            icon=ft.Icons.FOLDER_OPEN,
             on_click=lambda _: self.protect_file_picker.pick_files(
                 allowed_extensions=["pdf"],
                 dialog_title="Seleccionar PDF"
-            )
+            ),
+            style=ft.ButtonStyle(padding=20)
         )
         
-        # File info display
-        self.protect_file_info_text = ft.Text(
-            "No hay PDF seleccionado",
-            size=11,
-            color="#999999"
+        self.protect_file_info_text = ft.Text("No hay PDF seleccionado", size=13, color="#999999")
+        file_info_container = ft.Container(
+            content=ft.Row([ft.Icon(ft.Icons.PICTURE_AS_PDF, color="#999999"), self.protect_file_info_text], expand=True),
+            padding=15,
+            bgcolor="#F5F5F5",
+            border_radius=8,
         )
         
-        # Password input
         self.protect_password_field = ft.TextField(
-            label="Contraseña de usuario",
+            label="Contraseña de Usuario (Para abrir)",
             password=True,
-            width=250
+            can_reveal_password=True,
+            prefix_icon=ft.Icons.PASSWORD,
+            expand=True
         )
         
         self.protect_owner_password_field = ft.TextField(
-            label="Contraseña de propietario (opcional)",
+            label="Contraseña de Propietario (Opcional)",
             password=True,
-            width=250,
-            hint_text="Para cambiar permisos después"
+            can_reveal_password=True,
+            prefix_icon=ft.Icons.ADMIN_PANEL_SETTINGS,
+            hint_text="Permite cambiar permisos después",
+            expand=True
         )
         
-        # Preset selector
         preset_options = [
             ft.dropdown.Option("sin_restricciones", "Sin restricciones - Acceso completo"),
             ft.dropdown.Option("solo_lectura", "Solo lectura - No puede modificar"),
@@ -230,114 +216,80 @@ class PDFSecurityTab:
         ]
         
         self.protect_preset_dropdown = ft.Dropdown(
-            label="Nivel de protección",
+            label="Nivel de protección rápido",
             options=preset_options,
             value="solo_lectura",
-            width=300
+            icon=ft.Icons.SHIELD
         )
         
-        # Manual permissions
-        self.protect_allow_print = ft.Checkbox("Permitir impresión")
+        self.protect_allow_print = ft.Checkbox("Permitir impresión", value=True)
         self.protect_allow_modify = ft.Checkbox("Permitir modificación")
         self.protect_allow_copy = ft.Checkbox("Permitir copia de contenido")
         self.protect_allow_annotate = ft.Checkbox("Permitir anotaciones")
         self.protect_allow_forms = ft.Checkbox("Permitir formularios")
         self.protect_allow_assembly = ft.Checkbox("Permitir ensamblaje de páginas")
-        self.protect_allow_print_hq = ft.Checkbox("Permitir impresión de alta calidad")
+        self.protect_allow_print_hq = ft.Checkbox("Permitir impresión de alta calidad", value=True)
         
-        # Protect button
-        self.protect_btn = ft.ElevatedButton(
-            "Crear PDF Protegido",
-            icon=ft.icons.SHIELD,
-            on_click=lambda _: self._protect_pdf()
-        )
-        
-        # Error/success messages
-        self.protect_message_text = ft.Text(
-            "",
-            size=11,
-            color="#D32F2F",
-            visible=False
-        )
-        
-        # Expandable permissions section
         permissions_section = ft.ExpansionPanel(
             header=ft.ListTile(
-                title=ft.Text("Permisos personalizados", weight="bold"),
-                subtitle=ft.Text("Configurar manualmente")
+                title=ft.Text("Permisos personalizados avanzados", weight="w500"),
+                leading=ft.Icon(ft.Icons.TUNE)
             ),
             content=ft.Container(
-                content=ft.Column(
-                    controls=[
-                        self.protect_allow_print,
-                        self.protect_allow_modify,
-                        self.protect_allow_copy,
-                        self.protect_allow_annotate,
-                        self.protect_allow_forms,
-                        self.protect_allow_assembly,
-                        self.protect_allow_print_hq,
-                    ],
-                    spacing=8
-                ),
-                padding=20
+                content=ft.Column([
+                    self.protect_allow_print, self.protect_allow_modify, self.protect_allow_copy,
+                    self.protect_allow_annotate, self.protect_allow_forms, self.protect_allow_assembly, self.protect_allow_print_hq,
+                ], spacing=2),
+                padding=ft.padding.only(left=20, bottom=20, right=20),
+                bgcolor="#F5F5F5",
             )
         )
         
+        self.protect_btn = ft.ElevatedButton(
+            "Cifrar y Guardar PDF",
+            icon=ft.Icons.ENHANCED_ENCRYPTION,
+            on_click=lambda _: self._protect_pdf(),
+            style=ft.ButtonStyle(padding=20)
+        )
+        
+        self.protect_message_text = ft.Text("", size=13, weight="w500")
+        self.protect_message_container = ft.Container(
+            content=ft.Row([ft.Icon(ft.Icons.INFO), self.protect_message_text]),
+            padding=10,
+            border_radius=8,
+            visible=False,
+        )
+        
+        left_col = ft.Column([
+            ft.Text("Paso 1: Archivo y Nivel", weight="bold", size=16, color="#1E2A38"),
+            select_btn,
+            file_info_container,
+            ft.Container(height=5),
+            self.protect_preset_dropdown,
+            ft.ExpansionPanelList(controls=[permissions_section], expand_loose=True, elevation=0),
+        ], spacing=15)
+
+        right_col = ft.Column([
+            ft.Text("Paso 2: Seguridad", weight="bold", size=16, color="#1E2A38"),
+            ft.Row([self.protect_password_field]),
+            ft.Row([self.protect_owner_password_field]),
+            ft.Container(height=10),
+            self.protect_btn,
+            self.protect_message_container,
+        ], spacing=15)
+
         return ft.Container(
-            content=ft.Column(
-                controls=[
-                    ft.Container(
-                        content=ft.Text(
-                            "Protege tus PDFs con contraseña y permisos",
-                            size=12,
-                            color="#666666",
-                            italic=True
-                        ),
-                        padding=ft.padding.symmetric(horizontal=20, vertical=10),
-                    ),
-                    ft.Container(
-                        content=ft.Column(
-                            controls=[
-                                select_btn,
-                                ft.Divider(),
-                                self.protect_file_info_text,
-                                ft.Container(height=15),
-                                
-                                ft.Text("Contraseñas:", size=12, weight="bold"),
-                                self.protect_password_field,
-                                self.protect_owner_password_field,
-                                ft.Container(height=15),
-                                
-                                ft.Text("Nivel de protección:", size=12, weight="bold"),
-                                self.protect_preset_dropdown,
-                                ft.Container(height=15),
-                                
-                                ft.ExpansionPanelList(
-                                    controls=[permissions_section],
-                                    expand_loose=True
-                                ),
-                                ft.Container(height=20),
-                                
-                                self.protect_btn,
-                                self.protect_message_text,
-                            ],
-                            spacing=12,
-                            scroll=ft.ScrollMode.AUTO
-                        ),
-                        padding=20,
-                        expand=True
-                    ),
-                ],
-                spacing=0,
-                expand=True
-            ),
+            content=ft.Row([
+                ft.Container(left_col, expand=5, padding=ft.padding.only(right=20)),
+                ft.VerticalDivider(width=1, color="#E0E0E0"),
+                ft.Container(right_col, expand=4, padding=ft.padding.only(left=10))
+            ], spacing=0, vertical_alignment="start"),
             expand=True
         )
     
     # ─── UNLOCK HANDLERS ───────────────────────────────────────────────────
     
     def _on_unlock_file_picked(self, e: ft.FilePickerResultEvent) -> None:
-        """Handle file picker result for unlocking."""
         if not e.files:
             return
         
@@ -345,22 +297,20 @@ class PDFSecurityTab:
         self.protected_pdf_path = path
         filename = Path(path).name
         
-        # Show file info
-        self.unlock_file_info_text.value = f"📄 Archivo: {filename}"
-        self.unlock_message_text.visible = False
+        self.unlock_file_info_text.value = filename
+        self.unlock_message_container.visible = False
         
-        # Check if PDF is protected
         try:
             is_protected = PDFSecurityManager.is_protected(path)
             
             if is_protected:
-                self.unlock_file_info_text.value += " 🔒 (Protegido)"
+                self.unlock_file_info_text.value = f"{filename} (Protegido)"
                 self.unlock_password_field.visible = True
                 self.unlock_btn.visible = True
                 self.unlock_export_btn.visible = True
                 self._show_unlock_security_info(path)
             else:
-                self.unlock_file_info_text.value += " 🔓 (No protegido)"
+                self.unlock_file_info_text.value = f"{filename} (No protegido)"
                 self.unlock_password_field.visible = False
                 self.unlock_btn.visible = False
                 self.unlock_export_btn.visible = True
@@ -371,53 +321,44 @@ class PDFSecurityTab:
             self.unlock_password_field.visible = False
             self.unlock_btn.visible = False
             self.unlock_export_btn.visible = False
+            self.unlock_security_card_ref.visible = False
         
         self.page.update()
     
     def _show_unlock_security_info(self, path: str) -> None:
-        """Display security information about the PDF."""
         try:
             self.security_info = PDFSecurityManager.get_security_info(path)
-            
-            # Build info controls
             controls = []
             
-            # Protection status
-            status_text = "🔒 Protegido por contraseña" if self.security_info.is_protected else "🔓 Sin protección"
-            controls.append(ft.Text(status_text, size=12, weight="bold"))
+            is_prot = self.security_info.is_protected
+            status_color = "#D32F2F" if is_prot else "#2E7D32"
+            status_icon = ft.Icons.LOCK if is_prot else ft.Icons.LOCK_OPEN
+            status_text = "Requiere Contraseña" if is_prot else "Sin Protección"
             
-            # Encryption info
+            controls.append(
+                ft.Row([
+                    ft.Icon(status_icon, color=status_color, size=18),
+                    ft.Text(status_text, weight="bold", color=status_color)
+                ])
+            )
+            
             if self.security_info.is_encrypted:
-                controls.append(
-                    ft.Text(
-                        f"Método de cifrado: {self.security_info.encryption_method}",
-                        size=11,
-                        color="#666666"
-                    )
-                )
+                controls.append(ft.Text(f"Cifrado: {self.security_info.encryption_method}", size=12, color="#666666"))
             
-            # Permissions header
-            controls.append(ft.Text("Permisos:", size=12, weight="bold", color="#1E2A38"))
+            controls.append(ft.Divider(height=10, color="#E0E0E0"))
+            controls.append(ft.Text("Permisos actuales:", size=12, weight="w500", color="#1E2A38"))
             
-            # Permissions list
             perms = self.security_info.get_permissions_text()
             for perm in perms:
-                controls.append(
-                    ft.Text(
-                        f"  {perm}",
-                        size=11,
-                        color="#333333"
-                    )
-                )
+                controls.append(ft.Text(f"• {perm}", size=12, color="#666666"))
             
             self.unlock_security_info_column.controls = controls
-            self.unlock_security_info_column.visible = True
+            self.unlock_security_card_ref.visible = True
             
         except Exception as ex:
-            self._show_unlock_message(f"Error al obtener información: {ex}", error=True)
+            self._show_unlock_message(f"Error al obtener info: {ex}", error=True)
     
     def _try_unlock(self) -> None:
-        """Try to unlock the PDF with the entered password."""
         if not self.protected_pdf_path:
             self._show_unlock_message("Selecciona un PDF primero", error=True)
             return
@@ -430,24 +371,20 @@ class PDFSecurityTab:
         
         try:
             doc = PDFSecurityManager.unlock_pdf(self.protected_pdf_path, password)
-            
             if doc is None:
-                self._show_unlock_message("❌ Contraseña incorrecta", error=True)
+                self._show_unlock_message("Contraseña incorrecta", error=True)
                 return
             
             doc.close()
+            self._show_unlock_message("PDF desbloqueado exitosamente", error=False)
             
-            self._show_unlock_message("✓ PDF desbloqueado exitosamente", error=False)
-            
-            # Notify callback that PDF is unlocked
             if self.on_pdf_unlocked:
                 self.on_pdf_unlocked(self.protected_pdf_path, password)
-            
+                
         except Exception as ex:
             self._show_unlock_message(f"Error: {ex}", error=True)
     
     def _export_unlocked(self) -> None:
-        """Export the PDF without password protection."""
         if not self.protected_pdf_path:
             self._show_unlock_message("Selecciona un PDF primero", error=True)
             return
@@ -455,45 +392,38 @@ class PDFSecurityTab:
         password = self.unlock_password_field.value.strip()
         
         try:
-            # Generate output filename
             base_path = Path(self.protected_pdf_path)
             output_name = f"{base_path.stem}_desbloqueado{base_path.suffix}"
             output_path = base_path.parent / output_name
             
             if PDFSecurityManager.is_protected(self.protected_pdf_path):
                 if not password:
-                    self._show_unlock_message("Ingresa la contraseña", error=True)
+                    self._show_unlock_message("Ingresa la contraseña para poder exportar", error=True)
                     return
-                
-                PDFSecurityManager.unlock_pdf_to_file(
-                    self.protected_pdf_path,
-                    password,
-                    str(output_path)
-                )
+                PDFSecurityManager.unlock_pdf_to_file(self.protected_pdf_path, password, str(output_path))
             else:
-                # Just copy if not protected
                 import shutil
                 shutil.copy(self.protected_pdf_path, str(output_path))
             
-            self._show_unlock_message(
-                f"✓ PDF guardado: {output_name}",
-                error=False
-            )
+            self._show_unlock_message(f"PDF guardado con éxito: {output_name}", error=False)
             
         except Exception as ex:
             self._show_unlock_message(f"Error: {ex}", error=True)
     
     def _show_unlock_message(self, msg: str, error: bool = False) -> None:
-        """Display a message in unlock section."""
         self.unlock_message_text.value = msg
-        self.unlock_message_text.color = "#D32F2F" if error else "#2E7D32"
-        self.unlock_message_text.visible = True
+        color = "#D32F2F" if error else "#2E7D32"
+        bg_color = "#FFEBEE" if error else "#E8F5E9"
+        
+        self.unlock_message_text.color = color
+        self.unlock_message_container.bgcolor = bg_color
+        self.unlock_message_container.content.controls[0].color = color
+        self.unlock_message_container.visible = True
         self.page.update()
     
     # ─── PROTECT HANDLERS ───────────────────────────────────────────────────
     
     def _on_protect_file_picked(self, e: ft.FilePickerResultEvent) -> None:
-        """Handle file picker result for protecting."""
         if not e.files:
             return
         
@@ -501,12 +431,11 @@ class PDFSecurityTab:
         self.unprotected_pdf_path = path
         filename = Path(path).name
         
-        self.protect_file_info_text.value = f"📄 Archivo: {filename}"
-        self.protect_message_text.visible = False
+        self.protect_file_info_text.value = filename
+        self.protect_message_container.visible = False
         self.page.update()
     
     def _protect_pdf(self) -> None:
-        """Create a protected copy of the PDF."""
         if not self.unprotected_pdf_path:
             self._show_protect_message("Selecciona un PDF primero", error=True)
             return
@@ -516,20 +445,17 @@ class PDFSecurityTab:
         preset_name = self.protect_preset_dropdown.value
         
         if not user_password:
-            self._show_protect_message("Ingresa una contraseña", error=True)
+            self._show_protect_message("Ingresa una contraseña para el documento", error=True)
             return
         
         try:
-            # Generate output filename
             base_path = Path(self.unprotected_pdf_path)
             output_name = f"{base_path.stem}_protegido{base_path.suffix}"
             output_path = base_path.parent / output_name
             
-            # Get permissions based on preset
             if preset_name in self.presets:
                 perm_dict = self.presets[preset_name]
             else:
-                # Use custom permissions
                 perm_dict = {
                     "allow_print": self.protect_allow_print.value,
                     "allow_modify": self.protect_allow_modify.value,
@@ -540,7 +466,6 @@ class PDFSecurityTab:
                     "allow_print_hq": self.protect_allow_print_hq.value,
                 }
             
-            # Protect the PDF
             PDFSecurityManager.protect_pdf_with_permissions(
                 self.unprotected_pdf_path,
                 str(output_path),
@@ -549,36 +474,41 @@ class PDFSecurityTab:
                 **perm_dict
             )
             
-            self._show_protect_message(
-                f"✓ PDF protegido creado: {output_name}",
-                error=False
-            )
+            self._show_protect_message(f"Documento protegido guardado: {output_name}", error=False)
             
-            # Reset form
             self.protect_password_field.value = ""
             self.protect_owner_password_field.value = ""
-            self.protect_file_info_text.value = "No hay PDF seleccionado"
             
         except Exception as ex:
             self._show_protect_message(f"Error: {ex}", error=True)
     
     def _show_protect_message(self, msg: str, error: bool = False) -> None:
-        """Display a message in protect section."""
         self.protect_message_text.value = msg
-        self.protect_message_text.color = "#D32F2F" if error else "#2E7D32"
-        self.protect_message_text.visible = True
+        color = "#D32F2F" if error else "#2E7D32"
+        bg_color = "#FFEBEE" if error else "#E8F5E9"
+        
+        self.protect_message_text.color = color
+        self.protect_message_container.bgcolor = bg_color
+        self.protect_message_container.content.controls[0].color = color
+        self.protect_message_container.visible = True
         self.page.update()
     
     # ─── COMMON ───────────────────────────────────────────────────────────
     
     def get_tab_info(self) -> dict:
-        """Return tab information for main tab bar."""
-        return {
-            "text": "🔐 Seguridad",
-            "icon": ft.icons.LOCK,
+        info = {
+            "label": "Seguridad",
+            "icon": ft.Icons.SECURITY,
             "content": self._tab,
+            "closeable": True,
         }
+        if self._on_close:
+            info["close_cb"] = lambda: self._on_close(self)
+        return info
     
     def close(self) -> None:
-        """Cleanup when tab is closed."""
-        pass
+        for picker in (self.unlock_file_picker, self.protect_file_picker):
+            try:
+                self.page.overlay.remove(picker)
+            except ValueError:
+                pass

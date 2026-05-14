@@ -7,6 +7,7 @@ from pathlib import Path
 import flet as ft
 import flet.canvas as cv
 import fitz
+from pdf_security import PDFSecurityManager
 
 from .annotations import Tool
 from .renderer import BASE_SCALE, ZOOM_LEVELS, render_page, _RENDER_SEM
@@ -842,6 +843,9 @@ class _RenderMixin:
         if not e.path:
             return
         try:
+            if not PDFSecurityManager.can_save_changes(self.doc):
+                self._show_snack("Este PDF no permite guardar cambios por sus permisos de seguridad")
+                return
             with self._doc_lock:
                 self.doc.save(e.path, garbage=4, deflate=True)
             self._show_snack(f"Guardado: {Path(e.path).name}")

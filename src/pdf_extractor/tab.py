@@ -22,9 +22,10 @@ class PageMatch:
 
 
 class PDFExtractionTab:
-    def __init__(self, page_ref: ft.Page, on_open_preview: Callable[[str], None]):
+    def __init__(self, page_ref: ft.Page, on_open_preview: Callable[[str], None], on_close: Callable[["PDFExtractionTab"], None] | None = None):
         self.page_ref = page_ref
         self.on_open_preview = on_open_preview
+        self.on_close = on_close
         self.workspace_root = Path(__file__).resolve().parents[2]
         self.processor = OCRProcessor(str(self.workspace_root))
 
@@ -39,53 +40,7 @@ class PDFExtractionTab:
     # ------------------------------------------------------------------ UI
 
     def _build(self) -> None:
-        # Usando colores semánticos
-        self._ref_path_text = ft.Text("Referencia: sin archivo", size=12, color=ft.Colors.ON_SURFACE_VARIANT)
-        self._ref_kind_text = ft.Text("Tipo: -", size=12, color=ft.Colors.ON_SURFACE_VARIANT)
-        self._target_count_text = ft.Text("Archivos objetivo: 0", size=12, color=ft.Colors.ON_SURFACE_VARIANT)
-        self._dest_text = ft.Text(f"Destino: {self.destination_dir}", size=12, color=ft.Colors.ON_SURFACE_VARIANT)
-
-        self._reference_pages = ft.TextField(
-            label="Páginas de referencia (ej: 1,3-5)",
-            hint_text="Vacío = todas",
-            dense=True,
-            border_color=ft.Colors.OUTLINE_VARIANT,
-        )
-        self._hint_pages = ft.TextField(
-            label="Página sugerida en cada objetivo (ej: 1,2)",
-            hint_text="Se verifican primero; vacío = buscar en todas",
-            dense=True,
-            border_color=ft.Colors.OUTLINE_VARIANT,
-        )
-        self._keywords = ft.TextField(
-            label="Palabras clave / títulos / nombres de formato",
-            hint_text="Una por línea o separadas por coma",
-            multiline=True,
-            min_lines=4,
-            max_lines=8,
-            border_color=ft.Colors.OUTLINE_VARIANT,
-        )
-
-        self._results = ft.ListView(expand=True, spacing=4, auto_scroll=True)
-        self._progress = ft.Text("", size=13, color=ft.Colors.PRIMARY, weight=ft.FontWeight.W_500, italic=True)
-        self._summary = ft.Text("Sin búsqueda ejecutada", size=13, color=ft.Colors.ON_SURFACE_VARIANT)
-
-        self._run_btn = ft.ElevatedButton(
-            "Buscar y extraer",
-            icon=ft.Icons.SEARCH,
-            on_click=self._run_extraction,
-            style=ft.ButtonStyle(
-                bgcolor=ft.Colors.PRIMARY,
-                color=ft.Colors.ON_PRIMARY,
-            )
-        )
-        self._preview_btn = ft.OutlinedButton(
-            "Abrir vista previa",
-            icon=ft.Icons.VISIBILITY,
-            disabled=True,
-            on_click=self._open_preview,
-        )
-
+        # File pickers
         self._pick_reference = ft.FilePicker(on_result=self._on_reference_picked)
         self._pick_targets = ft.FilePicker(on_result=self._on_targets_picked)
         self._pick_destination = ft.FilePicker(on_result=self._on_destination_picked)
@@ -93,115 +48,208 @@ class PDFExtractionTab:
             [self._pick_reference, self._pick_targets, self._pick_destination]
         )
 
-        # -- Panel Izquierdo --
-        left_panel = ft.Container(
-            ft.Column(
+        # ─── HEADER ────────────────────────────────────────────────────────
+        header = ft.Container(
+            content=ft.Row(
                 [
-                    ft.Text("Referencia", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.ON_SURFACE),
-                    ft.Row(
-                        [
-                            ft.ElevatedButton(
-                                "Abrir PDF referencia",
-                                icon=ft.Icons.UPLOAD_FILE,
-                                on_click=lambda e: self._pick_reference.pick_files(
-                                    dialog_title="Seleccionar PDF referencia",
-                                    allowed_extensions=["pdf"],
-                                    allow_multiple=False,
-                                ),
-                            ),
-                        ]
-                    ),
-                    self._ref_path_text,
-                    self._ref_kind_text,
-                    ft.Container(height=4),
-                    self._reference_pages,
-                    ft.Divider(height=24, color=ft.Colors.OUTLINE_VARIANT),
-                    
-                    ft.Text("Patrón de búsqueda", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.ON_SURFACE),
-                    self._keywords,
-                    ft.Divider(height=24, color=ft.Colors.OUTLINE_VARIANT),
-                    
-                    ft.Text("Opciones avanzadas", size=14, weight=ft.FontWeight.W_600, color=ft.Colors.ON_SURFACE),
-                    self._hint_pages,
+                    ft.Icon(ft.Icons.FIND_IN_PAGE, size=32, color="#1565C0"),
+                    ft.Column([
+                        ft.Text("Extracción Inteligente de PDFs", size=22, weight="bold", color="#1E2A38"),
+                        ft.Text("Busca palabras clave y extrae páginas específicas de múltiples documentos", size=13, color="#666666"),
+                    ], spacing=2)
                 ],
-                spacing=8,
-                expand=True,
-                scroll=ft.ScrollMode.AUTO,
+                alignment="start",
+                spacing=16,
             ),
-            padding=ft.padding.all(20),
-            bgcolor=ft.Colors.SURFACE,
-            border=ft.border.only(right=ft.BorderSide(1, ft.Colors.OUTLINE_VARIANT)),
-            expand=1,
+            padding=ft.padding.only(left=20, top=20, right=20, bottom=10)
         )
 
-        # -- Panel Derecho --
-        right_panel = ft.Container(
-            ft.Column(
-                [
-                    ft.Text("Objetivos y extracción", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.ON_SURFACE),
-                    ft.Row(
-                        [
-                            ft.ElevatedButton(
-                                "Cargar PDFs objetivo",
-                                icon=ft.Icons.FOLDER_OPEN,
-                                on_click=lambda e: self._pick_targets.pick_files(
-                                    dialog_title="Seleccionar PDFs objetivo",
-                                    allowed_extensions=["pdf"],
-                                    allow_multiple=True,
-                                ),
-                            ),
-                            ft.OutlinedButton(
-                                "Carpeta destino",
-                                icon=ft.Icons.FOLDER,
-                                on_click=lambda e: self._pick_destination.get_directory_path(
-                                    dialog_title="Seleccionar carpeta destino"
-                                ),
-                            ),
-                        ],
-                        wrap=True,
-                    ),
-                    self._target_count_text,
-                    self._dest_text,
-                    ft.Container(height=8),
-                    ft.Row([self._run_btn, self._preview_btn], spacing=12),
-                    
-                    ft.Container(height=4),
-                    self._progress,
-                    self._summary,
-                    
-                    ft.Divider(height=24, color=ft.Colors.OUTLINE_VARIANT),
-                    ft.Text("Registro de operación", size=14, weight=ft.FontWeight.W_600, color=ft.Colors.ON_SURFACE),
-                    
-                    # Contenedor para el log, que le da un aspecto de "terminal" limpia
-                    ft.Container(
-                        content=self._results,
-                        expand=True,
-                        bgcolor=ft.Colors.SURFACE,
-                        border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
-                        border_radius=8,
-                        padding=ft.padding.all(12),
-                    ),
-                ],
-                spacing=8,
-                expand=True,
-            ),
-            padding=ft.padding.all(20),
-            expand=2,
-            bgcolor=ft.Colors.SURFACE,
+        # ─── PANEL IZQUIERDO (Configuración) ─────────────────────────────────
+        self._ref_path_text = ft.Text("Referencia: sin archivo", size=12, color="#666666")
+        self._ref_kind_text = ft.Text("Tipo: -", size=12, color="#666666")
+        
+        ref_info_container = ft.Container(
+            content=ft.Column([
+                ft.Row([ft.Icon(ft.Icons.PICTURE_AS_PDF, size=16, color="#999999"), self._ref_path_text]),
+                ft.Row([ft.Icon(ft.Icons.INFO_OUTLINE, size=16, color="#999999"), self._ref_kind_text])
+            ], spacing=4),
+            padding=15,
+            bgcolor="#F5F5F5",
+            border_radius=8,
         )
 
-        self.view = ft.Row([left_panel, right_panel], expand=True, spacing=0)
+        self._reference_pages = ft.TextField(
+            label="Páginas de referencia (ej: 1,3-5)",
+            hint_text="Vacío = todas",
+            dense=True,
+            border_color="#1E2A38",
+            prefix_icon=ft.Icons.NUMBERS,
+        )
+        
+        self._hint_pages = ft.TextField(
+            label="Páginas sugeridas en objetivos (ej: 1,2)",
+            hint_text="Se verifican primero; vacío = todas",
+            dense=True,
+            border_color="#1E2A38",
+            prefix_icon=ft.Icons.LIGHTBULB_OUTLINE,
+        )
+        
+        self._keywords = ft.TextField(
+            label="Palabras clave / títulos / nombres",
+            hint_text="Una por línea o separadas por coma",
+            multiline=True,
+            min_lines=4,
+            max_lines=8,
+            border_color="#1E2A38",
+            prefix_icon=ft.Icons.KEY,
+        )
+
+        left_panel = ft.Column(
+            [
+                ft.Text("Paso 1: Documento de Referencia", size=16, weight="bold", color="#1E2A38"),
+                ft.ElevatedButton(
+                    "Abrir PDF Referencia",
+                    icon=ft.Icons.UPLOAD_FILE,
+                    on_click=lambda e: self._pick_reference.pick_files(
+                        dialog_title="Seleccionar PDF referencia",
+                        allowed_extensions=["pdf"],
+                        allow_multiple=False,
+                    ),
+                    style=ft.ButtonStyle(padding=15)
+                ),
+                ref_info_container,
+                ft.Container(height=4),
+                self._reference_pages,
+                ft.Divider(height=24, color="#E0E0E0"),
+                
+                ft.Text("Paso 2: Patrón de Búsqueda", size=16, weight="bold", color="#1E2A38"),
+                self._keywords,
+                self._hint_pages,
+            ],
+            spacing=10,
+            expand=True,
+            scroll="auto",
+        )
+
+        # ─── PANEL DERECHO (Objetivos y Resultados) ──────────────────────────
+        self._target_count_text = ft.Text("Archivos objetivo: 0", size=12, color="#666666")
+        self._dest_text = ft.Text(f"Destino: {self.destination_dir}", size=12, color="#666666")
+        
+        target_info_container = ft.Container(
+            content=ft.Column([
+                ft.Row([ft.Icon(ft.Icons.LIBRARY_BOOKS, size=16, color="#999999"), self._target_count_text]),
+                ft.Row([ft.Icon(ft.Icons.FOLDER_SPECIAL, size=16, color="#999999"), self._dest_text])
+            ], spacing=4),
+            padding=15,
+            bgcolor="#F5F5F5",
+            border_radius=8,
+        )
+
+        self._results = ft.ListView(expand=True, spacing=4, auto_scroll=True)
+        self._progress = ft.Text("", size=13, color="#1565C0", weight="w500", italic=True)
+        self._summary = ft.Text("Sin búsqueda ejecutada", size=13, color="#666666", weight="bold")
+
+        self._run_btn = ft.ElevatedButton(
+            "Buscar y Extraer",
+            icon=ft.Icons.SEARCH,
+            on_click=self._run_extraction,
+            style=ft.ButtonStyle(
+                bgcolor="#1565C0",
+                color="white",
+                padding=20
+            )
+        )
+        self._preview_btn = ft.ElevatedButton(
+            "Abrir Vista Previa",
+            icon=ft.Icons.VISIBILITY,
+            disabled=True,
+            on_click=self._open_preview,
+            style=ft.ButtonStyle(padding=20)
+        )
+
+        right_panel = ft.Column(
+            [
+                ft.Text("Paso 3: Objetivos y Extracción", size=16, weight="bold", color="#1E2A38"),
+                ft.Row(
+                    [
+                        ft.ElevatedButton(
+                            "Cargar PDFs Objetivo",
+                            icon=ft.Icons.FOLDER_OPEN,
+                            on_click=lambda e: self._pick_targets.pick_files(
+                                dialog_title="Seleccionar PDFs objetivo",
+                                allowed_extensions=["pdf"],
+                                allow_multiple=True,
+                            ),
+                            style=ft.ButtonStyle(padding=15)
+                        ),
+                        ft.ElevatedButton(
+                            "Carpeta Destino",
+                            icon=ft.Icons.FOLDER,
+                            on_click=lambda e: self._pick_destination.get_directory_path(
+                                dialog_title="Seleccionar carpeta destino"
+                            ),
+                            style=ft.ButtonStyle(padding=15)
+                        ),
+                    ],
+                    wrap=True,
+                ),
+                target_info_container,
+                ft.Row([self._run_btn, self._preview_btn], spacing=12),
+                
+                ft.Divider(height=16, color="#E0E0E0"),
+                
+                ft.Row([ft.Icon(ft.Icons.TERMINAL, size=16, color="#1E2A38"), ft.Text("Registro de Operación", size=14, weight="bold", color="#1E2A38")]),
+                self._progress,
+                self._summary,
+                
+                # Terminal simulada para resultados
+                ft.Container(
+                    content=self._results,
+                    expand=True,
+                    bgcolor="#FAFAFA",
+                    border=ft.border.all(1, "#E0E0E0"),
+                    border_radius=8,
+                    padding=12,
+                ),
+            ],
+            spacing=10,
+            expand=True,
+        )
+
+        # ─── ESTRUCTURA PRINCIPAL ──────────────────────────────────────────
+        tabs_container = ft.Container(
+            content=ft.Row([
+                ft.Container(left_panel, expand=4, padding=ft.padding.only(right=20)),
+                ft.VerticalDivider(width=1, color="#E0E0E0"),
+                ft.Container(right_panel, expand=6, padding=ft.padding.only(left=10))
+            ], spacing=0, vertical_alignment="start"),
+            padding=20,
+            expand=True
+        )
+
+        self.view = ft.Card(
+            content=ft.Column([header, ft.Divider(height=1, color="#E0E0E0"), tabs_container], spacing=0),
+            elevation=2,
+            margin=10,
+            expand=True
+        )
 
     def get_tab(self) -> ft.Tab:
         if self._tab is None:
             self._tab = ft.Tab(
                 tab_content=ft.Row(
                     [
-                        ft.Icon(ft.Icons.FIND_IN_PAGE, size=18, color=ft.Colors.PRIMARY),
-                        ft.Text("Extraer PDF", size=14, weight=ft.FontWeight.W_500),
+                        ft.Icon(ft.Icons.FIND_IN_PAGE, size=18, color="#1565C0"),
+                        ft.Text("Extraer PDF", size=14, weight="w500"),
+                        ft.IconButton(
+                            ft.Icons.CLOSE, icon_size=14,
+                            on_click=lambda e: self.on_close(self) if self.on_close else None,
+                            tooltip="Cerrar pestaña",
+                            style=ft.ButtonStyle(padding=ft.padding.all(0)),
+                        ),
                     ],
-                    spacing=8,
-                    tight=True,
+                    spacing=4, tight=True,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 content=self.view,
             )
@@ -212,7 +260,8 @@ class PDFExtractionTab:
             "label": "Extraer PDF",
             "icon": ft.Icons.FIND_IN_PAGE,
             "content": self.view,
-            "closeable": False,
+            "closeable": True,
+            "close_cb": lambda: self.on_close(self) if self.on_close else None,
         }
 
     # ------------------------------------------------------------------ Events
@@ -303,7 +352,7 @@ class PDFExtractionTab:
             chunks.extend(part.strip() for part in row.split(","))
         return [c.lower() for c in chunks if c]
 
-    def _log(self, text: str, color: str = ft.Colors.ON_SURFACE_VARIANT) -> None:
+    def _log(self, text: str, color: str = "#666666") -> None:
         """Append a line to the results log and refresh."""
         self._results.controls.append(
             ft.Container(
@@ -314,7 +363,7 @@ class PDFExtractionTab:
         self.page_ref.update()
 
     def _log_separator(self) -> None:
-        self._results.controls.append(ft.Divider(height=1, color=ft.Colors.OUTLINE_VARIANT))
+        self._results.controls.append(ft.Divider(height=1, color="#E0E0E0"))
         self.page_ref.update()
 
     def _set_progress(self, text: str) -> None:
@@ -325,11 +374,11 @@ class PDFExtractionTab:
 
     def _run_extraction(self, e=None) -> None:  # noqa: C901
         if not self.target_paths:
-            self._log("✗ Selecciona al menos un PDF objetivo.", ft.Colors.ERROR)
+            self._log("✗ Selecciona al menos un PDF objetivo.", "#D32F2F")
             return
         kws = self._collect_keywords()
         if not kws:
-            self._log("✗ Define al menos una palabra clave para la búsqueda.", ft.Colors.ERROR)
+            self._log("✗ Define al menos una palabra clave para la búsqueda.", "#D32F2F")
             return
 
         self._run_btn.disabled = True
@@ -359,11 +408,11 @@ class PDFExtractionTab:
                     self._log(
                         f"Referencia: {Path(self.reference_path).name} — "
                         f"{len(ref_tokens)} tokens, {len(list(pages_to_use))} páginas procesadas",
-                        ft.Colors.PRIMARY,
+                        "#1565C0",
                     )
                     self._log_separator()
             except Exception as ex:
-                self._log(f"✗ Referencia no procesada: {ex}", ft.Colors.ERROR)
+                self._log(f"✗ Referencia no procesada: {ex}", "#D32F2F")
 
         # ── Target documents ─────────────────────────────────────────────────
         all_matches: list[PageMatch] = []
@@ -377,7 +426,7 @@ class PDFExtractionTab:
             try:
                 doc = fitz.open(path)
             except Exception as ex:
-                self._log(f"✗ {fname}: error al abrir — {ex}", ft.Colors.ERROR)
+                self._log(f"✗ {fname}: error al abrir — {ex}", "#D32F2F")
                 continue
 
             with doc:
@@ -387,13 +436,13 @@ class PDFExtractionTab:
 
                 self._log(
                     f"📄 [{file_idx + 1}/{total_files}] {fname} — {doc_kind_label}, {total_pages} página(s)",
-                    ft.Colors.PRIMARY,
+                    "#1565C0",
                 )
 
                 if doc_kind == "scanned":
                     self._log(
                         "  ⚠ Documento escaneado — se ejecutará OCR en cada página sin texto nativo.",
-                        ft.Colors.ORANGE,
+                        "#ED6C02",
                     )
 
                 hint_set = self._parse_pages(hint_pages_raw, total_pages)
@@ -403,7 +452,7 @@ class PDFExtractionTab:
                     self._log(
                         f"  ℹ Páginas sugeridas verificadas primero: "
                         f"{', '.join(str(p + 1) for p in sorted(hint_set))}",
-                        ft.Colors.ON_SURFACE_VARIANT,
+                        "#666666",
                     )
                 else:
                     scan_order = list(range(total_pages))
@@ -434,7 +483,7 @@ class PDFExtractionTab:
                         if is_hint:
                             self._log(
                                 f"  ~ Pág {i + 1}{hint_tag} [{mode} | {time_tag}]: sin texto extraíble",
-                                ft.Colors.ORANGE,
+                                "#ED6C02",
                             )
                         continue
 
@@ -460,13 +509,13 @@ class PDFExtractionTab:
                         self._log(
                             f"  ✓ Pág {i + 1}{hint_tag} [{mode}{ocr_tag} | {time_tag}]: "
                             f"{shown}{extra}",
-                            ft.Colors.GREEN,
+                            "#2E7D32",
                         )
                     else:
                         if is_hint:
                             self._log(
                                 f"  ~ Pág {i + 1}{hint_tag} [{mode}{ocr_tag} | {time_tag}]: no coincide",
-                                ft.Colors.ORANGE,
+                                "#ED6C02",
                             )
 
                 file_matches.sort(key=lambda m: m.score, reverse=True)
@@ -477,12 +526,12 @@ class PDFExtractionTab:
                 if file_matches:
                     self._log(
                         f"  → {len(file_matches)} página(s) encontrada(s){ocr_note}{skip_note}",
-                        ft.Colors.PRIMARY,
+                        "#1565C0",
                     )
                 else:
                     self._log(
                         f"  → Sin coincidencias{ocr_note}{skip_note}",
-                        ft.Colors.OUTLINE,
+                        "#999999",
                     )
                 self._log_separator()
 
@@ -520,7 +569,7 @@ class PDFExtractionTab:
             f"Finalizado: {len(all_matches)} coincidencia(s) en "
             f"{len(grouped)} archivo(s). Salida: {out_path.name}"
         )
-        self._log(f"💾 Archivo guardado: {out_path}", ft.Colors.PRIMARY)
+        self._log(f"💾 Archivo guardado: {out_path}", "#1565C0")
         self._run_btn.disabled = False
         self.page_ref.update()
 

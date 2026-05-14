@@ -10,7 +10,12 @@ from document_manager_ui import DocumentManagerUI
 from home import HomePage
 from pdf_extractor import PDFExtractionTab
 from pdf_merge import MergePDFTab
-from pdf_security import PDFSecurityTab
+from pdf_security import (
+    PDFInvalidPasswordError,
+    PDFPasswordRequiredError,
+    PDFSecurityManager,
+    PDFSecurityTab,
+)
 from pdf_viewer import PDFViewerTab
 from settings_tab import SettingsTab
 
@@ -30,8 +35,26 @@ def main(page: ft.Page) -> None:
     merge_tab:     MergePDFTab      | None = None
     security_tab:  PDFSecurityTab   | None = None
     settings_tab:  SettingsTab      | None = None
+    pending_password_paths: list[str] = []
 
     doc_mgr = DocumentManagerUI(page)
+
+    password_field = ft.TextField(
+        label="Contraseña",
+        password=True,
+        can_reveal_password=True,
+        autofocus=True,
+        on_submit=lambda _: _confirm_password_open(),
+    )
+    password_error = ft.Text("", color="#D32F2F", size=12, visible=False)
+
+    password_dialog = ft.AlertDialog(
+        modal=True,
+        title=ft.Text("PDF protegido"),
+        content=ft.Column([password_field, password_error], tight=True, spacing=8),
+        actions_alignment=ft.MainAxisAlignment.END,
+        actions=[],
+    )
 
     # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -81,20 +104,82 @@ def main(page: ft.Page) -> None:
 
     # ── Abrir pdf ─────────────────────────────────────────────────────────────
 
-    def _open_pdf_path(path: str) -> None:
+    def _show_next_password_dialog(error_message: str | None = None) -> None:
+        if not pending_password_paths:
+            return
+        current_path = pending_password_paths[0]
+        password_field.value = ""
+        password_error.value = error_message or ""
+        password_error.visible = bool(error_message)
+        password_dialog.title = ft.Text(f"PDF protegido: {Path(current_path).name}")
+        page.open(password_dialog)
+
+    def _enqueue_password_prompt(path: str) -> None:
+        if path in pending_password_paths:
+            return
+        pending_password_paths.append(path)
+        _show_next_password_dialog()
+
+    def _cancel_password_open() -> None:
+        if pending_password_paths:
+            pending_password_paths.pop(0)
+        page.close(password_dialog)
+        _show_next_password_dialog()
+
+    def _confirm_password_open() -> None:
+        if not pending_password_paths:
+            page.close(password_dialog)
+            return
+
+        password = (password_field.value or "").strip()
+        if not password:
+            password_error.value = "Ingresa la contraseña"
+            password_error.visible = True
+            page.update()
+            return
+
+        target_path = pending_password_paths.pop(0)
+        page.close(password_dialog)
+        _open_pdf_path(target_path, password=password)
+        _show_next_password_dialog()
+
+    password_dialog.actions = [
+        ft.TextButton("Cancelar", on_click=lambda _: _cancel_password_open()),
+        ft.ElevatedButton("Abrir", icon=ft.Icons.LOCK_OPEN, on_click=lambda _: _confirm_password_open()),
+    ]
+
+    def _open_pdf_path(path: str, password: str | None = None) -> bool:
         for i, existing in enumerate(open_tabs):
             if existing.path == path:
                 _rebuild_tabs(_fixed_count() + i)
-                return
+                return True
+
+        doc = None
         try:
-            viewer = PDFViewerTab(path, page, _close_viewer_tab)
+            doc = PDFSecurityManager.open_for_viewer(path, password=password)
+            viewer = PDFViewerTab(path, page, _close_viewer_tab, doc=doc)
+        except PDFPasswordRequiredError:
+            if doc is not None:
+                doc.close()
+            _enqueue_password_prompt(path)
+            return False
+        except PDFInvalidPasswordError:
+            if doc is not None:
+                doc.close()
+            if path not in pending_password_paths:
+                pending_password_paths.insert(0, path)
+            _show_next_password_dialog("Contraseña incorrecta")
+            return False
         except Exception as ex:
+            if doc is not None:
+                doc.close()
             _show_error(f"Error abriendo {Path(path).name}: {ex}")
-            return
+            return False
         open_tabs.append(viewer)
         rf.push(path)
         home.refresh_recent()
         _rebuild_tabs(_fixed_count() + len(open_tabs) - 1)
+        return True
 
     def _open_picker() -> None:
         file_picker.pick_files(
@@ -108,8 +193,13 @@ def main(page: ft.Page) -> None:
     def _open_extractor() -> None:
         nonlocal extractor_tab
         if extractor_tab is None:
-            extractor_tab = PDFExtractionTab(page, _open_pdf_path)
+            extractor_tab = PDFExtractionTab(page, _open_pdf_path, _close_extractor_tab)
         _rebuild_tabs(1)
+
+    def _close_extractor_tab(tab: PDFExtractionTab) -> None:
+        nonlocal extractor_tab
+        extractor_tab = None
+        _rebuild_tabs(0)
 
     # ── merge tab ─────────────────────────────────────────────────────────────
 
@@ -131,14 +221,14 @@ def main(page: ft.Page) -> None:
 
     def _on_pdf_unlocked(path: str, password: str) -> None:
         """Callback when a PDF is unlocked in the security tab."""
-        _open_pdf_path(path)
+        _open_pdf_path(path, password=password)
 
     def _open_security() -> None:
         nonlocal security_tab
         if security_tab is not None:
             _rebuild_tabs(_security_tab_idx())
             return
-        security_tab = PDFSecurityTab(page, _on_pdf_unlocked)
+        security_tab = PDFSecurityTab(page, _on_pdf_unlocked, _close_security_tab)
         _rebuild_tabs(_security_tab_idx())
 
     def _close_security_tab(tab: PDFSecurityTab) -> None:
@@ -179,28 +269,8 @@ def main(page: ft.Page) -> None:
     def _on_file_picked(e: ft.FilePickerResultEvent) -> None:
         if not e.files:
             return
-        last_new: int | None = None
         for f in e.files:
-            already_open = False
-            for i, existing in enumerate(open_tabs):
-                if existing.path == f.path:
-                    last_new = _fixed_count() + i
-                    already_open = True
-                    break
-            if already_open:
-                continue
-            try:
-                viewer = PDFViewerTab(f.path, page, _close_viewer_tab)
-            except Exception as ex:
-                _show_error(f"Error abriendo {Path(f.path).name}: {ex}")
-                continue
-            open_tabs.append(viewer)
-            rf.push(f.path)
-            last_new = _fixed_count() + len(open_tabs) - 1
-
-        home.refresh_recent()
-        if last_new is not None:
-            _rebuild_tabs(last_new)
+            _open_pdf_path(f.path)
 
     # ── keyboard shortcuts ────────────────────────────────────────────────────
 
@@ -340,6 +410,7 @@ def main(page: ft.Page) -> None:
         on_open_extractor=_open_extractor,
         on_open_merge=_open_merge,
         on_open_picker=_open_picker,
+        on_open_security=_open_security,
         on_open_pdf=_open_pdf_path,
     )
 
