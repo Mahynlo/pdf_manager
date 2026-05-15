@@ -1,6 +1,9 @@
 """App entry point: navbar + home screen + tab shell + file picker."""
 
 import sys
+import socket
+import threading
+import time
 from pathlib import Path
 
 import flet as ft
@@ -18,6 +21,55 @@ from pdf_security import (
 )
 from pdf_viewer import PDFViewerTab
 from settings_tab import SettingsTab
+
+# Single-instance IPC (local TCP) — permite que la app recibida por "Abrir con" reenvíe
+# la ruta de un PDF a la instancia ya abierta.
+_IPC_PORT = 57422
+_incoming_paths: list[str] = []
+_incoming_lock = threading.Lock()
+
+# Intentar crear un servidor local. Si falla, asumimos que ya hay una instancia
+# y actuamos como cliente al arrancar (más abajo) para reenviar el path.
+_ipc_server_socket = None
+try:
+    _ipc_server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    _ipc_server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    _ipc_server_socket.bind(("127.0.0.1", _IPC_PORT))
+    _ipc_server_socket.listen(5)
+
+    def _ipc_server_loop() -> None:
+        while True:
+            try:
+                conn, _addr = _ipc_server_socket.accept()
+                with conn:
+                    data = b""
+                    # recibir hasta 8KiB
+                    data = conn.recv(8192)
+                    if not data:
+                        continue
+                    path = data.decode("utf-8").strip()
+                    if path:
+                        with _incoming_lock:
+                            _incoming_paths.append(path)
+            except Exception:
+                time.sleep(0.1)
+
+    _ipc_thread = threading.Thread(target=_ipc_server_loop, daemon=True)
+    _ipc_thread.start()
+except OSError:
+    # Si no podemos bindear, hay una instancia escuchando. Si el usuario pasó
+    # un archivo en argv, lo reenviamos a la instancia y salimos.
+    if len(sys.argv) > 1:
+        candidate = sys.argv[1]
+        if candidate.lower().endswith(".pdf"):
+            try:
+                with socket.create_connection(("127.0.0.1", _IPC_PORT), timeout=1) as s:
+                    s.sendall(candidate.encode("utf-8"))
+                # Enviado OK, salir para no abrir otra ventana
+                sys.exit(0)
+            except Exception:
+                # No se pudo reenviar — continuar arrancando normalmente
+                pass
 
 _NAVBAR_BG     = "#1E2A38"
 _NAVBAR_FG     = "#FFFFFF"
@@ -38,6 +90,7 @@ def main(page: ft.Page) -> None:
     pending_password_paths: list[str] = []
 
     doc_mgr = DocumentManagerUI(page)
+
 
     password_field = ft.TextField(
         label="Contraseña",
@@ -422,6 +475,25 @@ def main(page: ft.Page) -> None:
 
     _rebuild_tabs(0)
     page.add(body)
+
+    # Procesar rutas recibidas desde otras instancias (single-instance IPC)
+    def _process_incoming_paths(timer=None) -> None:
+        try:
+            while True:
+                with _incoming_lock:
+                    if not _incoming_paths:
+                        break
+                    candidate = _incoming_paths.pop(0)
+                if candidate and Path(candidate).exists():
+                    _open_pdf_path(candidate)
+        except Exception:
+            pass
+
+    # Use periodic timer if available, otherwise call once to drain
+    try:
+        page.add_periodic_timer(0.5, _process_incoming_paths)
+    except Exception:
+        _process_incoming_paths()
 
     # Open PDF passed as command-line argument (e.g. from OS file association)
     if len(sys.argv) > 1:
