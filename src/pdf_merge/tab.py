@@ -14,6 +14,18 @@ _CHIPS_PREVIEW = 30
 _CHIPS_MAX     = 120
 
 
+class _MergePasswordRequiredError(ValueError):
+    """Raised when an encrypted PDF needs a password for merge operations."""
+
+
+class _MergeInvalidPasswordError(ValueError):
+    """Raised when authentication fails for an encrypted PDF."""
+
+
+class _MergePermissionDeniedError(ValueError):
+    """Raised when the PDF does not allow document assembly for merging."""
+
+
 # ── range helpers ─────────────────────────────────────────────────────────────
 
 def _selection_to_range(selected: list[bool]) -> str:
@@ -64,10 +76,12 @@ def _parse_range(text: str, total: int) -> list[bool]:
 class _PDFEntry:
     """One source PDF added to the merge list."""
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, doc: fitz.Document, password: str | None = None):
         self.path     = path
         self.filename = Path(path).name
-        self.doc      = fitz.open(path)
+        self.doc      = doc
+        self.password = password
+        self.is_encrypted = doc.is_encrypted
         self.total    = len(self.doc)
         self.selected = [True] * self.total
         self.chips_expanded = False
@@ -97,10 +111,12 @@ class MergePDFTab:
         page_ref:    ft.Page,
         on_close:    Callable[["MergePDFTab"], None],
         on_open_pdf: Callable[[str], None],
+        on_open_security: Callable[[], None] | None = None,
     ):
         self.page_ref    = page_ref
         self.on_close    = on_close
         self.on_open_pdf = on_open_pdf
+        self.on_open_security = on_open_security
 
         self._tab: ft.Tab | None = None
         self._entries: list[_PDFEntry] = []
@@ -114,6 +130,7 @@ class MergePDFTab:
         # Updated by _rebuild_preview; used by the lightbox dialog for navigation.
         self._preview_items: list[tuple[_PDFEntry, int]] = []
         self._dlg_cursor: int = 0
+        self._pending_password_paths: list[str] = []
 
         # UI refs (set in _build)
         self._pdf_col:       ft.Column         | None = None
@@ -133,6 +150,9 @@ class MergePDFTab:
         self._dlg_info:    ft.Column      | None = None
         self._dlg_prev:    ft.IconButton  | None = None
         self._dlg_next:    ft.IconButton  | None = None
+        self._pwd_dialog:  ft.AlertDialog | None = None
+        self._pwd_field:   ft.TextField   | None = None
+        self._pwd_error:   ft.Text        | None = None
 
         self._pick_pdfs   = ft.FilePicker(on_result=self._on_pdfs_picked)
         self._save_picker = ft.FilePicker(on_result=self._on_save_picked)
@@ -185,12 +205,12 @@ class MergePDFTab:
 
     # ── thumbnail helpers ─────────────────────────────────────────────────────
 
-    def _get_thumb(self, path: str, page: int) -> str | None:
+    def _get_thumb(self, path: str, page: int, password: str | None = None) -> str | None:
         key = (path, page)
         if key in self._thumb_cache:
             return self._thumb_cache[key]
         try:
-            with fitz.open(path) as doc:
+            with self._open_source_doc(path, password=password, enforce_permissions=False) as doc:
                 if page >= len(doc):
                     return None
                 mat = fitz.Matrix(0.25, 0.25)
@@ -201,13 +221,13 @@ class MergePDFTab:
         except Exception:
             return None
 
-    def _get_large_thumb(self, path: str, page: int) -> str | None:
+    def _get_large_thumb(self, path: str, page: int, password: str | None = None) -> str | None:
         """Return a cached base64 PNG at 0.5× scale — used by the lightbox dialog."""
         key = (path, page)
         if key in self._large_cache:
             return self._large_cache[key]
         try:
-            with fitz.open(path) as doc:
+            with self._open_source_doc(path, password=password, enforce_permissions=False) as doc:
                 if page >= len(doc):
                     return None
                 mat = fitz.Matrix(0.5, 0.5)
@@ -218,14 +238,14 @@ class MergePDFTab:
         except Exception:
             return None
 
-    def _render_thumbs_async(self, path: str, pages: list[int]) -> None:
+    def _render_thumbs_async(self, path: str, pages: list[int], password: str | None = None) -> None:
         uncached = [p for p in pages if (path, p) not in self._thumb_cache]
         if not uncached:
             return
 
         def _worker() -> None:
             for pg in uncached:
-                self._get_thumb(path, pg)
+                self._get_thumb(path, pg, password=password)
             self._rebuild_pdf_list()
             self._rebuild_preview()
             try:
@@ -512,6 +532,152 @@ class MergePDFTab:
             actions_alignment=ft.MainAxisAlignment.END,
         )
 
+        self._pwd_field = ft.TextField(
+            label="Contraseña",
+            password=True,
+            can_reveal_password=True,
+            autofocus=True,
+            on_submit=lambda _: self._confirm_add_protected_pdf(),
+        )
+        self._pwd_error = ft.Text("", color="#D32F2F", size=12, visible=False)
+        self._pwd_dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("PDF protegido"),
+            content=ft.Column([self._pwd_field, self._pwd_error], tight=True, spacing=8),
+            actions=[
+                ft.TextButton("Cancelar", on_click=lambda _: self._cancel_add_protected_pdf()),
+                ft.TextButton("Ir a Seguridad", on_click=lambda _: self._open_security_from_merge()),
+                ft.ElevatedButton("Agregar", icon=ft.Icons.LOCK_OPEN, on_click=lambda _: self._confirm_add_protected_pdf()),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+    @staticmethod
+    def _normalize_path(path: str) -> str:
+        """Normalize a file path for consistent comparison and storage."""
+        return str(Path(path).resolve())
+
+    @staticmethod
+    def _can_assemble_permissions(permissions: int) -> bool:
+        """Return True when permissions include assembly, or are unrestricted."""
+        if permissions < 0:
+            return True
+        return bool(permissions & 1024)  # PDF_PERM_ASSEMBLY
+
+    def _open_source_doc(
+        self,
+        path: str,
+        password: str | None = None,
+        enforce_permissions: bool = True,
+    ) -> fitz.Document:
+        """Open a source document for merge/preview, authenticating if needed."""
+        doc = fitz.open(path)
+        try:
+            if doc.is_encrypted:
+                if not password:
+                    raise _MergePasswordRequiredError("PDF protegido requiere contraseña")
+                if not doc.authenticate(password):
+                    raise _MergeInvalidPasswordError("Contraseña incorrecta")
+                if enforce_permissions and not self._can_assemble_permissions(doc.permissions):
+                    raise _MergePermissionDeniedError("El PDF no permite ensamblaje")
+            return doc
+        except Exception:
+            doc.close()
+            raise
+
+    def _show_next_password_prompt(self, error_message: str | None = None) -> None:
+        if not self._pending_password_paths or self._pwd_dialog is None:
+            return
+        current_path = self._pending_password_paths[0]
+        if self._pwd_field is not None:
+            self._pwd_field.value = ""
+        if self._pwd_error is not None:
+            self._pwd_error.value = error_message or ""
+            self._pwd_error.visible = bool(error_message)
+        self._pwd_dialog.title = ft.Text(f"PDF protegido: {Path(current_path).name}")
+        self.page_ref.open(self._pwd_dialog)
+
+    def _cancel_add_protected_pdf(self) -> None:
+        if self._pending_password_paths:
+            self._pending_password_paths.pop(0)
+        if self._pwd_dialog is not None:
+            self.page_ref.close(self._pwd_dialog)
+        self._show_next_password_prompt()
+
+    def _open_security_from_merge(self) -> None:
+        if self._pending_password_paths:
+            self._pending_password_paths.pop(0)
+        if self._pwd_dialog is not None:
+            self.page_ref.close(self._pwd_dialog)
+        if self.on_open_security is not None:
+            self.on_open_security()
+        self._show_next_password_prompt()
+
+    def _add_entry_from_path(self, path: str, password: str | None = None) -> _PDFEntry:
+        normalized_path = self._normalize_path(path)
+        doc = self._open_source_doc(normalized_path, password=password, enforce_permissions=True)
+        return _PDFEntry(normalized_path, doc, password=password)
+
+    def _confirm_add_protected_pdf(self) -> None:
+        if not self._pending_password_paths:
+            if self._pwd_dialog is not None:
+                self.page_ref.close(self._pwd_dialog)
+            return
+
+        password = (self._pwd_field.value if self._pwd_field else "") or ""
+        password = password.strip()
+        if not password:
+            if self._pwd_error is not None:
+                self._pwd_error.value = "Ingresa la contraseña"
+                self._pwd_error.visible = True
+            self.page_ref.update()
+            return
+
+        src_path = self._pending_password_paths[0]
+        try:
+            entry = self._add_entry_from_path(src_path, password=password)
+        except _MergeInvalidPasswordError:
+            self._show_next_password_prompt("Contraseña incorrecta")
+            self.page_ref.update()
+            return
+        except _MergePermissionDeniedError:
+            self.page_ref.snack_bar = ft.SnackBar(
+                ft.Text(
+                    f"{Path(src_path).name} no permite ensamblaje. Usa Seguridad para crear una copia desbloqueada."
+                ),
+                open=True,
+            )
+            self._pending_password_paths.pop(0)
+            if self._pwd_dialog is not None:
+                self.page_ref.close(self._pwd_dialog)
+            self._show_next_password_prompt()
+            self.page_ref.update()
+            return
+        except Exception as ex:
+            self.page_ref.snack_bar = ft.SnackBar(
+                ft.Text(f"Error abriendo {Path(src_path).name}: {ex}"), open=True,
+            )
+            self._pending_password_paths.pop(0)
+            if self._pwd_dialog is not None:
+                self.page_ref.close(self._pwd_dialog)
+            self._show_next_password_prompt()
+            self.page_ref.update()
+            return
+
+        self._entries.append(entry)
+        if self._output_path is None:
+            suggested = str(Path(src_path).parent / "combinado.pdf")
+            self._output_path = suggested
+            if self._output_label is not None:
+                self._output_label.value = suggested
+        self._pending_password_paths.pop(0)
+        if self._pwd_dialog is not None:
+            self.page_ref.close(self._pwd_dialog)
+        self._rebuild_pdf_list()
+        self._rebuild_preview()
+        self._show_next_password_prompt()
+        self.page_ref.update()
+
     # ── PDF list management ───────────────────────────────────────────────────
 
     def _on_pdfs_picked(self, e: ft.FilePickerResultEvent) -> None:
@@ -519,25 +685,38 @@ class MergePDFTab:
             return
         added = False
         for f in e.files:
-            if any(en.path == f.path for en in self._entries):
+            normalized_path = self._normalize_path(f.path)
+            if any(self._normalize_path(en.path) == normalized_path for en in self._entries):
                 continue
             try:
-                entry = _PDFEntry(f.path)
+                entry = self._add_entry_from_path(normalized_path)
                 self._entries.append(entry)
                 # Auto-suggest output path from the directory of the first PDF added
                 if self._output_path is None:
-                    suggested = str(Path(f.path).parent / "combinado.pdf")
+                    suggested = str(Path(normalized_path).parent / "combinado.pdf")
                     self._output_path = suggested
                     if self._output_label is not None:
                         self._output_label.value = suggested
                 added = True
+            except _MergePasswordRequiredError:
+                if normalized_path not in self._pending_password_paths:
+                    self._pending_password_paths.append(normalized_path)
+            except _MergePermissionDeniedError:
+                self.page_ref.snack_bar = ft.SnackBar(
+                    ft.Text(
+                        f"{Path(normalized_path).name} está protegido y no permite ensamblaje."
+                    ),
+                    open=True,
+                )
             except Exception as ex:
                 self.page_ref.snack_bar = ft.SnackBar(
-                    ft.Text(f"Error abriendo {Path(f.path).name}: {ex}"), open=True,
+                    ft.Text(f"Error abriendo {Path(normalized_path).name}: {ex}"), open=True,
                 )
         if added:
             self._rebuild_pdf_list()
             self._rebuild_preview()
+        if self._pending_password_paths:
+            self._show_next_password_prompt()
         self.page_ref.update()
 
     def _clear_all(self, e=None) -> None:
@@ -582,7 +761,7 @@ class MergePDFTab:
 
         def _chip(pg: int) -> ft.Container:
             sel = entry.selected[pg]
-            thumb_b64 = self._get_thumb(entry.path, pg)
+            thumb_b64 = self._get_thumb(entry.path, pg, password=entry.password)
 
             if thumb_b64:
                 thumb: ft.Control = ft.Image(
@@ -632,7 +811,7 @@ class MergePDFTab:
             visible_n = min(_CHIPS_PREVIEW, entry.total)
 
         chips: list[ft.Control] = [_chip(p) for p in range(visible_n)]
-        self._render_thumbs_async(entry.path, list(range(visible_n)))
+        self._render_thumbs_async(entry.path, list(range(visible_n)), password=entry.password)
 
         if entry.total > _CHIPS_PREVIEW:
             if entry.chips_expanded:
@@ -816,7 +995,7 @@ class MergePDFTab:
             for pg in entry.selected_pages:
                 flat_idx = total   # 0-based index in result
                 total += 1
-                thumb_b64 = self._get_thumb(entry.path, pg)
+                thumb_b64 = self._get_thumb(entry.path, pg, password=entry.password)
 
                 if thumb_b64:
                     thumb_ctrl: ft.Control = ft.Image(
@@ -913,7 +1092,7 @@ class MergePDFTab:
         entry, orig_pg = self._preview_items[idx]
 
         # Load large thumbnail (synchronous — single page render is fast enough)
-        large_b64 = self._get_large_thumb(entry.path, orig_pg)
+        large_b64 = self._get_large_thumb(entry.path, orig_pg, password=entry.password)
         if large_b64:
             self._dlg_img.src_base64 = large_b64
             self._dlg_img.src        = None
@@ -1002,8 +1181,8 @@ class MergePDFTab:
         self.page_ref.update()
 
         out_path   = self._output_path
-        snapshot   = [(en.path, list(en.selected_pages)) for en in self._entries]
-        total_pages = sum(len(pages) for _, pages in snapshot)
+        snapshot   = [(en.path, list(en.selected_pages), en.password) for en in self._entries]
+        total_pages = sum(len(pages) for _, pages, _ in snapshot)
 
         def _worker() -> None:
             try:
@@ -1011,8 +1190,8 @@ class MergePDFTab:
                 done = 0
                 last_update = time.monotonic()
 
-                for src_path, pages in snapshot:
-                    with fitz.open(src_path) as src:
+                for src_path, pages, password in snapshot:
+                    with self._open_source_doc(src_path, password=password, enforce_permissions=True) as src:
                         for pg in pages:
                             out_doc.insert_pdf(src, from_page=pg, to_page=pg, start_at=-1)
                             done += 1

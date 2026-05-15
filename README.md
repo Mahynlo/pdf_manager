@@ -146,36 +146,6 @@ Para más detalles, consulta la [Guía de Inicio](https://flet.dev/docs/getting-
 
 ## Compilación
 
-### Android
-
-```bash
-flet build apk -v
-```
-
-Para más detalles sobre compilación y firma, consulta la [Guía de Empaquetado para Android](https://flet.dev/docs/publish/android/).
-
-### iOS
-
-```bash
-flet build ipa -v
-```
-
-Para más detalles, consulta la [Guía de Empaquetado para iOS](https://flet.dev/docs/publish/ios/).
-
-### macOS
-
-```bash
-flet build macos -v
-```
-
-Para más detalles, consulta la [Guía de Empaquetado para macOS](https://flet.dev/docs/publish/macos/).
-
-### Linux
-
-```bash
-flet build linux -v
-```
-
 Para más detalles, consulta la [Guía de Empaquetado para Linux](https://flet.dev/docs/publish/linux/).
 
 ### Windows
