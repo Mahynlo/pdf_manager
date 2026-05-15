@@ -59,21 +59,60 @@ Extrae información de tus documentos PDF
 
 ## Instalación y Ejecución
 
-### Usando uv
+### Modo desarrollo (clonar y ejecutar)
 
-**Ejecutar como aplicación de escritorio:**
+1. Clona el repositorio y sitúate en la carpeta del proyecto:
+
+```bash
+git clone https://github.com/Mahynlo/pdf_manager.git
+cd pdf_manager
+```
+
+2. Crea y activa un entorno virtual:
+
+- En Linux / macOS:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+```
+
+- En Windows (PowerShell):
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+Nota: el usuario solicitó el método clásico de activación Windows `\.venv\Scripts\activate`; use la variante adecuada para su shell.
+
+3. Instala la herramienta `uv` si no la tienes (opcional, `uv` es la envoltura usada en este repo para ejecutar comandos):
+
+```bash
+pip install uv
+```
+
+4. (Una sola vez) sincroniza dependencias/entorno con `uv` (según flujo del proyecto):
+
+```bash
+uv sync
+```
+
+5. Ejecuta la aplicación en modo desarrollo:
 
 ```bash
 uv run flet run
 ```
 
-**Ejecutar como aplicación web:**
+Para ejecutar en modo web:
 
 ```bash
 uv run flet run --web
 ```
 
-### Usando Poetry
+Si prefieres no usar `uv`, sigue estos pasos alternativos con `poetry` o `pip`.
+
+### Usando Poetry (alternativa)
 
 **Instalar dependencias:**
 
@@ -92,6 +131,16 @@ poetry run flet run
 ```bash
 poetry run flet run --web
 ```
+
+### Usando pip + virtualenv (otra alternativa)
+
+Después de crear y activar el entorno virtual (ver arriba), instala dependencias con:
+
+```bash
+pip install -r requirements.txt
+```
+
+Si no existe `requirements.txt`, puedes instalar directamente desde el `pyproject.toml` usando `pip` junto con `pip-tools` o usar `poetry` para exportar las dependencias.
 
 Para más detalles, consulta la [Guía de Inicio](https://flet.dev/docs/getting-started/).
 
