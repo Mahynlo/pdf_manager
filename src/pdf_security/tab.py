@@ -191,44 +191,46 @@ class PDFSecurityTab:
         )
         
         self.protect_password_field = ft.TextField(
-            label="Contraseña de Usuario (Para abrir)",
+            label="Contraseña de Usuario (Para abrir el PDF)",
             password=True,
             can_reveal_password=True,
             prefix_icon=ft.Icons.PASSWORD,
+            helper_text="El usuario necesita esta contraseña para abrir y ver el documento",
             expand=True
         )
         
         self.protect_owner_password_field = ft.TextField(
-            label="Contraseña de Propietario (Opcional)",
+            label="Contraseña de Propietario (Opcional - Administrador)",
             password=True,
             can_reveal_password=True,
             prefix_icon=ft.Icons.ADMIN_PANEL_SETTINGS,
-            hint_text="Permite cambiar permisos después",
+            helper_text="Permite cambiar permisos y eliminar la contraseña de usuario sin necesitar la contraseña original",
             expand=True
         )
         
         preset_options = [
-            ft.dropdown.Option("sin_restricciones", "Sin restricciones - Acceso completo"),
-            ft.dropdown.Option("solo_lectura", "Solo lectura - No puede modificar"),
-            ft.dropdown.Option("solo_impresion", "Solo impresión - Sin copia"),
-            ft.dropdown.Option("impresion_y_lectura", "Impresión y lectura - Permisos limitados"),
-            ft.dropdown.Option("muy_restrictivo", "Muy restrictivo - Solo visor"),
+            ft.dropdown.Option("sin_restricciones", "📖 Sin restricciones - Acceso completo a todo"),
+            ft.dropdown.Option("solo_lectura", "🔒 Solo lectura - Ver sin editar ni copiar"),
+            ft.dropdown.Option("solo_impresion", "🖨️ Solo impresión - Imprimir sin copiar a otro programa"),
+            ft.dropdown.Option("impresion_y_lectura", "📋 Impresión y lectura - Leer e imprimir, no editar"),
+            ft.dropdown.Option("muy_restrictivo", "🔐 Muy restrictivo - Acceso mínimo, solo lectura básica"),
         ]
         
         self.protect_preset_dropdown = ft.Dropdown(
-            label="Nivel de protección rápido",
+            label="Presets rápidos de permisos",
+            helper_text="Selecciona un nivel predefinido o personaliza abajo",
             options=preset_options,
             value="solo_lectura",
             icon=ft.Icons.SHIELD
         )
         
-        self.protect_allow_print = ft.Checkbox("Permitir impresión", value=True)
-        self.protect_allow_modify = ft.Checkbox("Permitir modificación")
-        self.protect_allow_copy = ft.Checkbox("Permitir copia de contenido")
-        self.protect_allow_annotate = ft.Checkbox("Permitir anotaciones")
-        self.protect_allow_forms = ft.Checkbox("Permitir formularios")
-        self.protect_allow_assembly = ft.Checkbox("Permitir ensamblaje de páginas")
-        self.protect_allow_print_hq = ft.Checkbox("Permitir impresión de alta calidad", value=True)
+        self.protect_allow_print = ft.Checkbox("🖨️ Permitir impresión (cualidad estándar)")
+        self.protect_allow_modify = ft.Checkbox("✏️ Permitir modificación de contenido")
+        self.protect_allow_copy = ft.Checkbox("📋 Permitir copiar/extraer texto e imágenes")
+        self.protect_allow_annotate = ft.Checkbox("💬 Permitir agregar comentarios y anotaciones")
+        self.protect_allow_forms = ft.Checkbox("📝 Permitir llenar formularios")
+        self.protect_allow_assembly = ft.Checkbox("🔀 Permitir reorganizar y eliminar páginas")
+        self.protect_allow_print_hq = ft.Checkbox("🎨 Permitir impresión de alta calidad", value=True)
         
         permissions_section = ft.ExpansionPanel(
             header=ft.ListTile(
@@ -270,7 +272,41 @@ class PDFSecurityTab:
         ], spacing=15)
 
         right_col = ft.Column([
-            ft.Text("Paso 2: Seguridad", weight="bold", size=16, color="#1E2A38"),
+            ft.Text("Paso 2: Contraseñas y Permisos", weight="bold", size=16, color="#1E2A38"),
+            ft.Text("Define quién puede acceder y qué acciones están permitidas", size=12, color="#666666"),
+            ft.Container(height=8),
+            
+            # Info box explaining both password types
+            ft.Container(
+                content=ft.Column([
+                    ft.Row([
+                        ft.Icon(ft.Icons.INFO_OUTLINE, size=18, color="#1565C0"),
+                        ft.Text("¿Cuál es la diferencia?", size=13, weight="bold", color="#1565C0")
+                    ], spacing=8),
+                    ft.Divider(height=10, color="#E0E0E0"),
+                    ft.Row([
+                        ft.Icon(ft.Icons.PASSWORD, size=16, color="#666666"),
+                        ft.Column([
+                            ft.Text("Contraseña de Usuario", weight="bold", size=11, color="#1E2A38"),
+                            ft.Text("El usuario final la necesita para abrir el PDF. Restringe acciones según los permisos.", size=10, color="#666666")
+                        ], tight=True, spacing=2)
+                    ], spacing=10),
+                    ft.Container(height=8),
+                    ft.Row([
+                        ft.Icon(ft.Icons.ADMIN_PANEL_SETTINGS, size=16, color="#F9A825"),
+                        ft.Column([
+                            ft.Text("Contraseña de Propietario", weight="bold", size=11, color="#1E2A38"),
+                            ft.Text("Te permite cambiar los permisos y eliminar la contraseña sin necesitar la original.", size=10, color="#666666")
+                        ], tight=True, spacing=2)
+                    ], spacing=10),
+                ], spacing=8, tight=True),
+                padding=12,
+                bgcolor="#F0F7FF",
+                border_radius=8,
+                border=ft.border.all(1, "#D0E8FF")
+            ),
+            
+            ft.Container(height=12),
             ft.Row([self.protect_password_field]),
             ft.Row([self.protect_owner_password_field]),
             ft.Container(height=10),

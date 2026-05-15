@@ -13,6 +13,18 @@ import fitz
 from pdf_viewer.ocr import OCRProcessor
 
 
+class _ExtractPasswordRequiredError(ValueError):
+    """Raised when an encrypted PDF needs a password for extraction operations."""
+
+
+class _ExtractInvalidPasswordError(ValueError):
+    """Raised when authentication fails for an encrypted PDF."""
+
+
+class _ExtractPermissionDeniedError(ValueError):
+    """Raised when the PDF does not allow content copying/extraction."""
+
+
 @dataclass
 class PageMatch:
     source_path: str
@@ -22,19 +34,30 @@ class PageMatch:
 
 
 class PDFExtractionTab:
-    def __init__(self, page_ref: ft.Page, on_open_preview: Callable[[str], None], on_close: Callable[["PDFExtractionTab"], None] | None = None):
+    def __init__(self, page_ref: ft.Page, on_open_preview: Callable[[str], None], on_close: Callable[["PDFExtractionTab"], None] | None = None, on_open_security: Callable[[], None] | None = None):
         self.page_ref = page_ref
         self.on_open_preview = on_open_preview
         self.on_close = on_close
+        self.on_open_security = on_open_security
         self.workspace_root = Path(__file__).resolve().parents[2]
         self.processor = OCRProcessor(str(self.workspace_root))
 
         self.reference_path: str | None = None
+        self.reference_password: str | None = None
         self.target_paths: list[str] = []
+        self.target_passwords: dict[int, str] = {}  # file_idx -> password mapping
         self.destination_dir = str((self.workspace_root / "storage" / "temp").resolve())
         self.last_output_path: str | None = None
+        self._pending_password_file_idx: int | None = None
+
+        # Extraction state for pause/resume
+        self._extraction_state: dict | None = None  # Almacena estado cuando se pausa por contraseña
+        self._is_extracting = False
 
         self._tab: ft.Tab | None = None
+        self._pwd_dialog: ft.AlertDialog | None = None
+        self._pwd_field: ft.TextField | None = None
+        self._pwd_error: ft.Text | None = None
         self._build()
 
     # ------------------------------------------------------------------ UI
@@ -46,6 +69,26 @@ class PDFExtractionTab:
         self._pick_destination = ft.FilePicker(on_result=self._on_destination_picked)
         self.page_ref.overlay.extend(
             [self._pick_reference, self._pick_targets, self._pick_destination]
+        )
+
+        self._pwd_field = ft.TextField(
+            label="Contraseña",
+            password=True,
+            can_reveal_password=True,
+            autofocus=True,
+            on_submit=lambda _: self._confirm_protected_pdf_password(),
+        )
+        self._pwd_error = ft.Text("", color="#D32F2F", size=12, visible=False)
+        self._pwd_dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("PDF protegido"),
+            content=ft.Column([self._pwd_field, self._pwd_error], tight=True, spacing=8),
+            actions=[
+                ft.TextButton("Cancelar", on_click=lambda _: self._cancel_protected_pdf()),
+                ft.TextButton("Ir a Seguridad", on_click=lambda _: self._open_security_from_extraction()),
+                ft.ElevatedButton("Usar", icon=ft.Icons.LOCK_OPEN, on_click=lambda _: self._confirm_protected_pdf_password()),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
         )
 
         # ─── HEADER ────────────────────────────────────────────────────────
@@ -264,17 +307,159 @@ class PDFExtractionTab:
             "close_cb": lambda: self.on_close(self) if self.on_close else None,
         }
 
+    # ------------------------------------------------------------------ Auth helpers
+
+    @staticmethod
+    def _normalize_path(path: str) -> str:
+        """Normalize a file path for consistent dictionary keys."""
+        return str(Path(path).resolve())
+
+    @staticmethod
+    def _can_extract_permissions(permissions: int) -> bool:
+        """Return True when permissions allow content copying (PDF_PERM_COPY = 16)."""
+        if permissions < 0:
+            return True
+        return bool(permissions & 16)  # PDF_PERM_COPY
+
+    def _open_source_doc(
+        self,
+        path: str,
+        password: str | None = None,
+    ) -> fitz.Document:
+        """Open a document for extraction, authenticating if needed."""
+        doc = fitz.open(path)
+        try:
+            if doc.is_encrypted:
+                if not password:
+                    raise _ExtractPasswordRequiredError("PDF protegido requiere contraseña")
+                if not doc.authenticate(password):
+                    raise _ExtractInvalidPasswordError("Contraseña incorrecta")
+                if not self._can_extract_permissions(doc.permissions):
+                    raise _ExtractPermissionDeniedError("El PDF no permite copia/extracción de contenido")
+            return doc
+        except Exception:
+            doc.close()
+            raise
+
+    def _show_password_prompt(self, path: str, file_idx: int | None = None, error_message: str | None = None) -> None:
+        if self._pwd_dialog is None or self._pwd_field is None or self._pwd_error is None:
+            return
+        self._pending_password_file_idx = file_idx
+        self._pwd_field.value = ""
+        self._pwd_error.value = error_message or ""
+        self._pwd_error.visible = bool(error_message)
+        self._pwd_dialog.title = ft.Text(f"PDF protegido: {Path(path).name}")
+        self.page_ref.open(self._pwd_dialog)
+
+    def _cancel_protected_pdf(self) -> None:
+        self._pending_password_file_idx = None
+        if self._pwd_dialog is not None:
+            self.page_ref.close(self._pwd_dialog)
+
+    def _open_security_from_extraction(self) -> None:
+        self._pending_password_file_idx = None
+        if self._pwd_dialog is not None:
+            self.page_ref.close(self._pwd_dialog)
+        if self.on_open_security is not None:
+            self.on_open_security()
+
+    def _confirm_protected_pdf_password(self) -> None:
+        if self._pending_password_file_idx is None:
+            if self._pwd_dialog is not None:
+                self.page_ref.close(self._pwd_dialog)
+            return
+
+        password = (self._pwd_field.value if self._pwd_field else "") or ""
+        password = password.strip()
+        if not password:
+            if self._pwd_error is not None:
+                self._pwd_error.value = "Ingresa la contraseña"
+                self._pwd_error.visible = True
+            self.page_ref.update()
+            return
+
+        file_idx = self._pending_password_file_idx
+        path = self.reference_path if file_idx == -1 else self.target_paths[file_idx]
+        try:
+            doc = self._open_source_doc(path, password=password)
+            doc.close()
+        except _ExtractInvalidPasswordError:
+            self._show_password_prompt(path, "Contraseña incorrecta")
+            self.page_ref.update()
+            return
+        except _ExtractPermissionDeniedError:
+            self.page_ref.snack_bar = ft.SnackBar(
+                ft.Text(
+                    f"{Path(path).name} no permite copia/extracción de contenido. Usa Seguridad para crear una copia desbloqueada."
+                ),
+                open=True,
+            )
+            self._pending_password_path = None
+            if self._pwd_dialog is not None:
+                self.page_ref.close(self._pwd_dialog)
+            self.page_ref.update()
+            return
+        except Exception as ex:
+            self.page_ref.snack_bar = ft.SnackBar(
+                ft.Text(f"Error: {ex}"), open=True,
+            )
+            self._pending_password_path = None
+            if self._pwd_dialog is not None:
+                self.page_ref.close(self._pwd_dialog)
+            self.page_ref.update()
+            return
+
+        # Store the password
+        if file_idx == -1:
+            self.reference_password = password
+            self._on_reference_picked_internal(path)
+        else:
+            self.target_passwords[file_idx] = password
+
+        self._pending_password_file_idx = None
+        if self._pwd_dialog is not None:
+            self.page_ref.close(self._pwd_dialog)
+        
+        # If extraction was paused waiting for this password, resume it
+        if self._extraction_state is not None:
+            self.page_ref.snack_bar = ft.SnackBar(
+                ft.Text(f"Contraseña guardada. Reanudando…"),
+                open=True,
+            )
+            # Resume in the same thread (not async) for continuous flow
+            self._resume_extraction_sync()
+        else:
+            self.page_ref.update()
+
     # ------------------------------------------------------------------ Events
 
     def _on_reference_picked(self, e: ft.FilePickerResultEvent) -> None:
         if not e.files:
             return
-        self.reference_path = e.files[0].path
-        self._ref_path_text.value = f"Referencia: {Path(self.reference_path).name}"
+        path = e.files[0].path
+        self.reference_path = path
+        self.reference_password = None
+        self._on_reference_picked_internal(path)
+
+    def _on_reference_picked_internal(self, path: str) -> None:
+        self._ref_path_text.value = f"Referencia: {Path(path).name}"
         try:
-            with fitz.open(self.reference_path) as doc:
+            password = self.reference_password
+            doc = self._open_source_doc(path, password=password)
+            try:
                 kind = self.processor.get_doc_kind(doc)
                 self._ref_kind_text.value = f"Tipo: {self._doc_kind_label(kind)}"
+            finally:
+                doc.close()
+        except _ExtractPasswordRequiredError:
+            self._show_password_prompt(path, file_idx=-1)
+            return
+        except _ExtractPermissionDeniedError:
+            self._ref_kind_text.value = "Tipo: error (sin permisos de extracción)"
+            self.page_ref.snack_bar = ft.SnackBar(
+                ft.Text("PDF de referencia no permite extracción. Usa Seguridad para desbloquearlo."),
+                open=True,
+            )
         except Exception as ex:
             self._ref_kind_text.value = f"Tipo: error ({ex})"
         self.page_ref.update()
@@ -283,6 +468,7 @@ class PDFExtractionTab:
         if not e.files:
             return
         self.target_paths = [f.path for f in e.files if f.path]
+        self.target_passwords.clear()
         self._target_count_text.value = f"Archivos objetivo: {len(self.target_paths)}"
         self.page_ref.update()
 
@@ -387,6 +573,9 @@ class PDFExtractionTab:
         self._summary.value = "Iniciando análisis…"
         self._progress.value = ""
         self.page_ref.update()
+        
+        self._is_extracting = True
+        self._extraction_state = None
 
         hint_pages_raw = self._hint_pages.value or ""
 
@@ -395,7 +584,8 @@ class PDFExtractionTab:
         if self.reference_path:
             self._set_progress("Procesando documento de referencia…")
             try:
-                with fitz.open(self.reference_path) as ref_doc:
+                password = self.reference_password
+                with self._open_source_doc(self.reference_path, password=password) as ref_doc:
                     total_ref = len(ref_doc)
                     selected = self._parse_pages(self._reference_pages.value or "", total_ref)
                     pages_to_use = sorted(selected) if selected else range(total_ref)
@@ -411,6 +601,11 @@ class PDFExtractionTab:
                         "#1565C0",
                     )
                     self._log_separator()
+            except _ExtractPasswordRequiredError:
+                self._log(f"✗ Referencia requiere contraseña para procesarse.", "#D32F2F")
+                self._show_password_prompt(self.reference_path)
+            except _ExtractPermissionDeniedError:
+                self._log(f"✗ Referencia no permite extracción de contenido.", "#D32F2F")
             except Exception as ex:
                 self._log(f"✗ Referencia no procesada: {ex}", "#D32F2F")
 
@@ -424,7 +619,25 @@ class PDFExtractionTab:
             self.page_ref.update()
 
             try:
-                doc = fitz.open(path)
+                password = self.target_passwords.get(file_idx)
+                doc = self._open_source_doc(path, password=password)
+            except _ExtractPasswordRequiredError:
+                self._log(f"✗ {fname}: requiere contraseña. Pausando búsqueda…", "#D32F2F")
+                # Pause extraction and ask for password
+                self._extraction_state = {
+                    "ref_tokens": ref_tokens,
+                    "all_matches": all_matches,
+                    "file_idx": file_idx,
+                    "total_files": total_files,
+                    "kws": kws,
+                    "hint_pages_raw": hint_pages_raw,
+                }
+                self._show_password_prompt(path, file_idx=file_idx)
+                self._is_extracting = False
+                return
+            except _ExtractPermissionDeniedError:
+                self._log(f"✗ {fname}: no permite extracción de contenido.", "#D32F2F")
+                continue
             except Exception as ex:
                 self._log(f"✗ {fname}: error al abrir — {ex}", "#D32F2F")
                 continue
@@ -541,6 +754,7 @@ class PDFExtractionTab:
         if not all_matches:
             self._summary.value = "Búsqueda finalizada: no se encontraron páginas coincidentes."
             self._run_btn.disabled = False
+            self._is_extracting = False
             self.page_ref.update()
             return
 
@@ -556,7 +770,14 @@ class PDFExtractionTab:
         out_doc = fitz.open()
         try:
             for src_path, matches in grouped.items():
-                with fitz.open(src_path) as src_doc:
+                # Find the file_idx for this path
+                file_idx = None
+                for idx, target_path in enumerate(self.target_paths):
+                    if target_path == src_path:
+                        file_idx = idx
+                        break
+                password = self.target_passwords.get(file_idx) if file_idx is not None else None
+                with self._open_source_doc(src_path, password=password) as src_doc:
                     for pidx in sorted({m.page_index for m in matches}):
                         out_doc.insert_pdf(src_doc, from_page=pidx, to_page=pidx)
             out_doc.save(str(out_path), garbage=4, deflate=True)
@@ -571,6 +792,211 @@ class PDFExtractionTab:
         )
         self._log(f"💾 Archivo guardado: {out_path}", "#1565C0")
         self._run_btn.disabled = False
+        self._is_extracting = False
+        self._extraction_state = None
+        self.page_ref.update()
+
+    def _resume_extraction_sync(self) -> None:
+        """Reanuda la extracción después de obtener una contraseña (sincrónico)."""
+        if self._extraction_state is None:
+            return
+        
+        state = self._extraction_state
+        ref_tokens = state["ref_tokens"]
+        all_matches = state["all_matches"]
+        file_idx = state["file_idx"]
+        total_files = state["total_files"]
+        kws = state["kws"]
+        hint_pages_raw = state["hint_pages_raw"]
+        
+        # Continuar con el archivo actual que necesitaba contraseña
+        self._is_extracting = True
+        self._extraction_state = None
+        
+        # Re-enter the target documents loop starting from current file_idx
+        all_matches_resume: list[PageMatch] = all_matches
+        
+        for idx in range(file_idx, total_files):
+            path = self.target_paths[idx]
+            fname = Path(path).name
+            self._summary.value = f"Archivo {idx + 1} de {total_files}: {fname}"
+            self.page_ref.update()
+
+            try:
+                password = self.target_passwords.get(idx)
+                doc = self._open_source_doc(path, password=password)
+            except _ExtractPasswordRequiredError:
+                self._log(f"✗ {fname}: requiere contraseña. Pausando búsqueda…", "#D32F2F")
+                self._extraction_state = {
+                    "ref_tokens": ref_tokens,
+                    "all_matches": all_matches_resume,
+                    "file_idx": idx,
+                    "total_files": total_files,
+                    "kws": kws,
+                    "hint_pages_raw": hint_pages_raw,
+                }
+                self._show_password_prompt(path, file_idx=idx)
+                self._is_extracting = False
+                return
+            except _ExtractPermissionDeniedError:
+                self._log(f"✗ {fname}: no permite extracción de contenido.", "#D32F2F")
+                continue
+            except Exception as ex:
+                self._log(f"✗ {fname}: error al abrir — {ex}", "#D32F2F")
+                continue
+
+            with doc:
+                total_pages = len(doc)
+                doc_kind = self.processor.get_doc_kind(doc)
+                doc_kind_label = self._doc_kind_label(doc_kind)
+
+                self._log(
+                    f"📄 [{idx + 1}/{total_files}] {fname} — {doc_kind_label}, {total_pages} página(s)",
+                    "#1565C0",
+                )
+
+                if doc_kind == "scanned":
+                    self._log(
+                        "  ⚠ Documento escaneado — se ejecutará OCR en cada página sin texto nativo.",
+                        "#ED6C02",
+                    )
+
+                hint_set = self._parse_pages(hint_pages_raw, total_pages)
+                if hint_set:
+                    other_pages = [i for i in range(total_pages) if i not in hint_set]
+                    scan_order = sorted(hint_set) + other_pages
+                    self._log(
+                        f"  ℹ Páginas sugeridas verificadas primero: "
+                        f"{', '.join(str(p + 1) for p in sorted(hint_set))}",
+                        "#666666",
+                    )
+                else:
+                    scan_order = list(range(total_pages))
+
+                file_matches: list[PageMatch] = []
+                pages_with_ocr = 0
+                pages_skipped = 0
+
+                for i in scan_order:
+                    is_hint = i in hint_set
+                    hint_tag = " ⭐" if is_hint else ""
+
+                    self._set_progress(
+                        f"Analizando: {fname} — página {i + 1}/{total_pages}{hint_tag}"
+                    )
+
+                    text, mode, elapsed_ms, used_ocr = self._extract_page_text(doc, i)
+                    page_text_lower = text.lower()
+
+                    if used_ocr:
+                        pages_with_ocr += 1
+
+                    time_tag = f"{elapsed_ms:.0f}ms"
+                    ocr_tag = " | OCR" if used_ocr else ""
+
+                    if not page_text_lower.strip():
+                        pages_skipped += 1
+                        if is_hint:
+                            self._log(
+                                f"  ~ Pág {i + 1}{hint_tag} [{mode} | {time_tag}]: sin texto extraíble",
+                                "#ED6C02",
+                            )
+                        continue
+
+                    kw_hits = [kw for kw in kws if kw in page_text_lower]
+
+                    if len(kw_hits) == len(kws):
+                        score = float(len(kw_hits))
+                        reason = f"keywords={len(kw_hits)}"
+
+                        if ref_tokens:
+                            page_tokens = self._normalize_words(text)
+                            if page_tokens:
+                                inter = len(ref_tokens & page_tokens)
+                                union = len(ref_tokens | page_tokens)
+                                jaccard = inter / union if union else 0.0
+                                score += jaccard * 2
+                                reason += f", sim={jaccard:.2f}"
+
+                        file_matches.append(PageMatch(path, i, score, reason))
+
+                        shown = ", ".join(f'"{k}"' for k in kw_hits[:5])
+                        extra = f" +{len(kw_hits) - 5} más" if len(kw_hits) > 5 else ""
+                        self._log(
+                            f"  ✓ Pág {i + 1}{hint_tag} [{mode}{ocr_tag} | {time_tag}]: "
+                            f"{shown}{extra}",
+                            "#2E7D32",
+                        )
+                    else:
+                        if is_hint:
+                            self._log(
+                                f"  ~ Pág {i + 1}{hint_tag} [{mode}{ocr_tag} | {time_tag}]: no coincide",
+                                "#ED6C02",
+                            )
+
+                file_matches.sort(key=lambda m: m.score, reverse=True)
+                all_matches_resume.extend(file_matches)
+
+                ocr_note = f", OCR en {pages_with_ocr} pág." if pages_with_ocr else ""
+                skip_note = f", {pages_skipped} omitidas" if pages_skipped else ""
+                if file_matches:
+                    self._log(
+                        f"  → {len(file_matches)} página(s) encontrada(s){ocr_note}{skip_note}",
+                        "#1565C0",
+                    )
+                else:
+                    self._log(
+                        f"  → Sin coincidencias{ocr_note}{skip_note}",
+                        "#999999",
+                    )
+                self._log_separator()
+
+        self._set_progress("")
+
+        # ── Save output ───────────────────────────────────────────────────────
+        if not all_matches_resume:
+            self._summary.value = "Búsqueda finalizada: no se encontraron páginas coincidentes."
+            self._run_btn.disabled = False
+            self._is_extracting = False
+            self.page_ref.update()
+            return
+
+        dest = Path(self.destination_dir)
+        dest.mkdir(parents=True, exist_ok=True)
+        out_name = f"extraccion_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        out_path = dest / out_name
+
+        grouped: dict[str, list[PageMatch]] = {}
+        for match in all_matches_resume:
+            grouped.setdefault(match.source_path, []).append(match)
+
+        out_doc = fitz.open()
+        try:
+            for src_path, matches in grouped.items():
+                # Find the file_idx for this path
+                file_idx = None
+                for idx, target_path in enumerate(self.target_paths):
+                    if target_path == src_path:
+                        file_idx = idx
+                        break
+                password = self.target_passwords.get(file_idx) if file_idx is not None else None
+                with self._open_source_doc(src_path, password=password) as src_doc:
+                    for pidx in sorted({m.page_index for m in matches}):
+                        out_doc.insert_pdf(src_doc, from_page=pidx, to_page=pidx)
+            out_doc.save(str(out_path), garbage=4, deflate=True)
+        finally:
+            out_doc.close()
+
+        self.last_output_path = str(out_path)
+        self._preview_btn.disabled = False
+        self._summary.value = (
+            f"Finalizado: {len(all_matches_resume)} coincidencia(s) en "
+            f"{len(grouped)} archivo(s). Salida: {out_path.name}"
+        )
+        self._log(f"💾 Archivo guardado: {out_path}", "#1565C0")
+        self._run_btn.disabled = False
+        self._is_extracting = False
+        self._extraction_state = None
         self.page_ref.update()
 
     def _open_preview(self, e=None) -> None:

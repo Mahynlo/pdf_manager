@@ -193,7 +193,7 @@ def main(page: ft.Page) -> None:
     def _open_extractor() -> None:
         nonlocal extractor_tab
         if extractor_tab is None:
-            extractor_tab = PDFExtractionTab(page, _open_pdf_path, _close_extractor_tab)
+            extractor_tab = PDFExtractionTab(page, _open_pdf_path, _close_extractor_tab, _open_security)
         _rebuild_tabs(1)
 
     def _close_extractor_tab(tab: PDFExtractionTab) -> None:
@@ -208,7 +208,7 @@ def main(page: ft.Page) -> None:
         if merge_tab is not None:
             _rebuild_tabs(_merge_tab_idx())
             return
-        merge_tab = MergePDFTab(page, _close_merge_tab, _open_pdf_path)
+        merge_tab = MergePDFTab(page, _close_merge_tab, _open_pdf_path, _open_security)
         _rebuild_tabs(_merge_tab_idx())
 
     def _close_merge_tab(tab: MergePDFTab) -> None:
