@@ -27,6 +27,7 @@ from settings_tab import SettingsTab
 _IPC_PORT = 57422
 _incoming_paths: list[str] = []
 _incoming_lock = threading.Lock()
+_incoming_event = threading.Event()
 
 # Intentar crear un servidor local. Si falla, asumimos que ya hay una instancia
 # y actuamos como cliente al arrancar (más abajo) para reenviar el path.
@@ -47,29 +48,43 @@ try:
                     data = conn.recv(8192)
                     if not data:
                         continue
-                    path = data.decode("utf-8").strip()
-                    if path:
+                    payload = data.decode("utf-8")
+                    # admitir múltiples rutas separadas por nueva línea
+                    for raw in payload.splitlines():
+                        path = raw.strip()
+                        if not path:
+                            continue
                         with _incoming_lock:
                             _incoming_paths.append(path)
+                        # notificar al watcher en main()
+                        _incoming_event.set()
             except Exception:
                 time.sleep(0.1)
 
     _ipc_thread = threading.Thread(target=_ipc_server_loop, daemon=True)
     _ipc_thread.start()
 except OSError:
-    # Si no podemos bindear, hay una instancia escuchando. Si el usuario pasó
-    # un archivo en argv, lo reenviamos a la instancia y salimos.
-    if len(sys.argv) > 1:
-        candidate = sys.argv[1]
-        if candidate.lower().endswith(".pdf"):
-            try:
-                with socket.create_connection(("127.0.0.1", _IPC_PORT), timeout=1) as s:
-                    s.sendall(candidate.encode("utf-8"))
-                # Enviado OK, salir para no abrir otra ventana
-                sys.exit(0)
-            except Exception:
-                # No se pudo reenviar — continuar arrancando normalmente
-                pass
+    # Si no podemos bindear, hay una instancia escuchando. Actuamos como cliente:
+    # enviamos todos los argumentos PDF (si existen) o un mensaje de activación
+    try:
+        with socket.create_connection(("127.0.0.1", _IPC_PORT), timeout=1) as s:
+            # enviar todos los paths pdf pasados como argumentos, uno por línea
+            sent_any = False
+            for arg in sys.argv[1:]:
+                if arg.lower().endswith(".pdf"):
+                    s.sendall((arg + "\n").encode("utf-8"))
+                    sent_any = True
+            if not sent_any:
+                # No había argumentos PDF: pedir a la instancia activa que se enfoque
+                try:
+                    s.sendall(b"__ACTIVATE__\n")
+                except Exception:
+                    pass
+        # Enviado OK, salir para no abrir otra ventana
+        sys.exit(0)
+    except Exception:
+        # No se pudo conectar al servidor existente — continuar arrancando
+        pass
 
 _NAVBAR_BG     = "#1E2A38"
 _NAVBAR_FG     = "#FFFFFF"
@@ -476,6 +491,28 @@ def main(page: ft.Page) -> None:
     _rebuild_tabs(0)
     page.add(body)
 
+    # Watcher thread: espera señales del servidor IPC y programa el procesamiento
+    # de rutas en el hilo de Flet usando page.run_task().
+    def _incoming_watcher() -> None:
+        while True:
+            # esperar hasta que haya algo nuevo
+            _incoming_event.wait()
+            try:
+                # Solicitar ejecución en el hilo de Flet
+                try:
+                    page.run_task(lambda: _process_incoming_paths())
+                except Exception:
+                    # Fallback: intentar llamar directamente (siempre desde UI esto debería
+                    # ser seguro, pero solo como último recurso)
+                    try:
+                        _process_incoming_paths()
+                    except Exception:
+                        pass
+            finally:
+                _incoming_event.clear()
+
+    threading.Thread(target=_incoming_watcher, daemon=True).start()
+
     # Procesar rutas recibidas desde otras instancias (single-instance IPC)
     def _process_incoming_paths(timer=None) -> None:
         try:
@@ -484,7 +521,16 @@ def main(page: ft.Page) -> None:
                     if not _incoming_paths:
                         break
                     candidate = _incoming_paths.pop(0)
-                if candidate and Path(candidate).exists():
+                if not candidate:
+                    continue
+                # Special token to request window activation
+                if candidate == "__ACTIVATE__":
+                    try:
+                        page.update()
+                    except Exception:
+                        pass
+                    continue
+                if Path(candidate).exists():
                     _open_pdf_path(candidate)
         except Exception:
             pass
