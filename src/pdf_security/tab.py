@@ -325,9 +325,13 @@ class PDFSecurityTab:
         
         self.page.update()
     
-    def _show_unlock_security_info(self, path: str) -> None:
+    def _show_unlock_security_info(self, path: str, password: Optional[str] = None) -> None:
         try:
-            self.security_info = PDFSecurityManager.get_security_info(path)
+            # If a password is provided, retrieve detailed permissions after authentication
+            if password:
+                self.security_info = PDFSecurityManager.check_permissions(path, password)
+            else:
+                self.security_info = PDFSecurityManager.get_security_info(path)
             controls = []
             
             is_prot = self.security_info.is_protected
@@ -344,6 +348,8 @@ class PDFSecurityTab:
             
             if self.security_info.is_encrypted:
                 controls.append(ft.Text(f"Cifrado: {self.security_info.encryption_method}", size=12, color="#666666"))
+                if not password:
+                    controls.append(ft.Text("Nota: ingresa la contraseña para ver permisos reales.", size=11, color="#9E9E9E"))
             
             controls.append(ft.Divider(height=10, color="#E0E0E0"))
             controls.append(ft.Text("Permisos actuales:", size=12, weight="w500", color="#1E2A38"))
@@ -353,6 +359,8 @@ class PDFSecurityTab:
                 controls.append(ft.Text(f"• {perm}", size=12, color="#666666"))
             
             self.unlock_security_info_column.controls = controls
+            # Make sure the column and its container are visible
+            self.unlock_security_info_column.visible = True
             self.unlock_security_card_ref.visible = True
             
         except Exception as ex:
@@ -374,10 +382,18 @@ class PDFSecurityTab:
             if doc is None:
                 self._show_unlock_message("Contraseña incorrecta", error=True)
                 return
-            
+            # Close the opened doc (unlock_pdf returned an authenticated document)
             doc.close()
+
+            # Refresh displayed security info using authenticated permissions
+            try:
+                self._show_unlock_security_info(self.protected_pdf_path, password)
+            except Exception:
+                # If fetching detailed permissions fails, continue but inform user
+                pass
+
             self._show_unlock_message("PDF desbloqueado exitosamente", error=False)
-            
+
             if self.on_pdf_unlocked:
                 self.on_pdf_unlocked(self.protected_pdf_path, password)
                 
