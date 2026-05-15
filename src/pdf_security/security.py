@@ -292,17 +292,16 @@ class PDFSecurityManager:
         doc = None
         try:
             doc = fitz.open(input_path)
-            
-            # Set encryption with permissions
-            # If permissions is 0, all operations are restricted
-            doc.set_encryption(
-                user_password=user_password,
-                owner_password=owner_password,
-                permissions=permissions
+
+            # Save with explicit encryption parameters to ensure compatibility
+            enc = fitz.PDF_ENCRYPT_AES_256
+            doc.save(
+                output_path,
+                encryption=enc,
+                owner_pw=owner_password or "",
+                user_pw=user_password or "",
+                permissions=permissions,
             )
-            
-            # Save the protected PDF
-            doc.save(output_path)
             return True
             
         except Exception as e:
@@ -400,18 +399,20 @@ class PDFSecurityManager:
                 if not doc.authenticate(current_owner_password):
                     raise ValueError("Contraseña de propietario incorrecta")
             
-            # Use provided values or keep current
+            # Use provided values or fall back to current permissions
             user_pwd = new_user_password if new_user_password is not None else ""
             owner_pwd = new_owner_password if new_owner_password is not None else ""
             perms = permissions if permissions is not None else doc.permissions
-            
-            doc.set_encryption(
-                user_password=user_pwd,
-                owner_password=owner_pwd,
-                permissions=perms
+
+            enc = fitz.PDF_ENCRYPT_AES_256
+            doc.save(
+                output_path,
+                encryption=enc,
+                owner_pw=owner_pwd or "",
+                user_pw=user_pwd or "",
+                permissions=perms,
             )
-            
-            doc.save(output_path)
+
             return True
             
         except Exception as e:
@@ -446,18 +447,15 @@ class PDFSecurityManager:
                 # Already unprotected, just save a copy
                 doc.save(output_path)
                 return True
-            
+
             if not doc.authenticate(owner_password):
                 raise ValueError("Contraseña de propietario incorrecta")
-            
-            # Remove encryption by setting empty passwords and full permissions
-            doc.set_encryption(
-                user_password="",
-                owner_password="",
-                permissions=-1  # All permissions
-            )
-            
-            doc.save(output_path)
+
+            # Create an unencrypted copy by inserting pages into a new document
+            new_doc = fitz.open()
+            new_doc.insert_pdf(doc)
+            new_doc.save(output_path)
+            new_doc.close()
             return True
             
         except Exception as e:
