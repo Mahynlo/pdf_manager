@@ -43,9 +43,12 @@ try:
             try:
                 conn, _addr = _ipc_server_socket.accept()
                 with conn:
-                    data = b""
-                    # recibir hasta 8KiB
-                    data = conn.recv(8192)
+                    conn.settimeout(2.0)
+                    try:
+                        # recibir hasta 8KiB
+                        data = conn.recv(8192)
+                    except socket.timeout:
+                        continue
                     if not data:
                         continue
                     payload = data.decode("utf-8")
@@ -72,7 +75,8 @@ except OSError:
             sent_any = False
             for arg in sys.argv[1:]:
                 if arg.lower().endswith(".pdf"):
-                    s.sendall((arg + "\n").encode("utf-8"))
+                    absolute_path = str(Path(arg).resolve())
+                    s.sendall((absolute_path + "\n").encode("utf-8"))
                     sent_any = True
             if not sent_any:
                 # No había argumentos PDF: pedir a la instancia activa que se enfoque
@@ -199,7 +203,8 @@ def main(page: ft.Page) -> None:
         if path in pending_password_paths:
             return
         pending_password_paths.append(path)
-        _show_next_password_dialog()
+        if len(pending_password_paths) == 1:
+            _show_next_password_dialog()
 
     def _cancel_password_open() -> None:
         if pending_password_paths:
