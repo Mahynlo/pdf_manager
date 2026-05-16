@@ -322,45 +322,23 @@ class _TextSelMixin:
         start_pt = self._text_sel_start_pdf
         end_pt   = self._text_sel_end_pdf
         self._hide_text_sel_bar()
-        if pn is None:
+        if pn is None or start_pt is None or end_pt is None:
             return
-        with self._doc_lock:
-            changed = self._annot.apply_text_tool(self.doc, pn, tool)
-        if changed:
-            self._refresh_page(pn)
-            return
-        # Fallback: native text lookup found nothing (scanned/OCR page).
-        # Use the word rects collected during text selection, which include
-        # OCR-detected words that don't exist in the native PDF content stream.
-        if start_pt is None or end_pt is None:
-            return
+            
         words = self._get_page_words(pn)
         if not words:
             return
-        from .annotations import STROKE_COLOR, _line_merged_rects
+            
         selected = self._words_in_sweep(words, start_pt, end_pt)
         rects = [r for r, t in selected if t.strip()]
         if not rects:
             return
-        merged = _line_merged_rects(rects)
-        if not merged:
-            return
+
         with self._doc_lock:
-            page = self.doc[pn]
-            if tool == Tool.HIGHLIGHT:
-                annot = page.add_highlight_annot(merged)
-                annot.set_colors(stroke=self._annot.highlight_color)
-            elif tool == Tool.UNDERLINE:
-                annot = page.add_underline_annot(merged)
-                annot.set_colors(stroke=STROKE_COLOR[Tool.UNDERLINE])
-            elif tool == Tool.STRIKEOUT:
-                annot = page.add_strikeout_annot(merged)
-                annot.set_colors(stroke=STROKE_COLOR[Tool.STRIKEOUT])
-            else:
-                return
-            annot.update()
-            self._annot._history.append((pn, annot.xref))
-        self._refresh_page(pn)
+            changed = self._annot.apply_text_tool(self.doc, pn, tool, rects=rects)
+            
+        if changed:
+            self._refresh_page(pn)
 
     def _text_sel_send_to_redact(self, e=None) -> None:
         """Send the current text selection to the redaction panel as a candidate.

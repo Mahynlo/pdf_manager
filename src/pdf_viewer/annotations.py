@@ -81,13 +81,21 @@ def _catmull_rom(pts: list[tuple[float, float]], steps: int = 5) -> list[tuple[f
     return out
 
 
-def _word_rects(page: fitz.Page, clip: fitz.Rect) -> list[fitz.Rect]:
-    words = page.get_text("words", clip=clip)
-    return [fitz.Rect(w[0], w[1], w[2], w[3]) for w in words]
+def _char_rects(page: fitz.Page, clip: fitz.Rect) -> list[fitz.Rect]:
+    """Extract character bounding boxes within the clipping region."""
+    raw_dict = page.get_text("rawdict", clip=clip)
+    rects: list[fitz.Rect] = []
+    for block in raw_dict.get("blocks", []):
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                for char in span.get("chars", []):
+                    if char.get("c", "").strip():
+                        rects.append(fitz.Rect(char["bbox"]))
+    return rects
 
 
 def _line_merged_rects(rects: list[fitz.Rect]) -> list[fitz.Rect]:
-    """Merge adjacent word rects by visual line for smoother markup appearance."""
+    """Merge adjacent character rects by visual line for smoother markup appearance."""
     if not rects:
         return []
 
@@ -96,11 +104,16 @@ def _line_merged_rects(rects: list[fitz.Rect]) -> list[fitz.Rect]:
     current = fitz.Rect(sorted_rects[0])
 
     for rect in sorted_rects[1:]:
-        # Consider words in the same text line when vertical overlap is significant.
+        # Consider characters in the same text line when vertical overlap is significant.
         overlap = min(current.y1, rect.y1) - max(current.y0, rect.y0)
         min_height = min(current.height, rect.height)
         same_line = min_height > 0 and overlap >= min_height * 0.5
-        if same_line:
+        
+        # Prevent merging across massive horizontal gaps (like columns or wide table cells)
+        horizontal_gap = rect.x0 - current.x1
+        max_gap = current.height * 2.0
+
+        if same_line and horizontal_gap <= max_gap:
             current = fitz.Rect(
                 min(current.x0, rect.x0),
                 min(current.y0, rect.y0),
@@ -400,7 +413,7 @@ class AnnotationManager:
 
         # ── text markup ──────────────────────────────────────────────────────
         if self.tool in (Tool.HIGHLIGHT, Tool.UNDERLINE, Tool.STRIKEOUT):
-            rects = _line_merged_rects(_word_rects(page, rect))
+            rects = _line_merged_rects(_char_rects(page, rect))
             if not rects:
                 return False, None
             if self.tool == Tool.HIGHLIGHT:
@@ -1056,16 +1069,20 @@ class AnnotationManager:
 
     # ── deferred text annotation ──────────────────────────────────────────────
 
-    def apply_text_tool(self, doc: fitz.Document, page_num: int, tool: Tool) -> bool:
-        """Apply a markup annotation to the area saved from the last SELECT drag."""
-        if self.last_rect is None:
-            return False
-        rect = self.last_rect
+    def apply_text_tool(self, doc: fitz.Document, page_num: int, tool: Tool, rects: list[fitz.Rect] | None = None) -> bool:
+        """Apply a markup annotation to the area saved from the last SELECT drag, or to explicit rects."""
         page = doc[page_num]
-        rects = _line_merged_rects(_word_rects(page, rect))
-        if not rects:
-            self.last_rect = None
-            return False
+        if rects is None:
+            if self.last_rect is None:
+                return False
+            rects = _line_merged_rects(_char_rects(page, self.last_rect))
+            if not rects:
+                self.last_rect = None
+                return False
+        else:
+            if not rects:
+                return False
+            rects = _line_merged_rects(rects)
 
         if tool == Tool.HIGHLIGHT:
             annot = page.add_highlight_annot(rects)
