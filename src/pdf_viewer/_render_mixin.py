@@ -44,7 +44,8 @@ class _RenderMixin:
             self._rendered       = set()
             self._selected       = None
             self._page_words     = {}
-            self._text_sel_pn    = None
+            self._text_sel_start_pn = None
+            self._text_sel_end_pn   = None
             self._text_sel_text  = ""
             self._text_sel_start_pdf    = None
             self._text_sel_end_pdf      = None
@@ -145,7 +146,8 @@ class _RenderMixin:
         self._rendered             = set()
         self._selected             = None
         self._page_words           = {}
-        self._text_sel_pn          = None
+        self._text_sel_start_pn    = None
+        self._text_sel_end_pn      = None
         self._text_sel_text        = ""
         self._text_sel_start_pdf   = None
         self._text_sel_end_pdf     = None
