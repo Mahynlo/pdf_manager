@@ -16,9 +16,8 @@ def _sort_words_column_aware(words: list[tuple], page_width: float) -> list[tupl
     """Sort words in column-aware reading order.
 
     Detects multi-column layouts by finding significant gaps in the horizontal
-    distribution of word x-centres.  When a gap ≥ 8 % of page width is found,
-    words are sorted column-first (left column entirely before right column),
-    which prevents cross-column "bleeding" during flow selection.
+    distribution of word x-centres. Groups words dynamically into N columns,
+    preventing cross-column "bleeding" during flow selection.
 
     Falls back to simple row-band sort for single-column pages.
     """
@@ -30,25 +29,28 @@ def _sort_words_column_aware(words: list[tuple], page_width: float) -> list[tupl
     # Compute x-centre for every word and sort them
     x_centers = sorted((r.x0 + r.x1) / 2.0 for r, _ in words)
 
-    # Find the single largest gap between consecutive x-centres
-    max_gap = 0.0
-    split_x = None
+    # Find gaps larger than the threshold to support N columns
+    threshold = max(30.0, page_width * 0.08)  # ~48 pt for A4
+    splits = []
     for i in range(len(x_centers) - 1):
         gap = x_centers[i + 1] - x_centers[i]
-        if gap > max_gap:
-            max_gap = gap
-            split_x = (x_centers[i] + x_centers[i + 1]) / 2.0
-
-    threshold = max(30.0, page_width * 0.08)  # ~48 pt for A4
+        if gap > threshold:
+            splits.append((x_centers[i] + x_centers[i + 1]) / 2.0)
 
     result = list(words)
-    if split_x is None or max_gap < threshold:
+    if not splits:
         # Single column: row-band sort
         result.sort(key=lambda w: (round(w[0].y0 / 5) * 5, w[0].x0))
     else:
-        # Multi-column: column index first, then row-band, then x
+        # Multi-column: find column index, then row-band, then x
+        def get_col_index(x):
+            for i, split_x in enumerate(splits):
+                if x < split_x:
+                    return i
+            return len(splits)
+
         result.sort(key=lambda w: (
-            0 if (w[0].x0 + w[0].x1) / 2.0 < split_x else 1,
+            get_col_index((w[0].x0 + w[0].x1) / 2.0),
             round(w[0].y0 / 5) * 5,
             w[0].x0,
         ))
@@ -61,52 +63,24 @@ class _TextSelMixin:
 
     # ── visual sweep selection ────────────────────────────────────────────────
 
-    @staticmethod
     def _words_in_sweep(
-        words: list[tuple], start_pt: tuple, end_pt: tuple
+        self, words: list[tuple], start_pt: tuple, end_pt: tuple
     ) -> list[tuple]:
-        """Return words that fall within the visual sweep from start_pt to end_pt.
-
-        Uses bounding-box line-band logic instead of sorted-list index ranges,
-        so the result is always correct regardless of the column-aware sort order.
-        Words on the first line are filtered by start x, words on the last line
-        by end x, and all intermediate lines are included in full.
+        """Return words between start_pt and end_pt using the column-aware index.
+        
+        Leverages the pre-sorted list of words to perfectly maintain reading
+        order and prevent cross-column bleeding.
         """
-        px_s, py_s = start_pt
-        px_e, py_e = end_pt
-        # Normalise: ensure the start point is above (or left of) the end point
-        if py_s > py_e or (abs(py_s - py_e) < 2 and px_s > px_e):
-            px_s, py_s, px_e, py_e = px_e, py_e, px_s, py_s
-
-        BAND = 5  # pt tolerance for line-band grouping
-        start_band = round(py_s / BAND) * BAND
-        end_band   = round(py_e / BAND) * BAND
-
-        result: list[tuple] = []
-        for r, t in words:
-            if not t.strip():
-                continue
-            word_band = round(r.y0 / BAND) * BAND
-            if word_band < start_band or word_band > end_band:
-                continue
-            if start_band == end_band:
-                # Single-line drag: include words whose rect overlaps [px_s, px_e]
-                lo, hi = min(px_s, px_e), max(px_s, px_e)
-                if r.x1 < lo - BAND or r.x0 > hi + BAND:
-                    continue
-            elif word_band == start_band:
-                # First line: only words to the right of (or touching) start x
-                if r.x1 < px_s - BAND:
-                    continue
-            elif word_band == end_band:
-                # Last line: only words to the left of (or touching) end x
-                if r.x0 > px_e + BAND:
-                    continue
-            result.append((r, t))
-
-        # Sort by (line-band, x) so text output is always in reading order
-        result.sort(key=lambda w: (round(w[0].y0 / BAND) * BAND, w[0].x0))
-        return result
+        if not words:
+            return []
+            
+        si = self._nearest_word_index(words, start_pt)
+        ei = self._nearest_word_index(words, end_pt)
+        
+        if si > ei:
+            si, ei = ei, si
+            
+        return [(r, t) for r, t in words[si : ei + 1] if t.strip()]
 
     # ── word cache ────────────────────────────────────────────────────────────
 
@@ -169,16 +143,7 @@ class _TextSelMixin:
         if not words:
             return ""
 
-        # Bounding-box sweep: independent of column-sort order, so words are
-        # never incorrectly excluded because their sorted index falls outside [si:ei].
         selected = self._words_in_sweep(words, start_pt, end_pt)
-        if not selected:
-            # Fallback for single-click or very small drag: nearest word
-            si = self._nearest_word_index(words, start_pt)
-            ei = self._nearest_word_index(words, end_pt)
-            if si > ei:
-                si, ei = ei, si
-            selected = [(r, t) for r, t in words[si : ei + 1] if t.strip()]
 
         # Group word rects by line band (5 pt tolerance) so we render one
         # Container per line instead of one per word.  This prevents Flet from
@@ -243,7 +208,22 @@ class _TextSelMixin:
             except Exception:
                 pass
 
-        return " ".join(t.strip() for _, t in selected if t.strip())
+        # Build text string with newlines for significant vertical gaps
+        text_parts = []
+        last_y = None
+        for r, t in selected:
+            t = t.strip()
+            if not t:
+                continue
+            if last_y is not None:
+                if abs(r.y0 - last_y) > 5:
+                    text_parts.append("\n")
+                else:
+                    text_parts.append(" ")
+            text_parts.append(t)
+            last_y = r.y0
+
+        return "".join(text_parts)
 
     def _clear_text_selection(self) -> None:
         pn = self._text_sel_pn
@@ -338,12 +318,6 @@ class _TextSelMixin:
             return
         from .annotations import STROKE_COLOR, _line_merged_rects
         selected = self._words_in_sweep(words, start_pt, end_pt)
-        if not selected:
-            si = self._nearest_word_index(words, start_pt)
-            ei = self._nearest_word_index(words, end_pt)
-            if si > ei:
-                si, ei = ei, si
-            selected = [(r, t) for r, t in words[si : ei + 1] if t.strip()]
         rects = [r for r, t in selected if t.strip()]
         if not rects:
             return
