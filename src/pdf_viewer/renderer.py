@@ -54,7 +54,7 @@ def render_page(
     zoom: float,
     cache: PageRenderCache | None = None,
 ) -> tuple[str, int, int]:
-    """Render a PDF page to a base64-encoded JPEG.
+    """Render a PDF page to a base64-encoded JPEG or PNG.
 
     Returns (b64_data, pixel_width, pixel_height).
     Caller must hold doc_lock before calling this function.
@@ -66,10 +66,11 @@ def render_page(
 
     page = doc[page_num]
     mat = fitz.Matrix(zoom * BASE_SCALE, zoom * BASE_SCALE)
-    pix = page.get_pixmap(matrix=mat)
-    # JPEG does not support alpha; flatten to RGB if needed.
-    if pix.alpha:
-        pix = fitz.Pixmap(fitz.csRGB, pix)
+    
+    # Generar directamente sin canal alfa mejora drásticamente
+    # el consumo de RAM y la velocidad, evitando la conversión posterior.
+    pix = page.get_pixmap(matrix=mat, alpha=False)
+    
     # PNG for low zoom (text is small — lossless avoids visible compression blur);
     # JPEG at high quality for high zoom (large pixmaps keep reasonable size).
     if zoom <= 1.0:
@@ -77,6 +78,7 @@ def render_page(
     else:
         jpg_q = 95 if zoom <= 2.0 else 92
         img_bytes = pix.tobytes("jpeg", jpg_quality=jpg_q)
+
     b64 = base64.b64encode(img_bytes).decode()
     result = b64, pix.width, pix.height
 
