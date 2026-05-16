@@ -85,20 +85,36 @@ class _TextSelMixin:
     # ── word cache ────────────────────────────────────────────────────────────
 
     def _get_page_words(self, pn: int) -> list[tuple]:
-        """Return (fitz.Rect, str) list for every word on page *pn* (cached)."""
+        """Return (fitz.Rect, str) list for every character/word on page *pn* (cached)."""
         if pn in self._page_words:
             return self._page_words[pn]
+            
+        words: list[tuple] = []
         with self._doc_lock:
-            raw        = self.doc[pn].get_text("words")
             page_width = self.doc[pn].rect.width
-        words: list[tuple] = [
-            (fitz.Rect(w[0], w[1], w[2], w[3]), w[4]) for w in raw
-        ]
+            # Extract characters instead of words for finer selection
+            raw_dict = self.doc[pn].get_text("rawdict")
+            for block in raw_dict.get("blocks", []):
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        for char in span.get("chars", []):
+                            c = char.get("c", "")
+                            if c.strip():  # ignore purely space chars, we reconstruct spaces via gaps
+                                words.append((fitz.Rect(char["bbox"]), c))
+
         if pn in self._ocr_by_page:
             for det in self._ocr_by_page[pn].detections:
-                if det.bbox and det.text.strip():
-                    words.append((det.bbox, det.text))
-        # Column-aware reading order (handles 2-column layouts correctly)
+                text = det.text.strip()
+                if det.bbox and text:
+                    rect = fitz.Rect(det.bbox)
+                    x0, y0, x1, y1 = rect.x0, rect.y0, rect.x1, rect.y1
+                    char_w = (x1 - x0) / max(1, len(text))
+                    for i, char in enumerate(text):
+                        if char.strip():
+                            char_rect = fitz.Rect(x0 + i * char_w, y0, x0 + (i + 1) * char_w, y1)
+                            words.append((char_rect, char))
+                    
+        # Column-aware reading order
         words = _sort_words_column_aware(words, page_width)
         self._page_words[pn] = words
         return words
@@ -208,20 +224,25 @@ class _TextSelMixin:
             except Exception:
                 pass
 
-        # Build text string with newlines for significant vertical gaps
+        # Build text string with newlines and spaces based on gaps
         text_parts = []
-        last_y = None
+        last_r = None
         for r, t in selected:
             t = t.strip()
             if not t:
                 continue
-            if last_y is not None:
-                if abs(r.y0 - last_y) > 5:
+            if last_r is not None:
+                if abs(r.y0 - last_r.y0) > 5:
                     text_parts.append("\n")
                 else:
-                    text_parts.append(" ")
+                    # Space if horizontal gap is larger than ~15% of character height
+                    # with a minimum of 2.5 pt to avoid false spaces in kerning
+                    char_height = last_r.y1 - last_r.y0
+                    threshold = max(2.5, char_height * 0.15)
+                    if r.x0 - last_r.x1 > threshold:
+                        text_parts.append(" ")
             text_parts.append(t)
-            last_y = r.y0
+            last_r = r
 
         return "".join(text_parts)
 
@@ -423,15 +444,44 @@ class _TextSelMixin:
     # ── word selection (double-tap) ───────────────────────────────────────────
 
     def _select_word_at(self, pn: int, pdf_pt: tuple) -> None:
-        """Select the single word at (or nearest to) pdf_pt."""
+        """Select the full word at (or nearest to) pdf_pt (double-tap)."""
         words = self._get_page_words(pn)
         if not words:
             return
         idx = self._nearest_word_index(words, pdf_pt)
-        r, _ = words[idx]
-        mid_y = (r.y0 + r.y1) / 2
-        start_pt = (r.x0, mid_y)
-        end_pt   = (r.x1, mid_y)
+        
+        # Expand left to find the start of the word
+        si = idx
+        while si > 0:
+            curr_r = words[si][0]
+            prev_r = words[si - 1][0]
+            # Same line and small gap (no space)
+            char_height = prev_r.y1 - prev_r.y0
+            threshold = max(2.5, char_height * 0.15)
+            if abs(curr_r.y0 - prev_r.y0) <= 5 and (curr_r.x0 - prev_r.x1) <= threshold:
+                si -= 1
+            else:
+                break
+                
+        # Expand right to find the end of the word
+        ei = idx
+        while ei < len(words) - 1:
+            curr_r = words[ei][0]
+            next_r = words[ei + 1][0]
+            # Same line and small gap (no space)
+            char_height = curr_r.y1 - curr_r.y0
+            threshold = max(2.5, char_height * 0.15)
+            if abs(curr_r.y0 - next_r.y0) <= 5 and (next_r.x0 - curr_r.x1) <= threshold:
+                ei += 1
+            else:
+                break
+
+        start_r = words[si][0]
+        end_r   = words[ei][0]
+        
+        start_pt = (start_r.x0, (start_r.y0 + start_r.y1) / 2)
+        end_pt   = (end_r.x1,   (end_r.y0   + end_r.y1)   / 2)
+        
         self._text_sel_start_pdf = start_pt
         self._text_sel_end_pdf   = end_pt
         sel_text = self._update_text_selection(pn, start_pt, end_pt, update_ui=True)
