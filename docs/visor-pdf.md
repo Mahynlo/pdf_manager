@@ -567,7 +567,8 @@ self._ctrl_pressed: bool           # Estado de la tecla Ctrl (para Ctrl+Scroll)
 
 ```python
 self._page_words: dict[int, list]         # Caché de palabras por página
-self._text_sel_pn: int | None             # Página con selección activa
+self._text_sel_start_pn: int | None       # Página de inicio de la selección activa
+self._text_sel_end_pn: int | None         # Página de fin de la selección activa
 self._text_sel_text: str                  # Texto seleccionado
 self._text_sel_start_pdf: tuple | None    # Inicio en coords PDF
 self._text_sel_end_pdf: tuple | None      # Fin en coords PDF

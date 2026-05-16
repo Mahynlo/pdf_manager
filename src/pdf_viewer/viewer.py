@@ -126,7 +126,8 @@ class PDFViewerTab(
 
         # Text selection state
         self._page_words:         dict[int, list[tuple]] = {}
-        self._text_sel_pn:        int | None = None
+        self._text_sel_start_pn:  int | None = None
+        self._text_sel_end_pn:    int | None = None
         self._text_sel_text:      str = ""
         self._text_sel_start_pdf: tuple | None = None
         self._text_sel_end_pdf:   tuple | None = None
@@ -956,6 +957,6 @@ class PDFViewerTab(
             (words[-1][0].x0 + words[-1][0].x1) / 2,
             (words[-1][0].y0 + words[-1][0].y1) / 2,
         )
-        sel_text = self._update_text_selection(pn, start_pt, end_pt, update_ui=True)
+        sel_text = self._update_text_selection(pn, start_pt, pn, end_pt, update_ui=True)
         if sel_text:
             self._show_text_sel_bar(sel_text)

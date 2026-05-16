@@ -197,6 +197,26 @@ class _GestureMixin:
 
     # ── pan events ────────────────────────────────────────────────────────────
 
+    def _get_global_y(self, pn: int, local_y: float) -> float:
+        """Convert page-local Y to global scroll Y."""
+        y = 0.0
+        for i in range(pn):
+            y += getattr(self, "_page_heights", [])[i] + 16  # 16 is spacing
+        return y + local_y
+
+    def _get_page_and_local_y(self, global_y: float) -> tuple[int, float]:
+        """Convert global scroll Y to page index and local Y."""
+        y = 0.0
+        heights = getattr(self, "_page_heights", [])
+        for i, h in enumerate(heights):
+            if y <= global_y <= y + h + 16:
+                return i, global_y - y
+            y += h + 16
+        if heights:
+            last_pn = len(heights) - 1
+            return last_pn, global_y - (y - heights[-1] - 16)
+        return 0, global_y
+
     def _on_pan_start(self, e: ft.DragStartEvent, pn: int) -> None:
         self._pending_tap      = None
         self._pending_tap_page = None
@@ -228,7 +248,7 @@ class _GestureMixin:
                 for hname in ("start", "end"):
                     hpos = getattr(self, f"_text_sel_handle_{hname}_disp", None)
                     if (hpos is not None
-                            and self._text_sel_pn == pn
+                            and (getattr(self, "_text_sel_start_pn", None) == pn or getattr(self, "_text_sel_end_pn", None) == pn)
                             and math.hypot(e.local_x - hpos[0], e.local_y - hpos[1]) <= _H_HIT):
                         self._sel_drag_handle = hname
                         return
@@ -260,12 +280,13 @@ class _GestureMixin:
                     return
 
                 # ── 4. Nothing found → start smart text-selection drag ────────
+                self._hide_text_sel_bar()
                 self._sel_drag_handle        = None
                 self._smart_text_sel_active  = True
-                self._text_sel_pn            = pn
+                self._text_sel_start_pn      = pn
+                self._text_sel_end_pn        = pn
                 self._text_sel_start_pdf     = (pdf_x, pdf_y)
                 self._text_sel_end_pdf       = (pdf_x, pdf_y)
-                self._hide_text_sel_bar()
                 # Temporarily switch to text cursor for visual feedback
                 for gd in self._page_gestures:
                     gd.mouse_cursor = ft.MouseCursor.TEXT
@@ -283,12 +304,13 @@ class _GestureMixin:
 
         if self._annot.tool in (Tool.HIGHLIGHT, Tool.UNDERLINE, Tool.STRIKEOUT):
             self._deselect_annot()
+            self._hide_text_sel_bar()
             self._sel_drag_handle       = None
             self._smart_text_sel_active = True
-            self._text_sel_pn           = pn
+            self._text_sel_start_pn     = pn
+            self._text_sel_end_pn       = pn
             self._text_sel_start_pdf    = (pdf_x, pdf_y)
             self._text_sel_end_pdf      = (pdf_x, pdf_y)
-            self._hide_text_sel_bar()
             for gd in self._page_gestures:
                 gd.mouse_cursor = ft.MouseCursor.TEXT
                 try:
@@ -308,14 +330,16 @@ class _GestureMixin:
             for hname in ("start", "end"):
                 hpos = getattr(self, f"_text_sel_handle_{hname}_disp", None)
                 if (hpos is not None
-                        and self._text_sel_pn == pn
+                        and (getattr(self, "_text_sel_start_pn", None) == pn or getattr(self, "_text_sel_end_pn", None) == pn)
                         and math.hypot(e.local_x - hpos[0], e.local_y - hpos[1]) <= _H_HIT):
                     self._sel_drag_handle = hname
                     return
+            self._hide_text_sel_bar()
             self._sel_drag_handle    = None
+            self._text_sel_start_pn  = pn
+            self._text_sel_end_pn    = pn
             self._text_sel_start_pdf = (pdf_x, pdf_y)
             self._text_sel_end_pdf   = (pdf_x, pdf_y)
-            self._hide_text_sel_bar()
         self._annot.begin(pdf_x, pdf_y)
         if self._annot.tool in (Tool.LINE, Tool.ARROW):
             self._line_drag_start_disp = (e.local_x, e.local_y)
@@ -330,7 +354,7 @@ class _GestureMixin:
                 else:
                     self._text_sel_end_pdf = (pdf_x, pdf_y)
                 self._update_text_selection(
-                    pn, self._text_sel_start_pdf, self._text_sel_end_pdf, update_ui=True
+                    self._text_sel_start_pn, self._text_sel_start_pdf, pn, self._text_sel_end_pdf, update_ui=True
                 )
                 return
 
@@ -369,10 +393,13 @@ class _GestureMixin:
             # ── Smart text-selection drag ─────────────────────────────────────
             if getattr(self, "_smart_text_sel_active", False):
                 try:
-                    pdf_x, pdf_y = display_to_pdf(e.local_x, e.local_y, self.zoom)
+                    global_y = self._get_global_y(pn, e.local_y)
+                    target_pn, target_local_y = self._get_page_and_local_y(global_y)
+                    pdf_x, pdf_y = display_to_pdf(e.local_x, target_local_y, self.zoom)
+                    self._text_sel_end_pn = target_pn
                     self._text_sel_end_pdf = (pdf_x, pdf_y)
                     self._update_text_selection(
-                        pn, self._text_sel_start_pdf, self._text_sel_end_pdf, update_ui=True
+                        self._text_sel_start_pn, self._text_sel_start_pdf, self._text_sel_end_pn, self._text_sel_end_pdf, update_ui=True
                     )
                 except Exception:
                     pass
@@ -382,10 +409,17 @@ class _GestureMixin:
 
         if self._annot.tool in (Tool.HIGHLIGHT, Tool.UNDERLINE, Tool.STRIKEOUT):
             if getattr(self, "_smart_text_sel_active", False):
-                self._text_sel_end_pdf = (pdf_x, pdf_y)
-                self._update_text_selection(
-                    pn, self._text_sel_start_pdf, self._text_sel_end_pdf, update_ui=True
-                )
+                try:
+                    global_y = self._get_global_y(pn, e.local_y)
+                    target_pn, target_local_y = self._get_page_and_local_y(global_y)
+                    pdf_x, pdf_y = display_to_pdf(e.local_x, target_local_y, self.zoom)
+                    self._text_sel_end_pn = target_pn
+                    self._text_sel_end_pdf = (pdf_x, pdf_y)
+                    self._update_text_selection(
+                        self._text_sel_start_pn, self._text_sel_start_pdf, self._text_sel_end_pn, self._text_sel_end_pdf, update_ui=True
+                    )
+                except Exception:
+                    pass
             return
 
         if self._annot.tool == Tool.INK:
@@ -398,13 +432,21 @@ class _GestureMixin:
 
         # Legacy SELECT tool handle drag
         if self._annot.tool == Tool.SELECT and self._sel_drag_handle is not None:
-            if self._sel_drag_handle == "start":
-                self._text_sel_start_pdf = (pdf_x, pdf_y)
-            else:
-                self._text_sel_end_pdf = (pdf_x, pdf_y)
-            self._update_text_selection(
-                pn, self._text_sel_start_pdf, self._text_sel_end_pdf, update_ui=True
-            )
+            try:
+                global_y = self._get_global_y(pn, e.local_y)
+                target_pn, target_local_y = self._get_page_and_local_y(global_y)
+                pdf_x, pdf_y = display_to_pdf(e.local_x, target_local_y, self.zoom)
+                if self._sel_drag_handle == "start":
+                    self._text_sel_start_pn = target_pn
+                    self._text_sel_start_pdf = (pdf_x, pdf_y)
+                else:
+                    self._text_sel_end_pn = target_pn
+                    self._text_sel_end_pdf = (pdf_x, pdf_y)
+                self._update_text_selection(
+                    self._text_sel_start_pn, self._text_sel_start_pdf, self._text_sel_end_pn, self._text_sel_end_pdf, update_ui=True
+                )
+            except Exception:
+                pass
             return
 
         pdf_rect = self._annot.move(pdf_x, pdf_y)
@@ -413,10 +455,17 @@ class _GestureMixin:
         scale = self.zoom * BASE_SCALE
 
         if self._annot.tool == Tool.SELECT:
-            self._text_sel_end_pdf = (pdf_x, pdf_y)
-            self._update_text_selection(
-                pn, self._text_sel_start_pdf, (pdf_x, pdf_y), update_ui=True
-            )
+            try:
+                global_y = self._get_global_y(pn, e.local_y)
+                target_pn, target_local_y = self._get_page_and_local_y(global_y)
+                pdf_x, pdf_y = display_to_pdf(e.local_x, target_local_y, self.zoom)
+                self._text_sel_end_pn = target_pn
+                self._text_sel_end_pdf = (pdf_x, pdf_y)
+                self._update_text_selection(
+                    self._text_sel_start_pn, self._text_sel_start_pdf, self._text_sel_end_pn, self._text_sel_end_pdf, update_ui=True
+                )
+            except Exception:
+                pass
         elif self._annot.tool in (Tool.LINE, Tool.ARROW):
             start = getattr(self, "_line_drag_start_disp", None)
             if start is not None:
@@ -518,7 +567,7 @@ class _GestureMixin:
             if self._sel_drag_handle is not None:
                 self._sel_drag_handle = None
                 sel_text = self._update_text_selection(
-                    pn, self._text_sel_start_pdf, self._text_sel_end_pdf, update_ui=True
+                    self._text_sel_start_pn, self._text_sel_start_pdf, self._text_sel_end_pn, self._text_sel_end_pdf, update_ui=True
                 )
                 if sel_text:
                     if self._text_sel_sel_rect is not None:
@@ -605,7 +654,7 @@ class _GestureMixin:
             if getattr(self, "_smart_text_sel_active", False):
                 self._smart_text_sel_active = False
                 sel_text = self._update_text_selection(
-                    pn, self._text_sel_start_pdf, self._text_sel_end_pdf, update_ui=True
+                    self._text_sel_start_pn, self._text_sel_start_pdf, self._text_sel_end_pn, self._text_sel_end_pdf, update_ui=True
                 )
                 if not sel_text:
                     # OCR fallback for image-only pages
@@ -626,7 +675,7 @@ class _GestureMixin:
         if self._annot.tool == Tool.SELECT and self._sel_drag_handle is not None:
             self._sel_drag_handle = None
             sel_text = self._update_text_selection(
-                pn, self._text_sel_start_pdf, self._text_sel_end_pdf, update_ui=True
+                self._text_sel_start_pn, self._text_sel_start_pdf, self._text_sel_end_pn, self._text_sel_end_pdf, update_ui=True
             )
             if sel_text:
                 if self._text_sel_sel_rect is not None:
@@ -638,7 +687,7 @@ class _GestureMixin:
             if getattr(self, "_smart_text_sel_active", False):
                 self._smart_text_sel_active = False
                 sel_text = self._update_text_selection(
-                    pn, self._text_sel_start_pdf, self._text_sel_end_pdf, update_ui=True
+                    self._text_sel_start_pn, self._text_sel_start_pdf, self._text_sel_end_pn, self._text_sel_end_pdf, update_ui=True
                 )
                 if not sel_text:
                     sel_rect = self._text_sel_sel_rect
@@ -737,7 +786,7 @@ class _GestureMixin:
                                 break
         elif self._annot.tool == Tool.SELECT:
             sel_text = self._update_text_selection(
-                pn, self._text_sel_start_pdf, self._text_sel_end_pdf, update_ui=True
+                self._text_sel_start_pn, self._text_sel_start_pdf, self._text_sel_end_pn, self._text_sel_end_pdf, update_ui=True
             )
             if not sel_text:
                 sel_text = self._ocr_text_in_rect(pn, self._annot.last_select_rect)
@@ -920,7 +969,7 @@ class _GestureMixin:
         """Right-click: show the action popup for the active text selection."""
         if self._annot.tool not in (Tool.SELECT, Tool.CURSOR):
             return
-        if self._text_sel_pn != pn or not self._text_sel_text:
+        if getattr(self, "_text_sel_end_pn", None) != pn or not self._text_sel_text:
             return
         self._show_text_sel_bar(self._text_sel_text)
 
