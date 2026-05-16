@@ -130,6 +130,19 @@ def main(page: ft.Page) -> None:
         page.snack_bar = ft.SnackBar(ft.Text(msg), open=True)
         page.update()
 
+    def _activate_window() -> None:
+        try:
+            page.window.minimized = False
+            page.window.visible = True
+            page.window.focused = True
+            page.update()
+            page.window.to_front()
+        except Exception:
+            try:
+                page.update()
+            except Exception:
+                pass
+
     def _fixed_count() -> int:
         """Number of 'system' tabs before the PDF viewer tabs."""
         n = 1  # home
@@ -220,6 +233,7 @@ def main(page: ft.Page) -> None:
         for i, existing in enumerate(open_tabs):
             if existing.path == path:
                 _rebuild_tabs(_fixed_count() + i)
+                _activate_window()
                 return True
 
         doc = None
@@ -247,6 +261,7 @@ def main(page: ft.Page) -> None:
         rf.push(path)
         home.refresh_recent()
         _rebuild_tabs(_fixed_count() + len(open_tabs) - 1)
+        _activate_window()
         return True
 
     def _open_picker() -> None:
@@ -500,7 +515,7 @@ def main(page: ft.Page) -> None:
             try:
                 # Solicitar ejecución en el hilo de Flet
                 try:
-                    page.run_task(lambda: _process_incoming_paths())
+                    page.run_thread(_process_incoming_paths)
                 except Exception:
                     # Fallback: intentar llamar directamente (siempre desde UI esto debería
                     # ser seguro, pero solo como último recurso)
@@ -511,10 +526,8 @@ def main(page: ft.Page) -> None:
             finally:
                 _incoming_event.clear()
 
-    threading.Thread(target=_incoming_watcher, daemon=True).start()
-
     # Procesar rutas recibidas desde otras instancias (single-instance IPC)
-    def _process_incoming_paths(timer=None) -> None:
+    def _process_incoming_paths() -> None:
         try:
             while True:
                 with _incoming_lock:
@@ -523,27 +536,20 @@ def main(page: ft.Page) -> None:
                     candidate = _incoming_paths.pop(0)
                 if not candidate:
                     continue
-                # Special token to request window activation
                 if candidate == "__ACTIVATE__":
-                    try:
-                        page.update()
-                    except Exception:
-                        pass
+                    _activate_window()
                     continue
                 if Path(candidate).exists():
                     _open_pdf_path(candidate)
         except Exception:
             pass
 
-    # Use periodic timer if available, otherwise call once to drain
-    try:
-        page.add_periodic_timer(0.5, _process_incoming_paths)
-    except Exception:
-        _process_incoming_paths()
+    _process_incoming_paths()
+
+    threading.Thread(target=_incoming_watcher, daemon=True).start()
 
     # Open PDF passed as command-line argument (e.g. from OS file association)
-    if len(sys.argv) > 1:
-        candidate = sys.argv[1]
+    for candidate in sys.argv[1:]:
         if candidate.lower().endswith(".pdf") and Path(candidate).exists():
             _open_pdf_path(candidate)
 
