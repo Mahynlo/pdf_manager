@@ -62,6 +62,8 @@ class _RenderMixin:
                 load_ov = self._loading_overlays[pn]
 
                 img.visible = False
+                img.src = None
+                img.src_base64 = None
                 img.width  = w
                 img.height = h
                 slot.width  = w
@@ -560,12 +562,13 @@ class _RenderMixin:
                     with self._doc_lock:
                         if gen != self._render_gen or pn >= len(self._page_images):
                             return
-                        b64, w, h = render_page(self.doc, pn, self.zoom, cache)
+                        path, w, h = render_page(self.doc, pn, self.zoom, cache)
                 if gen != self._render_gen or pn >= len(self._page_images):
                     return
                 img  = self._page_images[pn]
                 slot = self._page_slots[pn]
-                img.src_base64 = b64
+                img.src = path
+                img.src_base64 = None
                 img.width      = w
                 img.height     = h
                 img.visible    = True
@@ -612,6 +615,8 @@ class _RenderMixin:
             page_bottom = start + h
             if page_bottom < keep_top or start > keep_bottom:
                 self._rendered.discard(pn)
+                self._page_images[pn].src = None
+                self._page_images[pn].src_base64 = None
                 self._page_images[pn].visible = False
                 if pn < len(loading_overlays):
                     loading_overlays[pn].visible = True
@@ -664,14 +669,15 @@ class _RenderMixin:
 
         mid = float(pixels) + float(viewport_h) / 2.0
         page_changed = False
-        for pn in range(len(self._page_cum_offsets) - 1, -1, -1):
-            if self._page_cum_offsets[pn] <= mid:
-                if pn != self.current_page:
-                    self.current_page = pn
-                    self._update_nav_state()
-                    self._refresh_ocr_ui_for_page()
-                    page_changed = True
-                break
+        import bisect
+        idx = bisect.bisect_right(self._page_cum_offsets, mid)
+        pn = max(0, idx - 1)
+        if 0 <= pn < len(self._page_cum_offsets):
+            if pn != self.current_page:
+                self.current_page = pn
+                self._update_nav_state()
+                self._refresh_ocr_ui_for_page()
+                page_changed = True
 
         px, vh = float(pixels), float(viewport_h)
         self._render_visible(px, vh)
