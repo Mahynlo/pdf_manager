@@ -320,25 +320,22 @@ class PDFViewerTab(
         nav_toolbar = ft.Container(
             ft.Row(
                 [
+                    self._make_sidebar_toggle_btn(),
+                    _vdivider(),
                     self.prev_btn, self.page_input, self.total_label, self.next_btn,
                     _vdivider(),
                     self.zoom_out_btn, self.zoom_label, self.zoom_in_btn, zoom_menu,
-                    _vdivider(),
                     _vdivider(),
                     self._mode_btn_continuous, self._mode_btn_single, self._mode_btn_double,
                     _vdivider(),
                     ft.IconButton(ft.Icons.ROTATE_RIGHT, tooltip="Rotar 90°", on_click=self._rotate),
                     _vdivider(),
-                    ft.IconButton(ft.Icons.UNDO,         tooltip="Deshacer última anotación  (Ctrl+Z)", on_click=self._undo),
-                    _vdivider(),
+                    ft.IconButton(ft.Icons.UNDO,         tooltip="Deshacer última anotación (Ctrl+Z)", on_click=self._undo),
                     ft.IconButton(ft.Icons.SAVE_ALT,     tooltip="Guardar PDF con anotaciones", on_click=self._save),
                     _vdivider(),
                     ft.IconButton(ft.Icons.DOCUMENT_SCANNER, tooltip="Ejecutar OCR en la página actual", on_click=self._run_ocr),
                     self._make_ocr_toggle_btn(),
-                    _vdivider(),
                     self._make_agent_toolbar_btn(),
-                    _vdivider(),
-                    self._make_sidebar_toggle_btn(),
                     _vdivider(),
                     self._make_night_mode_btn(),
                     ft.PopupMenuButton(
@@ -401,7 +398,7 @@ class PDFViewerTab(
                         ],
                     ),
                 ],
-                spacing=2,
+                spacing=4,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
             padding=ft.padding.symmetric(horizontal=8, vertical=4),
@@ -411,7 +408,9 @@ class PDFViewerTab(
 
         # ── annotation toolbar ────────────────────────────────────────────────
         tool_btns: list[ft.Control] = []
-        for tool, icon, tooltip, cursor in _TOOL_DEFS:
+        for i, (tool, icon, tooltip, cursor) in enumerate(_TOOL_DEFS):
+            if i in (1, 4, 8):  # Add visual groupings (Cursor | Markup | Shapes | Ink)
+                tool_btns.append(_vdivider())
             btn = ft.IconButton(
                 icon, tooltip=tooltip,
                 icon_color="#444444",
@@ -423,7 +422,7 @@ class PDFViewerTab(
 
         color_menu = ft.PopupMenuButton(
             icon=ft.Icons.PALETTE,
-            tooltip="Color de resaltado",
+            tooltip="Color de anotación",
             items=[
                 ft.PopupMenuItem(
                     text=name,
@@ -432,9 +431,14 @@ class PDFViewerTab(
                 for name, rgb in HIGHLIGHT_COLORS
             ],
         )
+        
         annot_toolbar = ft.Container(
-            ft.Row([*tool_btns, _vdivider(), color_menu],
-                   spacing=2, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            ft.Row([
+                ft.Row(tool_btns, spacing=2, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                ft.Container(expand=True), # Spacer to push color menu to the right
+                _vdivider(),
+                color_menu
+            ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
             padding=ft.padding.symmetric(horizontal=8, vertical=2),
             bgcolor=_ANNOT_BG,
             border=ft.border.only(bottom=ft.BorderSide(1, _DIVIDER_CLR)),
