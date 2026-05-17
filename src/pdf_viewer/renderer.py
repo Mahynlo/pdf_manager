@@ -1,7 +1,8 @@
 """PDF page rendering utilities."""
 from __future__ import annotations
 
-import base64
+import os
+import tempfile
 import threading
 from collections import OrderedDict
 
@@ -36,15 +37,29 @@ class PageRenderCache:
             self._d[key] = data
             self._d.move_to_end(key)
             while len(self._d) > self._MAX_ENTRIES:
-                self._d.popitem(last=False)
+                _, popped_data = self._d.popitem(last=False)
+                try:
+                    os.remove(popped_data[0])
+                except Exception:
+                    pass
 
     def invalidate_page(self, pn: int) -> None:
         with self._lock:
-            for k in [k for k in self._d if k[0] == pn]:
-                del self._d[k]
+            keys_to_delete = [k for k in self._d if k[0] == pn]
+            for k in keys_to_delete:
+                data = self._d.pop(k)
+                try:
+                    os.remove(data[0])
+                except Exception:
+                    pass
 
     def clear(self) -> None:
         with self._lock:
+            for k, data in self._d.items():
+                try:
+                    os.remove(data[0])
+                except Exception:
+                    pass
             self._d.clear()
 
 
@@ -54,9 +69,9 @@ def render_page(
     zoom: float,
     cache: PageRenderCache | None = None,
 ) -> tuple[str, int, int]:
-    """Render a PDF page to a base64-encoded JPEG or PNG.
+    """Render a PDF page to a temporary file.
 
-    Returns (b64_data, pixel_width, pixel_height).
+    Returns (file_path, pixel_width, pixel_height).
     Caller must hold doc_lock before calling this function.
     """
     if cache is not None:
@@ -71,16 +86,20 @@ def render_page(
     # el consumo de RAM y la velocidad, evitando la conversión posterior.
     pix = page.get_pixmap(matrix=mat, alpha=False)
     
+    fd, temp_path = tempfile.mkstemp(suffix=".png" if zoom <= 1.0 else ".jpg")
+    os.close(fd)
+    
     # PNG for low zoom (text is small — lossless avoids visible compression blur);
     # JPEG at high quality for high zoom (large pixmaps keep reasonable size).
     if zoom <= 1.0:
-        img_bytes = pix.tobytes("png")
+        pix.save(temp_path, output="png")
     else:
         jpg_q = 95 if zoom <= 2.0 else 92
         img_bytes = pix.tobytes("jpeg", jpg_quality=jpg_q)
+        with open(temp_path, "wb") as f:
+            f.write(img_bytes)
 
-    b64 = base64.b64encode(img_bytes).decode()
-    result = b64, pix.width, pix.height
+    result = temp_path, pix.width, pix.height
 
     if cache is not None:
         cache.put(page_num, zoom, result)
