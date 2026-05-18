@@ -33,6 +33,7 @@ from ._annot_mixin        import _AnnotMixin
 from ._text_sel_mixin     import _TextSelMixin
 from ._ocr_mixin          import _OCRMixin
 from ._redact_agent_mixin import _RedactAgentMixin
+from ._print_mixin        import _PrintMixin
 
 
 class PDFViewerTab(
@@ -42,6 +43,7 @@ class PDFViewerTab(
     _TextSelMixin,
     _OCRMixin,
     _RedactAgentMixin,
+    _PrintMixin,
 ):
     """Manages state and UI for a single open PDF document."""
 
@@ -332,6 +334,7 @@ class PDFViewerTab(
                     _vdivider(),
                     ft.IconButton(ft.Icons.UNDO,         tooltip="Deshacer última anotación (Ctrl+Z)", on_click=self._undo),
                     ft.IconButton(ft.Icons.SAVE_ALT,     tooltip="Guardar PDF con anotaciones", on_click=self._save),
+                    ft.IconButton(ft.Icons.PRINT,        tooltip="Imprimir documento", on_click=self._print_pdf),
                     _vdivider(),
                     ft.IconButton(ft.Icons.DOCUMENT_SCANNER, tooltip="Ejecutar OCR en la página actual", on_click=self._run_ocr),
                     self._make_ocr_toggle_btn(),
@@ -847,6 +850,11 @@ class PDFViewerTab(
             self.page_ref.overlay.remove(self._save_picker)
             self.page_ref.update()
         except ValueError:
+            pass
+        try:
+            self.page_ref.overlay.remove(self._print_save_picker)
+            self.page_ref.update()
+        except (ValueError, AttributeError):
             pass
 
     # ── sidebar mode switching ────────────────────────────────────────────────
