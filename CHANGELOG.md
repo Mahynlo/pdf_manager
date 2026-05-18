@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.7] - 2026-05-18
+
+### Changed
+- Se agregó `pywin32` al bundle de Windows para que la detección de impresoras e IPC funcionen en producción.
+- Se alineó la versión del instalador y del paquete con el release 0.1.7.
+
 ## [0.1.6] - 2026-05-18
 
 ### Added
