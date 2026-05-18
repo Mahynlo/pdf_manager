@@ -23,7 +23,7 @@ Write-Host ""
 Write-Host "==> [1/2] Compilando con flet build windows ..." -ForegroundColor Cyan
 
 Set-Location $ProjectRoot
-uv run flet build windows -v --hidden-import pywin32
+uv run flet build windows -v
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: flet build windows fallo (codigo $LASTEXITCODE)" -ForegroundColor Red
     exit 1
