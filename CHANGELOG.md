@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.8] - 2026-05-18
+
+### Changed
+- Se publicó una nueva versión de release con la configuración de build ya alineada.
+
 ## [0.1.7] - 2026-05-18
 
 ### Changed
