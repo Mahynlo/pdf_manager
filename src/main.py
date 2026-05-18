@@ -1,10 +1,11 @@
 """App entry point: navbar + home screen + tab shell + file picker."""
 
 import sys
-import socket
+import os
 import threading
 import time
 from pathlib import Path
+import platform
 
 import flet as ft
 
@@ -22,73 +23,199 @@ from pdf_security import (
 from pdf_viewer import PDFViewerTab
 from settings_tab import SettingsTab
 
-# Single-instance IPC (local TCP) — permite que la app recibida por "Abrir con" reenvíe
-# la ruta de un PDF a la instancia ya abierta.
-_IPC_PORT = 57422
+# Single-instance IPC (pywin32 named pipes en Windows / local TCP en otros)
+# Permite que la app ejecutada por "Abrir con" reenvíe la ruta a la instancia activa.
 _incoming_paths: list[str] = []
 _incoming_lock = threading.Lock()
 _incoming_event = threading.Event()
 
-# Intentar crear un servidor local. Si falla, asumimos que ya hay una instancia
-# y actuamos como cliente al arrancar (más abajo) para reenviar el path.
-_ipc_server_socket = None
-try:
-    _ipc_server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    _ipc_server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    _ipc_server_socket.bind(("127.0.0.1", _IPC_PORT))
-    _ipc_server_socket.listen(5)
 
-    def _ipc_server_loop() -> None:
-        while True:
-            try:
-                conn, _addr = _ipc_server_socket.accept()
-                with conn:
-                    conn.settimeout(2.0)
-                    try:
-                        # recibir hasta 8KiB
-                        data = conn.recv(8192)
-                    except socket.timeout:
-                        continue
-                    if not data:
-                        continue
-                    payload = data.decode("utf-8")
-                    # admitir múltiples rutas separadas por nueva línea
-                    for raw in payload.splitlines():
-                        path = raw.strip()
-                        if not path:
-                            continue
-                        with _incoming_lock:
-                            _incoming_paths.append(path)
-                        # notificar al watcher en main()
-                        _incoming_event.set()
-            except Exception:
-                time.sleep(0.1)
-
-    _ipc_thread = threading.Thread(target=_ipc_server_loop, daemon=True)
-    _ipc_thread.start()
-except OSError:
-    # Si no podemos bindear, hay una instancia escuchando. Actuamos como cliente:
-    # enviamos todos los argumentos PDF (si existen) o un mensaje de activación
+def _clean_path_argument(arg: str) -> str | None:
+    """Limpia y valida un argumento de ruta desde línea de comandos.
+    
+    Elimina comillas del registro de Windows, espacios extra, y backticks.
+    Verifica que sea un archivo PDF existente y retorna la ruta absoluta.
+    
+    Args:
+        arg: Argumento de línea de comandos que podría ser una ruta a PDF
+        
+    Returns:
+        Ruta absoluta resolvida o None si es inválida/no existe
+    """
+    clean = arg.strip(" \"'`")
+    if not clean.lower().endswith(".pdf"):
+        return None
     try:
-        with socket.create_connection(("127.0.0.1", _IPC_PORT), timeout=1) as s:
-            # enviar todos los paths pdf pasados como argumentos, uno por línea
-            sent_any = False
-            for arg in sys.argv[1:]:
-                if arg.lower().endswith(".pdf"):
-                    absolute_path = str(Path(arg).resolve())
-                    s.sendall((absolute_path + "\n").encode("utf-8"))
-                    sent_any = True
-            if not sent_any:
-                # No había argumentos PDF: pedir a la instancia activa que se enfoque
-                try:
-                    s.sendall(b"__ACTIVATE__\n")
-                except Exception:
-                    pass
-        # Enviado OK, salir para no abrir otra ventana
-        sys.exit(0)
+        abs_path = str(Path(clean).resolve())
+        if Path(abs_path).exists():
+            return abs_path
     except Exception:
-        # No se pudo conectar al servidor existente — continuar arrancando
         pass
+    return None
+
+
+if platform.system() == "Windows":
+    import win32event
+    import win32api
+    import winerror
+    import win32pipe
+    import win32file
+
+    _MUTEX_NAME = "ExtraerPDFs_SingleInstance_Mutex"
+    _PIPE_NAME = r"\\.\pipe\ExtraerPDFs_IPC_Pipe"
+
+    # Intentar obtener el Mutex para verificar si ya hay una instancia
+    _mutex = win32event.CreateMutex(None, False, _MUTEX_NAME)
+    _last_error = win32api.GetLastError()
+
+    if _last_error == winerror.ERROR_ALREADY_EXISTS:
+        # Ya existe una instancia. Somos el cliente (instancia secundaria)
+        try:
+            # Recolectar PDFs válidos de los argumentos
+            payload_lines = []
+            for arg in sys.argv[1:]:
+                cleaned = _clean_path_argument(arg)
+                if cleaned:
+                    payload_lines.append(cleaned)
+            
+            if not payload_lines:
+                payload_lines.append("__ACTIVATE__")
+                
+            payload = "\n".join(payload_lines) + "\n"
+            
+            # Esperar a que el pipe del servidor esté listo (timeout: 3s)
+            try:
+                win32file.WaitNamedPipe(_PIPE_NAME, 3000)
+            except Exception:
+                pass
+                
+            # Intentar enviar las rutas al servidor (instancia primaria)
+            try:
+                handle = win32file.CreateFile(
+                    _PIPE_NAME,
+                    win32file.GENERIC_WRITE,
+                    0,
+                    None,
+                    win32file.OPEN_EXISTING,
+                    0,
+                    None
+                )
+                win32file.WriteFile(handle, payload.encode("utf-8"))
+                win32file.CloseHandle(handle)
+            except Exception:
+                # Si falla la comunicación, igualmente salimos
+                pass
+        except Exception:
+            pass
+        # Terminar inmediatamente: evitar que Flet cargue la GUI en el cliente
+        os._exit(0)
+    else:
+        # Somos el servidor (primera instancia)
+        def _ipc_server_loop() -> None:
+            """Loop de servidor que escucha conexiones en el Named Pipe."""
+            while True:
+                pipe = None
+                try:
+                    # Crear nueva instancia del pipe para la siguiente conexión
+                    pipe = win32pipe.CreateNamedPipe(
+                        _PIPE_NAME,
+                        win32pipe.PIPE_ACCESS_INBOUND,
+                        win32pipe.PIPE_TYPE_MESSAGE | win32pipe.PIPE_READMODE_MESSAGE | win32pipe.PIPE_WAIT,
+                        win32pipe.PIPE_UNLIMITED_INSTANCES,
+                        65536, 65536,
+                        0,
+                        None
+                    )
+                    # Bloquear hasta que un cliente se conecte
+                    win32pipe.ConnectNamedPipe(pipe, None)
+                    
+                    # Leer datos del cliente
+                    try:
+                        result, data = win32file.ReadFile(pipe, 65536)
+                        payload = data.decode("utf-8", errors="ignore")
+                        
+                        # Procesar cada línea recibida
+                        for raw in payload.splitlines():
+                            # Las rutas ya vienen limpias del cliente
+                            path = raw.strip()
+                            if not path:
+                                continue
+                            # Agregar a la cola para procesamiento
+                            with _incoming_lock:
+                                _incoming_paths.append(path)
+                        # Señalar que hay datos nuevos
+                        _incoming_event.set()
+                    finally:
+                        if pipe is not None:
+                            win32file.CloseHandle(pipe)
+                except Exception:
+                    if pipe is not None:
+                        try:
+                            win32file.CloseHandle(pipe)
+                        except Exception:
+                            pass
+                    time.sleep(0.1)
+
+        _ipc_thread = threading.Thread(target=_ipc_server_loop, daemon=True)
+        _ipc_thread.start()
+else:
+    # Linux/macOS Fallback: usar TCP local
+    import socket
+    _IPC_PORT = 57422
+    
+    try:
+        _ipc_server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        _ipc_server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        _ipc_server_socket.bind(("127.0.0.1", _IPC_PORT))
+        _ipc_server_socket.listen(5)
+
+        def _ipc_server_loop() -> None:
+            """Loop de servidor TCP para recibir rutas de otras instancias."""
+            while True:
+                try:
+                    conn, _addr = _ipc_server_socket.accept()
+                    with conn:
+                        conn.settimeout(2.0)
+                        try:
+                            data = conn.recv(8192)
+                        except socket.timeout:
+                            continue
+                        if not data:
+                            continue
+                        payload = data.decode("utf-8", errors="ignore")
+                        
+                        # Procesar cada línea recibida
+                        for raw in payload.splitlines():
+                            # Las rutas ya vienen limpias del cliente
+                            path = raw.strip()
+                            if not path:
+                                continue
+                            with _incoming_lock:
+                                _incoming_paths.append(path)
+                        _incoming_event.set()
+                except Exception:
+                    time.sleep(0.1)
+
+        _ipc_thread = threading.Thread(target=_ipc_server_loop, daemon=True)
+        _ipc_thread.start()
+    except OSError:
+        # No se pudo crear el socket servidor: somos una instancia secundaria
+        try:
+            with socket.create_connection(("127.0.0.1", _IPC_PORT), timeout=1) as s:
+                sent_any = False
+                for arg in sys.argv[1:]:
+                    cleaned = _clean_path_argument(arg)
+                    if cleaned:
+                        s.sendall((cleaned + "\n").encode("utf-8"))
+                        sent_any = True
+                if not sent_any:
+                    try:
+                        s.sendall(b"__ACTIVATE__\n")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        os._exit(0)
 
 _NAVBAR_BG     = "#1E2A38"
 _NAVBAR_FG     = "#FFFFFF"
@@ -515,24 +642,25 @@ def main(page: ft.Page) -> None:
     # de rutas en el hilo de Flet usando page.run_task().
     def _incoming_watcher() -> None:
         while True:
-            # esperar hasta que haya algo nuevo
+            # Esperar hasta que haya algo nuevo
             _incoming_event.wait()
             try:
-                # Solicitar ejecución en el hilo de Flet
-                try:
-                    page.run_thread(_process_incoming_paths)
-                except Exception:
-                    # Fallback: intentar llamar directamente (siempre desde UI esto debería
-                    # ser seguro, pero solo como último recurso)
-                    try:
-                        _process_incoming_paths()
-                    except Exception:
-                        pass
+                # Procesamos las rutas en el hilo actual del watcher
+                # Los cambios a la UI se sincronizan internamente en Flet
+                _process_incoming_paths()
+            except Exception:
+                pass
             finally:
                 _incoming_event.clear()
 
     # Procesar rutas recibidas desde otras instancias (single-instance IPC)
     def _process_incoming_paths() -> None:
+        """Procesa rutas que llegan del IPC desde otras instancias.
+        
+        Esta función se ejecuta cuando:
+        1. Hay nuevas rutas en _incoming_paths desde _ipc_server_loop()
+        2. O al inicio, para procesar argumentos de línea de comandos
+        """
         try:
             while True:
                 with _incoming_lock:
@@ -544,19 +672,27 @@ def main(page: ft.Page) -> None:
                 if candidate == "__ACTIVATE__":
                     _activate_window()
                     continue
-                if Path(candidate).exists():
+                # Las rutas ya vienen limpias y validadas del IPC
+                try:
                     _open_pdf_path(candidate)
+                except Exception:
+                    pass
         except Exception:
             pass
 
-    _process_incoming_paths()
-
     threading.Thread(target=_incoming_watcher, daemon=True).start()
 
-    # Open PDF passed as command-line argument (e.g. from OS file association)
-    for candidate in sys.argv[1:]:
-        if candidate.lower().endswith(".pdf") and Path(candidate).exists():
-            _open_pdf_path(candidate)
+    # Procesar PDFs pasados como argumentos de línea de comandos (doble clic, "Abrir con", etc.)
+    # Esto ocurre solo en la primera instancia; instancias secundarias envían por IPC y salen
+    for arg in sys.argv[1:]:
+        cleaned = _clean_path_argument(arg)
+        if cleaned:
+            # Agregar a la cola para procesamiento uniforme
+            with _incoming_lock:
+                _incoming_paths.append(cleaned)
+    
+    # Procesar las rutas iniciales (ya sea del IPC o de los argumentos)
+    _process_incoming_paths()
 
 
 ft.app(main)
