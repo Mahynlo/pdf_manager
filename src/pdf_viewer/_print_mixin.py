@@ -4,10 +4,14 @@ import shutil
 import subprocess
 import platform
 import threading
-import importlib
 from pathlib import Path
 import flet as ft
 import fitz
+
+import win32api  # type: ignore[reportMissingImports]
+import win32con  # type: ignore[reportMissingImports]
+import win32print  # type: ignore[reportMissingImports]
+import win32ui  # type: ignore[reportMissingImports]
 
 class _PrintMixin:
     def _notify_print(self, message: str, *, error: bool = False) -> None:
@@ -34,7 +38,8 @@ class _PrintMixin:
         sys_plat = platform.system()
         try:
             if sys_plat == "Windows":
-                win32print = importlib.import_module("win32print")
+                if win32print is None:
+                    raise ImportError("pywin32 no disponible")
                 # EnumPrinters will return a tuple of tuples.
                 # Format: (flags, description, name, comment)
                 printer_info = win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)
@@ -75,7 +80,8 @@ class _PrintMixin:
             return printer
 
         try:
-            win32print = importlib.import_module("win32print")
+            if win32print is None:
+                raise ImportError("pywin32 no disponible")
             return win32print.GetDefaultPrinter()
         except Exception:
             return printer
@@ -310,8 +316,9 @@ class _PrintMixin:
                 self._schedule_temp_file_deletion(temp_path)
 
     def _handle_windows_print(self, path: str, printer: str, use_native_dlg: bool) -> None:
-        win32api = importlib.import_module("win32api")
-        win32print = importlib.import_module("win32print")
+        if win32api is None or win32print is None:
+            self._notify_print("Faltan dependencias pywin32 para imprimir en Windows.", error=True)
+            return
         
         status = "error"
 
@@ -346,9 +353,8 @@ class _PrintMixin:
         Esto elimina la dependencia de ShellExecute y visores de terceros.
         """
         try:
-            win32print = importlib.import_module("win32print")
-            win32ui = importlib.import_module("win32ui")
-            win32con = importlib.import_module("win32con")
+            if win32print is None or win32ui is None or win32con is None:
+                raise ImportError("pywin32 no disponible")
             from PIL import Image, ImageWin
             import fitz
 

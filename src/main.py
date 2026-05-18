@@ -23,6 +23,12 @@ from pdf_security import (
 from pdf_viewer import PDFViewerTab
 from settings_tab import SettingsTab
 
+import win32event  # type: ignore[reportMissingImports]
+import win32api  # type: ignore[reportMissingImports]
+import winerror  # type: ignore[reportMissingImports]
+import win32pipe  # type: ignore[reportMissingImports]
+import win32file  # type: ignore[reportMissingImports]
+
 # Single-instance IPC (pywin32 named pipes en Windows / local TCP en otros)
 # Permite que la app ejecutada por "Abrir con" reenvíe la ruta a la instancia activa.
 _incoming_paths: list[str] = []
@@ -55,11 +61,8 @@ def _clean_path_argument(arg: str) -> str | None:
 
 
 if platform.system() == "Windows":
-    import win32event
-    import win32api
-    import winerror
-    import win32pipe
-    import win32file
+    if any(module is None for module in (win32event, win32api, winerror, win32pipe, win32file)):
+        raise ImportError("pywin32 no está disponible en este build de Windows")
 
     _MUTEX_NAME = "ExtraerPDFs_SingleInstance_Mutex"
     _PIPE_NAME = r"\\.\pipe\ExtraerPDFs_IPC_Pipe"
