@@ -20,12 +20,12 @@ $ISSCCandidates = @(
 
 # ── 1. Compilar la app con Flet ───────────────────────────────────────────────
 Write-Host ""
-Write-Host "==> [1/2] Compilando con flet build windows ..." -ForegroundColor Cyan
+Write-Host "==> [1/2] Compilando con flet pack windows ..." -ForegroundColor Cyan
 
 Set-Location $ProjectRoot
-uv run flet build windows -v
+uv run flet pack windows -v
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "ERROR: flet build windows fallo (codigo $LASTEXITCODE)" -ForegroundColor Red
+    Write-Host "ERROR: flet pack windows fallo (codigo $LASTEXITCODE)" -ForegroundColor Red
     exit 1
 }
 
