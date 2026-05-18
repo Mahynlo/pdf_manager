@@ -74,7 +74,7 @@ jobs:
         env:
           PYTHONUTF8: "1"
           PYTHONIOENCODING: "utf-8"
-        run: uv run flet build windows -v --hidden-import pywin32
+        run: uv run flet build windows -v
 
       # ── 7. Verificar y mostrar salida del build ─────────────────────────────
       - name: Locate build output
