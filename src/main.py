@@ -1,11 +1,17 @@
-"""App entry point: navbar + home screen + tab shell + file picker."""
+"""App entry point: navbar + home screen + tab shell + file picker.
+
+IPC de instancia única implementado con socket TCP local + archivo de bloqueo.
+Compatible con `flet build` (sin pywin32 ni dependencias nativas del SO).
+"""
 
 import sys
 import os
+import socket
 import threading
 import time
+import tempfile
+import struct
 from pathlib import Path
-import platform
 
 import flet as ft
 
@@ -23,207 +29,186 @@ from pdf_security import (
 from pdf_viewer import PDFViewerTab
 from settings_tab import SettingsTab
 
-import win32event  # type: ignore[reportMissingImports]
-import win32api  # type: ignore[reportMissingImports]
-import winerror  # type: ignore[reportMissingImports]
-import win32pipe  # type: ignore[reportMissingImports]
-import win32file  # type: ignore[reportMissingImports]
 
-# Single-instance IPC (pywin32 named pipes en Windows / local TCP en otros)
-# Permite que la app ejecutada por "Abrir con" reenvíe la ruta a la instancia activa.
+# ---------------------------------------------------------------------------
+# IPC: Instancia única  (socket TCP loopback + archivo de bloqueo)
+# ---------------------------------------------------------------------------
+# Estrategia:
+#   1. Se elige un puerto fijo (configurable) en loopback.
+#   2. La primera instancia logra hacer bind() en ese puerto → es el SERVIDOR.
+#   3. Las instancias siguientes no pueden hacer bind() → son CLIENTES:
+#      envían sus rutas PDF al servidor y terminan.
+#   4. Un archivo de bloqueo en el directorio temporal del usuario guarda el
+#      PID del servidor; se usa solo como señal de "hay proceso vivo", pero la
+#      fuente de verdad es el bind del socket.
+# ---------------------------------------------------------------------------
+
+_IPC_PORT      = 57423          # Cambia si hay conflicto con otra app
+_IPC_HOST      = "127.0.0.1"
+_LOCK_FILENAME = "extrar_pdfs.lock"
+
 _incoming_paths: list[str] = []
-_incoming_lock = threading.Lock()
+_incoming_lock  = threading.Lock()
 _incoming_event = threading.Event()
+
+
+def _lock_file_path() -> Path:
+    return Path(tempfile.gettempdir()) / _LOCK_FILENAME
 
 
 def _clean_path_argument(arg: str) -> str | None:
     """Limpia y valida un argumento de ruta desde línea de comandos.
-    
-    Elimina comillas del registro de Windows, espacios extra, y backticks.
-    Verifica que sea un archivo PDF existente y retorna la ruta absoluta.
-    
-    Args:
-        arg: Argumento de línea de comandos que podría ser una ruta a PDF
-        
-    Returns:
-        Ruta absoluta resolvida o None si es inválida/no existe
+
+    Elimina comillas, espacios extra y backticks. Verifica que sea un PDF
+    existente y retorna la ruta absoluta resuelta, o None si es inválido.
     """
     clean = arg.strip(" \"'`")
     if not clean.lower().endswith(".pdf"):
         return None
     try:
-        abs_path = str(Path(clean).resolve())
-        if Path(abs_path).exists():
-            return abs_path
+        abs_path = Path(clean).resolve()
+        if abs_path.exists():
+            return str(abs_path)
     except Exception:
         pass
     return None
 
 
-if platform.system() == "Windows":
-    if any(module is None for module in (win32event, win32api, winerror, win32pipe, win32file)):
-        raise ImportError("pywin32 no está disponible en este build de Windows")
+def _send_to_server(paths: list[str]) -> bool:
+    """Intenta enviar rutas (o __ACTIVATE__) a la instancia ya corriendo.
 
-    _MUTEX_NAME = "ExtraerPDFs_SingleInstance_Mutex"
-    _PIPE_NAME = r"\\.\pipe\ExtraerPDFs_IPC_Pipe"
-
-    # Intentar obtener el Mutex para verificar si ya hay una instancia
-    _mutex = win32event.CreateMutex(None, False, _MUTEX_NAME)
-    _last_error = win32api.GetLastError()
-
-    if _last_error == winerror.ERROR_ALREADY_EXISTS:
-        # Ya existe una instancia. Somos el cliente (instancia secundaria)
-        try:
-            # Recolectar PDFs válidos de los argumentos
-            payload_lines = []
-            for arg in sys.argv[1:]:
-                cleaned = _clean_path_argument(arg)
-                if cleaned:
-                    payload_lines.append(cleaned)
-            
-            if not payload_lines:
-                payload_lines.append("__ACTIVATE__")
-                
-            payload = "\n".join(payload_lines) + "\n"
-            
-            # Esperar a que el pipe del servidor esté listo (timeout: 3s)
-            try:
-                win32file.WaitNamedPipe(_PIPE_NAME, 3000)
-            except Exception:
-                pass
-                
-            # Intentar enviar las rutas al servidor (instancia primaria)
-            try:
-                handle = win32file.CreateFile(
-                    _PIPE_NAME,
-                    win32file.GENERIC_WRITE,
-                    0,
-                    None,
-                    win32file.OPEN_EXISTING,
-                    0,
-                    None
-                )
-                win32file.WriteFile(handle, payload.encode("utf-8"))
-                win32file.CloseHandle(handle)
-            except Exception:
-                # Si falla la comunicación, igualmente salimos
-                pass
-        except Exception:
-            pass
-        # Terminar inmediatamente: evitar que Flet cargue la GUI en el cliente
-        os._exit(0)
-    else:
-        # Somos el servidor (primera instancia)
-        def _ipc_server_loop() -> None:
-            """Loop de servidor que escucha conexiones en el Named Pipe."""
-            while True:
-                pipe = None
-                try:
-                    # Crear nueva instancia del pipe para la siguiente conexión
-                    pipe = win32pipe.CreateNamedPipe(
-                        _PIPE_NAME,
-                        win32pipe.PIPE_ACCESS_INBOUND,
-                        win32pipe.PIPE_TYPE_MESSAGE | win32pipe.PIPE_READMODE_MESSAGE | win32pipe.PIPE_WAIT,
-                        win32pipe.PIPE_UNLIMITED_INSTANCES,
-                        65536, 65536,
-                        0,
-                        None
-                    )
-                    # Bloquear hasta que un cliente se conecte
-                    win32pipe.ConnectNamedPipe(pipe, None)
-                    
-                    # Leer datos del cliente
-                    try:
-                        result, data = win32file.ReadFile(pipe, 65536)
-                        payload = data.decode("utf-8", errors="ignore")
-                        
-                        # Procesar cada línea recibida
-                        for raw in payload.splitlines():
-                            # Las rutas ya vienen limpias del cliente
-                            path = raw.strip()
-                            if not path:
-                                continue
-                            # Agregar a la cola para procesamiento
-                            with _incoming_lock:
-                                _incoming_paths.append(path)
-                        # Señalar que hay datos nuevos
-                        _incoming_event.set()
-                    finally:
-                        if pipe is not None:
-                            win32file.CloseHandle(pipe)
-                except Exception:
-                    if pipe is not None:
-                        try:
-                            win32file.CloseHandle(pipe)
-                        except Exception:
-                            pass
-                    time.sleep(0.1)
-
-        _ipc_thread = threading.Thread(target=_ipc_server_loop, daemon=True)
-        _ipc_thread.start()
-else:
-    # Linux/macOS Fallback: usar TCP local
-    import socket
-    _IPC_PORT = 57422
-    
+    Protocolo: cada mensaje es uint32-BE (longitud) + bytes UTF-8 de la línea.
+    Retorna True si la conexión y envío fueron exitosos.
+    """
+    payload_lines = paths if paths else ["__ACTIVATE__"]
+    payload = "\n".join(payload_lines)
+    data = payload.encode("utf-8")
+    header = struct.pack(">I", len(data))
     try:
-        _ipc_server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        _ipc_server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        _ipc_server_socket.bind(("127.0.0.1", _IPC_PORT))
-        _ipc_server_socket.listen(5)
-
-        def _ipc_server_loop() -> None:
-            """Loop de servidor TCP para recibir rutas de otras instancias."""
-            while True:
-                try:
-                    conn, _addr = _ipc_server_socket.accept()
-                    with conn:
-                        conn.settimeout(2.0)
-                        try:
-                            data = conn.recv(8192)
-                        except socket.timeout:
-                            continue
-                        if not data:
-                            continue
-                        payload = data.decode("utf-8", errors="ignore")
-                        
-                        # Procesar cada línea recibida
-                        for raw in payload.splitlines():
-                            # Las rutas ya vienen limpias del cliente
-                            path = raw.strip()
-                            if not path:
-                                continue
-                            with _incoming_lock:
-                                _incoming_paths.append(path)
-                        _incoming_event.set()
-                except Exception:
-                    time.sleep(0.1)
-
-        _ipc_thread = threading.Thread(target=_ipc_server_loop, daemon=True)
-        _ipc_thread.start()
+        with socket.create_connection((_IPC_HOST, _IPC_PORT), timeout=2) as s:
+            s.sendall(header + data)
+        return True
     except OSError:
-        # No se pudo crear el socket servidor: somos una instancia secundaria
+        return False
+
+
+def _try_bind_server() -> socket.socket | None:
+    """Intenta crear y vincular el socket servidor.
+
+    Retorna el socket listo (listen) o None si el puerto ya está ocupado
+    (lo que indica que hay otra instancia corriendo).
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind((_IPC_HOST, _IPC_PORT))
+        sock.listen(10)
+        return sock
+    except OSError:
+        sock.close()
+        return None
+
+
+def _write_lock_file() -> None:
+    try:
+        _lock_file_path().write_text(str(os.getpid()), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _remove_lock_file() -> None:
+    try:
+        _lock_file_path().unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _ipc_server_loop(server_sock: socket.socket) -> None:
+    """Acepta conexiones entrantes y encola las rutas recibidas."""
+    server_sock.settimeout(1.0)          # para poder salir limpio si se cierra
+    while True:
         try:
-            with socket.create_connection(("127.0.0.1", _IPC_PORT), timeout=1) as s:
-                sent_any = False
-                for arg in sys.argv[1:]:
-                    cleaned = _clean_path_argument(arg)
-                    if cleaned:
-                        s.sendall((cleaned + "\n").encode("utf-8"))
-                        sent_any = True
-                if not sent_any:
-                    try:
-                        s.sendall(b"__ACTIVATE__\n")
-                    except Exception:
-                        pass
+            conn, _ = server_sock.accept()
+        except socket.timeout:
+            continue
+        except OSError:
+            break                        # socket cerrado: terminamos
+        try:
+            conn.settimeout(3.0)
+            # Leer header de longitud (4 bytes big-endian)
+            raw_len = _recv_exact(conn, 4)
+            if raw_len is None:
+                continue
+            msg_len = struct.unpack(">I", raw_len)[0]
+            if msg_len > 1_048_576:      # sanidad: máx 1 MB
+                continue
+            raw_body = _recv_exact(conn, msg_len)
+            if raw_body is None:
+                continue
+            payload = raw_body.decode("utf-8", errors="ignore")
+            with _incoming_lock:
+                for line in payload.splitlines():
+                    line = line.strip()
+                    if line:
+                        _incoming_paths.append(line)
+            _incoming_event.set()
         except Exception:
             pass
-        os._exit(0)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def _recv_exact(conn: socket.socket, n: int) -> bytes | None:
+    """Lee exactamente n bytes de conn; retorna None en caso de error/EOF."""
+    buf = bytearray()
+    while len(buf) < n:
+        try:
+            chunk = conn.recv(n - len(buf))
+        except Exception:
+            return None
+        if not chunk:
+            return None
+        buf.extend(chunk)
+    return bytes(buf)
+
+
+# ── Intento de convertirse en servidor ──────────────────────────────────────
+
+_server_socket: socket.socket | None = _try_bind_server()
+
+if _server_socket is None:
+    # ── CLIENTE: ya hay una instancia corriendo ──────────────────────────────
+    valid_paths = [p for p in (_clean_path_argument(a) for a in sys.argv[1:]) if p]
+    _send_to_server(valid_paths)
+    os._exit(0)
+else:
+    # ── SERVIDOR: somos la primera instancia ────────────────────────────────
+    _write_lock_file()
+
+    _ipc_thread = threading.Thread(
+        target=_ipc_server_loop,
+        args=(_server_socket,),
+        daemon=True,
+        name="ipc-server",
+    )
+    _ipc_thread.start()
+
+
+# ---------------------------------------------------------------------------
+# Constantes de UI
+# ---------------------------------------------------------------------------
 
 _NAVBAR_BG     = "#1E2A38"
 _NAVBAR_FG     = "#FFFFFF"
 _NAVBAR_FG_DIM = "#90A4AE"
 
+
+# ---------------------------------------------------------------------------
+# App principal
+# ---------------------------------------------------------------------------
 
 def main(page: ft.Page) -> None:
     page.title        = "Extraer PDFs"
@@ -240,6 +225,7 @@ def main(page: ft.Page) -> None:
 
     doc_mgr = DocumentManagerUI(page)
 
+    # ── Diálogo de contraseña ────────────────────────────────────────────────
 
     password_field = ft.TextField(
         label="Contraseña",
@@ -265,10 +251,11 @@ def main(page: ft.Page) -> None:
         page.update()
 
     def _activate_window() -> None:
+        """Trae la ventana al frente, desminimizando si es necesario."""
         try:
             page.window.minimized = False
-            page.window.visible = True
-            page.window.focused = True
+            page.window.visible   = True
+            page.window.focused   = True
             page.update()
             page.window.to_front()
         except Exception:
@@ -278,7 +265,7 @@ def main(page: ft.Page) -> None:
                 pass
 
     def _fixed_count() -> int:
-        """Number of 'system' tabs before the PDF viewer tabs."""
+        """Número de pestañas 'sistema' antes de las pestañas de visor PDF."""
         n = 1  # home
         if extractor_tab is not None:
             n += 1
@@ -297,7 +284,12 @@ def main(page: ft.Page) -> None:
         return 1 + (1 if extractor_tab is not None else 0) + (1 if merge_tab is not None else 0)
 
     def _settings_tab_idx() -> int:
-        return 1 + (1 if extractor_tab is not None else 0) + (1 if merge_tab is not None else 0) + (1 if security_tab is not None else 0)
+        return (
+            1
+            + (1 if extractor_tab is not None else 0)
+            + (1 if merge_tab is not None else 0)
+            + (1 if security_tab is not None else 0)
+        )
 
     def _rebuild_tabs(selected_index: int | None = None) -> None:
         if selected_index is None:
@@ -317,16 +309,16 @@ def main(page: ft.Page) -> None:
 
         doc_mgr.rebuild(infos, selected_index)
 
-    # ── Abrir pdf ─────────────────────────────────────────────────────────────
+    # ── Abrir PDF ─────────────────────────────────────────────────────────────
 
     def _show_next_password_dialog(error_message: str | None = None) -> None:
         if not pending_password_paths:
             return
         current_path = pending_password_paths[0]
-        password_field.value = ""
-        password_error.value = error_message or ""
+        password_field.value   = ""
+        password_error.value   = error_message or ""
         password_error.visible = bool(error_message)
-        password_dialog.title = ft.Text(f"PDF protegido: {Path(current_path).name}")
+        password_dialog.title  = ft.Text(f"PDF protegido: {Path(current_path).name}")
         page.open(password_dialog)
 
     def _enqueue_password_prompt(path: str) -> None:
@@ -349,7 +341,7 @@ def main(page: ft.Page) -> None:
 
         password = (password_field.value or "").strip()
         if not password:
-            password_error.value = "Ingresa la contraseña"
+            password_error.value   = "Ingresa la contraseña"
             password_error.visible = True
             page.update()
             return
@@ -361,10 +353,15 @@ def main(page: ft.Page) -> None:
 
     password_dialog.actions = [
         ft.TextButton("Cancelar", on_click=lambda _: _cancel_password_open()),
-        ft.ElevatedButton("Abrir", icon=ft.Icons.LOCK_OPEN, on_click=lambda _: _confirm_password_open()),
+        ft.ElevatedButton(
+            "Abrir",
+            icon=ft.Icons.LOCK_OPEN,
+            on_click=lambda _: _confirm_password_open(),
+        ),
     ]
 
     def _open_pdf_path(path: str, password: str | None = None) -> bool:
+        # Si ya está abierto, cambiar a esa pestaña
         for i, existing in enumerate(open_tabs):
             if existing.path == path:
                 _rebuild_tabs(_fixed_count() + i)
@@ -373,7 +370,7 @@ def main(page: ft.Page) -> None:
 
         doc = None
         try:
-            doc = PDFSecurityManager.open_for_viewer(path, password=password)
+            doc    = PDFSecurityManager.open_for_viewer(path, password=password)
             viewer = PDFViewerTab(path, page, _close_viewer_tab, doc=doc)
         except PDFPasswordRequiredError:
             if doc is not None:
@@ -392,6 +389,7 @@ def main(page: ft.Page) -> None:
                 doc.close()
             _show_error(f"Error abriendo {Path(path).name}: {ex}")
             return False
+
         open_tabs.append(viewer)
         rf.push(path)
         home.refresh_recent()
@@ -406,12 +404,14 @@ def main(page: ft.Page) -> None:
             allow_multiple=True,
         )
 
-    # ── extractor tab ─────────────────────────────────────────────────────────
+    # ── Pestaña extractor ─────────────────────────────────────────────────────
 
     def _open_extractor() -> None:
         nonlocal extractor_tab
         if extractor_tab is None:
-            extractor_tab = PDFExtractionTab(page, _open_pdf_path, _close_extractor_tab, _open_security)
+            extractor_tab = PDFExtractionTab(
+                page, _open_pdf_path, _close_extractor_tab, _open_security
+            )
         _rebuild_tabs(1)
 
     def _close_extractor_tab(tab: PDFExtractionTab) -> None:
@@ -419,7 +419,7 @@ def main(page: ft.Page) -> None:
         extractor_tab = None
         _rebuild_tabs(0)
 
-    # ── merge tab ─────────────────────────────────────────────────────────────
+    # ── Pestaña combinar ──────────────────────────────────────────────────────
 
     def _open_merge() -> None:
         nonlocal merge_tab
@@ -435,10 +435,9 @@ def main(page: ft.Page) -> None:
         merge_tab = None
         _rebuild_tabs(0)
 
-    # ── security tab ──────────────────────────────────────────────────────────
+    # ── Pestaña seguridad ─────────────────────────────────────────────────────
 
     def _on_pdf_unlocked(path: str, password: str) -> None:
-        """Callback when a PDF is unlocked in the security tab."""
         _open_pdf_path(path, password=password)
 
     def _open_security() -> None:
@@ -455,7 +454,7 @@ def main(page: ft.Page) -> None:
         security_tab = None
         _rebuild_tabs(0)
 
-    # ── settings tab ─────────────────────────────────────────────────────────
+    # ── Pestaña configuración ─────────────────────────────────────────────────
 
     def _open_settings() -> None:
         nonlocal settings_tab
@@ -470,7 +469,7 @@ def main(page: ft.Page) -> None:
         settings_tab = None
         _rebuild_tabs(0)
 
-    # ── close viewer tab ─────────────────────────────────────────────────────
+    # ── Cerrar pestaña visor ──────────────────────────────────────────────────
 
     def _close_viewer_tab(viewer: PDFViewerTab) -> None:
         idx = open_tabs.index(viewer)
@@ -482,7 +481,7 @@ def main(page: ft.Page) -> None:
         else:
             _rebuild_tabs(0)
 
-    # ── file picker result ────────────────────────────────────────────────────
+    # ── Resultado del file picker ─────────────────────────────────────────────
 
     def _on_file_picked(e: ft.FilePickerResultEvent) -> None:
         if not e.files:
@@ -490,7 +489,7 @@ def main(page: ft.Page) -> None:
         for f in e.files:
             _open_pdf_path(f.path)
 
-    # ── keyboard shortcuts ────────────────────────────────────────────────────
+    # ── Atajos de teclado ─────────────────────────────────────────────────────
 
     def _on_keyboard(e: ft.KeyboardEvent) -> None:
         for v in open_tabs:
@@ -522,19 +521,23 @@ def main(page: ft.Page) -> None:
                 if not e.ctrl:
                     v._zoom_out()
 
-    # ── persistent navbar ─────────────────────────────────────────────────────
+    def _on_keyboard_up(e: ft.KeyboardEvent) -> None:
+        for v in open_tabs:
+            v._ctrl_pressed = e.ctrl
 
-    def _nav_btn(
-        icon: str,
-        label: str,
-        on_click,
-        tooltip: str = "",
-    ) -> ft.Container:
+    # ── Navbar persistente ────────────────────────────────────────────────────
+
+    def _nav_btn(icon: str, label: str, on_click, tooltip: str = "") -> ft.Container:
         return ft.Container(
             content=ft.Row(
                 [
                     ft.Icon(icon, size=16, color=_NAVBAR_FG),
-                    ft.Text(label, size=13, color=_NAVBAR_FG, weight=ft.FontWeight.W_500),
+                    ft.Text(
+                        label,
+                        size=13,
+                        color=_NAVBAR_FG,
+                        weight=ft.FontWeight.W_500,
+                    ),
                 ],
                 spacing=6,
                 tight=True,
@@ -551,7 +554,6 @@ def main(page: ft.Page) -> None:
     navbar = ft.Container(
         content=ft.Row(
             [
-                # ── brand ──
                 ft.Row(
                     [
                         ft.Icon(ft.Icons.PICTURE_AS_PDF, size=22, color="#EF5350"),
@@ -566,7 +568,6 @@ def main(page: ft.Page) -> None:
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 ft.Container(expand=True),
-                # ── action buttons ──
                 _nav_btn(
                     ft.Icons.FOLDER_OPEN_OUTLINED,
                     "Abrir PDF",
@@ -592,10 +593,7 @@ def main(page: ft.Page) -> None:
                     tooltip="Desbloquear PDFs protegidos",
                 ),
                 ft.Container(width=4),
-                ft.Container(
-                    width=1, height=20,
-                    bgcolor=_NAVBAR_FG_DIM,
-                ),
+                ft.Container(width=1, height=20, bgcolor=_NAVBAR_FG_DIM),
                 ft.Container(width=4),
                 _nav_btn(
                     ft.Icons.SETTINGS_OUTLINED,
@@ -612,11 +610,7 @@ def main(page: ft.Page) -> None:
         border=ft.border.only(bottom=ft.BorderSide(1, "#2E3E50")),
     )
 
-    # ── wiring ────────────────────────────────────────────────────────────────
-
-    def _on_keyboard_up(e: ft.KeyboardEvent) -> None:
-        for v in open_tabs:
-            v._ctrl_pressed = e.ctrl
+    # ── Wiring ────────────────────────────────────────────────────────────────
 
     file_picker = ft.FilePicker(on_result=_on_file_picked)
     page.overlay.append(file_picker)
@@ -641,60 +635,65 @@ def main(page: ft.Page) -> None:
     _rebuild_tabs(0)
     page.add(body)
 
-    # Watcher thread: espera señales del servidor IPC y programa el procesamiento
-    # de rutas en el hilo de Flet usando page.run_task().
-    def _incoming_watcher() -> None:
-        while True:
-            # Esperar hasta que haya algo nuevo
-            _incoming_event.wait()
+    # ── Limpieza al cerrar la ventana ────────────────────────────────────────
+
+    def _on_window_event(e: ft.WindowEvent) -> None:
+        if e.type == ft.WindowEventType.CLOSE:
+            _remove_lock_file()
             try:
-                # Procesamos las rutas en el hilo actual del watcher
-                # Los cambios a la UI se sincronizan internamente en Flet
-                _process_incoming_paths()
+                _server_socket.close()  # type: ignore[union-attr]
             except Exception:
                 pass
-            finally:
-                _incoming_event.clear()
 
-    # Procesar rutas recibidas desde otras instancias (single-instance IPC)
+    page.window.on_event = _on_window_event
+
+    # ── Procesador de rutas entrantes (IPC + args iniciales) ─────────────────
+
     def _process_incoming_paths() -> None:
-        """Procesa rutas que llegan del IPC desde otras instancias.
-        
-        Esta función se ejecuta cuando:
-        1. Hay nuevas rutas en _incoming_paths desde _ipc_server_loop()
-        2. O al inicio, para procesar argumentos de línea de comandos
-        """
-        try:
-            while True:
-                with _incoming_lock:
-                    if not _incoming_paths:
-                        break
-                    candidate = _incoming_paths.pop(0)
-                if not candidate:
-                    continue
-                if candidate == "__ACTIVATE__":
-                    _activate_window()
-                    continue
-                # Las rutas ya vienen limpias y validadas del IPC
-                try:
-                    _open_pdf_path(candidate)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        """Desencola y abre PDFs recibidos por IPC o desde argv."""
+        while True:
+            with _incoming_lock:
+                if not _incoming_paths:
+                    break
+                candidate = _incoming_paths.pop(0)
+            if not candidate:
+                continue
+            if candidate == "__ACTIVATE__":
+                _activate_window()
+                continue
+            try:
+                _open_pdf_path(candidate)
+            except Exception:
+                pass
 
-    threading.Thread(target=_incoming_watcher, daemon=True).start()
+    def _incoming_watcher() -> None:
+        """Hilo daemon: espera el evento IPC y despacha al hilo de Flet."""
+        while True:
+            _incoming_event.wait()
+            _incoming_event.clear()
+            try:
+                # page.run_task programa el callback en el event-loop de Flet
+                page.run_task(_process_incoming_paths_async)
+            except Exception:
+                pass
 
-    # Procesar PDFs pasados como argumentos de línea de comandos (doble clic, "Abrir con", etc.)
-    # Esto ocurre solo en la primera instancia; instancias secundarias envían por IPC y salen
+    async def _process_incoming_paths_async() -> None:
+        """Versión async de _process_incoming_paths para run_task."""
+        _process_incoming_paths()
+
+    threading.Thread(
+        target=_incoming_watcher,
+        daemon=True,
+        name="ipc-watcher",
+    ).start()
+
+    # Procesar PDFs pasados como argv en esta primera instancia
     for arg in sys.argv[1:]:
         cleaned = _clean_path_argument(arg)
         if cleaned:
-            # Agregar a la cola para procesamiento uniforme
             with _incoming_lock:
                 _incoming_paths.append(cleaned)
-    
-    # Procesar las rutas iniciales (ya sea del IPC o de los argumentos)
+
     _process_incoming_paths()
 
 

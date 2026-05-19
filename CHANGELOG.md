@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.9]- 2026-05-19
+
+### Changed
+- **Eliminación de dependencias críticas**: Se removieron por completo los módulos de `pywin32` para solucionar conflictos en el empaquetado con `flet build windows` y garantizar la compatibilidad multiplataforma en Linux y macOS.
+- **Rediseño de Instancia Única (IPC)**: Se migró la lógica en `main.py` hacia una solución nativa basada en sockets TCP locales combinados con un archivo de bloqueo (*lockfile*).
+- **Módulo de Impresión Portátil**: Se reestructuró la lógica de impresión utilizando utilidades nativas de cada sistema operativo (PowerShell en Windows, y CUPS en Linux y macOS) en lugar de llamadas a la API de Windows.
+
+## [0.1.8] - 2026-05-18
+
+### Changed
+- Se actualizaron los imports de pywin32 a nivel explícito para garantizar que flet build los detecte correctamente.
+- Se movieron imports de win32print, win32ui, win32con desde imports dinámicos a explícitos en _print_mixin.py.
+
 ## [0.1.8] - 2026-05-18
 
 ### Changed
