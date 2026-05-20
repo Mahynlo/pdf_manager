@@ -12,7 +12,7 @@
 
 #define MyAppName        "Extraer PDFs"
 #ifndef MyAppVersion
-  #define MyAppVersion   "0.1.9"
+  #define MyAppVersion   "0.1.10"
 #endif
 #define MyAppPublisher   "Flet"
 #define MyAppExeName     "extraer_pdfs.exe"
