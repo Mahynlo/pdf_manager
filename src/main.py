@@ -46,6 +46,9 @@ from settings_tab import SettingsTab
 _IPC_PORT      = 57423          # Cambia si hay conflicto con otra app
 _IPC_HOST      = "127.0.0.1"
 _LOCK_FILENAME = "extrar_pdfs.lock"
+_WEB_UPLOAD_DIR = Path(__file__).resolve().parents[1] / "storage" / "temp"
+
+_WEB_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 _incoming_paths: list[str] = []
 _incoming_lock  = threading.Lock()
@@ -76,37 +79,50 @@ def _clean_path_argument(arg: str) -> str | None:
 
 
 def _collect_initial_paths() -> list[str]:
-    """Recolecta rutas PDF desde EXTRAR_PDF_PATH y sys.argv."""
+    """Recolecta rutas PDF desde sys.argv (modo empaquetado Flet-compatible)."""
     paths: list[str] = []
+    
+    # En builds de Flet, los args propios de Flutter vienen primero.
+    # Filtramos solo los que terminan en .pdf y existen en disco.
+    for arg in sys.argv[1:]:
+        # Flet/Flutter puede pasar args como --dart-entrypoint-args=ruta
+        if "=" in arg:
+            arg = arg.split("=", 1)[1]
+        cleaned = _clean_path_argument(arg)
+        if cleaned and cleaned not in paths:
+            paths.append(cleaned)
+    
+    # Fallback: variable de entorno (ya no es el método principal, pero se mantiene)
     env_val = os.environ.get("EXTRAR_PDF_PATH", "").strip()
     if env_val:
         for raw in env_val.split("|"):
             cleaned = _clean_path_argument(raw)
             if cleaned and cleaned not in paths:
                 paths.append(cleaned)
-    for arg in sys.argv[1:]:
-        cleaned = _clean_path_argument(arg)
-        if cleaned and cleaned not in paths:
-            paths.append(cleaned)
+    
     return paths
 
 
-def _send_to_server(paths: list[str]) -> bool:
-    """Intenta enviar rutas (o __ACTIVATE__) a la instancia ya corriendo.
-
-    Protocolo: cada mensaje es uint32-BE (longitud) + bytes UTF-8 de la línea.
-    Retorna True si la conexión y envío fueron exitosos.
+def _send_to_server(paths: list[str], retries: int = 8, delay: float = 0.4) -> bool:
+    """Envía rutas al servidor con reintentos para cubrir el arranque lento.
+    
+    El servidor puede tardar varios segundos en estar listo (Flutter + Python).
+    Con 8 reintentos × 0.4 s = hasta 3.2 s de espera total.
     """
     payload_lines = paths if paths else ["__ACTIVATE__"]
     payload = "\n".join(payload_lines)
     data = payload.encode("utf-8")
     header = struct.pack(">I", len(data))
-    try:
-        with socket.create_connection((_IPC_HOST, _IPC_PORT), timeout=2) as s:
-            s.sendall(header + data)
-        return True
-    except OSError:
-        return False
+    
+    for attempt in range(retries):
+        try:
+            with socket.create_connection((_IPC_HOST, _IPC_PORT), timeout=2) as s:
+                s.sendall(header + data)
+            return True
+        except OSError:
+            if attempt < retries - 1:
+                time.sleep(delay)
+    return False
 
 
 def _try_bind_server() -> socket.socket | None:
@@ -381,7 +397,13 @@ def main(page: ft.Page) -> None:
         ),
     ]
 
-    def _open_pdf_path(path: str, password: str | None = None) -> bool:
+    def _open_pdf_path(path: str | None, password: str | None = None) -> bool:
+        if not path:
+            _show_error("No se recibió una ruta válida para el PDF seleccionado")
+            return False
+
+        pdf_name = Path(path).name
+
         # Si ya está abierto, cambiar a esa pestaña
         for i, existing in enumerate(open_tabs):
             if existing.path == path:
@@ -408,7 +430,7 @@ def main(page: ft.Page) -> None:
         except Exception as ex:
             if doc is not None:
                 doc.close()
-            _show_error(f"Error abriendo {Path(path).name}: {ex}")
+            _show_error(f"Error abriendo {pdf_name}: {ex}")
             return False
 
         open_tabs.append(viewer)
@@ -508,6 +530,11 @@ def main(page: ft.Page) -> None:
         if not e.files:
             return
         for f in e.files:
+            if not f.path:
+                _show_error(
+                    f"No se pudo abrir {f.name}: en la versión web el archivo debe subirse primero"
+                )
+                continue
             _open_pdf_path(f.path)
 
     # ── Atajos de teclado ─────────────────────────────────────────────────────
@@ -715,4 +742,4 @@ def main(page: ft.Page) -> None:
         _incoming_event.set()
 
 
-ft.app(main)
+ft.app(main, upload_dir=str(_WEB_UPLOAD_DIR))
