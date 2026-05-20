@@ -58,7 +58,7 @@ Name: "{commondesktop}\{#MyAppName}";      Filename: "{app}\{#MyAppExeName}"; Ta
 ; ── ProgID para archivos PDF ───────────────────────────────────────────────
 Root: HKCR; Subkey: "{#MyAppProgID}";                          ValueType: string; ValueName: "";        ValueData: "Documento PDF (Extraer PDFs)"; Flags: uninsdeletekey
 Root: HKCR; Subkey: "{#MyAppProgID}\DefaultIcon";              ValueType: string; ValueName: "";        ValueData: "{app}\{#MyAppExeName},0"
-Root: HKCR; Subkey: "{#MyAppProgID}\shell\open\command";       ValueType: string; ValueName: "";        ValueData: "cmd /c set ""EXTRAR_PDF_PATH=%1"" && ""{app}\{#MyAppExeName}"" ""%1"""
+Root: HKCR; Subkey: "{#MyAppProgID}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 
 ; ── Registro de capacidades de la aplicacion (modo moderno de Windows) ─────
 Root: HKLM; Subkey: "Software\{#MyAppName}";                                          Flags: uninsdeletekey
