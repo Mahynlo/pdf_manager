@@ -1,8 +1,5 @@
 name: Build & Package Windows Installer
 
-# Dispara el workflow:
-#   - Al hacer push de un tag vX.Y.Z  → compila + crea Release en GitHub
-#   - Manualmente desde la UI de GitHub (Actions → Run workflow)
 on:
   push:
     tags:
@@ -19,25 +16,20 @@ jobs:
     name: Build Windows App + Installer
     runs-on: windows-latest
     permissions:
-      contents: write   # necesario para crear GitHub Releases
+      contents: write
 
     steps:
-      # ── 1. Código fuente ────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── 2. Determinar version ───────────────────────────────────────────────
       - name: Get version
         id: version
         shell: pwsh
         run: |
-          # Prioridad: input manual > tag git > pyproject.toml
           $ver = "${{ github.event.inputs.version_override }}"
-
           if (-not $ver -and "${{ github.ref }}" -match "refs/tags/v(.+)") {
             $ver = $Matches[1]
           }
-
           if (-not $ver) {
             $content = Get-Content pyproject.toml -Raw
             if ($content -match 'version\s*=\s*"([^"]+)"') {
@@ -46,17 +38,12 @@ jobs:
               $ver = "0.1.0"
             }
           }
-
           Write-Host "Version: $ver"
           echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
 
-      # ── 3. Instalar uv ──────────────────────────────────────────────────────
       - name: Setup uv
         uses: astral-sh/setup-uv@v4
 
-      # ── 4. Cachear Flutter gestionado por Flet (~/.flet) ───────────────────
-      #       Flet descarga Flutter automáticamente la primera vez;
-      #       la cache evita re-descargarlo en cada run.
       - name: Cache Flet/Flutter
         uses: actions/cache@v4
         with:
@@ -65,82 +52,71 @@ jobs:
           restore-keys: |
             flet-flutter-${{ runner.os }}-
 
-      # ── 5. Instalar dependencias Python ────────────────────────────────────
       - name: Install Python dependencies
         run: uv sync
 
-      # ── 6. Build con Flet ───────────────────────────────────────────────────
       - name: Build Windows app
         env:
           PYTHONUTF8: "1"
           PYTHONIOENCODING: "utf-8"
         run: uv run flet build windows -v
 
-      # ── 7. Verificar y mostrar salida del build ─────────────────────────────
       - name: Locate build output
         id: buildout
         shell: pwsh
         run: |
           $base = "build\windows"
-          Write-Host "Contenido de $base :"
-          Get-ChildItem $base -Recurse -Filter "*.exe" | ForEach-Object {
-            Write-Host "  $($_.FullName)"
-          }
-
-          # Ruta estándar de Flutter para Windows x64
           $expected = "build\windows\x64\runner\Release"
           if (Test-Path $expected) {
             echo "BUILD_DIR=$expected" >> $env:GITHUB_OUTPUT
           } else {
-            # Fallback: primer directorio que contenga un .exe
             $found = Get-ChildItem $base -Filter "*.exe" -Recurse | Select-Object -First 1
-            if (-not $found) {
-              Write-Error "No se encontro ningun .exe en $base"
-              exit 1
-            }
+            if (-not $found) { Write-Error "No se encontró .exe en $base"; exit 1 }
             echo "BUILD_DIR=$($found.DirectoryName)" >> $env:GITHUB_OUTPUT
           }
+          Write-Host "BUILD_DIR: $(cat $env:GITHUB_OUTPUT | Select-String BUILD_DIR)"
 
-      # ── 8. Instalar InnoSetup via Chocolatey ────────────────────────────────
       - name: Install InnoSetup
         run: choco install innosetup --no-progress -y
 
-      # ── 9. Compilar el instalador ───────────────────────────────────────────
+      # ── PASO CLAVE: parchear el .iss con el PATH real del build ─────────────
+      # Si flet build produce el exe en un subdirectorio diferente al esperado,
+      # este paso lo detecta y parchea el .iss automáticamente.
+      - name: Patch setup.iss with real build dir
+        shell: pwsh
+        run: |
+          $buildDir = "${{ steps.buildout.outputs.BUILD_DIR }}"
+          $issPath  = "installer\setup.iss"
+          $content  = Get-Content $issPath -Raw
+          # Reemplazar la macro MyAppSourceDir con la ruta real detectada
+          $content  = $content -replace '#define MyAppSourceDir.*', "#define MyAppSourceDir `"$buildDir`""
+          Set-Content $issPath $content -Encoding UTF8
+          Write-Host "setup.iss parcheado con BUILD_DIR=$buildDir"
+
       - name: Compile installer
         shell: pwsh
         run: |
           $ISCC    = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           $IssFile = "installer\setup.iss"
           $version = "${{ steps.version.outputs.VERSION }}"
-          $buildDir = "${{ steps.buildout.outputs.BUILD_DIR }}"
 
           New-Item -ItemType Directory -Force -Path dist | Out-Null
 
-          Write-Host "Compilando instalador v$version desde $buildDir ..."
-          & $ISCC `
-            "/DMyAppVersion=$version" `
-            "/DMyAppSourceDir=$buildDir" `
-            $IssFile
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "ISCC.exe fallo con codigo $LASTEXITCODE"
-            exit 1
-          }
+          & $ISCC "/DMyAppVersion=$version" $IssFile
+          if ($LASTEXITCODE -ne 0) { Write-Error "ISCC.exe falló con código $LASTEXITCODE"; exit 1 }
 
           Write-Host "Archivos en dist/:"
           Get-ChildItem dist -Filter "*.exe" | ForEach-Object {
             Write-Host "  $($_.Name)  ($([math]::Round($_.Length / 1MB, 1)) MB)"
           }
 
-      # ── 10. Subir instalador como artefacto del workflow ────────────────────
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: ExtraerPDFs-installer-${{ steps.version.outputs.VERSION }}
           path: dist/*.exe
           if-no-files-found: error
-
-      # ── 11. Crear GitHub Release (solo en tags v*) ──────────────────────────
+      # ── 11. Crear GitHub Release (solo en tags v*) 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
