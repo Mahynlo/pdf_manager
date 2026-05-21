@@ -2,15 +2,17 @@
 
 IPC de instancia única via TCP loopback.
 
-PROBLEMA EN WINDOWS con named pipes y SO_REUSEADDR:
-  Ambos permiten que MÚLTIPLES procesos hagan bind/listen en el mismo
-  recurso, por lo que todas las instancias se convierten en "servidor"
-  y se abren ventanas duplicadas.
+PROBLEMA RAÍZ en flet build windows:
+  Flutter crea y muestra la ventana ANTES de que Python corra.
+  Cualquier chequeo a nivel de módulo (os._exit) mata el proceso
+  pero la ventana ya estaba visible → ventana huérfana persistente.
 
-SOLUCIÓN: TCP con SO_EXCLUSIVEADDRUSE en Windows.
-  Este flag garantiza que bind() falle si otra instancia ya tiene el
-  puerto, igual que SO_REUSEADDR hace en Linux/macOS correctamente.
+SOLUCIÓN: el chequeo de instancia única ocurre DENTRO de main(page),
+  donde ya tenemos acceso a page.window.visible para ocultar la ventana
+  antes de que el usuario la vea y cerrarla limpiamente.
 """
+
+from __future__ import annotations
 
 import sys
 import os
@@ -24,35 +26,15 @@ from pathlib import Path
 
 import flet as ft
 
-import recent_files as rf
-from document_manager_ui import DocumentManagerUI
-from home import HomePage
-from pdf_extractor import PDFExtractionTab
-from pdf_merge import MergePDFTab
-from pdf_security import (
-    PDFInvalidPasswordError,
-    PDFPasswordRequiredError,
-    PDFSecurityManager,
-    PDFSecurityTab,
-)
-from pdf_viewer import PDFViewerTab
-from settings_tab import SettingsTab
+# Los módulos de características (pdf_viewer, pdf_extractor, pdf_merge,
+# pdf_security, settings_tab) se importan de forma lazy dentro de main()
+# o dentro de las funciones que los usan. Esto hace que:
+#   · La instancia secundaria ("Abrir con") salga en milisegundos
+#     antes de que el usuario vea la ventana en blanco.
+#   · La instancia primaria muestre el home rápidamente.
+# recent_files, document_manager_ui y home se importan dentro de main()
+# después del check de instancia única, por la misma razón.
 
-
-# ---------------------------------------------------------------------------
-# IPC: Instancia única via TCP loopback
-# ---------------------------------------------------------------------------
-# Estrategia:
-#   1. Se elige un puerto fijo en loopback.
-#   2. La primera instancia logra hacer bind() → es el SERVIDOR.
-#   3. Las siguientes instancias fallan en bind() → son CLIENTES:
-#      envían sus rutas PDF al servidor y terminan.
-#
-# Por qué TCP con SO_EXCLUSIVEADDRUSE y no named pipes / multiprocessing:
-#   En Windows, multiprocessing.connection.Listener con named pipes y
-#   sockets con SO_REUSEADDR permiten que múltiples procesos hagan bind
-#   simultáneamente. SO_EXCLUSIVEADDRUSE garantiza exclusividad real.
-# ---------------------------------------------------------------------------
 
 _IPC_PORT = 57423          # Puerto fijo; cambia si hay conflicto con otra app
 _IPC_HOST = "127.0.0.1"
@@ -226,27 +208,6 @@ def _ipc_server_loop(server_sock: socket.socket) -> None:
                 pass
 
 
-# ── Intento de convertirse en servidor ──────────────────────────────────────
-
-_server_socket: socket.socket | None = _try_bind_server()
-_initial_paths: list[str] = _collect_initial_paths()
-
-if _server_socket is None:
-    # ── CLIENTE: ya hay una instancia corriendo ──────────────────────────────
-    _send_to_server(_initial_paths)
-    os._exit(0)
-else:
-    # ── SERVIDOR: somos la primera instancia ────────────────────────────────
-    _ipc_thread = threading.Thread(
-        target=_ipc_server_loop,
-        args=(_server_socket,),
-        daemon=True,
-        name="ipc-server",
-    )
-    _ipc_thread.start()
-    _incoming_paths.extend(_initial_paths)
-
-
 # ---------------------------------------------------------------------------
 # Constantes de UI
 # ---------------------------------------------------------------------------
@@ -261,16 +222,64 @@ _NAVBAR_FG_DIM = "#90A4AE"
 # ---------------------------------------------------------------------------
 
 def main(page: ft.Page) -> None:
-    page.title        = "Extraer PDFs"
-    page.theme_mode   = ft.ThemeMode.LIGHT
-    page.padding      = 0
-    page.window.icon  = "icon.png"
+    # ── Instancia única: primer acto antes de cualquier UI ───────────────────
+    # Aquí (dentro de main) ya tenemos page.window para ocultar la ventana
+    # si somos una instancia secundaria, evitando la ventana huérfana.
+    server_sock = _try_bind_server()
 
-    open_tabs:     list[PDFViewerTab]      = []
-    extractor_tab: PDFExtractionTab | None = None
-    merge_tab:     MergePDFTab      | None = None
-    security_tab:  PDFSecurityTab   | None = None
-    settings_tab:  SettingsTab      | None = None
+    if server_sock is None:
+        # Somos una instancia secundaria. Ocultar la ventana antes de que el
+        # usuario la vea, reenviar rutas a la instancia principal y salir.
+        page.window.visible = False
+        page.update()
+        initial_paths = _collect_initial_paths()
+        threading.Thread(
+            target=lambda: (_send_to_server(initial_paths), os._exit(0)),
+            daemon=True,
+            name="ipc-secondary-exit",
+        ).start()
+        return
+
+    # Somos la instancia principal.
+    # Configurar ventana y mostrar spinner ANTES de cualquier import pesado
+    # para que el usuario vea contenido en ~0.5 s en lugar de blanco.
+    page.title       = "Extraer PDFs"
+    page.theme_mode  = ft.ThemeMode.LIGHT
+    page.padding     = 0
+    page.window.icon = "icon.png"
+    page.add(ft.Container(
+        content=ft.Column(
+            [ft.ProgressRing(width=44, height=44, stroke_width=3, color="#1E2A38")],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        expand=True,
+        alignment=ft.alignment.center,
+        bgcolor=ft.Colors.WHITE,
+    ))
+    page.update()   # ← spinner visible en ~0.5 s desde que abre la ventana
+
+    # Importar módulos de la app DESPUÉS del spinner para no bloquear la UI.
+    # Las instancias secundarias salen antes de llegar aquí.
+    import recent_files as rf
+    from document_manager_ui import DocumentManagerUI
+    from home import HomePage
+
+    _ipc_thread = threading.Thread(
+        target=_ipc_server_loop,
+        args=(server_sock,),
+        daemon=True,
+        name="ipc-server",
+    )
+    _ipc_thread.start()
+    _incoming_paths.extend(_collect_initial_paths())
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    open_tabs:     list = []   # list[PDFViewerTab]
+    extractor_tab = None       # PDFExtractionTab | None
+    merge_tab     = None       # MergePDFTab | None
+    security_tab  = None       # PDFSecurityTab | None
+    settings_tab  = None       # SettingsTab | None
     pending_password_paths: list[str] = []
 
     doc_mgr = DocumentManagerUI(page)
@@ -411,6 +420,13 @@ def main(page: ft.Page) -> None:
     ]
 
     def _open_pdf_path(path: str | None, password: str | None = None) -> bool:
+        from pdf_security import (        # lazy — carga fitz solo al abrir un PDF
+            PDFInvalidPasswordError,
+            PDFPasswordRequiredError,
+            PDFSecurityManager,
+        )
+        from pdf_viewer import PDFViewerTab  # lazy — carga fitz + onnxtr
+
         if not path:
             _show_error("No se recibió una ruta válida para el PDF seleccionado")
             return False
@@ -465,12 +481,13 @@ def main(page: ft.Page) -> None:
     def _open_extractor() -> None:
         nonlocal extractor_tab
         if extractor_tab is None:
+            from pdf_extractor import PDFExtractionTab  # lazy
             extractor_tab = PDFExtractionTab(
                 page, _open_pdf_path, _close_extractor_tab, _open_security
             )
         _rebuild_tabs(1)
 
-    def _close_extractor_tab(tab: PDFExtractionTab) -> None:
+    def _close_extractor_tab(tab) -> None:
         nonlocal extractor_tab
         extractor_tab = None
         _rebuild_tabs(0)
@@ -482,10 +499,11 @@ def main(page: ft.Page) -> None:
         if merge_tab is not None:
             _rebuild_tabs(_merge_tab_idx())
             return
+        from pdf_merge import MergePDFTab  # lazy
         merge_tab = MergePDFTab(page, _close_merge_tab, _open_pdf_path, _open_security)
         _rebuild_tabs(_merge_tab_idx())
 
-    def _close_merge_tab(tab: MergePDFTab) -> None:
+    def _close_merge_tab(tab) -> None:
         nonlocal merge_tab
         tab.close()
         merge_tab = None
@@ -501,10 +519,11 @@ def main(page: ft.Page) -> None:
         if security_tab is not None:
             _rebuild_tabs(_security_tab_idx())
             return
+        from pdf_security import PDFSecurityTab  # lazy
         security_tab = PDFSecurityTab(page, _on_pdf_unlocked, _close_security_tab)
         _rebuild_tabs(_security_tab_idx())
 
-    def _close_security_tab(tab: PDFSecurityTab) -> None:
+    def _close_security_tab(tab) -> None:
         nonlocal security_tab
         tab.close()
         security_tab = None
@@ -517,10 +536,11 @@ def main(page: ft.Page) -> None:
         if settings_tab is not None:
             _rebuild_tabs(_settings_tab_idx())
             return
+        from settings_tab import SettingsTab  # lazy
         settings_tab = SettingsTab(page, _close_settings_tab)
         _rebuild_tabs(_settings_tab_idx())
 
-    def _close_settings_tab(tab: SettingsTab) -> None:
+    def _close_settings_tab(tab) -> None:
         nonlocal settings_tab
         settings_tab = None
         _rebuild_tabs(0)
@@ -695,6 +715,7 @@ def main(page: ft.Page) -> None:
     )
 
     _rebuild_tabs(0)
+    page.controls.clear()   # remueve el spinner
     page.add(body)
 
     # ── Limpieza al cerrar la ventana ────────────────────────────────────────
@@ -702,7 +723,7 @@ def main(page: ft.Page) -> None:
     def _on_window_event(e: ft.WindowEvent) -> None:
         if e.type == ft.WindowEventType.CLOSE:
             try:
-                _server_socket.close()  # type: ignore[union-attr]
+                server_sock.close()
             except Exception:
                 pass
 
