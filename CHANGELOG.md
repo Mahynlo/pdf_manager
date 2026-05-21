@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.13] - 2026-05-21
+
+### Changed
+- **Módulo de agente IA refactorizado**: `_redact_agent_mixin.py` (~2100 líneas) se dividió en tres módulos independientes: `_redact_mixin.py` (búsqueda, términos, vista previa y aplicación de censura), `_profiles_mixin.py` (diálogos de gestión de perfiles de censura) y `_agent_mixin.py` (panel de chat y acciones rápidas del agente IA).
+
 ## [0.1.12] - 2026-05-21
 
 ### Added
