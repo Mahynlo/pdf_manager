@@ -1,6 +1,7 @@
 """Rendering, navigation, zoom and save behaviour for PDFViewerTab."""
 from __future__ import annotations
 
+import bisect
 import threading
 from pathlib import Path
 
@@ -598,17 +599,28 @@ class _RenderMixin:
         threading.Thread(target=_worker, daemon=True).start()
 
     def _render_visible(self, pixels: float, viewport_h: float) -> None:
+        if not self._page_cum_offsets:
+            return
         margin = viewport_h * 0.5
         top    = pixels - margin
         bottom = pixels + viewport_h + margin
-        for pn, (start, h) in enumerate(zip(self._page_cum_offsets, self._page_heights)):
-            if start + h >= top and start <= bottom:
+        # Saltar directamente a la primera página que puede estar en el viewport:
+        # bisect_right da la posición de inserción después de todos los offsets ≤ top,
+        # así que -1 nos da la última página que empieza antes del borde superior.
+        start_idx = max(0, bisect.bisect_right(self._page_cum_offsets, top) - 1)
+        for pn in range(start_idx, len(self._page_cum_offsets)):
+            start = self._page_cum_offsets[pn]
+            if start > bottom:
+                break
+            if start + self._page_heights[pn] >= top:
                 self._render_page_slot(pn)
 
-    def _evict_distant(self, pixels: float, viewport_h: float) -> None:
+    def _evict_distant(self, pixels: float, viewport_h: float) -> bool:
+        """Oculta páginas alejadas del viewport. Retorna True si eviccionó alguna."""
         keep_top    = pixels - viewport_h * _EVICT_MARGIN
         keep_bottom = pixels + viewport_h * (1.0 + _EVICT_MARGIN)
         loading_overlays = getattr(self, "_loading_overlays", [])
+        evicted = False
         for pn, (start, h) in enumerate(zip(self._page_cum_offsets, self._page_heights)):
             if pn not in self._rendered:
                 continue
@@ -620,6 +632,8 @@ class _RenderMixin:
                 self._page_images[pn].visible = False
                 if pn < len(loading_overlays):
                     loading_overlays[pn].visible = True
+                evicted = True
+        return evicted
 
     # ── render / update ───────────────────────────────────────────────────────
 
@@ -669,7 +683,6 @@ class _RenderMixin:
 
         mid = float(pixels) + float(viewport_h) / 2.0
         page_changed = False
-        import bisect
         idx = bisect.bisect_right(self._page_cum_offsets, mid)
         pn = max(0, idx - 1)
         if 0 <= pn < len(self._page_cum_offsets):
@@ -681,14 +694,20 @@ class _RenderMixin:
 
         px, vh = float(pixels), float(viewport_h)
         self._render_visible(px, vh)
-        if page_changed:
+
+        # Evicción y actualización de UI en un solo bloque:
+        # si eviccionamos páginas, necesitamos propagar el visible=False a Flutter
+        # para liberar las texturas de GPU; se combina con el update de navegación.
+        evicted = False
+        if abs(px - self._last_evict_px) >= _EVICT_THRESHOLD:
+            self._last_evict_px = px
+            evicted = self._evict_distant(px, vh)
+
+        if page_changed or evicted:
             try:
                 self.page_ref.update()
             except Exception:
                 pass
-        if abs(px - self._last_evict_px) >= _EVICT_THRESHOLD:
-            self._last_evict_px = px
-            self._evict_distant(px, vh)
 
     def _show_snack(self, msg: str) -> None:
         self.page_ref.snack_bar = ft.SnackBar(ft.Text(msg), open=True)

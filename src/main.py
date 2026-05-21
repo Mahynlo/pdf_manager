@@ -281,6 +281,7 @@ def main(page: ft.Page) -> None:
     security_tab  = None       # PDFSecurityTab | None
     settings_tab  = None       # SettingsTab | None
     pending_password_paths: list[str] = []
+    _opening_now:  set  = set()  # paths being opened; prevents double-open
 
     doc_mgr = DocumentManagerUI(page)
 
@@ -440,6 +441,11 @@ def main(page: ft.Page) -> None:
                 _activate_window()
                 return True
 
+        # Evitar doble-apertura por doble-clic o clics rápidos repetidos
+        if path in _opening_now:
+            return True
+        _opening_now.add(path)
+
         doc = None
         try:
             doc    = PDFSecurityManager.open_for_viewer(path, password=password)
@@ -461,6 +467,8 @@ def main(page: ft.Page) -> None:
                 doc.close()
             _show_error(f"Error abriendo {pdf_name}: {ex}")
             return False
+        finally:
+            _opening_now.discard(path)
 
         open_tabs.append(viewer)
         rf.push(path)
@@ -768,6 +776,15 @@ def main(page: ft.Page) -> None:
     _ui_ready.set()
     if _incoming_paths:
         _incoming_event.set()
+
+    # Pre-calentar imports pesados en background para que el primer PDF abra rápido
+    def _prewarm() -> None:
+        try:
+            import pdf_viewer    # noqa: F401
+            import pdf_security  # noqa: F401
+        except Exception:
+            pass
+    threading.Thread(target=_prewarm, daemon=True, name="prewarm").start()
 
 
 ft.app(main, upload_dir=str(_WEB_UPLOAD_DIR))

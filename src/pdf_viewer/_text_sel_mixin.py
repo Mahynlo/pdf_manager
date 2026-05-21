@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import urllib.parse
+from collections import defaultdict
 
 import flet as ft
 import fitz
@@ -64,22 +65,23 @@ class _TextSelMixin:
     # ── visual sweep selection ────────────────────────────────────────────────
 
     def _words_in_sweep(
-        self, words: list[tuple], start_pt: tuple, end_pt: tuple
+        self, words: list[tuple], start_pt: tuple, end_pt: tuple,
+        pn: int | None = None,
     ) -> list[tuple]:
         """Return words between start_pt and end_pt using the column-aware index.
-        
+
         Leverages the pre-sorted list of words to perfectly maintain reading
         order and prevent cross-column bleeding.
         """
         if not words:
             return []
-            
-        si = self._nearest_word_index(words, start_pt)
-        ei = self._nearest_word_index(words, end_pt)
-        
+
+        si = self._nearest_word_index(words, start_pt, pn)
+        ei = self._nearest_word_index(words, end_pt, pn)
+
         if si > ei:
             si, ei = ei, si
-            
+
         return [(r, t) for r, t in words[si : ei + 1] if t.strip()]
 
     # ── word cache ────────────────────────────────────────────────────────────
@@ -117,17 +119,58 @@ class _TextSelMixin:
         # Column-aware reading order
         words = _sort_words_column_aware(words, page_width)
         self._page_words[pn] = words
+
+        # Build y-band spatial index: {band: [(original_idx, rect), ...]}
+        bands: dict[int, list[tuple[int, fitz.Rect]]] = {}
+        for idx, (r, _) in enumerate(words):
+            band = round(r.y0 / 5) * 5
+            if band not in bands:
+                bands[band] = []
+            bands[band].append((idx, r))
+        self._page_word_bands[pn] = bands
+
         return words
 
     # ── flow-based selection ──────────────────────────────────────────────────
 
     def _nearest_word_index(
-        self, words: list[tuple], pt: tuple[float, float]
+        self, words: list[tuple], pt: tuple[float, float], pn: int | None = None
     ) -> int:
-        """Return the index of the word at or nearest to PDF point *pt*."""
+        """Return the index of the word at or nearest to PDF point *pt*.
+
+        Uses the pre-built y-band index (O(k)) when *pn* is provided, falling
+        back to a full O(n) scan otherwise.
+        """
         if not words:
             return 0
         px, py = pt
+
+        bands = self._page_word_bands.get(pn) if pn is not None else None
+        if bands:
+            query_band = round(py / 5) * 5
+            # ±2 bands = ±10 pt — covers typical text line heights
+            candidates: list[tuple[int, fitz.Rect]] = []
+            for db in range(-2, 3):
+                b = query_band + db * 5
+                if b in bands:
+                    candidates.extend(bands[b])
+            if not candidates:
+                # Click is in whitespace; scan all bands (same cost as O(n))
+                for band_list in bands.values():
+                    candidates.extend(band_list)
+
+            for i, r in candidates:
+                if r.x0 <= px <= r.x1 and r.y0 <= py <= r.y1:
+                    return i
+            best_i, best_d = 0, float("inf")
+            for i, r in candidates:
+                cx, cy = (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2
+                d = (px - cx) ** 2 + (py - cy) ** 2
+                if d < best_d:
+                    best_d, best_i = d, i
+            return best_i
+
+        # O(n) fallback (band index not yet built)
         for i, (r, _) in enumerate(words):
             if r.x0 <= px <= r.x1 and r.y0 <= py <= r.y1:
                 return i
@@ -186,7 +229,7 @@ class _TextSelMixin:
             page_start_pt = spt if i == spn else (0, -9999)
             page_end_pt   = ept if i == epn else (9999, 9999)
             
-            selected = self._words_in_sweep(words, page_start_pt, page_end_pt)
+            selected = self._words_in_sweep(words, page_start_pt, page_end_pt, pn=i)
             if not selected:
                 layer = self._text_sel_layers[i]
                 if layer.controls or getattr(layer, "visible", False):
@@ -198,7 +241,6 @@ class _TextSelMixin:
                 continue
                 
             has_any_selection = True
-            from collections import defaultdict
             line_bands: dict = defaultdict(list)
             for word_rect, word_text in selected:
                 if not word_text.strip():
@@ -365,7 +407,7 @@ class _TextSelMixin:
                 if not words: continue
                 page_start_pt = spt if i == spn else (0, -9999)
                 page_end_pt   = ept if i == epn else (9999, 9999)
-                selected = self._words_in_sweep(words, page_start_pt, page_end_pt)
+                selected = self._words_in_sweep(words, page_start_pt, page_end_pt, pn=i)
                 rects = [r for r, t in selected if t.strip()]
                 if not rects: continue
                 if self._annot.apply_text_tool(self.doc, i, tool, rects=rects):
@@ -461,7 +503,7 @@ class _TextSelMixin:
         words = self._get_page_words(pn)
         if not words:
             return
-        idx = self._nearest_word_index(words, pdf_pt)
+        idx = self._nearest_word_index(words, pdf_pt, pn)
         
         # Expand left to find the start of the word
         si = idx
@@ -506,8 +548,12 @@ class _TextSelMixin:
     def _select_paragraph_at(self, pn: int, pdf_pt: tuple) -> None:
         """Select all words in the text block that contains *pdf_pt*."""
         px, py = pdf_pt
-        with self._doc_lock:
-            blocks = self.doc[pn].get_text("blocks")
+        if pn in self._page_blocks_cache:
+            blocks = self._page_blocks_cache[pn]
+        else:
+            with self._doc_lock:
+                blocks = self.doc[pn].get_text("blocks")
+            self._page_blocks_cache[pn] = blocks
 
         # Find the block that contains the click point (type 0 = text block)
         target_rect: fitz.Rect | None = None
