@@ -802,7 +802,16 @@ class _RenderMixin:
 
     def _on_page_scroll(self, e, pn: int) -> None:
         """Handle scroll-wheel events over a page. Ctrl+Scroll zooms in/out."""
-        if not getattr(self, "_ctrl_pressed", False):
+        import time
+        # _ctrl_pressed is set by main.py on keydown (Flet has no keyup event).
+        # We expire it after 1 s so releasing Ctrl restores normal scroll.
+        # On systems with key auto-repeat the Ctrl keydown keeps refreshing
+        # _ctrl_time (~30 ms), so zoom works for the entire hold duration.
+        ctrl = (
+            getattr(self, "_ctrl_pressed", False)
+            and (time.monotonic() - getattr(self, "_ctrl_time", 0.0)) < 1.0
+        )
+        if not ctrl:
             return
         delta = getattr(e, "scroll_delta_y", None)
         if delta is None:
