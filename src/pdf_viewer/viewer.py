@@ -1,12 +1,14 @@
 """PDFViewerTab: full-featured PDF viewer — continuous scroll, lazy rendering.
 
 Behaviour is split across focused mixin modules:
-  _render_mixin.py      — page rendering, navigation, zoom, save
-  _gesture_mixin.py     — pan / tap event routing
-  _annot_mixin.py       — annotation selection and editing
-  _text_sel_mixin.py    — word-level text selection overlay
-  _ocr_mixin.py         — OCR execution and results panel
-  _redact_agent_mixin.py — redaction search/apply and AI-agent chat
+  _render_mixin.py   — page rendering, navigation, zoom, save
+  _gesture_mixin.py  — pan / tap event routing
+  _annot_mixin.py    — annotation selection and editing
+  _text_sel_mixin.py — word-level text selection overlay
+  _ocr_mixin.py      — OCR execution and results panel
+  _redact_mixin.py   — redaction search, term management, preview, apply
+  _profiles_mixin.py — censorship profile dialogs (create, edit, load)
+  _agent_mixin.py    — AI document-analysis agent panel and chat
 """
 from __future__ import annotations
 
@@ -27,13 +29,15 @@ from ._viewer_defs import (
     _OCR_PANEL_BG,
     _SELECTED_BG, _vdivider,
 )
-from ._render_mixin       import _RenderMixin
-from ._gesture_mixin      import _GestureMixin
-from ._annot_mixin        import _AnnotMixin
-from ._text_sel_mixin     import _TextSelMixin
-from ._ocr_mixin          import _OCRMixin
-from ._redact_agent_mixin import _RedactAgentMixin
-from ._print_mixin        import _PrintMixin
+from ._render_mixin   import _RenderMixin
+from ._gesture_mixin  import _GestureMixin
+from ._annot_mixin    import _AnnotMixin
+from ._text_sel_mixin import _TextSelMixin
+from ._ocr_mixin      import _OCRMixin
+from ._redact_mixin   import _RedactMixin
+from ._profiles_mixin import _ProfilesMixin
+from ._agent_mixin    import _AgentMixin
+from ._print_mixin    import _PrintMixin
 
 
 class PDFViewerTab(
@@ -42,7 +46,9 @@ class PDFViewerTab(
     _AnnotMixin,
     _TextSelMixin,
     _OCRMixin,
-    _RedactAgentMixin,
+    _RedactMixin,
+    _ProfilesMixin,
+    _AgentMixin,
     _PrintMixin,
 ):
     """Manages state and UI for a single open PDF document."""
@@ -254,6 +260,8 @@ class PDFViewerTab(
         self._agent_key_status:        ft.Text       | None = None
         self._agent_config_section:    ft.Container  | None = None
         self._agent_config_toggle_btn: ft.IconButton | None = None
+        self._agent_redact_sensitivity: str               = "medium"
+        self._agent_sensitivity_btns:   dict              = {}
 
         # Ctrl key state — updated from main.py keyboard handler for Ctrl+Scroll zoom
         self._ctrl_pressed: bool = False

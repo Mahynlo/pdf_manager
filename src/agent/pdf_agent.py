@@ -84,12 +84,24 @@ _PROMPT_EXTRACT = (
 def _redact_prompt(level_desc: str) -> str:
     return (
         f"Analiza este documento e identifica información que debería redactarse "
-        f"(nivel: {level_desc}).\n"
-        "Devuelve SOLO un JSON válido con este esquema exacto:\n"
-        '{"redacciones": [{"texto": "...", "categoria": "...", "motivo": "..."}]}\n'
-        "Categorías posibles: nombre, dni_id, dirección, teléfono, email, "
-        "cuenta_bancaria, dato_médico, contraseña, otro.\n"
-        "Incluye solo el texto literal que aparece en el documento, no patrones."
+        f"(nivel: {level_desc}).\n\n"
+        "INSTRUCCIONES IMPORTANTES:\n"
+        "1. Para cada dato sensible extrae el FRAGMENTO MÍNIMO necesario — solo el valor, "
+        "nunca el contexto que lo rodea. "
+        "Ejemplo correcto: «Juan García López». "
+        "Ejemplo incorrecto: «El paciente Juan García López declaró que».\n"
+        "2. No repitas el mismo dato con variaciones menores.\n"
+        "3. Para datos estructurados (teléfonos, emails, números de ID, cuentas bancarias, "
+        "códigos postales) usa tipo=\"patron\" con una expresión regular Python válida "
+        "que capture todas las variantes del formato. "
+        "Para textos libres (nombres, direcciones, frases) usa tipo=\"literal\".\n\n"
+        "Devuelve SOLO un JSON válido con este esquema exacto (sin texto adicional):\n"
+        '{"redacciones": [{"texto": "...", "categoria": "...", "motivo": "...", "tipo": "literal|patron"}]}\n\n'
+        "Categorías: nombre, dni_id, dirección, teléfono, email, cuenta_bancaria, "
+        "dato_médico, contraseña, fecha_nacimiento, otro.\n"
+        "tipo=\"literal\": texto exacto tal como aparece en el documento.\n"
+        "tipo=\"patron\": expresión regular Python sin delimitadores (ej: "
+        r'r"\d{9}" para un número de 9 dígitos).'
     )
 
 
@@ -111,7 +123,8 @@ class PDFAgent:
     model : str
         Nombre del modelo. Por defecto: gemini-2.5-flash / gpt-4o-mini.
     redact_callback : callable, optional
-        Llamado con list[str] cuando suggest_redactions encuentra términos.
+        Llamado con list[dict] cuando suggest_redactions encuentra términos.
+        Cada dict contiene: texto, categoria, motivo, tipo (literal|patron).
     ocr_overrides : dict[int, str], optional
         Texto OCR por página (0-based) para documentos escaneados.
     """
@@ -473,10 +486,11 @@ class PDFAgent:
         end   = raw.rfind("}") + 1
         text  = raw[start:end] if start >= 0 and end > start else ""
         try:
-            data  = json.loads(text)
-            terms = [r["texto"] for r in data.get("redacciones", []) if r.get("texto")]
-            if terms and self._callback is not None:
-                self._callback(terms)
+            data    = json.loads(text)
+            records = [r for r in data.get("redacciones", []) if r.get("texto")]
+            if records and self._callback is not None:
+                # Pass full dicts so the UI can show category, motivo and tipo.
+                self._callback(records)
             return json.dumps(data, ensure_ascii=False, indent=2)
         except Exception:
             return raw
