@@ -581,8 +581,11 @@ def main(page: ft.Page) -> None:
     # ── Atajos de teclado ─────────────────────────────────────────────────────
 
     def _on_keyboard(e: ft.KeyboardEvent) -> None:
+        t = time.monotonic()
         for v in open_tabs:
             v._ctrl_pressed = e.ctrl
+            if e.ctrl:
+                v._ctrl_time = t
         if e.ctrl and e.key.upper() == "O":
             _open_picker()
             return
@@ -592,27 +595,56 @@ def main(page: ft.Page) -> None:
         if not (0 <= idx < len(open_tabs)):
             return
         v = open_tabs[idx]
-        if e.ctrl and e.key.upper() == "Z":
-            v._undo()
+
+        # ── Ctrl + key ────────────────────────────────────────────────────────
+        if e.ctrl:
+            k = e.key.upper()
+            if k == "Z":
+                v._undo(); return
+            if k == "A":
+                v._select_all_page_text(); return
+            if k == "S":
+                v._save(); return
+            if k == "P":
+                v._print_pdf(); return
+            if k == "C":
+                if getattr(v, "_text_sel_text", ""):
+                    v._text_sel_copy()
+                return
+            if e.key == "Home":
+                v._scroll_to_page(0); return
+            if e.key == "End":
+                v._scroll_to_page(len(v.doc) - 1); return
             return
-        if e.ctrl and e.key.upper() == "A":
-            v._select_all_page_text()
-            return
+
+        # ── Sin modificador ───────────────────────────────────────────────────
         match e.key:
-            case "Arrow Left" | "Arrow Up":
+            case "Escape":
+                v._deselect_annot()
+                v._hide_text_sel_bar()
+            case "Arrow Left" | "Arrow Up" | "Page Up":
                 v._prev()
-            case "Arrow Right" | "Arrow Down":
+            case "Arrow Right" | "Arrow Down" | "Page Down":
                 v._next()
+            case "Home":
+                v._scroll_to_page(0)
+            case "End":
+                v._scroll_to_page(len(v.doc) - 1)
             case "+" | "=":
-                if not e.ctrl:
-                    v._zoom_in()
+                v._zoom_in()
             case "-":
-                if not e.ctrl:
-                    v._zoom_out()
+                v._zoom_out()
+            case "w" | "W":
+                v._fit_width()
+            case "f" | "F":
+                v._fit_page()
 
     def _on_keyboard_up(e: ft.KeyboardEvent) -> None:
+        # Cuando el propio Ctrl se suelta, e.ctrl puede seguir siendo True en
+        # algunas plataformas. Forzar el reset cuando la tecla es "Control".
+        released_ctrl = "Control" in (e.key or "")
         for v in open_tabs:
-            v._ctrl_pressed = e.ctrl
+            v._ctrl_pressed = False if released_ctrl else e.ctrl
 
     # ── Navbar persistente ────────────────────────────────────────────────────
 

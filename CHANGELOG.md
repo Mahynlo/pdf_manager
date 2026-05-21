@@ -1,6 +1,34 @@
 # Changelog
 
-## [0.1.9]- 2026-05-19
+## [0.1.12] - 2026-05-21
+
+### Added
+- **Atajos de teclado completos en el visor**: Ctrl+Z (deshacer), Ctrl+A (seleccionar todo el texto), Ctrl+S (guardar), Ctrl+P (imprimir), Ctrl+C (copiar selección), Ctrl+O (abrir archivo), Ctrl+Inicio/Fin (ir a primera/última página), Escape (deseleccionar), Inicio/Fin, flechas, Re Pág/Av Pág, `+`/`-` (zoom), `W` (ajustar ancho), `F` (ajustar página).
+
+### Changed
+- **Vista previa de impresión rediseñada**: Las páginas ahora se muestran como una lista vertical desplazable (estilo filmstrip) con miniatura a la izquierda e información de página a la derecha, en lugar de una cuadrícula envuelta.
+- **Apertura de archivos recientes más rápida**: Los módulos `pdf_viewer` y `pdf_security` se pre-cargan en segundo plano al iniciar la app, eliminando el retardo en el primer clic.
+
+### Fixed
+- **Doble apertura de archivos recientes**: Se agregó un guard `_opening_now` que previene abrir el mismo PDF dos veces si el usuario hace clic rápidamente o doble clic.
+- **Ctrl+Scroll no se desactiva**: El modo zoom con Ctrl+Scroll ya no queda "pegado" después de soltar Ctrl. Ahora expira automáticamente en 1 segundo, restaurando el scroll normal sin necesidad de presionar otra tecla.
+
+## [0.1.11] - 2026-05-20
+
+### Changed
+- **Manejo de instancia única en Windows mejorado**: La ventana se oculta antes de que Flutter la muestre al usuario, eliminando el parpadeo de ventana huérfana cuando la app ya está en ejecución.
+- **IPC y conexión TCP optimizados**: Mejoras en el manejo de rutas iniciales y la conexión TCP en Windows para mayor fiabilidad al abrir PDFs con "Abrir con".
+
+### Fixed
+- Error de tipo en la firma de `_close_viewer_tab`.
+
+## [0.1.10] - 2026-05-19
+
+### Fixed
+- Correcciones en el manejo de "Abrir con" y empaquetado en Windows.
+- Mejoras en la compatibilidad de rutas y en la inicialización del IPC al usar `flet build`.
+
+## [0.1.9] - 2026-05-19
 
 ### Changed
 - **Eliminación de dependencias críticas**: Se removieron por completo los módulos de `pywin32` para solucionar conflictos en el empaquetado con `flet build windows` y garantizar la compatibilidad multiplataforma en Linux y macOS.
