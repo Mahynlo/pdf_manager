@@ -4,7 +4,7 @@ from __future__ import annotations
 import flet as ft
 import fitz
 
-from .annotations import HIGHLIGHT_COLORS, Tool
+from .annotations import HIGHLIGHT_COLORS, Tool, _atype
 from .renderer import BASE_SCALE
 from ._viewer_defs import _SELECTED_BG, _rgb_to_hex
 
@@ -102,7 +102,7 @@ class _AnnotMixin:
         """
         if pn >= len(self._sel_handles):
             return
-        atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
+        atype = _atype(annot)
         self._selected_atype = atype
 
         h = self._sel_handles[pn]
@@ -377,11 +377,10 @@ class _AnnotMixin:
         dlg = ft.AlertDialog(title=ft.Text("Texto seleccionado"))
 
         def close(ev=None) -> None:
-            dlg.open = False
-            self.page_ref.update()
+            self.page_ref.close(dlg)
 
         def copy_text(ev) -> None:
-            close() # Cierra el diálogo antes de copiar para que el usuario vea el cambio de estado.
+            close()
             self.page_ref.set_clipboard(text)
             short = text[:60] + ("…" if len(text) > 60 else "")
             self._show_snack(f'Copiado: "{short}"')
@@ -399,8 +398,6 @@ class _AnnotMixin:
             ft.TextButton("Resaltar", icon=ft.Icons.HIGHLIGHT,            on_click=lambda ev: apply_tool(Tool.HIGHLIGHT)),
             ft.TextButton("Subrayar", icon=ft.Icons.FORMAT_UNDERLINE,     on_click=lambda ev: apply_tool(Tool.UNDERLINE)),
             ft.TextButton("Tachar",   icon=ft.Icons.FORMAT_STRIKETHROUGH, on_click=lambda ev: apply_tool(Tool.STRIKEOUT)),
-            ft.TextButton("Cerrar", on_click=close),
+            ft.TextButton("Cerrar",   on_click=close),
         ]
-        self.page_ref.dialog = dlg
-        dlg.open = True
-        self.page_ref.update()
+        self.page_ref.open(dlg)

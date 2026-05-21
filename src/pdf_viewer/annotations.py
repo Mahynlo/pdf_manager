@@ -54,6 +54,62 @@ HIGHLIGHT_COLORS: list[tuple[str, tuple[float, float, float]]] = [
 ]
 
 
+# ── module-level helpers ───────────────────────────────────────────────────────
+
+def _atype(annot: fitz.Annot) -> str:
+    """Return the annotation type string (e.g. 'Square', 'Ink', 'Highlight')."""
+    t = annot.type
+    return t[1] if isinstance(t, (tuple, list)) and len(t) > 1 else ""
+
+
+def _find_annot_by_xref(page: fitz.Page, xref: int) -> fitz.Annot | None:
+    """Return the annotation with the given xref on *page*, or None."""
+    for annot in page.annots():
+        if annot.xref == xref:
+            return annot
+    return None
+
+
+def _rdp_simplify(
+    pts: list[tuple[float, float]],
+    epsilon: float = 1.5,
+) -> list[tuple[float, float]]:
+    """Ramer-Douglas-Peucker polyline simplification.
+
+    Removes points within *epsilon* PDF units of the simplified line so
+    Catmull-Rom smoothing operates on fewer, more meaningful vertices —
+    smaller PDF ink annotations and faster rendering.
+    """
+    if len(pts) < 3:
+        return list(pts)
+
+    start, end = pts[0], pts[-1]
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    line_len = math.hypot(dx, dy)
+
+    max_dist = 0.0
+    max_idx  = 0
+    for i in range(1, len(pts) - 1):
+        if line_len < 1e-9:
+            dist = math.hypot(pts[i][0] - start[0], pts[i][1] - start[1])
+        else:
+            dist = abs(
+                dy * pts[i][0] - dx * pts[i][1]
+                + end[0] * start[1] - end[1] * start[0]
+            ) / line_len
+        if dist > max_dist:
+            max_dist = dist
+            max_idx  = i
+
+    if max_dist <= epsilon:
+        return [start, end]
+
+    left  = _rdp_simplify(pts[:max_idx + 1], epsilon)
+    right = _rdp_simplify(pts[max_idx:], epsilon)
+    return left[:-1] + right  # avoid duplicate midpoint
+
+
 def _catmull_rom(pts: list[tuple[float, float]], steps: int = 5) -> list[tuple[float, float]]:
     """Smooth a polyline with Catmull-Rom spline interpolation."""
     if len(pts) < 3:
@@ -104,12 +160,11 @@ def _line_merged_rects(rects: list[fitz.Rect]) -> list[fitz.Rect]:
     current = fitz.Rect(sorted_rects[0])
 
     for rect in sorted_rects[1:]:
-        # Consider characters in the same text line when vertical overlap is significant.
         overlap = min(current.y1, rect.y1) - max(current.y0, rect.y0)
         min_height = min(current.height, rect.height)
         same_line = min_height > 0 and overlap >= min_height * 0.5
-        
-        # Prevent merging across massive horizontal gaps (like columns or wide table cells)
+
+        # Prevent merging across massive horizontal gaps (columns / table cells).
         horizontal_gap = rect.x0 - current.x1
         max_gap = current.height * 2.0
 
@@ -333,16 +388,18 @@ class AnnotationManager:
         self.last_select_rect: fitz.Rect | None = None
         # History for undo: list of (page_num, annot_xref) in insertion order.
         self._history: list[tuple[int, int]] = []
-        # Visual (unrotated) rect per annotation xref. ``annot.rect`` is
-        # also the visual rect here because we never expand it — rotation
-        # is handled via the Form XObject's /Matrix — but caching lets the
-        # viewer read it without holding the document lock during drag.
+        # Visual (unrotated) rect per annotation xref.
         self._visual_rects: dict[int, fitz.Rect] = {}
-        # Rotation in degrees per xref. ``annot.rotation`` (/Rotate) is
-        # NOT used as the source of truth: setting /Rotate makes PyMuPDF
-        # expand the bbox inside update(), which undoes the work of
-        # keeping /Rect at the visual size.
+        # Rotation in degrees per xref.
         self._rotations: dict[int, float] = {}
+
+    # ── internal helpers ────────────────────────────────────────────────────────
+
+    def _remap_xref(self, page_num: int, old_xref: int, new_xref: int) -> None:
+        """Update the history entry for (page_num, old_xref) to new_xref in-place."""
+        for i, (p, x) in enumerate(self._history):
+            if p == page_num and x == old_xref:
+                self._history[i] = (page_num, new_xref)
 
     def get_visual_rect(self, xref: int) -> fitz.Rect | None:
         vr = self._visual_rects.get(xref)
@@ -351,7 +408,7 @@ class AnnotationManager:
     def get_rotation(self, xref: int) -> float:
         return float(self._rotations.get(xref, 0.0))
 
-    # ── tool selection ──────────────────────────────────────────────────────
+    # ── tool selection ──────────────────────────────────────────────────────────
 
     def set_tool(self, tool: Tool) -> None:
         self.tool = tool
@@ -360,7 +417,7 @@ class AnnotationManager:
     def overlay_color(self) -> str:
         return OVERLAY_COLOR.get(self.tool, "#40808080")
 
-    # ── drag lifecycle ──────────────────────────────────────────────────────
+    # ── drag lifecycle ──────────────────────────────────────────────────────────
 
     def begin(self, x: float, y: float) -> None:
         self._start = (x, y)
@@ -489,7 +546,11 @@ class AnnotationManager:
         """Create a smoothed ink annotation from collected PDF-space points."""
         if len(pdf_points) < 2:
             return False
-        smoothed = _catmull_rom(pdf_points) if len(pdf_points) >= 3 else list(pdf_points)
+        # Simplify with RDP before smoothing: fewer input points → fewer output
+        # vertices, smaller PDF, faster rendering. Quality is preserved because
+        # RDP removes only collinear/near-collinear points.
+        simplified = _rdp_simplify(pdf_points) if len(pdf_points) >= 3 else list(pdf_points)
+        smoothed   = _catmull_rom(simplified)  if len(simplified)  >= 3 else simplified
         page  = doc[page_num]
         annot = page.add_ink_annot([smoothed])
         annot.set_colors(stroke=STROKE_COLOR[Tool.INK])
@@ -498,7 +559,7 @@ class AnnotationManager:
         self._history.append((page_num, annot.xref))
         return True
 
-    # ── undo ─────────────────────────────────────────────────────────────────
+    # ── undo ─────────────────────────────────────────────────────────────────────
 
     def undo_last(self, doc: fitz.Document) -> int | None:
         """Remove the most recently added annotation (any page).
@@ -521,7 +582,7 @@ class AnnotationManager:
         """Compatibility wrapper used by viewer code."""
         return self.undo_last(doc) is not None
 
-    # ── annotation hit-test & editing ─────────────────────────────────────────
+    # ── annotation hit-test & editing ─────────────────────────────────────────────
 
     def get_annot_at(self, page: fitz.Page, x: float, y: float) -> fitz.Annot | None:
         """Return the annotation at PDF point (x, y), preferring shapes over markup."""
@@ -538,10 +599,7 @@ class AnnotationManager:
             hit.y1 += 6
             if not hit.contains(pt):
                 continue
-            atype = (annot.type[1]
-                     if isinstance(annot.type, (tuple, list)) and len(annot.type) > 1
-                     else "")
-            if atype in _MARKUP:
+            if _atype(annot) in _MARKUP:
                 markup_result = annot
             else:
                 shape_result = annot
@@ -550,15 +608,15 @@ class AnnotationManager:
         return shape_result if shape_result is not None else markup_result
 
     def delete_annot(self, doc: fitz.Document, page_num: int, xref: int) -> bool:
-        page = doc[page_num]
-        for annot in page.annots():
-            if annot.xref == xref:
-                page.delete_annot(annot)
-                self._history = [(p, x) for p, x in self._history if x != xref]
-                self._visual_rects.pop(xref, None)
-                self._rotations.pop(xref, None)
-                return True
-        return False
+        page  = doc[page_num]
+        annot = _find_annot_by_xref(page, xref)
+        if annot is None:
+            return False
+        page.delete_annot(annot)
+        self._history = [(p, x) for p, x in self._history if x != xref]
+        self._visual_rects.pop(xref, None)
+        self._rotations.pop(xref, None)
+        return True
 
     def change_annot_color(
         self,
@@ -567,17 +625,17 @@ class AnnotationManager:
         xref: int,
         color: tuple[float, float, float],
     ) -> bool:
-        page = doc[page_num]
-        for annot in page.annots():
-            if annot.xref == xref:
-                rotation = self._rotations.get(xref, 0.0)
-                _reset_ap(annot)
-                annot.set_colors(stroke=color)
-                annot.update()
-                if rotation:
-                    _apply_rot(annot, rotation)
-                return True
-        return False
+        page  = doc[page_num]
+        annot = _find_annot_by_xref(page, xref)
+        if annot is None:
+            return False
+        rotation = self._rotations.get(xref, 0.0)
+        _reset_ap(annot)
+        annot.set_colors(stroke=color)
+        annot.update()
+        if rotation:
+            _apply_rot(annot, rotation)
+        return True
 
     def move_annot(
         self,
@@ -597,67 +655,61 @@ class AnnotationManager:
         For Square/Circle/FreeText the xref is preserved and any existing
         /Rotate value is returned unchanged.
         """
-        page = doc[page_num]
-        for annot in page.annots():
-            if annot.xref != xref:
-                continue
-            atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
-            if atype == "Ink":
-                strokes = _ink_verts_from_annot(annot)
-                if not strokes:
-                    return None
-                new_strokes = [[fitz.Point(pt.x + dx, pt.y + dy) for pt in s] for s in strokes]
-                try:
-                    new_annot = _ink_replace(page, annot, new_strokes)
-                except Exception:
-                    return None
-                self._history = [
-                    (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
-                    for (p, x) in self._history
-                ]
-                self._visual_rects.pop(xref, None)
-                self._rotations.pop(xref, None)
-                return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
-            if atype in ("Line", "Polygon", "PolyLine"):
-                verts = annot.vertices
-                if not verts or len(verts) < 2:
-                    return None
-                new_verts = []
-                for v in verts:
-                    try:
-                        vx, vy = float(v[0]), float(v[1])
-                    except (TypeError, IndexError):
-                        vx, vy = float(v.x), float(v.y)
-                    new_verts.append(fitz.Point(vx + dx, vy + dy))
-                if atype == "Line":
-                    new_annot = _line_replace(page, annot, new_verts)
-                else:
-                    new_annot = _polygon_replace(page, annot, new_verts, atype)
-                self._history = [
-                    (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
-                    for (p, x) in self._history
-                ]
-                self._visual_rects.pop(xref, None)
-                self._rotations.pop(xref, None)
-                return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
-            rotation = self._rotations.get(xref, 0.0)
-            cached = self._visual_rects.get(xref)
-            base   = cached if cached is not None else fitz.Rect(annot.rect)
-            new_visual = fitz.Rect(
-                base.x0 + dx, base.y0 + dy,
-                base.x1 + dx, base.y1 + dy,
-            )
+        page  = doc[page_num]
+        annot = _find_annot_by_xref(page, xref)
+        if annot is None:
+            return None
+
+        at = _atype(annot)
+
+        if at == "Ink":
+            strokes = _ink_verts_from_annot(annot)
+            if not strokes:
+                return None
+            new_strokes = [[fitz.Point(pt.x + dx, pt.y + dy) for pt in s] for s in strokes]
             try:
-                _reset_ap(annot)  # avoid PyMuPDF 1.27 setRect bug in update()
-                annot.set_rect(new_visual)
-                annot.update()
-                if rotation:
-                    _apply_rot(annot, rotation)
+                new_annot = _ink_replace(page, annot, new_strokes)
             except Exception:
                 return None
-            self._visual_rects[annot.xref] = fitz.Rect(new_visual)
-            return new_visual, annot.xref, rotation
-        return None
+            self._remap_xref(page_num, xref, new_annot.xref)
+            self._visual_rects.pop(xref, None)
+            self._rotations.pop(xref, None)
+            return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
+
+        if at in ("Line", "Polygon", "PolyLine"):
+            verts = annot.vertices
+            if not verts or len(verts) < 2:
+                return None
+            new_verts = []
+            for v in verts:
+                try:
+                    vx, vy = float(v[0]), float(v[1])
+                except (TypeError, IndexError):
+                    vx, vy = float(v.x), float(v.y)
+                new_verts.append(fitz.Point(vx + dx, vy + dy))
+            new_annot = _line_replace(page, annot, new_verts) if at == "Line" else _polygon_replace(page, annot, new_verts, at)
+            self._remap_xref(page_num, xref, new_annot.xref)
+            self._visual_rects.pop(xref, None)
+            self._rotations.pop(xref, None)
+            return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
+
+        rotation = self._rotations.get(xref, 0.0)
+        cached   = self._visual_rects.get(xref)
+        base     = cached if cached is not None else fitz.Rect(annot.rect)
+        new_visual = fitz.Rect(
+            base.x0 + dx, base.y0 + dy,
+            base.x1 + dx, base.y1 + dy,
+        )
+        try:
+            _reset_ap(annot)
+            annot.set_rect(new_visual)
+            annot.update()
+            if rotation:
+                _apply_rot(annot, rotation)
+        except Exception:
+            return None
+        self._visual_rects[annot.xref] = fitz.Rect(new_visual)
+        return new_visual, annot.xref, rotation
 
     def set_annot_hidden(
         self,
@@ -672,22 +724,21 @@ class AnnotationManager:
         Used during interactive drag so the old position doesn't show under
         the moving ghost overlay.
         """
-        page = doc[page_num]
+        page  = doc[page_num]
+        annot = _find_annot_by_xref(page, xref)
+        if annot is None:
+            return False
         flag = fitz.PDF_ANNOT_IS_HIDDEN
-        for annot in page.annots():
-            if annot.xref != xref:
-                continue
-            cur = annot.flags
-            new = (cur | flag) if hidden else (cur & ~flag)
-            if new != cur:
-                rotation = self._rotations.get(xref, 0.0)
-                _reset_ap(annot)
-                annot.set_flags(new)
-                annot.update()
-                if rotation:
-                    _apply_rot(annot, rotation)
-            return True
-        return False
+        cur  = annot.flags
+        new  = (cur | flag) if hidden else (cur & ~flag)
+        if new != cur:
+            rotation = self._rotations.get(xref, 0.0)
+            _reset_ap(annot)
+            annot.set_flags(new)
+            annot.update()
+            if rotation:
+                _apply_rot(annot, rotation)
+        return True
 
     def resize_annot(
         self,
@@ -710,66 +761,57 @@ class AnnotationManager:
         """
         if new_rect.is_empty or new_rect.width < 1 or new_rect.height < 1:
             return None
-        page = doc[page_num]
-        for annot in page.annots():
-            if annot.xref != xref:
-                continue
-            atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
-            if atype == "Ink":
-                strokes = _ink_verts_from_annot(annot)
-                if not strokes:
-                    return None
-                old_rect = annot.rect
-                new_strokes = [
-                    [_map_point(pt, old_rect, new_rect) for pt in s]
-                    for s in strokes
-                ]
-                try:
-                    new_annot = _ink_replace(page, annot, new_strokes)
-                except Exception:
-                    return None
-                self._history = [
-                    (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
-                    for (p, x) in self._history
-                ]
-                self._visual_rects.pop(xref, None)
-                self._rotations.pop(xref, None)
-                return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
-            if atype in ("Line", "Polygon", "PolyLine"):
-                verts = annot.vertices
-                if not verts or len(verts) < 2:
-                    return None
-                old_rect = annot.rect
-                new_verts = []
-                for v in verts:
-                    try:
-                        vx, vy = float(v[0]), float(v[1])
-                    except (TypeError, IndexError):
-                        vx, vy = float(v.x), float(v.y)
-                    new_verts.append(_map_point(fitz.Point(vx, vy), old_rect, new_rect))
-                if atype == "Line":
-                    new_annot = _line_replace(page, annot, new_verts)
-                else:
-                    new_annot = _polygon_replace(page, annot, new_verts, atype)
-                self._history = [
-                    (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
-                    for (p, x) in self._history
-                ]
-                self._visual_rects.pop(xref, None)
-                self._rotations.pop(xref, None)
-                return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
-            rotation = self._rotations.get(xref, 0.0)
+        page  = doc[page_num]
+        annot = _find_annot_by_xref(page, xref)
+        if annot is None:
+            return None
+
+        at = _atype(annot)
+
+        if at == "Ink":
+            strokes = _ink_verts_from_annot(annot)
+            if not strokes:
+                return None
+            old_rect    = annot.rect
+            new_strokes = [[_map_point(pt, old_rect, new_rect) for pt in s] for s in strokes]
             try:
-                _reset_ap(annot)
-                annot.set_rect(new_rect)
-                annot.update()
-                if rotation:
-                    _apply_rot(annot, rotation)
+                new_annot = _ink_replace(page, annot, new_strokes)
             except Exception:
                 return None
-            self._visual_rects[annot.xref] = fitz.Rect(new_rect)
-            return fitz.Rect(new_rect), annot.xref, rotation
-        return None
+            self._remap_xref(page_num, xref, new_annot.xref)
+            self._visual_rects.pop(xref, None)
+            self._rotations.pop(xref, None)
+            return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
+
+        if at in ("Line", "Polygon", "PolyLine"):
+            verts = annot.vertices
+            if not verts or len(verts) < 2:
+                return None
+            old_rect  = annot.rect
+            new_verts = []
+            for v in verts:
+                try:
+                    vx, vy = float(v[0]), float(v[1])
+                except (TypeError, IndexError):
+                    vx, vy = float(v.x), float(v.y)
+                new_verts.append(_map_point(fitz.Point(vx, vy), old_rect, new_rect))
+            new_annot = _line_replace(page, annot, new_verts) if at == "Line" else _polygon_replace(page, annot, new_verts, at)
+            self._remap_xref(page_num, xref, new_annot.xref)
+            self._visual_rects.pop(xref, None)
+            self._rotations.pop(xref, None)
+            return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
+
+        rotation = self._rotations.get(xref, 0.0)
+        try:
+            _reset_ap(annot)
+            annot.set_rect(new_rect)
+            annot.update()
+            if rotation:
+                _apply_rot(annot, rotation)
+        except Exception:
+            return None
+        self._visual_rects[annot.xref] = fitz.Rect(new_rect)
+        return fitz.Rect(new_rect), annot.xref, rotation
 
     def rotate_annot(
         self,
@@ -801,84 +843,70 @@ class AnnotationManager:
         """
         if abs(angle_deg) < 0.01:
             return None
-        page = doc[page_num]
+        page  = doc[page_num]
+        annot = _find_annot_by_xref(page, xref)
+        if annot is None:
+            return None
 
-        for annot in page.annots():
-            if annot.xref != xref:
-                continue
-            atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
+        at = _atype(annot)
 
-            if atype in ("Line", "Polygon", "PolyLine"):
-                verts = annot.vertices
-                if not verts or len(verts) < 2:
-                    return None
-                r = fitz.Rect(annot.rect)
-                cx = (r.x0 + r.x1) / 2
-                cy = (r.y0 + r.y1) / 2
-                rad   = math.radians(angle_deg)
-                cos_a = math.cos(rad)
-                sin_a = math.sin(rad)
-                new_verts = []
-                for v in verts:
-                    try:
-                        vx, vy = float(v[0]), float(v[1])
-                    except (TypeError, IndexError):
-                        vx, vy = float(v.x), float(v.y)
-                    dx, dy = vx - cx, vy - cy
-                    new_verts.append(fitz.Point(
-                        cx + dx * cos_a - dy * sin_a,
-                        cy + dx * sin_a + dy * cos_a,
-                    ))
-                new_annot = _polygon_replace(page, annot, new_verts, atype)
-                self._history = [
-                    (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
-                    for (p, x) in self._history
-                ]
-                self._visual_rects.pop(xref, None)
-                self._rotations.pop(xref, None)
-                return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
-
-            # Square / Circle / FreeText: visually rotate via the Form
-            # XObject's /Matrix (apn_matrix). PyMuPDF's native set_rotation
-            # stores /Rotate but MuPDF does not render Square/Circle at
-            # arbitrary angles — only bbox expansion happens. We instead
-            # keep /Rect equal to the visual rect and set apn_matrix so the
-            # appearance is rotated around the rect's centre.
-            current     = self._rotations.get(xref, 0.0)
-            new_rotation = (float(current) + float(angle_deg)) % 360
-            if new_rotation < 0:
-                new_rotation += 360
-
-            vr = None
-            if visual_rect is not None:
-                vr = fitz.Rect(visual_rect)
-            else:
-                cached = self._visual_rects.get(xref)
-                if cached is not None:
-                    vr = fitz.Rect(cached)
-            if vr is None:
-                vr = fitz.Rect(annot.rect)
-            try:
-                # Rewrite /Rect to the visual rect (unrotated) and
-                # regenerate the axis-aligned appearance, then rotate the
-                # Form XObject via its /Matrix. Reset apn_matrix first —
-                # PyMuPDF 1.27's update() crashes if apn_matrix is
-                # non-identity. set_rotation is NOT called: it would
-                # cause update() to expand the bbox and render the shape
-                # axis-aligned inside the expansion.
-                _reset_ap(annot)
-                annot.set_rect(vr)
-                annot.update()
-                _apply_rot(annot, new_rotation)
-            except Exception:
+        if at in ("Line", "Polygon", "PolyLine"):
+            verts = annot.vertices
+            if not verts or len(verts) < 2:
                 return None
-            self._visual_rects[annot.xref] = fitz.Rect(vr)
-            # Stash rotation so re-selection can recover it without
-            # decoding the apn_matrix. Keyed by current xref.
-            self._rotations[annot.xref] = float(new_rotation)
-            return vr, annot.xref, float(new_rotation)
+            r = fitz.Rect(annot.rect)
+            cx = (r.x0 + r.x1) / 2
+            cy = (r.y0 + r.y1) / 2
+            rad   = math.radians(angle_deg)
+            cos_a = math.cos(rad)
+            sin_a = math.sin(rad)
+            new_verts = []
+            for v in verts:
+                try:
+                    vx, vy = float(v[0]), float(v[1])
+                except (TypeError, IndexError):
+                    vx, vy = float(v.x), float(v.y)
+                dx, dy = vx - cx, vy - cy
+                new_verts.append(fitz.Point(
+                    cx + dx * cos_a - dy * sin_a,
+                    cy + dx * sin_a + dy * cos_a,
+                ))
+            new_annot = _polygon_replace(page, annot, new_verts, at)
+            self._remap_xref(page_num, xref, new_annot.xref)
+            self._visual_rects.pop(xref, None)
+            self._rotations.pop(xref, None)
+            return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
 
-        return None
+        # Square / Circle / FreeText: visually rotate via the Form
+        # XObject's /Matrix (apn_matrix). PyMuPDF's native set_rotation
+        # stores /Rotate but MuPDF does not render Square/Circle at
+        # arbitrary angles — only bbox expansion happens. We instead
+        # keep /Rect equal to the visual rect and set apn_matrix so the
+        # appearance is rotated around the rect's centre.
+        current      = self._rotations.get(xref, 0.0)
+        new_rotation = (float(current) + float(angle_deg)) % 360
+        if new_rotation < 0:
+            new_rotation += 360
+
+        vr = None
+        if visual_rect is not None:
+            vr = fitz.Rect(visual_rect)
+        else:
+            cached = self._visual_rects.get(xref)
+            if cached is not None:
+                vr = fitz.Rect(cached)
+        if vr is None:
+            vr = fitz.Rect(annot.rect)
+        try:
+            _reset_ap(annot)
+            annot.set_rect(vr)
+            annot.update()
+            _apply_rot(annot, new_rotation)
+        except Exception:
+            return None
+        self._visual_rects[annot.xref] = fitz.Rect(vr)
+        self._rotations[annot.xref]    = float(new_rotation)
+        return vr, annot.xref, float(new_rotation)
 
     def scale_annot(
         self,
@@ -895,71 +923,65 @@ class AnnotationManager:
         """
         if factor <= 0:
             return None
-        page = doc[page_num]
-        for annot in page.annots():
-            if annot.xref != xref:
-                continue
-            atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
+        page  = doc[page_num]
+        annot = _find_annot_by_xref(page, xref)
+        if annot is None:
+            return None
 
-            # Use the cached pre-rotation rect when available so scale is
-            # applied to the user-facing shape, not PyMuPDF's expanded bbox.
-            cached = self._visual_rects.get(xref)
-            r = fitz.Rect(cached) if cached is not None else fitz.Rect(annot.rect)
-            cx = (r.x0 + r.x1) / 2
-            cy = (r.y0 + r.y1) / 2
-            half_w = max(1.0, r.width * factor / 2)
-            half_h = max(1.0, r.height * factor / 2)
-            new_rect = fitz.Rect(cx - half_w, cy - half_h, cx + half_w, cy + half_h)
+        at = _atype(annot)
 
-            if atype == "Ink":
-                strokes = _ink_verts_from_annot(annot)
-                if not strokes:
-                    return None
-                old_rect = fitz.Rect(annot.rect)
-                new_strokes = [[_map_point(pt, old_rect, new_rect) for pt in s] for s in strokes]
-                try:
-                    new_annot = _ink_replace(page, annot, new_strokes)
-                except Exception:
-                    return None
-                self._history = [
-                    (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
-                    for (p, x) in self._history
-                ]
-                self._visual_rects.pop(xref, None)
-                self._rotations.pop(xref, None)
-                return new_rect, new_annot.xref
+        # Use the cached pre-rotation rect when available so scale is
+        # applied to the user-facing shape, not PyMuPDF's expanded bbox.
+        cached = self._visual_rects.get(xref)
+        r      = fitz.Rect(cached) if cached is not None else fitz.Rect(annot.rect)
+        cx     = (r.x0 + r.x1) / 2
+        cy     = (r.y0 + r.y1) / 2
+        half_w = max(1.0, r.width  * factor / 2)
+        half_h = max(1.0, r.height * factor / 2)
+        new_rect = fitz.Rect(cx - half_w, cy - half_h, cx + half_w, cy + half_h)
 
-            if atype == "Line":
-                verts = annot.vertices
-                if verts and len(verts) >= 2:
-                    try:
-                        vx0, vy0 = float(verts[0].x), float(verts[0].y)
-                        vx1, vy1 = float(verts[1].x), float(verts[1].y)
-                    except (AttributeError, TypeError):
-                        vx0, vy0 = float(verts[0][0]), float(verts[0][1])
-                        vx1, vy1 = float(verts[1][0]), float(verts[1][1])
-                    p1 = _map_point(fitz.Point(vx0, vy0), r, new_rect)
-                    p2 = _map_point(fitz.Point(vx1, vy1), r, new_rect)
-                    new_annot = _line_replace(page, annot, [p1, p2])
-                    self._history = [
-                        (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
-                        for (p, x) in self._history
-                    ]
-                    self._visual_rects.pop(xref, None)
-                    return new_rect, new_annot.xref
-
-            rotation = self._rotations.get(xref, 0.0)
+        if at == "Ink":
+            strokes = _ink_verts_from_annot(annot)
+            if not strokes:
+                return None
+            old_rect    = fitz.Rect(annot.rect)
+            new_strokes = [[_map_point(pt, old_rect, new_rect) for pt in s] for s in strokes]
             try:
-                _reset_ap(annot)
-                annot.set_rect(new_rect)
-                annot.update()
-                if rotation:
-                    _apply_rot(annot, rotation)
+                new_annot = _ink_replace(page, annot, new_strokes)
             except Exception:
                 return None
-            self._visual_rects[annot.xref] = fitz.Rect(new_rect)
-            return new_rect, annot.xref
-        return None
+            self._remap_xref(page_num, xref, new_annot.xref)
+            self._visual_rects.pop(xref, None)
+            self._rotations.pop(xref, None)
+            return new_rect, new_annot.xref
+
+        if at == "Line":
+            verts = annot.vertices
+            if verts and len(verts) >= 2:
+                try:
+                    vx0, vy0 = float(verts[0].x), float(verts[0].y)
+                    vx1, vy1 = float(verts[1].x), float(verts[1].y)
+                except (AttributeError, TypeError):
+                    vx0, vy0 = float(verts[0][0]), float(verts[0][1])
+                    vx1, vy1 = float(verts[1][0]), float(verts[1][1])
+                p1 = _map_point(fitz.Point(vx0, vy0), r, new_rect)
+                p2 = _map_point(fitz.Point(vx1, vy1), r, new_rect)
+                new_annot = _line_replace(page, annot, [p1, p2])
+                self._remap_xref(page_num, xref, new_annot.xref)
+                self._visual_rects.pop(xref, None)
+                return new_rect, new_annot.xref
+
+        rotation = self._rotations.get(xref, 0.0)
+        try:
+            _reset_ap(annot)
+            annot.set_rect(new_rect)
+            annot.update()
+            if rotation:
+                _apply_rot(annot, rotation)
+        except Exception:
+            return None
+        self._visual_rects[annot.xref] = fitz.Rect(new_rect)
+        return new_rect, annot.xref
 
     def change_annot_width(
         self,
@@ -974,98 +996,89 @@ class AnnotationManager:
         For Line annotations the xref changes because delete+recreate is
         needed to preserve the arrow tip (line_ends).
         """
-        page = doc[page_num]
-        for annot in page.annots():
-            if annot.xref != xref:
-                continue
-            atype = annot.type[1] if isinstance(annot.type, tuple) and len(annot.type) > 1 else ""
-            border = annot.border or {}
-            cur_w  = float(border.get("width") or 2)
-            new_w  = max(0.5, min(20.0, cur_w + delta))
+        page  = doc[page_num]
+        annot = _find_annot_by_xref(page, xref)
+        if annot is None:
+            return None
 
-            if atype == "Ink":
-                strokes = _ink_verts_from_annot(annot)
-                if not strokes:
-                    return None
-                try:
-                    new_annot = _ink_replace(page, annot, strokes, new_width=new_w)
-                except Exception:
-                    return None
-                self._history = [
-                    (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
-                    for (p, x) in self._history
-                ]
-                self._visual_rects.pop(xref, None)
-                self._rotations.pop(xref, None)
-                return new_annot.xref
+        at     = _atype(annot)
+        border = annot.border or {}
+        cur_w  = float(border.get("width") or 2)
+        new_w  = max(0.5, min(20.0, cur_w + delta))
 
-            if atype == "Line":
-                verts = annot.vertices
-                if not verts or len(verts) < 2:
-                    return None
-                new_verts = []
-                for v in verts:
-                    try:
-                        new_verts.append(fitz.Point(float(v.x), float(v.y)))
-                    except (AttributeError, TypeError):
-                        new_verts.append(fitz.Point(float(v[0]), float(v[1])))
-                try:
-                    new_annot = _line_replace(page, annot, new_verts, new_width=new_w)
-                except Exception:
-                    return None
-                self._history = [
-                    (p, new_annot.xref) if (p == page_num and x == xref) else (p, x)
-                    for (p, x) in self._history
-                ]
-                self._visual_rects.pop(xref, None)
-                self._rotations.pop(xref, None)
-                return new_annot.xref
-
-            if atype == "Square":
-                colors = {}
-                try:
-                    colors = annot.colors or {}
-                except Exception:
-                    pass
-                stroke = colors.get("stroke")
-                rect = fitz.Rect(annot.rect)
-                rotation = self._rotations.get(xref, 0.0)
-                try:
-                    page.delete_annot(annot)
-                    new_annot = page.add_rect_annot(rect)
-                    if stroke is not None:
-                        new_annot.set_colors(stroke=stroke)
-                    new_annot.set_border(width=new_w)
-                    _reset_ap(new_annot)
-                    new_annot.update()
-                    if rotation:
-                        _apply_rot(new_annot, rotation)
-                except Exception:
-                    return None
-                new_xref = new_annot.xref
-                self._history = [
-                    (p, new_xref) if (p == page_num and x == xref) else (p, x)
-                    for (p, x) in self._history
-                ]
-                self._visual_rects.pop(xref, None)
-                if rotation:
-                    self._rotations[new_xref] = rotation
-                self._rotations.pop(xref, None)
-                return new_xref
-
-            rotation = self._rotations.get(xref, 0.0)
+        if at == "Ink":
+            strokes = _ink_verts_from_annot(annot)
+            if not strokes:
+                return None
             try:
-                existing = dict(annot.border or {})
-                existing["width"] = new_w
-                annot.set_border(existing)
-                _reset_ap(annot)
-                annot.update()
-                if rotation:
-                    _apply_rot(annot, rotation)
+                new_annot = _ink_replace(page, annot, strokes, new_width=new_w)
             except Exception:
                 return None
-            return xref
-        return None
+            self._remap_xref(page_num, xref, new_annot.xref)
+            self._visual_rects.pop(xref, None)
+            self._rotations.pop(xref, None)
+            return new_annot.xref
+
+        if at == "Line":
+            verts = annot.vertices
+            if not verts or len(verts) < 2:
+                return None
+            new_verts = []
+            for v in verts:
+                try:
+                    new_verts.append(fitz.Point(float(v.x), float(v.y)))
+                except (AttributeError, TypeError):
+                    new_verts.append(fitz.Point(float(v[0]), float(v[1])))
+            try:
+                new_annot = _line_replace(page, annot, new_verts, new_width=new_w)
+            except Exception:
+                return None
+            self._remap_xref(page_num, xref, new_annot.xref)
+            self._visual_rects.pop(xref, None)
+            self._rotations.pop(xref, None)
+            return new_annot.xref
+
+        if at == "Square":
+            colors = {}
+            try:
+                colors = annot.colors or {}
+            except Exception:
+                pass
+            stroke   = colors.get("stroke")
+            rect     = fitz.Rect(annot.rect)
+            rotation = self._rotations.get(xref, 0.0)
+            try:
+                page.delete_annot(annot)
+                new_annot = page.add_rect_annot(rect)
+                if stroke is not None:
+                    new_annot.set_colors(stroke=stroke)
+                new_annot.set_border(width=new_w)
+                _reset_ap(new_annot)
+                new_annot.update()
+                if rotation:
+                    _apply_rot(new_annot, rotation)
+            except Exception:
+                return None
+            new_xref = new_annot.xref
+            self._remap_xref(page_num, xref, new_xref)
+            if rotation:
+                self._rotations[new_xref] = rotation
+            self._visual_rects.pop(xref, None)
+            self._rotations.pop(xref, None)
+            return new_xref
+
+        rotation = self._rotations.get(xref, 0.0)
+        try:
+            existing = dict(annot.border or {})
+            existing["width"] = new_w
+            annot.set_border(existing)
+            _reset_ap(annot)
+            annot.update()
+            if rotation:
+                _apply_rot(annot, rotation)
+        except Exception:
+            return None
+        return xref
 
     # ── deferred text annotation ──────────────────────────────────────────────
 
