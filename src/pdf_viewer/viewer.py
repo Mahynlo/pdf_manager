@@ -128,6 +128,8 @@ class PDFViewerTab(
 
         # Text selection state
         self._page_words:         dict[int, list[tuple]] = {}
+        self._page_word_bands:    dict[int, dict[int, list]] = {}
+        self._page_blocks_cache:  dict[int, list] = {}
         self._text_sel_start_pn:  int | None = None
         self._text_sel_end_pn:    int | None = None
         self._text_sel_text:      str = ""

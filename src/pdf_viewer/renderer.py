@@ -17,7 +17,7 @@ _RENDER_SEM = threading.Semaphore(4)
 
 class PageRenderCache:
     """Thread-safe LRU cache for rendered page images (per document instance)."""
-    _MAX_ENTRIES = 25
+    _MAX_ENTRIES = 15
 
     def __init__(self) -> None:
         self._d: OrderedDict[tuple[int, float], tuple[str, int, int]] = OrderedDict()
@@ -81,25 +81,24 @@ def render_page(
 
     page = doc[page_num]
     mat = fitz.Matrix(zoom * BASE_SCALE, zoom * BASE_SCALE)
-    
-    # Generar directamente sin canal alfa mejora drásticamente
-    # el consumo de RAM y la velocidad, evitando la conversión posterior.
+
+    # alpha=False: sin canal alfa → 25% menos RAM y conversión evitada.
     pix = page.get_pixmap(matrix=mat, alpha=False)
-    
+
     fd, temp_path = tempfile.mkstemp(suffix=".png" if zoom <= 1.0 else ".jpg")
     os.close(fd)
-    
-    # PNG for low zoom (text is small — lossless avoids visible compression blur);
-    # JPEG at high quality for high zoom (large pixmaps keep reasonable size).
+
+    # PNG para zoom bajo (texto pequeño — sin pérdida evita blur de compresión);
+    # JPEG para zoom alto (pixmaps grandes: calidad alta pero no excesiva).
+    # pix.save() escribe directo a disco sin buffer intermedio en RAM.
     if zoom <= 1.0:
         pix.save(temp_path, output="png")
     else:
-        jpg_q = 95 if zoom <= 2.0 else 92
-        img_bytes = pix.tobytes("jpeg", jpg_quality=jpg_q)
-        with open(temp_path, "wb") as f:
-            f.write(img_bytes)
+        jpg_q = 90 if zoom <= 2.0 else 82
+        pix.save(temp_path, output="jpeg", jpg_quality=jpg_q)
 
     result = temp_path, pix.width, pix.height
+    del pix  # libera el bitmap (~54 MB a zoom=4) antes de que el GC actúe
 
     if cache is not None:
         cache.put(page_num, zoom, result)
