@@ -547,7 +547,7 @@ def main(page: ft.Page) -> None:
 
     # ── Cerrar pestaña visor ──────────────────────────────────────────────────
 
-    def _close_viewer_tab(viewer: PDFViewerTab) -> None:
+    def _close_viewer_tab(viewer) -> None:
         idx = open_tabs.index(viewer)
         viewer.close()
         open_tabs.remove(viewer)
