@@ -1,6 +1,7 @@
 """OCR execution, results display and sidebar panel for PDFViewerTab."""
 from __future__ import annotations
 
+import gc
 import flet as ft
 
 from .annotations import Tool
@@ -11,6 +12,8 @@ from ._viewer_defs import _OCR_BOX_BG, _OCR_BOX_CLR, _OCR_PANEL_BG, _SELECTED_BG
 _CHIP_BG   = "#E8F5E9"
 _CHIP_FG   = "#2E7D32"
 _METRIC_BG = "#F1F8E9"
+
+_MAX_OCR_PAGES_CACHED = 8  # max pages kept in memory; oldest are evicted first
 
 
 def _chip(label: str, value: str, icon: str | None = None) -> ft.Container:
@@ -301,6 +304,20 @@ class _OCRMixin:
 
         self._ocr_copy_btn.visible = bool(result.segments)
 
+    # ── LRU eviction ─────────────────────────────────────────────────────────
+
+    def _evict_old_ocr_pages(self, keep_pn: int) -> None:
+        """Remove oldest cached OCR pages (keeping keep_pn) to bound memory use."""
+        while len(self._ocr_by_page) > _MAX_OCR_PAGES_CACHED:
+            evict_pn = next((p for p in self._ocr_by_page if p != keep_pn), None)
+            if evict_pn is None:
+                break
+            del self._ocr_by_page[evict_pn]
+            if evict_pn < len(self._ocr_overlays):
+                ov = self._ocr_overlays[evict_pn]
+                ov.controls = []
+                ov.visible = False
+
     # ── copy all text ─────────────────────────────────────────────────────────
 
     def _ocr_copy_all(self, e=None) -> None:
@@ -341,6 +358,8 @@ class _OCRMixin:
             return
 
         self._ocr_by_page[pn] = result
+        self._evict_old_ocr_pages(keep_pn=pn)
+        gc.collect()
         self._page_words.pop(pn, None)
         self._ocr_active_index = 0
         self._refresh_ocr_ui_for_page()

@@ -14,6 +14,7 @@ from onnxtr.models import ocr_predictor
 
 
 _SCALE_FOR_OCR = 2.0
+_MAX_OCR_PX = 2000  # cap longest edge to avoid huge pixmaps on large pages
 
 
 @dataclass
@@ -100,6 +101,8 @@ class OCRProcessor:
         return fitz.Rect(x0, y0, x1, y1)
 
     def _run_predictor(self, img: np.ndarray) -> tuple[list[tuple[fitz.Rect, str, float]], float]:
+        """ Regresa una lista de tuplas (rectángulo, texto, puntuación) para cada palabra detectada en la imagen, junto con el tiempo que tomó ejecutar el predictor.
+        """
         start = perf_counter()
         document = self.predictor([img])
         elapsed = perf_counter() - start
@@ -121,13 +124,19 @@ class OCRProcessor:
                     score = float(conf) if conf is not None else 1.0
                     words.append((rect, text, score))
 
+        # page holds a reference into document — release both before returning
+        # so onnxtr's internal tensors and feature maps can be freed by the GC.
+        del page, document
         return words, elapsed
 
     def get_doc_kind(self, doc: fitz.Document) -> str:
-        """Classify the document as 'native', 'scanned', or 'hybrid'.
-
-        Result is cached per document path so processing multiple files in
-        one session does not bleed cache between them.
+        """Clasificar el documento como 'nativo', 'escaneado' o 'híbrido' según el contenido de sus páginas.
+         - 'nativo' si tiene al menos una página con texto extraíble y ninguna con imágenes.
+         - 'escaneado' si tiene al menos una página con imágenes y ninguna con texto extraíble.
+         - 'híbrido' si tiene al menos una página con texto extraíble y al menos una página con imágenes.
+         - Si no tiene páginas con texto ni imágenes, se clasifica como 'escaneado' por defecto.
+         - Solo se analizan las primeras 20 páginas para determinar el tipo de documento, para mejorar el rendimiento en documentos largos.
+         -
         """
         key = doc.name or id(doc)
         if key in self._doc_kind_cache:
@@ -138,6 +147,8 @@ class OCRProcessor:
         max_pages = min(len(doc), 20)
 
         for i in range(max_pages):
+            if text_pages > 0 and image_pages > 0:
+                break  # already "hybrid" — no need to scan more pages
             page = doc[i]
             has_text = bool(page.get_text("text").strip())
             has_images = bool(page.get_images(full=True))
@@ -159,6 +170,13 @@ class OCRProcessor:
         return kind
 
     def page_kind(self, page: fitz.Page) -> str:
+        """"
+        Clasificar la página como 'nativa', 'escaneada' o 'híbrida' según su contenido.
+         - 'nativa' si tiene texto extraíble pero no imágenes.
+         - 'escaneada' si tiene imágenes pero no texto extraíble.
+         - 'híbrida' si tiene tanto texto extraíble como imágenes.
+         - Si no tiene texto ni imágenes, se clasifica como 'escaneada' por defecto.
+        """
         has_text = bool(page.get_text("text").strip())
         has_images = bool(page.get_images(full=True))
         if has_text and not has_images:
@@ -195,15 +213,13 @@ class OCRProcessor:
 
     def _image_regions(self, page: fitz.Page) -> list[fitz.Rect]:
         regions: list[fitz.Rect] = []
-        content = page.get_text("dict")
-        for block in content.get("blocks", []):
-            if block.get("type") != 1:
+        # get_image_info() only returns image metadata (bbox, size, …) without
+        # loading all text content like get_text("dict") would.
+        for info in page.get_image_info():
+            bbox = info.get("bbox")
+            if not bbox:
                 continue
-            bbox = block.get("bbox")
-            if not bbox or len(bbox) != 4:
-                continue
-            x0, y0, x1, y1 = bbox
-            rect = fitz.Rect(float(x0), float(y0), float(x1), float(y1))
+            rect = fitz.Rect(bbox)
             if rect.width < 8 or rect.height < 8:
                 continue
             regions.append(rect)
@@ -215,11 +231,16 @@ class OCRProcessor:
 
     @staticmethod
     def _pixmap_to_ndarray(pix: fitz.Pixmap) -> np.ndarray:
-        arr = np.frombuffer(pix.samples, dtype=np.uint8)
-        arr = arr.reshape(pix.height, pix.width, pix.n)
-        if pix.n >= 3:
-            return arr[:, :, :3].copy()
-        return arr.copy()
+        arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+        return (arr[:, :, :3] if pix.n >= 3 else arr).copy()
+
+    @staticmethod
+    def _ocr_scale(rect: fitz.Rect) -> float:
+        longest = max(rect.width, rect.height)
+        scale = _SCALE_FOR_OCR
+        if longest * scale > _MAX_OCR_PX:
+            scale = _MAX_OCR_PX / longest
+        return max(scale, 1.0)
 
     def _ocr_on_regions(self, page: fitz.Page) -> tuple[list[OCRSegment], list[OCRDetection], float]:
         segments: list[OCRSegment] = []
@@ -227,21 +248,24 @@ class OCRProcessor:
         total_elapsed = 0.0
 
         for rect in self._image_regions(page):
+            scale = self._ocr_scale(rect)
             pix = page.get_pixmap(
-                matrix=fitz.Matrix(_SCALE_FOR_OCR, _SCALE_FOR_OCR),
+                matrix=fitz.Matrix(scale, scale),
                 clip=rect,
                 alpha=False,
             )
             img = self._pixmap_to_ndarray(pix)
+            del pix  # free pixmap memory before inference
 
             words, elapsed = self._run_predictor(img)
+            del img  # free image array after inference
             total_elapsed += elapsed
 
             for px_rect, text, score in words:
-                x0 = rect.x0 + px_rect.x0 / _SCALE_FOR_OCR
-                y0 = rect.y0 + px_rect.y0 / _SCALE_FOR_OCR
-                x1 = rect.x0 + px_rect.x1 / _SCALE_FOR_OCR
-                y1 = rect.y0 + px_rect.y1 / _SCALE_FOR_OCR
+                x0 = rect.x0 + px_rect.x0 / scale
+                y0 = rect.y0 + px_rect.y0 / scale
+                x1 = rect.x0 + px_rect.x1 / scale
+                y1 = rect.y0 + px_rect.y1 / scale
                 pdf_rect = fitz.Rect(x0, y0, x1, y1)
 
                 segments.append(OCRSegment(text=text, source="ocr", bbox=pdf_rect))
@@ -250,22 +274,23 @@ class OCRProcessor:
         return segments, detections, total_elapsed
 
     def process_page(self, doc: fitz.Document, page_num: int, force_ocr: bool = False) -> OCRPageResult:
-        page = doc[page_num]
-        doc_kind = self.get_doc_kind(doc)
-        page_kind = self.page_kind(page)
+        page = doc[page_num] # numeo de página es 0-indexed en PyMuPDF
+        doc_kind = self.get_doc_kind(doc) #Clasificación del documento: Nativo, Escaneado o Híbrido
+        page_kind = self.page_kind(page) #Clasificación de la página: Nativa, Escaneada o Híbrida
 
-        start = perf_counter()
-        native_segments = self._native_segments(page)
-        ocr_segments: list[OCRSegment] = []
-        detections: list[OCRDetection] = []
-        ocr_elapsed = 0.0
+        start = perf_counter() #Tiempo de inicio para medir el tiempo total de procesamiento de la página
+        native_segments = self._native_segments(page) #Extracción de segmentos de texto nativos de la página
+        ocr_segments: list[OCRSegment] = [] #Inicialización de la lista de segmentos OCR, se llenará solo si se necesita OCR
+        detections: list[OCRDetection] = [] #Inicialización de la lista de detecciones OCR, se llenará solo si se necesita OCR
+        ocr_elapsed = 0.0 #Inicialización del tiempo de OCR, se actualizará solo si se realiza OCR
 
-        if force_ocr or page_kind in ("hybrid", "scanned"):
+        if force_ocr or page_kind in ("hybrid", "scanned"): 
             ocr_segments, detections, ocr_elapsed = self._ocr_on_regions(page)
 
         segments = [*native_segments, *ocr_segments]
         segments.sort(key=lambda s: (s.bbox.y0, s.bbox.x0))
 
+        #Tipo de página: Nativo, Escaneado o Híbrido
         if native_segments and ocr_segments:
             mode = "Hibrido"
         elif native_segments:
