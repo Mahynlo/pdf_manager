@@ -12,13 +12,14 @@ _singleton: "ProfileManager | None" = None
 
 @dataclass
 class CensorshipProfile:
-    id: str
-    name: str
-    terms: list[str]
-    color: str = "#000000"
-    case_sensitive: bool = True
+    id: str # unique identifier, e.g. UUID
+    name: str # human-friendly name for the profile
+    terms: list[str] # list of terms to censor (exact matches, not regex)
+    color: str = "#000000" # hex color code for highlighting censored terms
+    case_sensitive: bool = True # whether term matching is case-sensitive
 
     def to_dict(self) -> dict:
+        """Funcion se encarga de convertir el perfil a un diccionario para su almacenamiento."""
         return {
             "id": self.id,
             "name": self.name,
@@ -29,6 +30,9 @@ class CensorshipProfile:
 
     @classmethod
     def from_dict(cls, d: dict) -> "CensorshipProfile":
+        """
+        Crea un perfil de censura a partir de un diccionario.
+        """
         return cls(
             id=d.get("id", str(uuid.uuid4())),
             name=d.get("name", "Sin nombre"),
@@ -44,6 +48,9 @@ class ProfileManager:
         self._load()
 
     def _load(self) -> None:
+        """
+        Crga el perfil de cencura desde un archivo JSON. Si el archivo no existe o hay un error, se inicia con una lista vacía de perfiles.
+        """
         try:
             if _PROFILES_FILE.exists():
                 data = json.loads(_PROFILES_FILE.read_text(encoding="utf-8"))
@@ -54,6 +61,9 @@ class ProfileManager:
             self._profiles = []
 
     def _save(self) -> None:
+        """
+        Guarda el perfil de cencura en un archivo JSON.
+        """
         try:
             _PROFILES_FILE.write_text(
                 json.dumps(
@@ -67,9 +77,15 @@ class ProfileManager:
             pass
 
     def all(self) -> list[CensorshipProfile]:
+        """
+        Retorna una lista de todos los perfiles de censura.
+        """
         return list(self._profiles)
 
     def search(self, query: str) -> list[CensorshipProfile]:
+        """
+        Busca perfiles de cenecura.
+        """
         q = query.strip().lower()
         if not q:
             return self.all()
@@ -88,6 +104,9 @@ class ProfileManager:
         color: str = "#000000",
         case_sensitive: bool = True,
     ) -> CensorshipProfile:
+        """
+        Crea un nuevo perfil de censura.
+        """
         profile = CensorshipProfile(
             id=str(uuid.uuid4()),
             name=name.strip() or "Sin nombre",
@@ -108,6 +127,9 @@ class ProfileManager:
         color: str | None = None,
         case_sensitive: bool | None = None,
     ) -> bool:
+        """
+        Actualiza un perfil de censura existente.
+        """
         p = self.get(profile_id)
         if p is None:
             return False
@@ -123,6 +145,9 @@ class ProfileManager:
         return True
 
     def delete(self, profile_id: str) -> bool:
+        """
+        Elimina un perfil de censura.
+        """
         before = len(self._profiles)
         self._profiles = [p for p in self._profiles if p.id != profile_id]
         if len(self._profiles) < before:
@@ -132,6 +157,8 @@ class ProfileManager:
 
 
 def get_profile_manager() -> ProfileManager:
+    """
+    Retorna el singleton ProfileManager, creando una instancia si aún no existe."""
     global _singleton
     if _singleton is None:
         _singleton = ProfileManager()

@@ -51,9 +51,9 @@ class _AnnotMixin:
         scale  = self.zoom * BASE_SCALE
         popup  = self._annot_popups[pn]
 
-        _POPUP_H = 44
-        _POPUP_W = 200
-        _MARGIN  = 8
+        _POPUP_H = 44 # E el espacio vertical que ocupa el popup; usado para posicionar el popup dentro de la página.
+        _POPUP_W = 200 # El ancho del popup; usado para posicionar el popup dentro de la página.
+        _MARGIN  = 8 # Margen mínimo entre el popup y los bordes de la página.
 
         page_h = float(self._page_heights[pn]) if pn < len(self._page_heights) else 9999.0
         page_w = float(self._page_slots[pn].width or 9999) if pn < len(self._page_slots) else 9999.0
@@ -381,7 +381,7 @@ class _AnnotMixin:
             self.page_ref.update()
 
         def copy_text(ev) -> None:
-            close()
+            close() # Cierra el diálogo antes de copiar para que el usuario vea el cambio de estado.
             self.page_ref.set_clipboard(text)
             short = text[:60] + ("…" if len(text) > 60 else "")
             self._show_snack(f'Copiado: "{short}"')
