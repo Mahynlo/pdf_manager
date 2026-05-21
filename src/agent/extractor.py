@@ -12,6 +12,32 @@ from __future__ import annotations
 import pymupdf4llm
 
 
+def to_pages(
+    pdf_path: str,
+    ocr_overrides: dict[int, str] | None = None,
+    max_pages: int = 300,
+) -> list[dict]:
+    """
+    Return raw page_chunks from pymupdf4llm with OCR overrides applied.
+
+    Each element is a dict with keys ``"metadata"`` (page_number, etc.)
+    and ``"text"`` (Markdown for that page).
+    """
+    pages: list[dict] = pymupdf4llm.to_markdown(
+        pdf_path,
+        page_chunks=True,
+        show_progress=False,
+    )
+    result: list[dict] = []
+    for page_data in pages[:max_pages]:
+        pn_0: int = page_data["metadata"].get("page_number", 1) - 1
+        text: str = (page_data.get("text") or "").strip()
+        if not text and ocr_overrides and pn_0 in ocr_overrides:
+            page_data = {**page_data, "text": ocr_overrides[pn_0].strip()}
+        result.append(page_data)
+    return result
+
+
 def to_markdown(
     pdf_path: str,
     ocr_overrides: dict[int, str] | None = None,
@@ -35,26 +61,10 @@ def to_markdown(
     str
         Documento en formato Markdown listo para enviar al LLM.
     """
-    # pymupdf4llm con page_chunks=True devuelve una lista de dicts,
-    # uno por página: {"metadata": {"page": 0, ...}, "text": "..."}
-    pages: list[dict] = pymupdf4llm.to_markdown(
-        pdf_path,
-        page_chunks=True,
-        show_progress=False,
-    )
-
     parts: list[str] = []
-    for page_data in pages[:max_pages]:
-        # pymupdf4llm devuelve page_number con base 1
-        page_num_1based: int = page_data["metadata"].get("page_number", 1)
-        page_num_0based: int = page_num_1based - 1
+    for page_data in to_pages(pdf_path, ocr_overrides, max_pages):
+        pn: int = page_data["metadata"].get("page_number", 1)
         text: str = (page_data.get("text") or "").strip()
-
-        # Para páginas sin texto nativo, usar el texto OCR si está disponible
-        if not text and ocr_overrides and page_num_0based in ocr_overrides:
-            text = ocr_overrides[page_num_0based].strip()
-
         if text:
-            parts.append(f"<!-- Página {page_num_1based} -->\n{text}")
-
+            parts.append(f"<!-- Página {pn} -->\n{text}")
     return "\n\n---\n\n".join(parts) if parts else "(documento sin texto extraíble)"
