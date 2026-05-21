@@ -75,7 +75,7 @@ if (-not (Test-Path $DistDir)) {
     New-Item -ItemType Directory -Path $DistDir | Out-Null
 }
 
-& $ISCC $IssScript
+& $ISCC "/DMyAppSourceDir=$BuildOutput" $IssScript
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: ISCC fallo (codigo $LASTEXITCODE)" -ForegroundColor Red
     exit 1

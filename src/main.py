@@ -1,16 +1,25 @@
 """App entry point: navbar + home screen + tab shell + file picker.
 
-IPC de instancia única implementado con socket TCP local + archivo de bloqueo.
-Compatible con `flet build` (sin pywin32 ni dependencias nativas del SO).
+IPC de instancia única via TCP loopback.
+
+PROBLEMA EN WINDOWS con named pipes y SO_REUSEADDR:
+  Ambos permiten que MÚLTIPLES procesos hagan bind/listen en el mismo
+  recurso, por lo que todas las instancias se convierten en "servidor"
+  y se abren ventanas duplicadas.
+
+SOLUCIÓN: TCP con SO_EXCLUSIVEADDRUSE en Windows.
+  Este flag garantiza que bind() falle si otra instancia ya tiene el
+  puerto, igual que SO_REUSEADDR hace en Linux/macOS correctamente.
 """
 
 import sys
 import os
+import json
 import socket
+import struct
 import threading
 import time
 import tempfile
-import struct
 from pathlib import Path
 
 import flet as ft
@@ -31,24 +40,31 @@ from settings_tab import SettingsTab
 
 
 # ---------------------------------------------------------------------------
-# IPC: Instancia única  (socket TCP loopback + archivo de bloqueo)
+# IPC: Instancia única via TCP loopback
 # ---------------------------------------------------------------------------
 # Estrategia:
-#   1. Se elige un puerto fijo (configurable) en loopback.
-#   2. La primera instancia logra hacer bind() en ese puerto → es el SERVIDOR.
-#   3. Las instancias siguientes no pueden hacer bind() → son CLIENTES:
+#   1. Se elige un puerto fijo en loopback.
+#   2. La primera instancia logra hacer bind() → es el SERVIDOR.
+#   3. Las siguientes instancias fallan en bind() → son CLIENTES:
 #      envían sus rutas PDF al servidor y terminan.
-#   4. Un archivo de bloqueo en el directorio temporal del usuario guarda el
-#      PID del servidor; se usa solo como señal de "hay proceso vivo", pero la
-#      fuente de verdad es el bind del socket.
+#
+# Por qué TCP con SO_EXCLUSIVEADDRUSE y no named pipes / multiprocessing:
+#   En Windows, multiprocessing.connection.Listener con named pipes y
+#   sockets con SO_REUSEADDR permiten que múltiples procesos hagan bind
+#   simultáneamente. SO_EXCLUSIVEADDRUSE garantiza exclusividad real.
 # ---------------------------------------------------------------------------
 
-_IPC_PORT      = 57423          # Cambia si hay conflicto con otra app
-_IPC_HOST      = "127.0.0.1"
-_LOCK_FILENAME = "extrar_pdfs.lock"
+_IPC_PORT = 57423          # Puerto fijo; cambia si hay conflicto con otra app
+_IPC_HOST = "127.0.0.1"
+
 _WEB_UPLOAD_DIR = Path(__file__).resolve().parents[1] / "storage" / "temp"
 
-_WEB_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    _WEB_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    # Fallback seguro si está en C:\Program Files y no hay permisos de admin
+    _WEB_UPLOAD_DIR = Path(tempfile.gettempdir()) / "extrar_pdfs_upload"
+    _WEB_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 _incoming_paths: list[str] = []
 _incoming_lock  = threading.Lock()
@@ -56,17 +72,13 @@ _incoming_event = threading.Event()
 _ui_ready       = threading.Event()
 
 
-def _lock_file_path() -> Path:
-    return Path(tempfile.gettempdir()) / _LOCK_FILENAME
-
-
 def _clean_path_argument(arg: str) -> str | None:
-    """Limpia y valida un argumento de ruta desde línea de comandos.
+    """Limpia y valida una posible ruta PDF.
 
     Elimina comillas, espacios extra y backticks. Verifica que sea un PDF
     existente y retorna la ruta absoluta resuelta, o None si es inválido.
     """
-    clean = arg.strip(" \"'`")
+    clean = arg.strip(" \"'`\r\n")
     if not clean.lower().endswith(".pdf"):
         return None
     try:
@@ -79,123 +91,46 @@ def _clean_path_argument(arg: str) -> str | None:
 
 
 def _collect_initial_paths() -> list[str]:
-    """Recolecta rutas PDF desde sys.argv (modo empaquetado Flet-compatible)."""
+    """Recolecta rutas PDF desde sys.argv y variable de entorno.
+
+    Formatos soportados en builds de Flet empaquetado:
+      - Ruta directa:    extraer_pdfs.exe "C:\\ruta\\archivo.pdf"
+      - Con = :          --dart-entrypoint-args=C:\\ruta\\archivo.pdf
+      - Con espacio:     --dart-entrypoint-args C:\\ruta\\archivo.pdf
+    Los flags de Flutter/Dart (--dart-*, --observatory-*, etc.) se ignoran.
+    """
     paths: list[str] = []
-    
-    # En builds de Flet, los args propios de Flutter vienen primero.
-    # Filtramos solo los que terminan en .pdf y existen en disco.
-    for arg in sys.argv[1:]:
-        # Flet/Flutter puede pasar args como --dart-entrypoint-args=ruta
-        if "=" in arg:
-            arg = arg.split("=", 1)[1]
-        cleaned = _clean_path_argument(arg)
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg.startswith("--dart-entrypoint-args="):
+            candidate = arg[len("--dart-entrypoint-args="):]
+        elif arg == "--dart-entrypoint-args" and i + 1 < len(args):
+            i += 1
+            candidate = args[i]
+        elif arg.startswith("--"):
+            i += 1
+            continue
+        else:
+            candidate = arg
+        cleaned = _clean_path_argument(candidate)
         if cleaned and cleaned not in paths:
             paths.append(cleaned)
-    
-    # Fallback: variable de entorno (ya no es el método principal, pero se mantiene)
+        i += 1
+
     env_val = os.environ.get("EXTRAR_PDF_PATH", "").strip()
     if env_val:
         for raw in env_val.split("|"):
             cleaned = _clean_path_argument(raw)
             if cleaned and cleaned not in paths:
                 paths.append(cleaned)
-    
+
     return paths
 
 
-def _send_to_server(paths: list[str], retries: int = 8, delay: float = 0.4) -> bool:
-    """Envía rutas al servidor con reintentos para cubrir el arranque lento.
-    
-    El servidor puede tardar varios segundos en estar listo (Flutter + Python).
-    Con 8 reintentos × 0.4 s = hasta 3.2 s de espera total.
-    """
-    payload_lines = paths if paths else ["__ACTIVATE__"]
-    payload = "\n".join(payload_lines)
-    data = payload.encode("utf-8")
-    header = struct.pack(">I", len(data))
-    
-    for attempt in range(retries):
-        try:
-            with socket.create_connection((_IPC_HOST, _IPC_PORT), timeout=2) as s:
-                s.sendall(header + data)
-            return True
-        except OSError:
-            if attempt < retries - 1:
-                time.sleep(delay)
-    return False
-
-
-def _try_bind_server() -> socket.socket | None:
-    """Intenta crear y vincular el socket servidor.
-
-    Retorna el socket listo (listen) o None si el puerto ya está ocupado
-    (lo que indica que hay otra instancia corriendo).
-    """
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    try:
-        sock.bind((_IPC_HOST, _IPC_PORT))
-        sock.listen(10)
-        return sock
-    except OSError:
-        sock.close()
-        return None
-
-
-def _write_lock_file() -> None:
-    try:
-        _lock_file_path().write_text(str(os.getpid()), encoding="utf-8")
-    except Exception:
-        pass
-
-
-def _remove_lock_file() -> None:
-    try:
-        _lock_file_path().unlink(missing_ok=True)
-    except Exception:
-        pass
-
-
-def _ipc_server_loop(server_sock: socket.socket) -> None:
-    """Acepta conexiones entrantes y encola las rutas recibidas."""
-    server_sock.settimeout(1.0)          # para poder salir limpio si se cierra
-    while True:
-        try:
-            conn, _ = server_sock.accept()
-        except socket.timeout:
-            continue
-        except OSError:
-            break                        # socket cerrado: terminamos
-        try:
-            conn.settimeout(3.0)
-            # Leer header de longitud (4 bytes big-endian)
-            raw_len = _recv_exact(conn, 4)
-            if raw_len is None:
-                continue
-            msg_len = struct.unpack(">I", raw_len)[0]
-            if msg_len > 1_048_576:      # sanidad: máx 1 MB
-                continue
-            raw_body = _recv_exact(conn, msg_len)
-            if raw_body is None:
-                continue
-            payload = raw_body.decode("utf-8", errors="ignore")
-            with _incoming_lock:
-                for line in payload.splitlines():
-                    line = line.strip()
-                    if line:
-                        _incoming_paths.append(line)
-            _incoming_event.set()
-        except Exception:
-            pass
-        finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
-
-
 def _recv_exact(conn: socket.socket, n: int) -> bytes | None:
-    """Lee exactamente n bytes de conn; retorna None en caso de error/EOF."""
+    """Lee exactamente n bytes del socket; retorna None en EOF o error."""
     buf = bytearray()
     while len(buf) < n:
         try:
@@ -208,19 +143,100 @@ def _recv_exact(conn: socket.socket, n: int) -> bytes | None:
     return bytes(buf)
 
 
+def _send_to_server(paths: list[str], retries: int = 5, delay: float = 0.35) -> bool:
+    """Envía rutas al servidor con reintentos para cubrir el arranque lento.
+
+    5 reintentos × 0.35 s = hasta 1.75 s de espera total.
+    Para la app ya abierta conecta en el primer intento (< 5 ms).
+    """
+    payload = json.dumps(paths if paths else ["__ACTIVATE__"]).encode("utf-8")
+    header = struct.pack(">I", len(payload))
+
+    for attempt in range(retries):
+        try:
+            with socket.create_connection((_IPC_HOST, _IPC_PORT), timeout=2) as s:
+                s.sendall(header + payload)
+            return True
+        except OSError:
+            if attempt < retries - 1:
+                time.sleep(delay)
+    return False
+
+
+def _try_bind_server() -> socket.socket | None:
+    """Intenta hacer bind del servidor IPC.
+
+    En Windows usa SO_EXCLUSIVEADDRUSE en lugar de SO_REUSEADDR.
+    SO_REUSEADDR en Windows permite que múltiples procesos hagan bind
+    en el mismo puerto (a diferencia de Linux donde falla correctamente).
+    SO_EXCLUSIVEADDRUSE garantiza que bind() falle si ya hay otra instancia.
+
+    Retorna el socket listo (listen) o None si ya hay otra instancia.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        if sys.platform == "win32":
+            # Constante 2752 (0xAC0) — no siempre exportada en socket.*
+            _SO_EXCL = getattr(socket, "SO_EXCLUSIVEADDRUSE", 2752)
+            sock.setsockopt(socket.SOL_SOCKET, _SO_EXCL, 1)
+        else:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((_IPC_HOST, _IPC_PORT))
+        sock.listen(10)
+        return sock
+    except OSError:
+        sock.close()
+        return None
+
+
+def _ipc_server_loop(server_sock: socket.socket) -> None:
+    """Acepta conexiones entrantes y encola las rutas recibidas."""
+    server_sock.settimeout(1.0)
+    while True:
+        try:
+            conn, _ = server_sock.accept()
+        except socket.timeout:
+            continue
+        except OSError:
+            break
+        try:
+            conn.settimeout(3.0)
+            raw_len = _recv_exact(conn, 4)
+            if raw_len is None:
+                continue
+            msg_len = struct.unpack(">I", raw_len)[0]
+            if msg_len > 1_048_576:      # sanidad: máx 1 MB
+                continue
+            raw_body = _recv_exact(conn, msg_len)
+            if raw_body is None:
+                continue
+            payload = json.loads(raw_body.decode("utf-8"))
+            if isinstance(payload, list):
+                with _incoming_lock:
+                    for item in payload:
+                        if isinstance(item, str) and item.strip():
+                            _incoming_paths.append(item.strip())
+                _incoming_event.set()
+        except Exception:
+            pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 # ── Intento de convertirse en servidor ──────────────────────────────────────
 
 _server_socket: socket.socket | None = _try_bind_server()
+_initial_paths: list[str] = _collect_initial_paths()
 
 if _server_socket is None:
     # ── CLIENTE: ya hay una instancia corriendo ──────────────────────────────
-    valid_paths = _collect_initial_paths()
-    _send_to_server(valid_paths)
+    _send_to_server(_initial_paths)
     os._exit(0)
 else:
     # ── SERVIDOR: somos la primera instancia ────────────────────────────────
-    _write_lock_file()
-
     _ipc_thread = threading.Thread(
         target=_ipc_server_loop,
         args=(_server_socket,),
@@ -228,10 +244,7 @@ else:
         name="ipc-server",
     )
     _ipc_thread.start()
-
-    # Encolar rutas iniciales (argv / env var) para la primera instancia
-    for path in _collect_initial_paths():
-        _incoming_paths.append(path)
+    _incoming_paths.extend(_initial_paths)
 
 
 # ---------------------------------------------------------------------------
@@ -688,7 +701,6 @@ def main(page: ft.Page) -> None:
 
     def _on_window_event(e: ft.WindowEvent) -> None:
         if e.type == ft.WindowEventType.CLOSE:
-            _remove_lock_file()
             try:
                 _server_socket.close()  # type: ignore[union-attr]
             except Exception:
@@ -698,7 +710,7 @@ def main(page: ft.Page) -> None:
 
     # ── Procesador de rutas entrantes (IPC + args iniciales) ─────────────────
 
-    def _process_incoming_paths() -> None:
+    async def _process_incoming_paths() -> None:
         """Desencola y abre PDFs recibidos por IPC o desde argv."""
         while True:
             with _incoming_lock:
@@ -722,14 +734,9 @@ def main(page: ft.Page) -> None:
             _incoming_event.clear()
             _ui_ready.wait()
             try:
-                # page.run_task programa el callback en el event-loop de Flet
-                page.run_task(_process_incoming_paths_async)
+                page.run_task(_process_incoming_paths)
             except Exception:
                 pass
-
-    async def _process_incoming_paths_async() -> None:
-        """Versión async de _process_incoming_paths para run_task."""
-        _process_incoming_paths()
 
     threading.Thread(
         target=_incoming_watcher,
