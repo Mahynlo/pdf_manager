@@ -43,7 +43,7 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 
 [Tasks]
 Name: "desktopicon";  Description: "Crear acceso directo en el &escritorio";  GroupDescription: "Accesos directos:"; Flags: unchecked
-Name: "assocpdf";     Description: "Abrir archivos PDF con {#MyAppName} (agrega a 'Abrir con')"; GroupDescription: "Asociacion de archivos:"; Flags: unchecked
+Name: "assocpdf";     Description: "Abrir archivos PDF con {#MyAppName} (agrega a 'Abrir con')"; GroupDescription: "Asociacion de archivos:"
 
 [Files]
 ; Copia todo el directorio de salida del build (exe + DLLs + data/)
