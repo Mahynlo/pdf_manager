@@ -7,13 +7,16 @@ import fitz
 
 
 # ── Auth-level bits returned by `fitz.Document.authenticate()` ────────────────
-# PyMuPDF returns a bitmask: 0 = failure; bit 1 = user; bit 2 = owner;
-# bit 4 = cleartext password. To verify "authenticated AS owner" you must
-# bit-test against AUTH_OWNER — checking truthiness lets a user-only auth pass.
-AUTH_FAILED  = 0
-AUTH_USER    = 1
-AUTH_OWNER   = 2
-AUTH_CLEAR   = 4
+# Empirically verified against PyMuPDF 1.27 (Flet 0.28.3 environment):
+#   0 = failure
+#   2 = user-level auth (bit at position 1)
+#   4 = owner-level auth (bit at position 2)
+# Combinations: e.g. 6 = both user+owner matched. To verify "authenticated AS
+# owner" you must bit-test against AUTH_OWNER — checking just truthiness lets
+# a user-only auth bypass owner-required operations.
+AUTH_FAILED = 0
+AUTH_USER   = 2
+AUTH_OWNER  = 4
 
 
 class PDFSecurityError(ValueError):
@@ -111,9 +114,13 @@ class PDFSecurityManager:
 
     @staticmethod
     def _has_permission(permissions: int, *flags: int) -> bool:
-        """Return True when any provided permission flag is present."""
-        if permissions < 0:
-            return True
+        """Return True iff any of *flags* is set in the *permissions* bitmask.
+
+        The bitwise check works correctly for both positive (user-auth) and
+        negative (owner-auth, sign-extended) permission values returned by
+        PyMuPDF. The caller is responsible for short-circuiting unencrypted
+        docs first — this helper only inspects bits.
+        """
         return any(bool(permissions & flag) for flag in flags)
     
     @staticmethod
@@ -156,9 +163,13 @@ class PDFSecurityManager:
             )
             return info
 
-        except fitz.FileDataError as e:
-            raise PDFFileError(f"Archivo no es un PDF válido: {e}") from e
-        except fitz.FileError as e:
+        except PDFSecurityError:
+            raise
+        except Exception as e:
+            # PyMuPDF raises a mix of types depending on version
+            # (FileDataError, FileNotFoundError, EmptyFileError, generic
+            # RuntimeException). Catch broadly and wrap so callers only
+            # need to know our exception hierarchy.
             raise PDFFileError(f"Error al leer el PDF: {e}") from e
         finally:
             if doc is not None:
@@ -178,16 +189,18 @@ class PDFSecurityManager:
         try:
             doc = fitz.open(path)
             return bool(doc.is_encrypted)
-        except fitz.FileDataError as e:
-            raise PDFFileError(f"Archivo no es un PDF válido: {e}") from e
-        except fitz.FileError as e:
+        except PDFSecurityError:
+            raise
+        except Exception as e:
+            # PyMuPDF raises a mix of types depending on version
+            # (FileDataError, FileNotFoundError, EmptyFileError, generic
+            # RuntimeException). Catch broadly and wrap so callers only
+            # need to know our exception hierarchy.
             raise PDFFileError(f"Error al leer el PDF: {e}") from e
-        except OSError as e:
-            raise PDFFileError(f"Error de I/O al leer el PDF: {e}") from e
         finally:
             if doc is not None:
                 doc.close()
-    
+
     @staticmethod
     def unlock_pdf(path: str, password: str) -> Optional[fitz.Document]:
         """
@@ -314,9 +327,13 @@ class PDFSecurityManager:
 
         except PDFSecurityError:
             raise
-        except fitz.FileDataError as e:
-            raise PDFFileError(f"Archivo no es un PDF válido: {e}") from e
-        except fitz.FileError as e:
+        except PDFSecurityError:
+            raise
+        except Exception as e:
+            # PyMuPDF raises a mix of types depending on version
+            # (FileDataError, FileNotFoundError, EmptyFileError, generic
+            # RuntimeException). Catch broadly and wrap so callers only
+            # need to know our exception hierarchy.
             raise PDFFileError(f"Error al leer el PDF: {e}") from e
         finally:
             if doc is not None:
@@ -324,12 +341,16 @@ class PDFSecurityManager:
 
     @staticmethod
     def can_save_changes(doc: fitz.Document) -> bool:
-        """
-        Return whether the current opened document has enough permissions to save edits.
-        """
-        if not doc.is_encrypted:
-            return True
+        """Return whether the opened document allows saving edits.
 
+        BUG FIX: was checking ``doc.is_encrypted`` which PyMuPDF flips to
+        ``False`` after successful authentication — even at user level — so
+        user-authed restricted PDFs were incorrectly reported as savable.
+        We now use ``doc.needs_pass`` (reflects the file state, not the auth
+        state) to detect encryption, then inspect the permission bitmask.
+        """
+        if not doc.needs_pass:
+            return True   # file is not encrypted at all
         return PDFSecurityManager._has_permission(
             doc.permissions,
             PDFSecurityManager.PDF_PERM_MODIFY,
