@@ -39,6 +39,32 @@ import flet as ft
 _IPC_PORT = 57423          # Puerto fijo; cambia si hay conflicto con otra app
 _IPC_HOST = "127.0.0.1"
 
+# ── Logging diagnóstico ──────────────────────────────────────────────────────
+# Escribe a %USERPROFILE%\.extraer_pdfs_debug.log para diagnosticar fallos en
+# "Abrir con", IPC, parseo de argv post-instalación. Best-effort: nunca lanza
+# excepciones. Truncado automático al pasar 1 MB.
+_DBG_LOG_PATH = Path.home() / ".extraer_pdfs_debug.log"
+
+
+def _dbg_log(msg: str) -> None:
+    try:
+        if _DBG_LOG_PATH.exists() and _DBG_LOG_PATH.stat().st_size > 1_048_576:
+            _DBG_LOG_PATH.write_text("", encoding="utf-8")
+        with _DBG_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [{os.getpid()}] {msg}\n")
+    except Exception:
+        pass
+
+
+# Marcador de arranque: tan temprano como sea posible, antes de cualquier import
+# pesado o lógica que pueda fallar silenciosamente.
+_dbg_log("=" * 60)
+_dbg_log(f"LAUNCH | sys.argv = {sys.argv!r}")
+_dbg_log(f"LAUNCH | sys.executable = {sys.executable!r}")
+_dbg_log(f"LAUNCH | cwd = {os.getcwd()!r}")
+_dbg_log(f"LAUNCH | EXTRAR_PDF_PATH = {os.environ.get('EXTRAR_PDF_PATH', '')!r}")
+_dbg_log(f"LAUNCH | platform = {sys.platform}")
+
 _WEB_UPLOAD_DIR = Path(__file__).resolve().parents[1] / "storage" / "temp"
 
 try:
@@ -88,26 +114,38 @@ def _collect_initial_paths() -> list[str]:
         arg = args[i]
         if arg.startswith("--dart-entrypoint-args="):
             candidate = arg[len("--dart-entrypoint-args="):]
+            _dbg_log(f"ARGS  | matched --dart-entrypoint-args=, candidate = {candidate!r}")
         elif arg == "--dart-entrypoint-args" and i + 1 < len(args):
             i += 1
             candidate = args[i]
+            _dbg_log(f"ARGS  | matched --dart-entrypoint-args <sep>, candidate = {candidate!r}")
         elif arg.startswith("--"):
+            _dbg_log(f"ARGS  | skip flag {arg!r}")
             i += 1
             continue
         else:
             candidate = arg
+            _dbg_log(f"ARGS  | direct arg, candidate = {candidate!r}")
         cleaned = _clean_path_argument(candidate)
         if cleaned and cleaned not in paths:
             paths.append(cleaned)
+            _dbg_log(f"ARGS  | accepted path = {cleaned!r}")
+        elif candidate:
+            _dbg_log(f"ARGS  | REJECTED candidate = {candidate!r} (no .pdf ext o no existe)")
         i += 1
 
     env_val = os.environ.get("EXTRAR_PDF_PATH", "").strip()
     if env_val:
+        _dbg_log(f"ENV   | EXTRAR_PDF_PATH = {env_val!r}")
         for raw in env_val.split("|"):
             cleaned = _clean_path_argument(raw)
             if cleaned and cleaned not in paths:
                 paths.append(cleaned)
+                _dbg_log(f"ENV   | accepted path = {cleaned!r}")
+            elif raw:
+                _dbg_log(f"ENV   | REJECTED candidate = {raw!r}")
 
+    _dbg_log(f"COLLECT | final paths = {paths!r}")
     return paths
 
 
@@ -138,10 +176,13 @@ def _send_to_server(paths: list[str], retries: int = 5, delay: float = 0.35) -> 
         try:
             with socket.create_connection((_IPC_HOST, _IPC_PORT), timeout=2) as s:
                 s.sendall(header + payload)
+            _dbg_log(f"IPC   | send OK (attempt {attempt + 1}/{retries}), paths={paths!r}")
             return True
-        except OSError:
+        except OSError as ex:
+            _dbg_log(f"IPC   | send FAIL attempt {attempt + 1}/{retries}: {ex!r}")
             if attempt < retries - 1:
                 time.sleep(delay)
+    _dbg_log(f"IPC   | send GAVE UP after {retries} attempts")
     return False
 
 
@@ -165,8 +206,10 @@ def _try_bind_server() -> socket.socket | None:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind((_IPC_HOST, _IPC_PORT))
         sock.listen(10)
+        _dbg_log(f"BIND  | OK on {_IPC_HOST}:{_IPC_PORT} (we are PRIMARY)")
         return sock
-    except OSError:
+    except OSError as ex:
+        _dbg_log(f"BIND  | FAIL on {_IPC_HOST}:{_IPC_PORT}: {ex!r} (we are SECONDARY)")
         sock.close()
         return None
 
@@ -193,6 +236,7 @@ def _ipc_server_loop(server_sock: socket.socket) -> None:
             if raw_body is None:
                 continue
             payload = json.loads(raw_body.decode("utf-8"))
+            _dbg_log(f"IPC   | server recv payload = {payload!r}")
             if isinstance(payload, list):
                 with _incoming_lock:
                     for item in payload:
@@ -230,9 +274,11 @@ def main(page: ft.Page) -> None:
     if server_sock is None:
         # Somos una instancia secundaria. Ocultar la ventana antes de que el
         # usuario la vea, reenviar rutas a la instancia principal y salir.
+        _dbg_log("MAIN  | running as SECONDARY instance")
         page.window.visible = False
         page.update()
         initial_paths = _collect_initial_paths()
+        _dbg_log(f"MAIN  | secondary forwarding {len(initial_paths)} path(s) and exiting")
         threading.Thread(
             target=lambda: (_send_to_server(initial_paths), os._exit(0)),
             daemon=True,
@@ -421,6 +467,7 @@ def main(page: ft.Page) -> None:
     ]
 
     def _open_pdf_path(path: str | None, password: str | None = None) -> bool:
+        _dbg_log(f"OPEN  | _open_pdf_path called with path={path!r} pwd={'<set>' if password else None}")
         from pdf_security import (        # lazy — carga fitz solo al abrir un PDF
             PDFInvalidPasswordError,
             PDFPasswordRequiredError,
@@ -429,6 +476,7 @@ def main(page: ft.Page) -> None:
         from pdf_viewer import PDFViewerTab  # lazy — carga fitz + onnxtr
 
         if not path:
+            _dbg_log("OPEN  | ABORT: path is empty/None")
             _show_error("No se recibió una ruta válida para el PDF seleccionado")
             return False
 
@@ -475,6 +523,7 @@ def main(page: ft.Page) -> None:
         home.refresh_recent()
         _rebuild_tabs(_fixed_count() + len(open_tabs) - 1)
         _activate_window()
+        _dbg_log(f"OPEN  | SUCCESS: {path!r}")
         return True
 
     def _open_picker() -> None:
@@ -781,12 +830,14 @@ def main(page: ft.Page) -> None:
             if not candidate:
                 continue
             if candidate == "__ACTIVATE__":
+                _dbg_log("QUEUE | __ACTIVATE__ marker — bringing window to front")
                 _activate_window()
                 continue
+            _dbg_log(f"QUEUE | dequeued {candidate!r}, calling _open_pdf_path")
             try:
                 _open_pdf_path(candidate)
-            except Exception:
-                pass
+            except Exception as ex:
+                _dbg_log(f"QUEUE | _open_pdf_path raised: {ex!r}")
 
     def _incoming_watcher() -> None:
         """Hilo daemon: espera el evento IPC y despacha al hilo de Flet."""
