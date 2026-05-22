@@ -810,13 +810,21 @@ class PDFViewerTab(
 
     # ── lazy suspension ───────────────────────────────────────────────────────
     #
-    # When this tab loses focus it starts a 60 s timer. On expiry the render
-    # cache is cleared (frees ~2–3 MB of base64 page images) while the
-    # fitz.Document stays open (avoids serialising unsaved annotations).
-    # On focus the timer is cancelled; if already suspended, a fast-resize
-    # rebuild re-renders the visible pages on demand.
+    # Lifecycle de RAM en dos pasos cuando este tab pierde foco:
+    #
+    #   1) on_blur (inmediato): shrink del cache a 5 entradas. Esto libera la
+    #      mayoría de las páginas cacheadas (~6-7 MB por tab) sin esperar el
+    #      timer — clave cuando hay muchos PDFs abiertos.
+    #
+    #   2) 20 s después (_do_suspend): clear total del cache. El fitz.Document
+    #      queda abierto para evitar serializar anotaciones no guardadas. Al
+    #      volver al tab, un fast-resize re-renderiza las páginas visibles.
+    #
+    # Antes el delay era 60 s y no había shrink inmediato → con 10 PDFs
+    # abiertos cada uno podía retener 8-16 MB en cache simultáneamente.
 
-    _SUSPEND_DELAY = 60.0  # seconds of inactivity before freeing cache
+    _SUSPEND_DELAY     = 20.0  # segundos de inactividad antes de clear total
+    _BLUR_SHRINK_KEEP  = 5     # entradas a conservar tras perder foco
 
     def on_focus(self) -> None:
         """Called by DocumentManagerUI when this tab becomes active."""
@@ -829,6 +837,11 @@ class PDFViewerTab(
 
     def on_blur(self) -> None:
         """Called by DocumentManagerUI when another tab becomes active."""
+        # Shrink inmediato: libera RAM sin esperar el timer.
+        try:
+            self._render_cache.shrink(self._BLUR_SHRINK_KEEP)
+        except Exception:
+            pass
         self._start_suspend_timer()
 
     def _start_suspend_timer(self) -> None:
