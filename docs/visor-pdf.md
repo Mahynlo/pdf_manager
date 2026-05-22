@@ -280,7 +280,7 @@ flowchart TD
     H -- No --> J["_render_page_slot(pn)\n→ hilo background"]
     H -- Sí --> I
 
-    J --> I{¿|scroll − last_evict|\n≥ 400 px?}
+    J --> I{¿abs scroll − last_evict\n≥ 400 px?}
 
     I -- Sí --> K["_evict_distant(pixels, vp_h)\nkeep_top  = pixels − vp_h × 3\nkeep_bottom = pixels + vp_h × 4"]
     I -- No --> L([Fin de ciclo])
