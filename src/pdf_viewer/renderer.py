@@ -12,7 +12,11 @@ BASE_SCALE = 1.5
 ZOOM_LEVELS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
 
 # Global semaphore: cap concurrent page renders across all open tabs.
-_RENDER_SEM = threading.Semaphore(4)
+# Subido de 4 → 6: durante un cambio de zoom las 5-6 páginas visibles arrancan
+# en paralelo y terminan ~al mismo tiempo, lo que permite que el debounce de
+# 30 ms en _schedule_render_update agrupe TODOS los swaps en un único update
+# del viewer (sin cascada visible entre las primeras 4 y la 5ª-6ª).
+_RENDER_SEM = threading.Semaphore(6)
 
 # Cache entry: (file_path: str | None, width: int, height: int, png_bytes: bytes | None)
 # - file_path set, png_bytes=None  → JPEG en disco (zoom > 1.0)
