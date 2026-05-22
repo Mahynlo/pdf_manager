@@ -6,6 +6,16 @@ from typing import Optional
 import fitz
 
 
+# ── Auth-level bits returned by `fitz.Document.authenticate()` ────────────────
+# PyMuPDF returns a bitmask: 0 = failure; bit 1 = user; bit 2 = owner;
+# bit 4 = cleartext password. To verify "authenticated AS owner" you must
+# bit-test against AUTH_OWNER — checking truthiness lets a user-only auth pass.
+AUTH_FAILED  = 0
+AUTH_USER    = 1
+AUTH_OWNER   = 2
+AUTH_CLEAR   = 4
+
+
 class PDFSecurityError(ValueError):
     """Base exception for PDF security operations."""
 
@@ -16,6 +26,14 @@ class PDFPasswordRequiredError(PDFSecurityError):
 
 class PDFInvalidPasswordError(PDFSecurityError):
     """Raised when password authentication fails for an encrypted PDF."""
+
+
+class PDFOwnerRequiredError(PDFSecurityError):
+    """Raised when an operation requires owner-level auth but only user was provided."""
+
+
+class PDFFileError(PDFSecurityError):
+    """Raised when the file cannot be read as a PDF (corrupt, missing, etc.)."""
 
 
 @dataclass
@@ -100,36 +118,75 @@ class PDFSecurityManager:
     
     @staticmethod
     def get_security_info(path: str) -> PDFSecurityInfo:
-        """Get security information about a PDF without opening it."""
+        """Get security information about a PDF without authenticating.
+
+        Determines whether the PDF requires a user password by trying an empty
+        password — if `authenticate("")` succeeds the file is openable as-is
+        (only owner-side restrictions, no user password) and we report
+        ``has_user_password=False`` honestly. Previously both flags echoed
+        ``is_encrypted`` which gave UI consumers wrong info for owner-only
+        protected PDFs.
+        """
+        doc = None
         try:
             doc = fitz.open(path)
-            is_protected = doc.is_pdf and doc.is_encrypted
-            
+
+            is_encrypted = bool(doc.is_encrypted)
+            has_user_password  = False
+            has_owner_password = False
+
+            if is_encrypted:
+                # Empty-password auth probe: distinguishes user-pw-required
+                # from owner-only-restricted PDFs without touching the doc state
+                # any further than PyMuPDF requires.
+                auth_level = doc.authenticate("")
+                has_user_password  = (auth_level == AUTH_FAILED)
+                # If empty-password auth succeeded as user (1) the PDF still has
+                # an owner pw; if it succeeded as owner (2) likewise. The only
+                # case without an owner pw is a non-encrypted PDF (handled above).
+                has_owner_password = True
+
             info = PDFSecurityInfo(
-                is_protected=is_protected,
-                is_encrypted=doc.is_encrypted,
+                is_protected=is_encrypted,
+                is_encrypted=is_encrypted,
                 permissions=doc.permissions,
-                has_user_password=is_protected,  # User password present if encrypted
-                has_owner_password=is_protected,  # Owner password present if encrypted
-                encryption_method="PDF Standard Encryption" if is_protected else "None"
+                has_user_password=has_user_password,
+                has_owner_password=has_owner_password,
+                encryption_method="PDF Standard Encryption" if is_encrypted else "None",
             )
-            
-            doc.close()
             return info
-            
+
+        except fitz.FileDataError as e:
+            raise PDFFileError(f"Archivo no es un PDF válido: {e}") from e
         except fitz.FileError as e:
-            raise ValueError(f"Error al leer el PDF: {e}")
-    
+            raise PDFFileError(f"Error al leer el PDF: {e}") from e
+        finally:
+            if doc is not None:
+                doc.close()
+
     @staticmethod
     def is_protected(path: str) -> bool:
-        """Check if a PDF is password-protected."""
+        """Check if a PDF requires unlocking. Propagates I/O errors.
+
+        Previously this swallowed *any* exception and returned False — meaning
+        a missing or corrupt file was reported as "not protected", masking the
+        real failure. Now I/O errors (file not found, permission denied,
+        invalid PDF) are surfaced as `PDFFileError`; only legitimate "is this
+        encrypted?" queries return a bool.
+        """
+        doc = None
         try:
             doc = fitz.open(path)
-            is_protected = doc.is_encrypted
-            doc.close()
-            return is_protected
-        except Exception:
-            return False
+            return bool(doc.is_encrypted)
+        except fitz.FileDataError as e:
+            raise PDFFileError(f"Archivo no es un PDF válido: {e}") from e
+        except fitz.FileError as e:
+            raise PDFFileError(f"Error al leer el PDF: {e}") from e
+        except OSError as e:
+            raise PDFFileError(f"Error de I/O al leer el PDF: {e}") from e
+        finally:
+            if doc is not None:
+                doc.close()
     
     @staticmethod
     def unlock_pdf(path: str, password: str) -> Optional[fitz.Document]:
@@ -185,57 +242,82 @@ class PDFSecurityManager:
     
     @staticmethod
     def unlock_pdf_to_file(path: str, password: str, output_path: str) -> bool:
-        """
-        Unlock a PDF and save it without protection to output_path.
-        Returns True if successful.
+        """Unlock a PDF and save it without protection to *output_path*.
+
+        BUG FIX: previously called ``doc.save(output_path)`` which defaults to
+        ``encryption=PDF_ENCRYPT_KEEP`` — preserving the original encryption.
+        The "unlocked" output was actually still encrypted with the same
+        password. We now explicitly request ``PDF_ENCRYPT_NONE`` and use a
+        fresh document container so no encryption metadata leaks through.
         """
         doc = None
         try:
             doc = PDFSecurityManager.unlock_pdf(path, password)
-            
             if doc is None:
-                raise ValueError("Contraseña incorrecta o PDF no se pudo desbloquear")
-            
-            # Save without encryption
-            doc.save(output_path)
+                raise PDFInvalidPasswordError(
+                    "Contraseña incorrecta o PDF no se pudo desbloquear"
+                )
+
+            # Copy pages into a fresh, unencrypted document. This is more
+            # robust than `doc.save(..., encryption=PDF_ENCRYPT_NONE)` because
+            # it strips any residual encryption metadata, owner/user pw fields
+            # and permission flags from the saved file.
+            new_doc = fitz.open()
+            try:
+                new_doc.insert_pdf(doc)
+                new_doc.save(output_path)
+            finally:
+                new_doc.close()
             return True
-            
+
+        except PDFSecurityError:
+            raise
         except Exception as e:
-            raise ValueError(f"Error al guardar PDF desbloqueado: {e}")
+            raise PDFFileError(f"Error al guardar PDF desbloqueado: {e}") from e
         finally:
             if doc is not None:
                 doc.close()
     
     @staticmethod
     def check_permissions(path: str, password: Optional[str] = None) -> PDFSecurityInfo:
-        """
-        Get detailed permission information for a PDF.
-        If the PDF is encrypted, password must be provided.
+        """Get detailed permission information for a PDF.
+
+        If encrypted, authenticates with *password* first so the returned
+        ``permissions`` reflects what the authenticated session can do (not
+        just what the file declares).
         """
         doc = None
         try:
             doc = fitz.open(path)
-            
+
+            has_user_password  = False
+            has_owner_password = False
+
             if doc.is_encrypted:
                 if password is None:
-                    raise ValueError("PDF protegido requiere contraseña")
-                
-                if not doc.authenticate(password):
-                    raise ValueError("Contraseña incorrecta")
-            
-            info = PDFSecurityInfo(
-                is_protected=doc.is_encrypted,
-                is_encrypted=doc.is_encrypted,
+                    raise PDFPasswordRequiredError("PDF protegido requiere contraseña")
+                auth_level = doc.authenticate(password)
+                if auth_level == AUTH_FAILED:
+                    raise PDFInvalidPasswordError("Contraseña incorrecta")
+                # Honest flags now (see get_security_info docstring).
+                has_user_password  = True   # if we needed a pw, there IS one
+                has_owner_password = True
+
+            return PDFSecurityInfo(
+                is_protected=bool(doc.is_encrypted),
+                is_encrypted=bool(doc.is_encrypted),
                 permissions=doc.permissions,
-                has_user_password=doc.is_encrypted,
-                has_owner_password=doc.is_encrypted,
-                encryption_method="AES" if doc.is_encrypted else "None"
+                has_user_password=has_user_password,
+                has_owner_password=has_owner_password,
+                encryption_method="AES" if doc.is_encrypted else "None",
             )
-            
-            return info
-            
-        except Exception:
+
+        except PDFSecurityError:
             raise
+        except fitz.FileDataError as e:
+            raise PDFFileError(f"Archivo no es un PDF válido: {e}") from e
+        except fitz.FileError as e:
+            raise PDFFileError(f"Error al leer el PDF: {e}") from e
         finally:
             if doc is not None:
                 doc.close()
@@ -373,93 +455,107 @@ class PDFSecurityManager:
         input_path: str,
         output_path: str,
         current_owner_password: str,
-        new_user_password: Optional[str] = None,
-        new_owner_password: Optional[str] = None,
-        permissions: Optional[int] = None
+        new_user_password: str,
+        new_owner_password: str,
+        permissions: Optional[int] = None,
     ) -> bool:
+        """Change the permissions of an already protected PDF.
+
+        BUG FIX: previously, passing ``new_user_password=None`` was silently
+        treated as ``""`` — the PDF was saved with an empty user password,
+        effectively REMOVING the open-protection. Now both passwords are
+        required positional-ish arguments; if you want to remove a password,
+        pass an empty string explicitly. To remove all protection, use
+        :py:meth:`remove_protection`.
+
+        BUG FIX: requires the **owner** auth level (not just any auth).
         """
-        Change the permissions of an already protected PDF.
-        
-        Args:
-            input_path: Path to the protected PDF
-            output_path: Path where to save the modified PDF
-            current_owner_password: Current owner password
-            new_user_password: New user password (if None, keeps current)
-            new_owner_password: New owner password (if None, keeps current)
-            permissions: New permissions (if None, keeps current)
-        
-        Returns:
-            True if successful
-        """
+        if new_user_password is None or new_owner_password is None:
+            raise ValueError(
+                "new_user_password y new_owner_password no pueden ser None; "
+                "pasá '' explícitamente para 'sin contraseña' o usá "
+                "remove_protection() para quitar la protección"
+            )
+
         doc = None
         try:
             doc = fitz.open(input_path)
-            
+
             if doc.is_encrypted:
-                if not doc.authenticate(current_owner_password):
-                    raise ValueError("Contraseña de propietario incorrecta")
-            
-            # Use provided values or fall back to current permissions
-            user_pwd = new_user_password if new_user_password is not None else ""
-            owner_pwd = new_owner_password if new_owner_password is not None else ""
+                auth_level = doc.authenticate(current_owner_password)
+                if auth_level == AUTH_FAILED:
+                    raise PDFInvalidPasswordError("Contraseña de propietario incorrecta")
+                if not (auth_level & AUTH_OWNER):
+                    # Authenticated as user, not as owner — refuse to alter
+                    # permissions silently with limited rights.
+                    raise PDFOwnerRequiredError(
+                        "Se autenticó como usuario, no como propietario; "
+                        "no es posible cambiar los permisos"
+                    )
+
             perms = permissions if permissions is not None else doc.permissions
 
-            enc = fitz.PDF_ENCRYPT_AES_256
             doc.save(
                 output_path,
-                encryption=enc,
-                owner_pw=owner_pwd or "",
-                user_pw=user_pwd or "",
+                encryption=fitz.PDF_ENCRYPT_AES_256,
+                owner_pw=new_owner_password,
+                user_pw=new_user_password,
                 permissions=perms,
             )
-
             return True
-            
+
+        except PDFSecurityError:
+            raise
         except Exception as e:
-            raise ValueError(f"Error al cambiar permisos: {e}")
+            raise PDFFileError(f"Error al cambiar permisos: {e}") from e
         finally:
             if doc is not None:
                 doc.close()
-    
+
     @staticmethod
     def remove_protection(
         input_path: str,
         output_path: str,
-        owner_password: str
+        owner_password: str,
     ) -> bool:
-        """
-        Remove password protection from a PDF entirely.
-        Requires the owner password.
-        
-        Args:
-            input_path: Path to the protected PDF
-            output_path: Path where to save the unprotected PDF
-            owner_password: Owner password to remove protection
-        
-        Returns:
-            True if successful
+        """Remove password protection from a PDF entirely.
+
+        BUG FIX: requires authentication AS OWNER. The previous check
+        ``if not doc.authenticate(owner_password)`` returned truthy even when
+        ``owner_password`` happened to match the *user* password (auth
+        level 1) — letting a user-level holder strip protection. We now
+        require bit ``AUTH_OWNER`` (=2) in the auth-level bitmask.
         """
         doc = None
         try:
             doc = fitz.open(input_path)
-            
+
             if not doc.is_encrypted:
-                # Already unprotected, just save a copy
                 doc.save(output_path)
                 return True
 
-            if not doc.authenticate(owner_password):
-                raise ValueError("Contraseña de propietario incorrecta")
+            auth_level = doc.authenticate(owner_password)
+            if auth_level == AUTH_FAILED:
+                raise PDFInvalidPasswordError("Contraseña de propietario incorrecta")
+            if not (auth_level & AUTH_OWNER):
+                raise PDFOwnerRequiredError(
+                    "Se autenticó como usuario, no como propietario; "
+                    "no es posible remover la protección"
+                )
 
-            # Create an unencrypted copy by inserting pages into a new document
+            # Copy pages into a fresh, unencrypted document.
             new_doc = fitz.open()
-            new_doc.insert_pdf(doc)
-            new_doc.save(output_path)
-            new_doc.close()
+            try:
+                new_doc.insert_pdf(doc)
+                new_doc.save(output_path)
+            finally:
+                new_doc.close()
             return True
-            
+
+        except PDFSecurityError:
+            raise
         except Exception as e:
-            raise ValueError(f"Error al remover protección: {e}")
+            raise PDFFileError(f"Error al remover protección: {e}") from e
         finally:
             if doc is not None:
                 doc.close()

@@ -1,7 +1,9 @@
 """PDF Security module: unlock password-protected PDFs and display permissions."""
 
 from .security import (
+	PDFFileError,
 	PDFInvalidPasswordError,
+	PDFOwnerRequiredError,
 	PDFPasswordRequiredError,
 	PDFSecurityError,
 	PDFSecurityManager,
@@ -14,4 +16,6 @@ __all__ = [
 	"PDFSecurityError",
 	"PDFPasswordRequiredError",
 	"PDFInvalidPasswordError",
+	"PDFOwnerRequiredError",
+	"PDFFileError",
 ]
