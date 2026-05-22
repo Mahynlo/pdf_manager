@@ -1,6 +1,7 @@
 """Rendering, navigation, zoom and save behaviour for PDFViewerTab."""
 from __future__ import annotations
 
+import base64
 import bisect
 import threading
 from pathlib import Path
@@ -62,20 +63,28 @@ class _RenderMixin:
                 ink     = self._ink_canvases[pn]
                 load_ov = self._loading_overlays[pn]
 
-                img.visible = False
-                img.src = None
-                img.src_base64 = None
+                # Si la página ya estaba renderizada, mantenerla visible como
+                # preview escalada (fit=CONTAIN) mientras llega el nuevo render.
+                # El worker restaura fit=NONE al terminar. Esto elimina el flash
+                # gris/spinner durante cambios de zoom.
+                has_old = bool(img.src or img.src_base64)
+                if has_old:
+                    img.fit = ft.ImageFit.CONTAIN
+                    img.visible = True
+                    slot.bgcolor = None
+                else:
+                    img.visible = False
+                    slot.bgcolor = _PAGE_BG
                 img.width  = w
                 img.height = h
                 slot.width  = w
                 slot.height = h
-                slot.bgcolor = _PAGE_BG
                 ink.width  = w
                 ink.height = h
 
                 load_ov.width   = w
                 load_ov.height  = h
-                load_ov.visible = True
+                load_ov.visible = not has_old
 
                 self._drag_overlays[pn].visible   = False
                 self._sel_overlays[pn].visible    = False
@@ -563,25 +572,31 @@ class _RenderMixin:
                     with self._doc_lock:
                         if gen != self._render_gen or pn >= len(self._page_images):
                             return
-                        path, w, h = render_page(self.doc, pn, self.zoom, cache)
+                        path, w, h, png_bytes = render_page(self.doc, pn, self.zoom, cache)
                 if gen != self._render_gen or pn >= len(self._page_images):
                     return
                 img  = self._page_images[pn]
                 slot = self._page_slots[pn]
-                img.src = path
-                img.src_base64 = None
-                img.width      = w
-                img.height     = h
-                img.visible    = True
-                slot.bgcolor   = None
+                if png_bytes is not None:
+                    # PNG en memoria → encode a base64 sólo aquí (no en el cache).
+                    img.src_base64 = base64.b64encode(png_bytes).decode()
+                    img.src = None
+                else:
+                    img.src = path
+                    img.src_base64 = None
+                img.fit    = ft.ImageFit.NONE  # restaurar desde preview CONTAIN
+                img.width  = w
+                img.height = h
+                img.visible = True
+                slot.bgcolor = None
                 loading_overlays = getattr(self, "_loading_overlays", [])
                 if pn < len(loading_overlays):
                     loading_overlays[pn].visible = False
                 self._rendered.add(pn)
-                try:
-                    slot.update()
-                except Exception:
-                    pass
+                # Batch updates: si varios workers terminan dentro de 30 ms,
+                # se consolida en un solo update del scroll → elimina la cascada
+                # visual durante cambios de zoom.
+                self._schedule_render_update()
                 # Notify mixins that the page image is now up-to-date.
                 try:
                     self._on_page_rendered(pn)
@@ -597,6 +612,26 @@ class _RenderMixin:
                     self._render_page_slot(pn)
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _schedule_render_update(self) -> None:
+        """Coalesce concurrent worker completions into a single UI update.
+
+        Sin esto, cada worker llama slot.update() cuando termina; con varios
+        renders concurrentes (cambio de zoom) se ve una cascada de pantallazos.
+        Con un debounce de 30 ms todos los renders que terminan juntos
+        comparten un solo update del scroll.
+        """
+        t = getattr(self, "_render_upd_timer", None)
+        if t is not None:
+            t.cancel()
+        self._render_upd_timer = threading.Timer(0.03, self._do_render_update)
+        self._render_upd_timer.start()
+
+    def _do_render_update(self) -> None:
+        try:
+            self.viewer_scroll.update()
+        except Exception:
+            pass
 
     def _render_visible(self, pixels: float, viewport_h: float) -> None:
         if not self._page_cum_offsets:
@@ -825,13 +860,31 @@ class _RenderMixin:
         candidates = [z for z in ZOOM_LEVELS if z < self.zoom - 0.01]
         if candidates:
             self.zoom = candidates[-1]
-            self._apply_zoom()
+            self.zoom_label.value = f"{int(round(self.zoom * 100))}%"
+            try:
+                self.zoom_label.update()
+            except Exception:
+                pass
+            self._schedule_zoom_apply()
 
     def _zoom_in(self, e=None) -> None:
         candidates = [z for z in ZOOM_LEVELS if z > self.zoom + 0.01]
         if candidates:
             self.zoom = candidates[0]
-            self._apply_zoom()
+            self.zoom_label.value = f"{int(round(self.zoom * 100))}%"
+            try:
+                self.zoom_label.update()
+            except Exception:
+                pass
+            self._schedule_zoom_apply()
+
+    def _schedule_zoom_apply(self) -> None:
+        """Debounce zoom rebuilds: espera 120 ms desde el último cambio de nivel."""
+        t = getattr(self, "_zoom_timer", None)
+        if t is not None:
+            t.cancel()
+        self._zoom_timer = threading.Timer(0.12, self._apply_zoom)
+        self._zoom_timer.start()
 
     def _set_zoom(self, z: float) -> None:
         self.zoom = z
