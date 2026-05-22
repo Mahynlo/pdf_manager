@@ -65,11 +65,16 @@ class _RenderMixin:
 
                 # Si la página ya estaba renderizada, mantenerla visible como
                 # preview escalada (fit=CONTAIN) mientras llega el nuevo render.
-                # El worker restaura fit=NONE al terminar. Esto elimina el flash
-                # gris/spinner durante cambios de zoom.
+                # El worker restaura fit=NONE + opacity=1.0 al terminar.
+                #
+                # opacity=0.6 atenúa el blur del upscale durante zoom-in: en vez
+                # de ver "imagen borrosa nítida → imagen nítida" se ve "imagen
+                # tenue → imagen nítida", lo que el ojo lee como un fade-in
+                # natural en lugar de un parpadeo.
                 has_old = bool(img.src or img.src_base64)
                 if has_old:
                     img.fit = ft.ImageFit.CONTAIN
+                    img.opacity = 0.6
                     img.visible = True
                     slot.bgcolor = None
                 else:
@@ -584,9 +589,10 @@ class _RenderMixin:
                 else:
                     img.src = path
                     img.src_base64 = None
-                img.fit    = ft.ImageFit.NONE  # restaurar desde preview CONTAIN
-                img.width  = w
-                img.height = h
+                img.fit     = ft.ImageFit.NONE  # restaurar desde preview CONTAIN
+                img.opacity = 1.0               # restaurar desde fade del preview
+                img.width   = w
+                img.height  = h
                 img.visible = True
                 slot.bgcolor = None
                 loading_overlays = getattr(self, "_loading_overlays", [])
