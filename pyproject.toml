@@ -44,6 +44,7 @@ path = "src"
 [tool.uv]
 dev-dependencies = [
     "flet[all]==0.28.3",
+    "pytest>=8.4.2",
 ]
 
 [tool.poetry]
@@ -51,3 +52,12 @@ package-mode = false
 
 [tool.poetry.group.dev.dependencies]
 flet = {extras = ["all"], version = "0.28.3"}
+pytest = ">=8.4.2"
+
+[tool.pytest.ini_options]
+# src/ no es un paquete instalable; añadirlo al sys.path para que los tests
+# puedan hacer `import pdf_viewer.renderer`, `import recent_files`, etc.
+pythonpath = ["src"]
+testpaths  = ["tests"]
+# -q: salida concisa, -ra: resumen de tests no-pass al final
+addopts = "-q -ra"
