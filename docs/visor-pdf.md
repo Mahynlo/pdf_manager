@@ -29,10 +29,16 @@ El visor está construido con **Flet** (Python sobre Flutter) y **PyMuPDF** (`fi
 **Constantes globales clave:**
 
 ```
-BASE_SCALE  = 1.5   # Factor base pt→px (72 DPI → 108 DPI efectivos)
-ZOOM_LEVELS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
-_RENDER_SEM = threading.Semaphore(4)   # Máx 4 renders simultáneos
-_MAX_ENTRIES = 25   # Entradas máximas en la caché LRU
+BASE_SCALE   = 1.5   # Factor base pt→px (72 DPI → 108 DPI efectivos)
+ZOOM_LEVELS  = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
+_RENDER_SEM  = threading.Semaphore(6)   # Máx 6 renders concurrentes (todos
+                                        #  los tabs comparten este semaphore;
+                                        #  6 ≈ páginas visibles típicas, para
+                                        #  que un cambio de zoom termine en
+                                        #  una sola oleada en lugar de dos)
+_MAX_ENTRIES = 25                       # Entradas máximas en la caché LRU
+_MAX_BYTES   = 8 * 1024 * 1024          # Tope duro de bytes PNG en RAM por tab
+                                        #  (evicción por size + por count)
 ```
 
 ---
@@ -196,19 +202,23 @@ flowchart TD
     P -- No --> R
 
     Q --> R{zoom ≤ 1.0?}
-    R -- Sí\nPNG lossless --> S["img_bytes = pix.tobytes('png')"]
-    R -- No\nJPEG --> T{zoom ≤ 2.0?}
-    T -- Sí --> U["JPEG quality=95"]
-    T -- No --> V["JPEG quality=92"]
+    R -- Sí\nPNG en RAM --> S["raw = pix.tobytes('png')\nresult = (None, w, h, raw)"]
+    R -- No\nJPEG a disco --> T{zoom ≤ 2.0?}
+    T -- Sí --> U["JPEG quality=90"]
+    T -- No --> V["JPEG quality=82"]
 
-    S --> W["base64.b64encode(img_bytes)"]
-    U --> W
+    U --> W["mkstemp(suffix='.jpg')\npix.save(temp, jpeg)\nresult = (path, w, h, None)"]
     V --> W
 
-    W --> X["cache.put(pn, zoom, result)"]
+    S --> X["cache.put(pn, zoom, result)"]
+    W --> X
     X --> M
-    M --> Y["img.src_base64 = b64\nimg.visible = True\nslot.update()"]
-    Y --> Z([Página visible en pantalla])
+    M --> Y2{¿png_bytes\nestá set?}
+    Y2 -- Sí --> Y3["img.src_base64 =\nb64encode(png_bytes)\nimg.src = None"]
+    Y2 -- No\n(JPEG en disco) --> Y4["img.src = path\nimg.src_base64 = None"]
+    Y3 --> Y5["img.visible = True\n_schedule_render_update()\n→ debounce 30 ms\n→ un solo viewer_scroll.update()"]
+    Y4 --> Y5
+    Y5 --> Z([Página visible en pantalla])
 
     style A fill:#E8F5E9,stroke:#2E7D32
     style Z fill:#E8F5E9,stroke:#2E7D32
@@ -227,13 +237,20 @@ Conversión inversa (clic en pantalla → posición PDF):
   pdf_y = display_y / (zoom × BASE_SCALE)
 ```
 
-### Formato de imagen según zoom
+### Formato y almacenamiento según zoom
 
-| Zoom | Formato | Calidad | Motivo |
-|------|---------|---------|--------|
-| ≤ 1.0 | PNG | Lossless | Texto pequeño — JPEG añade artefactos visibles |
-| 1.0 – 2.0 | JPEG | 95 | Equilibrio calidad/tamaño |
-| > 2.0 | JPEG | 92 | Pixmaps grandes — 92 es aceptable |
+| Zoom | Formato | Calidad | Ubicación | Motivo |
+|------|---------|---------|-----------|--------|
+| ≤ 1.0 | PNG | Lossless | **RAM** (`png_bytes`) | Texto pequeño — JPEG añade artefactos. Sin escritura a disco → menos latencia. |
+| 1.0 – 2.0 | JPEG | 90 | Disco (`tempfile`) | Pixmaps medianos; quality 90 ya es indistinguible para vista humana. |
+| > 2.0 | JPEG | 82 | Disco (`tempfile`) | Pixmaps grandes (~5-15 MB de pixmap crudo) → quality 82 ahorra ~40% de tamaño sin pérdida perceptible en visualización. |
+
+**El caché guarda PNG bytes crudos (no base64).** El worker codifica a base64 solo al asignar a `img.src_base64`. Esto evita el overhead del 33% de base64 en RAM:
+
+```
+Antes:  cache ←  base64-string (270 KB por página)  → img.src_base64
+Ahora:  cache ←  bytes PNG (200 KB)                  → b64encode()  → img.src_base64
+```
 
 ---
 
@@ -292,25 +309,52 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    Z1([Botón + / −]) --> A["_zoom_in() / _zoom_out()\nBuscar siguiente nivel\nen ZOOM_LEVELS"]
+    Z1([Botón + / −]) --> A["_zoom_in() / _zoom_out()\nself.zoom = siguiente nivel\nActualizar label en el acto"]
     Z2([Ctrl+Scroll]) --> B["_on_page_scroll(e, pn)\n¿_ctrl_pressed = True?\ndelta_y < 0 → zoom_in\ndelta_y > 0 → zoom_out"]
-    Z3([Ajustar ancho]) --> C["_fit_width()\nzoom = (page_ref.width − 72)\n         / (pw × BASE_SCALE)"]
-    Z4([Ajustar página]) --> D["_fit_page()\nzoom = min(\n  avail_w / (pw × BASE_SCALE),\n  avail_h / (ph × BASE_SCALE))"]
+    Z3([Ajustar ancho]) --> C["_fit_width()\nzoom = (page_ref.width − 72)\n         / (pw × BASE_SCALE)\n→ _apply_zoom() directo"]
+    Z4([Ajustar página]) --> D["_fit_page()\nzoom = min(\n  avail_w / (pw × BASE_SCALE),\n  avail_h / (ph × BASE_SCALE))\n→ _apply_zoom() directo"]
 
-    A --> E["_apply_zoom()"]
-    B --> E
+    A --> DB["_schedule_zoom_apply()\n→ Timer 120 ms"]
+    B --> DB
+    DB -- "Más Ctrl+Scrolls\nantes de 120 ms" --> DB
+    DB -- "120 ms sin\ninput" --> E["_apply_zoom()"]
     C --> E
     D --> E
 
-    E --> F["zoom_label.value = f'{zoom*100:.0f}%'"]
+    E --> F["zoom_label.value (ya estaba)"]
     F --> G["Guardar posición fraccional:\nfrac = (scroll_px − cum_offset[pn])\n       / page_height[pn]"]
     G --> H["_rebuild_scroll_content(scroll_back=False)\n→ Fast-resize path"]
     H --> I["Restaurar posición:\ntarget = cum_offset[pn] + frac × page_height[pn]\nviewer_scroll.scroll_to(target, duration=0)"]
 
     style E fill:#FFF9C4,stroke:#F9A825
+    style DB fill:#FFE0B2,stroke:#E65100
 ```
 
-La **posición fraccional** evita que al hacer zoom el contenido salte al inicio de la página: si el usuario estaba viendo el 40% de la página 3, después del zoom sigue en el mismo punto visual.
+### Debounce de zoom (120 ms)
+
+`_zoom_in` / `_zoom_out` actualizan `self.zoom` y el label **inmediatamente** pero difieren el rebuild costoso vía `_schedule_zoom_apply`. Cada llamada cancela el timer previo y reinicia 120 ms. Esto significa que durante Ctrl+Scroll rápido (varios eventos en < 120 ms) solo se dispara **un** `_apply_zoom` al final, con el zoom final — no uno por cada tick de scroll.
+
+Los entry points "directos" (botones de fit, menú de zoom específico) llaman a `_apply_zoom` sin pasar por el debounce.
+
+### Preview durante transición (fast-resize path)
+
+`_rebuild_scroll_content` con `len(_page_images) == total` reusa los controles existentes. Para cada página visible:
+
+| Si la página ya tenía render | Si no |
+|------------------------------|-------|
+| `img.fit = CONTAIN` (escala la imagen vieja al nuevo tamaño) | `img.visible = False` |
+| `slot.bgcolor = None` | `slot.bgcolor = _PAGE_BG` (gris) |
+| `load_overlay.visible = False` | `load_overlay.visible = True` (spinner) |
+
+Mientras el worker renderiza al nuevo zoom (200-300 ms), el usuario ve un preview escalado (borroso) en vez de un gris vacío. Al terminar, el worker restaura `fit = NONE` y asigna el render nítido en un solo update batchedeado (ver `_schedule_render_update`).
+
+### Coalescing de updates post-render (30 ms)
+
+Cuando varios workers terminan dentro de una ventana corta (típico en cambios de zoom donde 5-6 páginas se renderizan en paralelo), `_schedule_render_update` debounce 30 ms y consolida en un único `viewer_scroll.update()`. Sin esto, cada worker disparaba su propio `slot.update()`, generando una cascada visual.
+
+### Posición fraccional
+
+La posición fraccional (`frac`) evita que al hacer zoom el contenido salte al inicio de la página: si el usuario estaba viendo el 40% vertical de la página 3, después del zoom sigue en el mismo punto visual.
 
 ---
 
@@ -500,23 +544,63 @@ _get_page_words(pn):
 flowchart LR
     R["render_page(doc, pn, zoom, cache)"] --> G["cache.get(pn, round(zoom,2))"]
     G --> H{¿Hit?}
-    H -- Sí --> RET["Retornar (b64, w, h)\nmover a 'más reciente'"]
-    H -- No --> COMPUTE["Calcular pixmap\n+ encode base64"]
-    COMPUTE --> P["cache.put(pn, zoom, data)"]
-    P --> EVICT{¿len > 25?}
-    EVICT -- Sí --> DEL["Eliminar entrada\nmás antigua (LRU)"]
-    EVICT -- No --> RET2["Retornar (b64, w, h)"]
-    DEL --> RET2
+    H -- Sí --> RET["Retornar entry\nmover a 'más reciente'"]
+    H -- No --> COMPUTE{¿zoom\n≤ 1.0?}
+    COMPUTE -- Sí --> CM["pixmap → tobytes('png')\n→ entry = (None, w, h, raw)"]
+    COMPUTE -- No --> CD["pixmap → mkstemp(.jpg)\n→ entry = (path, w, h, None)"]
+    CM --> P["cache.put(pn, zoom, entry)"]
+    CD --> P
+    P --> EVICT{¿len > 25\nO bytes > 8MB?}
+    EVICT -- Sí --> DEL["popitem(last=False)\nSi entry.path: os.remove\nSi entry.png_bytes: descontar bytes\nLoop hasta cumplir ambos"]
+    EVICT -- No --> RET2["Retornar entry"]
+    DEL --> EVICT
+    EVICT -- Cumple ambos --> RET2
 
     style H fill:#FFF9C4,stroke:#F9A825
     style EVICT fill:#FFF9C4,stroke:#F9A825
+    style COMPUTE fill:#E1F5FE,stroke:#0277BD
 ```
 
-- Clave: `(page_num, round(zoom, 2))`
-- Estructura: `OrderedDict` con `move_to_end` para LRU
-- Hilo-seguro: `threading.Lock` en cada operación
-- Capacidad: 25 entradas (~25 páginas × 1 nivel de zoom en memoria)
-- Al cambiar zoom: las entradas del zoom anterior siguen en caché y se reutilizan si el usuario vuelve
+### Estructura de la entrada del caché
+
+```python
+CacheEntry = tuple[str | None, int, int, bytes | None]
+#               (path,        w,   h,   png_bytes)
+#
+# Modo memoria (zoom ≤ 1.0):  (None, w, h, raw_png_bytes)
+# Modo disco   (zoom > 1.0):  ("/tmp/xxx.jpg", w, h, None)
+```
+
+### Propiedades del caché
+
+| Propiedad | Valor |
+|-----------|-------|
+| Clave | `(page_num, round(zoom, 2))` |
+| Estructura | `OrderedDict` con `move_to_end` para LRU |
+| Thread-safety | `threading.Lock` en cada operación |
+| Tope por count | `_MAX_ENTRIES = 25` entradas |
+| Tope por bytes | `_MAX_BYTES = 8 MB` (solo cuenta `png_bytes`; los JPEGs en disco no consumen RAM) |
+| Eviction trigger | El que se alcance primero (count o bytes) |
+
+### Operaciones públicas
+
+```python
+get(pn, zoom)         → CacheEntry | None    # con LRU bump
+put(pn, zoom, entry)  → None                  # eviccion automática
+invalidate_page(pn)   → None                  # tras edición / anotación
+clear()               → None                  # tras suspend o close
+shrink(max_entries)   → None                  # tras on_blur (max_entries=5)
+```
+
+### Lifecycle del caché por tab
+
+1. **Tab activo**: hasta 25 entradas o 8 MB, lo que se alcance primero
+2. **Tab pierde foco** (`on_blur`): `shrink(5)` inmediato → libera ~80% de la RAM del caché
+3. **20 s después sin recuperar foco** (`_do_suspend`): `clear()` completo + `_render_gen += 1` para abortar workers en vuelo
+4. **Tab recupera foco** (`on_focus`): si estaba suspendido, fast-resize re-renderiza las páginas visibles
+5. **Tab cerrado** (`close`): `clear()` + `doc.close()`
+
+Esto permite tener 10+ PDFs abiertos simultáneamente reteniendo ~13 MB en total en el peor caso (1 activo × 8 MB + 9 inactivos × ~500 KB), en lugar de 80-200 MB que serían con el caché completo en cada tab.
 
 ---
 
@@ -603,11 +687,29 @@ def get_tab_info(self) -> dict:
 
 def on_focus(self) -> None:
     """Llamado por DocumentManagerUI al activar esta pestaña."""
-    # Re-registra el teclado, relanza renders pendientes, etc.
+    self._cancel_suspend_timer()
+    if self._is_suspended:
+        self._is_suspended = False
+        # fast-resize re-renderiza las páginas visibles bajo demanda
+        self._rebuild_scroll_content(scroll_back=False)
 
 def on_blur(self) -> None:
     """Llamado por DocumentManagerUI al desactivar esta pestaña."""
-    # Detiene renders en vuelo, limpia estado de teclas.
+    # Shrink inmediato: libera ~80% del caché sin esperar el timer.
+    self._render_cache.shrink(self._BLUR_SHRINK_KEEP)  # = 5 entradas
+    self._start_suspend_timer()  # 20 s → clear total
 ```
 
-`DocumentManagerUI.rebuild()` llama a `old_viewer.on_blur()` / `new_viewer.on_focus()` automáticamente al cambiar la pestaña activa, garantizando que el visor suspendido no compita por recursos con el activo.
+`DocumentManagerUI.rebuild()` llama a `old_viewer.on_blur()` / `new_viewer.on_focus()` automáticamente al cambiar la pestaña activa.
+
+### Lifecycle de RAM en dos pasos
+
+| Paso | Trigger | Acción | Efecto |
+|------|---------|--------|--------|
+| 1 | `on_blur` (inmediato) | `cache.shrink(5)` | Libera ~6-7 MB por tab al instante |
+| 2 | 20 s sin recuperar foco | `_do_suspend()`: `_render_gen += 1` + `cache.clear()` | Libera el resto + aborta workers en vuelo |
+| ↩ | `on_focus` | Cancela el timer; fast-resize si estaba suspendido | Re-renderiza las páginas visibles |
+
+Sin este lifecycle, con 10 PDFs abiertos cada uno retendría 8 MB de caché → ~80 MB en total solo en imágenes cacheadas. Con el lifecycle de dos pasos, el costo realista cae a ~13 MB (1 activo × 8 MB + 9 inactivos × ~500 KB tras el shrink, hasta que el timer hace el clear completo).
+
+El `fitz.Document` **queda abierto** entre suspend y resume — abrirlo de nuevo serializaría las anotaciones no guardadas. Solo el caché de imágenes se libera.
