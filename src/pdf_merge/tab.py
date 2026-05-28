@@ -306,6 +306,7 @@ class MergePDFTab:
                                     allowed_extensions=["pdf"],
                                     allow_multiple=True,
                                 ),
+                                tooltip="Agregar uno o más PDFs a la lista",
                                 style=ft.ButtonStyle(padding=12)
                             ),
                         ],
@@ -366,9 +367,12 @@ class MergePDFTab:
             icon=ft.Icons.MERGE_TYPE,
             on_click=self._on_merge,
             disabled=True,
+            tooltip="Combina las páginas seleccionadas y guarda el nuevo PDF",
             style=ft.ButtonStyle(
-                bgcolor="#2E7D32",
-                padding=15
+                bgcolor="#026E07",
+                padding=15,
+                color="#F1E7E7",
+                text_style=ft.TextStyle(size=12),
             )
         )
         self._result_row = ft.Container(
