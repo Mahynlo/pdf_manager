@@ -4,6 +4,7 @@ Una aplicación de escritorio completa para gestionar, visualizar y manipular ar
 
 ![Inicio de la aplicación](src/assets/app_imagenes/home_page.png)
 
+
 ## Características
 
 ### 📖 Visor de PDF
