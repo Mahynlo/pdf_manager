@@ -1,4 +1,4 @@
-# ExtraerPdfs app
+# PdfManager App
 
 Una aplicación de escritorio completa para gestionar, visualizar y manipular archivos PDF con capacidades avanzadas de seguridad, OCR y anotaciones.
 
