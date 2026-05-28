@@ -868,6 +868,10 @@ class PDFViewerTab(
         self._cancel_suspend_timer()
         self._render_gen += 1  # signal running workers to exit before doc is closed
         self._render_cache.clear()
+        if hasattr(self, "_cancel_ocr_model_release"):
+            self._cancel_ocr_model_release()
+        if getattr(self, "_ocr_processor", None) is not None:
+            self._ocr_processor.release_predictor()
         self.doc.close()
         try:
             self.page_ref.overlay.remove(self._save_picker)

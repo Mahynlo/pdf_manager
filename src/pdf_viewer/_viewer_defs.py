@@ -24,6 +24,9 @@ _PAGE_GAP        = 16    # vertical gap between pages (px)
 _PRELOAD         = 2     # pages to render eagerly on first load
 _EVICT_MARGIN    = 3     # viewport heights to keep rendered on each side
 _EVICT_THRESHOLD = 400   # scroll px between eviction passes
+_CACHE_KEEP_PAGES  = 5     # keep only N pages rendered around current page
+_PREVIEW_MAX_ZOOM  = 0.75  # max zoom for fast scroll preview renders
+_SCROLL_IDLE_DELAY = 0.2   # seconds to wait before rendering full-res after scroll
 
 # ── Tool button definitions ───────────────────────────────────────────────────
 _TOOL_DEFS: list[tuple[Tool, str, str, ft.MouseCursor]] = [

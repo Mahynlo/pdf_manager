@@ -78,6 +78,17 @@ class OCRProcessor:
             )
         return self._predictor
 
+    def release_predictor(self) -> None:
+        """Free OCR model memory after idle periods."""
+        predictor = self._predictor
+        if predictor is None:
+            return
+        self._predictor = None
+        close = getattr(predictor, "close", None)
+        if callable(close):
+            close()
+        del predictor
+
     @staticmethod
     def _geometry_to_pixel_rect(geometry: Any, width: int, height: int) -> fitz.Rect | None:
         if geometry is None:

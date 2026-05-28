@@ -15,6 +15,7 @@ from .annotations import Tool
 from .renderer import BASE_SCALE, ZOOM_LEVELS, render_page, _RENDER_SEM
 from ._viewer_defs import (
     _PAGE_BG, _PAGE_GAP, _PRELOAD, _EVICT_MARGIN, _EVICT_THRESHOLD,
+    _CACHE_KEEP_PAGES, _PREVIEW_MAX_ZOOM, _SCROLL_IDLE_DELAY,
     _SELECTED_BG,
 )
 
@@ -28,6 +29,9 @@ class _RenderMixin:
         """(Re)build all page slot controls. Called on init and after zoom/rotate."""
         self._render_gen    += 1
         self._rendering      = set()
+        self._rendering_preview = set()
+        self._previewed         = set()
+        self._render_tokens     = {}
         self._last_evict_px  = -9999.0
 
         with self._doc_lock:
@@ -44,6 +48,7 @@ class _RenderMixin:
         # This avoids recreating ~20 controls × N pages on every zoom change.
         if len(self._page_images) == total and total > 0:
             self._rendered       = set()
+            self._previewed      = set()
             self._selected       = None
             self._page_words     = {}
             self._text_sel_start_pn = None
@@ -55,6 +60,9 @@ class _RenderMixin:
             self._annot_popup_pn        = None
             self._smart_text_sel_active = False
             self._sel_drag_handle       = None
+            self._rendering             = set()
+            self._rendering_preview     = set()
+            self._render_tokens         = {}
 
             cum = 0.0
             for pn, (w, h) in enumerate(page_dims):
@@ -549,19 +557,99 @@ class _RenderMixin:
             except Exception:
                 pass
 
-    def _render_page_slot(self, pn: int) -> None:
-        """Schedule a background render for one page (no-op if already rendered)."""
-        if pn in self._rendered or pn in self._rendering:
-            if pn in self._rendering:
-                # Another render is in progress; request a follow-up render so
-                # changes committed while the current render runs are not lost.
-                getattr(self, "_pending_rerender", set()).add(pn)
+    def _bump_render_token(self, pn: int) -> int:
+        tokens = getattr(self, "_render_tokens", None)
+        if tokens is None:
+            tokens = {}
+            self._render_tokens = tokens
+        token = tokens.get(pn, 0) + 1
+        tokens[pn] = token
+        return token
+
+    def _preview_zoom(self) -> float:
+        return min(self.zoom, _PREVIEW_MAX_ZOOM)
+
+    def _schedule_scroll_idle(self) -> None:
+        t = getattr(self, "_scroll_idle_timer", None)
+        if t is not None:
+            t.cancel()
+        self._scroll_idle_timer = threading.Timer(_SCROLL_IDLE_DELAY, self._on_scroll_idle)
+        self._scroll_idle_timer.daemon = True
+        self._scroll_idle_timer.start()
+
+    def _on_scroll_idle(self) -> None:
+        self._scrolling = False
+        px = getattr(self, "_scroll_px", 0.0)
+        vh = getattr(self, "_last_viewport_h", 600.0)
+        self._render_visible(float(px), float(vh), preview=False)
+        self._prune_render_cache(self.current_page)
+        evicted = self._evict_outside_window(self.current_page)
+        if evicted:
+            try:
+                self.page_ref.update()
+            except Exception:
+                pass
+
+    def _prune_render_cache(self, center_page: int) -> None:
+        cache = getattr(self, "_render_cache", None)
+        if cache is None:
             return
-        self._rendering.add(pn)
+        total = len(self.doc)
+        radius = max(0, (_CACHE_KEEP_PAGES - 1) // 2)
+        start = max(0, center_page - radius)
+        end = min(total, center_page + radius + 1)
+        keep_pages = set(range(start, end))
+        try:
+            cache.keep_pages(keep_pages)
+        except Exception:
+            pass
+
+    def _evict_outside_window(self, center_page: int) -> bool:
+        total = len(self.doc)
+        radius = max(0, (_CACHE_KEEP_PAGES - 1) // 2)
+        start = max(0, center_page - radius)
+        end = min(total, center_page + radius + 1)
+        keep_pages = set(range(start, end))
+        loading_overlays = getattr(self, "_loading_overlays", [])
+        evicted = False
+        for pn in range(total):
+            if pn in keep_pages:
+                continue
+            if pn not in self._rendered and pn not in self._previewed:
+                continue
+            self._rendered.discard(pn)
+            self._previewed.discard(pn)
+            img = self._page_images[pn]
+            img.src = None
+            img.src_base64 = None
+            img.visible = False
+            if pn < len(loading_overlays):
+                loading_overlays[pn].visible = True
+            evicted = True
+        return evicted
+
+    def _render_page_slot(self, pn: int, preview: bool = False) -> None:
+        """Schedule a background render for one page (no-op if already rendered)."""
+        if preview and self.zoom <= _PREVIEW_MAX_ZOOM:
+            preview = False
+
+        if preview:
+            if pn in self._rendered or pn in self._rendering_preview:
+                return
+            self._rendering_preview.add(pn)
+        else:
+            if pn in self._rendered or pn in self._rendering:
+                if pn in self._rendering:
+                    # Another render is in progress; request a follow-up render so
+                    # changes committed while the current render runs are not lost.
+                    getattr(self, "_pending_rerender", set()).add(pn)
+                return
+            self._rendering.add(pn)
         # Cancel any stale pending-rerender request for this slot; we're
         # starting fresh right now.
         getattr(self, "_pending_rerender", set()).discard(pn)
         gen = self._render_gen
+        token = self._bump_render_token(pn)
 
         cache = getattr(self, "_render_cache", None)
 
@@ -571,8 +659,11 @@ class _RenderMixin:
                     with self._doc_lock:
                         if gen != self._render_gen or pn >= len(self._page_images):
                             return
-                        path, w, h, png_bytes = render_page(self.doc, pn, self.zoom, cache)
+                        zoom = self._preview_zoom() if preview else self.zoom
+                        path, w, h, png_bytes = render_page(self.doc, pn, zoom, cache)
                 if gen != self._render_gen or pn >= len(self._page_images):
+                    return
+                if token != getattr(self, "_render_tokens", {}).get(pn, token):
                     return
                 img  = self._page_images[pn]
                 slot = self._page_slots[pn]
@@ -583,15 +674,21 @@ class _RenderMixin:
                 else:
                     img.src = path
                     img.src_base64 = None
-                img.fit    = ft.ImageFit.NONE  # restaurar desde preview CONTAIN
-                img.width  = w
-                img.height = h
+                if preview:
+                    img.fit = ft.ImageFit.CONTAIN
+                    self._previewed.add(pn)
+                else:
+                    img.fit    = ft.ImageFit.NONE  # restaurar desde preview CONTAIN
+                    img.width  = w
+                    img.height = h
+                    self._previewed.discard(pn)
                 img.visible = True
                 slot.bgcolor = None
                 loading_overlays = getattr(self, "_loading_overlays", [])
                 if pn < len(loading_overlays):
                     loading_overlays[pn].visible = False
-                self._rendered.add(pn)
+                if not preview:
+                    self._rendered.add(pn)
                 # Batch updates: si varios workers terminan dentro de 30 ms,
                 # se consolida en un solo update del scroll → elimina la cascada
                 # visual durante cambios de zoom.
@@ -602,10 +699,13 @@ class _RenderMixin:
                 except Exception:
                     pass
             finally:
-                self._rendering.discard(pn)
+                if preview:
+                    self._rendering_preview.discard(pn)
+                else:
+                    self._rendering.discard(pn)
                 # If a re-render was requested while this one was running, start it.
                 pending = getattr(self, "_pending_rerender", set())
-                if pn in pending:
+                if not preview and pn in pending:
                     pending.discard(pn)
                     self._rendered.discard(pn)
                     self._render_page_slot(pn)
@@ -632,9 +732,11 @@ class _RenderMixin:
         except Exception:
             pass
 
-    def _render_visible(self, pixels: float, viewport_h: float) -> None:
+    def _render_visible(self, pixels: float, viewport_h: float, preview: bool = False) -> None:
         if not self._page_cum_offsets:
             return
+        if preview and self.zoom <= _PREVIEW_MAX_ZOOM:
+            preview = False
         margin = viewport_h * 0.5
         top    = pixels - margin
         bottom = pixels + viewport_h + margin
@@ -647,7 +749,7 @@ class _RenderMixin:
             if start > bottom:
                 break
             if start + self._page_heights[pn] >= top:
-                self._render_page_slot(pn)
+                self._render_page_slot(pn, preview=preview)
 
     def _evict_distant(self, pixels: float, viewport_h: float) -> bool:
         """Oculta páginas alejadas del viewport. Retorna True si eviccionó alguna."""
@@ -656,11 +758,12 @@ class _RenderMixin:
         loading_overlays = getattr(self, "_loading_overlays", [])
         evicted = False
         for pn, (start, h) in enumerate(zip(self._page_cum_offsets, self._page_heights)):
-            if pn not in self._rendered:
+            if pn not in self._rendered and pn not in self._previewed:
                 continue
             page_bottom = start + h
             if page_bottom < keep_top or start > keep_bottom:
                 self._rendered.discard(pn)
+                self._previewed.discard(pn)
                 self._page_images[pn].src = None
                 self._page_images[pn].src_base64 = None
                 self._page_images[pn].visible = False
@@ -683,6 +786,7 @@ class _RenderMixin:
         if cache is not None:
             cache.invalidate_page(pn)
         self._rendered.discard(pn)
+        self._previewed.discard(pn)
         self._render_page_slot(pn)
 
     def _refresh_page(self, pn: int, keep_selection: bool = False) -> None:
@@ -693,6 +797,7 @@ class _RenderMixin:
         if cache is not None:
             cache.invalidate_page(pn)
         self._rendered.discard(pn)
+        self._previewed.discard(pn)
         self._render_page_slot(pn)
         self._refresh_ocr_ui_for_page()
         self.page_ref.update()
@@ -714,6 +819,9 @@ class _RenderMixin:
         if pixels is None:
             return
         self._scroll_px = float(pixels)
+        self._last_viewport_h = float(viewport_h)
+        self._scrolling = True
+        self._schedule_scroll_idle()
 
         mid = float(pixels) + float(viewport_h) / 2.0
         page_changed = False
@@ -727,7 +835,7 @@ class _RenderMixin:
                 page_changed = True
 
         px, vh = float(pixels), float(viewport_h)
-        self._render_visible(px, vh)
+        self._render_visible(px, vh, preview=True)
 
         # Evicción y actualización de UI en un solo bloque:
         # si eviccionamos páginas, necesitamos propagar el visible=False a Flutter
@@ -737,6 +845,8 @@ class _RenderMixin:
             self._last_evict_px = px
             evicted = self._evict_distant(px, vh)
 
+        if page_changed:
+            self._prune_render_cache(self.current_page)
         if page_changed or evicted:
             try:
                 self.page_ref.update()
@@ -753,6 +863,8 @@ class _RenderMixin:
         self.current_page = pn
         self._update_nav_state()
         self._render_page_slot(pn)
+        self._prune_render_cache(pn)
+        self._evict_outside_window(pn)
         self._refresh_ocr_ui_for_page()
         display_mode = getattr(self, "_display_mode", "continuous")
         if display_mode in ("single", "double") and getattr(self, "_page_rows", None):

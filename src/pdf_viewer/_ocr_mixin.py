@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import gc
+import threading
 import flet as ft
 
 from .annotations import Tool
@@ -14,6 +15,7 @@ _CHIP_FG   = "#2E7D32"
 _METRIC_BG = "#F1F8E9"
 
 _MAX_OCR_PAGES_CACHED = 8  # max pages kept in memory; oldest are evicted first
+_OCR_MODEL_RELEASE_DELAY = 5.0  # seconds to unload OCR model after idle
 
 
 def _chip(label: str, value: str, icon: str | None = None) -> ft.Container:
@@ -318,6 +320,26 @@ class _OCRMixin:
                 ov.controls = []
                 ov.visible = False
 
+    def _schedule_ocr_model_release(self) -> None:
+        t = getattr(self, "_ocr_model_timer", None)
+        if t is not None:
+            t.cancel()
+        self._ocr_model_timer = threading.Timer(
+            _OCR_MODEL_RELEASE_DELAY, self._release_ocr_model
+        )
+        self._ocr_model_timer.daemon = True
+        self._ocr_model_timer.start()
+
+    def _cancel_ocr_model_release(self) -> None:
+        t = getattr(self, "_ocr_model_timer", None)
+        if t is not None:
+            t.cancel()
+            self._ocr_model_timer = None
+
+    def _release_ocr_model(self) -> None:
+        self._ocr_processor.release_predictor()
+        gc.collect()
+
     # ── copy all text ─────────────────────────────────────────────────────────
 
     def _ocr_copy_all(self, e=None) -> None:
@@ -338,6 +360,7 @@ class _OCRMixin:
         elif not self._sidebar_visible:
             self._toggle_sidebar()
 
+        self._cancel_ocr_model_release()
         pn = self.current_page
         self._ocr_set_running(f"Analizando página {pn + 1}…")
         self.page_ref.update()
@@ -355,6 +378,7 @@ class _OCRMixin:
             ]
             self._show_snack(f"Error OCR: {ex}")
             self.page_ref.update()
+            self._schedule_ocr_model_release()
             return
 
         self._ocr_by_page[pn] = result
@@ -367,6 +391,7 @@ class _OCRMixin:
             self._agent_instance.set_ocr_overrides(self._build_ocr_overrides())
         self._show_snack("OCR completado")
         self.page_ref.update()
+        self._schedule_ocr_model_release()
 
     # ── OCR UI refresh ────────────────────────────────────────────────────────
 

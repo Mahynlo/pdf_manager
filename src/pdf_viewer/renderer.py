@@ -88,6 +88,21 @@ class PageRenderCache:
                     except Exception:
                         pass
 
+    def keep_pages(self, pages: set[int]) -> None:
+        """Evict cache entries whose page is not in the provided set."""
+        if not pages:
+            return
+        with self._lock:
+            keys_to_delete = [k for k in self._d if k[0] not in pages]
+            for k in keys_to_delete:
+                data = self._d.pop(k)
+                self._bytes_used -= self._entry_bytes(data)
+                if data[0] is not None:
+                    try:
+                        os.remove(data[0])
+                    except Exception:
+                        pass
+
     def clear(self) -> None:
         with self._lock:
             for data in self._d.values():
