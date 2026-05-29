@@ -1,36 +1,30 @@
-"""Tab for searching and extracting pages from one or multiple PDFs."""
+"""Tab for searching and extracting pages from one or multiple PDFs.
 
+UI + orchestration only. The extraction logic (opening docs, OCR, scoring,
+saving) lives in `engine.py`; pure helpers/records live in `model.py`.
+
+The scan runs synchronously on the UI thread and pauses when a target needs a
+password: it stores `_extraction_state`, shows the password dialog, and resumes
+the *same* loop (`_process_targets_from`) from the stored index once the
+password is entered — so the initial run and the resume share one code path.
+"""
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
 import flet as ft
-import fitz
 
 from pdf_viewer.ocr import OCRProcessor
 
-
-class _ExtractPasswordRequiredError(ValueError):
-    """Raised when an encrypted PDF needs a password for extraction operations."""
-
-
-class _ExtractInvalidPasswordError(ValueError):
-    """Raised when authentication fails for an encrypted PDF."""
-
-
-class _ExtractPermissionDeniedError(ValueError):
-    """Raised when the PDF does not allow content copying/extraction."""
-
-
-@dataclass
-class PageMatch:
-    source_path: str
-    page_index: int
-    score: float
-    reason: str
+from . import engine
+from .engine import (
+    ExtractInvalidPasswordError,
+    ExtractPasswordRequiredError,
+    ExtractPermissionDeniedError,
+    Reporter,
+)
+from .model import collect_keywords, doc_kind_label
 
 
 class PDFExtractionTab:
@@ -50,9 +44,15 @@ class PDFExtractionTab:
         self.last_output_path: str | None = None
         self._pending_password_file_idx: int | None = None
 
-        # Extraction state for pause/resume
-        self._extraction_state: dict | None = None  # Almacena estado cuando se pausa por contraseña
+        # Extraction state for pause/resume (set when paused waiting for a password)
+        self._extraction_state: dict | None = None
         self._is_extracting = False
+
+        self._reporter = Reporter(
+            log=self._log,
+            set_progress=self._set_progress,
+            log_separator=self._log_separator,
+        )
 
         self._tab: ft.Tab | None = None
         self._pwd_dialog: ft.AlertDialog | None = None
@@ -110,7 +110,7 @@ class PDFExtractionTab:
         # ─── PANEL IZQUIERDO (Configuración) ─────────────────────────────────
         self._ref_path_text = ft.Text("Referencia: sin archivo", size=12, color="#666666")
         self._ref_kind_text = ft.Text("Tipo: -", size=12, color="#666666")
-        
+
         ref_info_container = ft.Container(
             content=ft.Column([
                 ft.Row([ft.Icon(ft.Icons.PICTURE_AS_PDF, size=16, color="#999999"), self._ref_path_text]),
@@ -128,7 +128,7 @@ class PDFExtractionTab:
             border_color="#1E2A38",
             prefix_icon=ft.Icons.NUMBERS,
         )
-        
+
         self._hint_pages = ft.TextField(
             label="Páginas sugeridas en objetivos (ej: 1,2)",
             hint_text="Se verifican primero; vacío = todas",
@@ -136,7 +136,7 @@ class PDFExtractionTab:
             border_color="#1E2A38",
             prefix_icon=ft.Icons.LIGHTBULB_OUTLINE,
         )
-        
+
         self._keywords = ft.TextField(
             label="Palabras clave / títulos / nombres",
             hint_text="Una por línea o separadas por coma",
@@ -164,7 +164,7 @@ class PDFExtractionTab:
                 ft.Container(height=4),
                 self._reference_pages,
                 ft.Divider(height=24, color="#E0E0E0"),
-                
+
                 ft.Text("Paso 2: Patrón de Búsqueda", size=16, weight="bold", color="#1E2A38"),
                 self._keywords,
                 self._hint_pages,
@@ -177,7 +177,7 @@ class PDFExtractionTab:
         # ─── PANEL DERECHO (Objetivos y Resultados) ──────────────────────────
         self._target_count_text = ft.Text("Archivos objetivo: 0", size=12, color="#666666")
         self._dest_text = ft.Text(f"Destino: {self.destination_dir}", size=12, color="#666666")
-        
+
         target_info_container = ft.Container(
             content=ft.Column([
                 ft.Row([ft.Icon(ft.Icons.LIBRARY_BOOKS, size=16, color="#999999"), self._target_count_text]),
@@ -238,13 +238,13 @@ class PDFExtractionTab:
                 ),
                 target_info_container,
                 ft.Row([self._run_btn, self._preview_btn], spacing=12),
-                
+
                 ft.Divider(height=16, color="#E0E0E0"),
-                
+
                 ft.Row([ft.Icon(ft.Icons.TERMINAL, size=16, color="#1E2A38"), ft.Text("Registro de Operación", size=14, weight="bold", color="#1E2A38")]),
                 self._progress,
                 self._summary,
-                
+
                 # Terminal simulada para resultados
                 ft.Container(
                     content=self._results,
@@ -307,39 +307,30 @@ class PDFExtractionTab:
             "close_cb": lambda: self.on_close(self) if self.on_close else None,
         }
 
-    # ------------------------------------------------------------------ Auth helpers
+    # ------------------------------------------------------------------ Log helpers
 
-    @staticmethod
-    def _normalize_path(path: str) -> str:
-        """Normalize a file path for consistent dictionary keys."""
-        return str(Path(path).resolve())
+    def _snack(self, message: str) -> None:
+        self.page_ref.snack_bar = ft.SnackBar(ft.Text(message), open=True)
 
-    @staticmethod
-    def _can_extract_permissions(permissions: int) -> bool:
-        """Return True when permissions allow content copying (PDF_PERM_COPY = 16)."""
-        if permissions < 0:
-            return True
-        return bool(permissions & 16)  # PDF_PERM_COPY
+    def _log(self, text: str, color: str = "#666666") -> None:
+        """Append a line to the results log and refresh."""
+        self._results.controls.append(
+            ft.Container(
+                ft.Text(text, size=13, color=color, selectable=True, font_family="Consolas"),
+                padding=ft.padding.symmetric(vertical=2, horizontal=4),
+            )
+        )
+        self.page_ref.update()
 
-    def _open_source_doc(
-        self,
-        path: str,
-        password: str | None = None,
-    ) -> fitz.Document:
-        """Open a document for extraction, authenticating if needed."""
-        doc = fitz.open(path)
-        try:
-            if doc.is_encrypted:
-                if not password:
-                    raise _ExtractPasswordRequiredError("PDF protegido requiere contraseña")
-                if not doc.authenticate(password):
-                    raise _ExtractInvalidPasswordError("Contraseña incorrecta")
-                if not self._can_extract_permissions(doc.permissions):
-                    raise _ExtractPermissionDeniedError("El PDF no permite copia/extracción de contenido")
-            return doc
-        except Exception:
-            doc.close()
-            raise
+    def _log_separator(self) -> None:
+        self._results.controls.append(ft.Divider(height=1, color="#E0E0E0"))
+        self.page_ref.update()
+
+    def _set_progress(self, text: str) -> None:
+        self._progress.value = text
+        self.page_ref.update()
+
+    # ------------------------------------------------------------------ Password dialog
 
     def _show_password_prompt(self, path: str, file_idx: int | None = None, error_message: str | None = None) -> None:
         if self._pwd_dialog is None or self._pwd_field is None or self._pwd_error is None:
@@ -381,29 +372,24 @@ class PDFExtractionTab:
         file_idx = self._pending_password_file_idx
         path = self.reference_path if file_idx == -1 else self.target_paths[file_idx]
         try:
-            doc = self._open_source_doc(path, password=password)
-            doc.close()
-        except _ExtractInvalidPasswordError:
-            self._show_password_prompt(path, "Contraseña incorrecta")
+            engine.open_source_doc(path, password=password).close()
+        except ExtractInvalidPasswordError:
+            self._show_password_prompt(path, file_idx=file_idx, error_message="Contraseña incorrecta")
             self.page_ref.update()
             return
-        except _ExtractPermissionDeniedError:
-            self.page_ref.snack_bar = ft.SnackBar(
-                ft.Text(
-                    f"{Path(path).name} no permite copia/extracción de contenido. Usa Seguridad para crear una copia desbloqueada."
-                ),
-                open=True,
+        except ExtractPermissionDeniedError:
+            self._snack(
+                f"{Path(path).name} no permite copia/extracción de contenido. "
+                "Usa Seguridad para crear una copia desbloqueada."
             )
-            self._pending_password_path = None
+            self._pending_password_file_idx = None
             if self._pwd_dialog is not None:
                 self.page_ref.close(self._pwd_dialog)
             self.page_ref.update()
             return
         except Exception as ex:
-            self.page_ref.snack_bar = ft.SnackBar(
-                ft.Text(f"Error: {ex}"), open=True,
-            )
-            self._pending_password_path = None
+            self._snack(f"Error: {ex}")
+            self._pending_password_file_idx = None
             if self._pwd_dialog is not None:
                 self.page_ref.close(self._pwd_dialog)
             self.page_ref.update()
@@ -419,14 +405,10 @@ class PDFExtractionTab:
         self._pending_password_file_idx = None
         if self._pwd_dialog is not None:
             self.page_ref.close(self._pwd_dialog)
-        
+
         # If extraction was paused waiting for this password, resume it
         if self._extraction_state is not None:
-            self.page_ref.snack_bar = ft.SnackBar(
-                ft.Text(f"Contraseña guardada. Reanudando…"),
-                open=True,
-            )
-            # Resume in the same thread (not async) for continuous flow
+            self._snack("Contraseña guardada. Reanudando…")
             self._resume_extraction_sync()
         else:
             self.page_ref.update()
@@ -444,22 +426,18 @@ class PDFExtractionTab:
     def _on_reference_picked_internal(self, path: str) -> None:
         self._ref_path_text.value = f"Referencia: {Path(path).name}"
         try:
-            password = self.reference_password
-            doc = self._open_source_doc(path, password=password)
+            doc = engine.open_source_doc(path, password=self.reference_password)
             try:
                 kind = self.processor.get_doc_kind(doc)
-                self._ref_kind_text.value = f"Tipo: {self._doc_kind_label(kind)}"
+                self._ref_kind_text.value = f"Tipo: {doc_kind_label(kind)}"
             finally:
                 doc.close()
-        except _ExtractPasswordRequiredError:
+        except ExtractPasswordRequiredError:
             self._show_password_prompt(path, file_idx=-1)
             return
-        except _ExtractPermissionDeniedError:
+        except ExtractPermissionDeniedError:
             self._ref_kind_text.value = "Tipo: error (sin permisos de extracción)"
-            self.page_ref.snack_bar = ft.SnackBar(
-                ft.Text("PDF de referencia no permite extracción. Usa Seguridad para desbloquearlo."),
-                open=True,
-            )
+            self._snack("PDF de referencia no permite extracción. Usa Seguridad para desbloquearlo.")
         except Exception as ex:
             self._ref_kind_text.value = f"Tipo: error ({ex})"
         self.page_ref.update()
@@ -479,91 +457,14 @@ class PDFExtractionTab:
         self._dest_text.value = f"Destino: {self.destination_dir}"
         self.page_ref.update()
 
-    # ------------------------------------------------------------------ Helpers
+    # ------------------------------------------------------------------ Extraction
 
-    @staticmethod
-    def _doc_kind_label(kind: str) -> str:
-        return {"native": "Texto nativo", "hybrid": "Híbrido", "scanned": "Escaneado"}.get(
-            kind, kind
-        )
-
-    @staticmethod
-    def _parse_pages(page_input: str, total_pages: int) -> set[int]:
-        out: set[int] = set()
-        if not page_input.strip():
-            return out
-        for chunk in [c.strip() for c in page_input.replace(";", ",").split(",") if c.strip()]:
-            if "-" in chunk:
-                parts = chunk.split("-", 1)
-                try:
-                    a, b = int(parts[0].strip()), int(parts[1].strip())
-                    if a > b:
-                        a, b = b, a
-                    out.update(idx - 1 for idx in range(a, b + 1) if 0 < idx <= total_pages)
-                except ValueError:
-                    pass
-            else:
-                try:
-                    idx = int(chunk) - 1
-                    if 0 <= idx < total_pages:
-                        out.add(idx)
-                except ValueError:
-                    pass
-        return out
-
-    @staticmethod
-    def _normalize_words(text: str) -> set[str]:
-        words: set[str] = set()
-        for raw in text.lower().replace("\n", " ").split():
-            token = "".join(ch for ch in raw if ch.isalnum())
-            if len(token) >= 4:
-                words.add(token)
-        return words
-
-    def _extract_page_text(
-        self, doc: fitz.Document, page_index: int
-    ) -> tuple[str, str, float, bool]:
-        page = doc[page_index]
-        needs_ocr = self.processor.page_needs_ocr(page)
-
-        result = self.processor.process_page(doc, page_index, force_ocr=needs_ocr)
-        text = "\n".join(seg.text for seg in result.segments if seg.text.strip())
-        used_ocr = bool(result.detections)
-        return text, result.mode_label, result.elapsed_ms, used_ocr
-
-    def _collect_keywords(self) -> list[str]:
-        raw = self._keywords.value or ""
-        chunks: list[str] = []
-        for row in raw.splitlines():
-            chunks.extend(part.strip() for part in row.split(","))
-        return [c.lower() for c in chunks if c]
-
-    def _log(self, text: str, color: str = "#666666") -> None:
-        """Append a line to the results log and refresh."""
-        self._results.controls.append(
-            ft.Container(
-                ft.Text(text, size=13, color=color, selectable=True, font_family="Consolas"),
-                padding=ft.padding.symmetric(vertical=2, horizontal=4),
-            )
-        )
-        self.page_ref.update()
-
-    def _log_separator(self) -> None:
-        self._results.controls.append(ft.Divider(height=1, color="#E0E0E0"))
-        self.page_ref.update()
-
-    def _set_progress(self, text: str) -> None:
-        self._progress.value = text
-        self.page_ref.update()
-
-    # ------------------------------------------------------------------ Core
-
-    def _run_extraction(self, e=None) -> None:  # noqa: C901
+    def _run_extraction(self, e=None) -> None:
         if not self.target_paths:
             self._log("✗ Selecciona al menos un PDF objetivo.", "#D32F2F")
             return
-        kws = self._collect_keywords()
-        if not kws:
+        keywords = collect_keywords(self._keywords.value or "")
+        if not keywords:
             self._log("✗ Define al menos una palabra clave para la búsqueda.", "#D32F2F")
             return
 
@@ -573,69 +474,74 @@ class PDFExtractionTab:
         self._summary.value = "Iniciando análisis…"
         self._progress.value = ""
         self.page_ref.update()
-        
+
         self._is_extracting = True
         self._extraction_state = None
 
         hint_pages_raw = self._hint_pages.value or ""
+        ref_tokens = self._process_reference()
+        self._process_targets_from(0, ref_tokens, [], keywords, hint_pages_raw)
 
-        # ── Reference document ───────────────────────────────────────────────
-        ref_tokens: set[str] = set()
-        if self.reference_path:
-            self._set_progress("Procesando documento de referencia…")
-            try:
-                password = self.reference_password
-                with self._open_source_doc(self.reference_path, password=password) as ref_doc:
-                    total_ref = len(ref_doc)
-                    selected = self._parse_pages(self._reference_pages.value or "", total_ref)
-                    pages_to_use = sorted(selected) if selected else range(total_ref)
-                    for i in pages_to_use:
-                        self._set_progress(
-                            f"Referencia: página {i + 1}/{total_ref} — {Path(self.reference_path).name}"
-                        )
-                        text, mode, ms, used_ocr = self._extract_page_text(ref_doc, i)
-                        ref_tokens |= self._normalize_words(text)
-                    self._log(
-                        f"Referencia: {Path(self.reference_path).name} — "
-                        f"{len(ref_tokens)} tokens, {len(list(pages_to_use))} páginas procesadas",
-                        "#1565C0",
-                    )
-                    self._log_separator()
-            except _ExtractPasswordRequiredError:
-                self._log(f"✗ Referencia requiere contraseña para procesarse.", "#D32F2F")
-                self._show_password_prompt(self.reference_path)
-            except _ExtractPermissionDeniedError:
-                self._log(f"✗ Referencia no permite extracción de contenido.", "#D32F2F")
-            except Exception as ex:
-                self._log(f"✗ Referencia no procesada: {ex}", "#D32F2F")
+    def _process_reference(self) -> set[str]:
+        """Tokenize the reference document, handling password/permission in the UI."""
+        if not self.reference_path:
+            return set()
+        self._set_progress("Procesando documento de referencia…")
+        try:
+            tokens = engine.extract_reference_tokens(
+                self.reference_path,
+                self.reference_password,
+                self._reference_pages.value or "",
+                self.processor,
+                reporter=self._reporter,
+            )
+            self._log_separator()
+            return tokens
+        except ExtractPasswordRequiredError:
+            self._log("✗ Referencia requiere contraseña para procesarse.", "#D32F2F")
+            self._show_password_prompt(self.reference_path, file_idx=-1)
+            return set()
+        except ExtractPermissionDeniedError:
+            self._log("✗ Referencia no permite extracción de contenido.", "#D32F2F")
+            return set()
+        except Exception as ex:
+            self._log(f"✗ Referencia no procesada: {ex}", "#D32F2F")
+            return set()
 
-        # ── Target documents ─────────────────────────────────────────────────
-        all_matches: list[PageMatch] = []
+    def _process_targets_from(
+        self,
+        start_idx: int,
+        ref_tokens: set[str],
+        all_matches: list,
+        keywords: list[str],
+        hint_pages_raw: str,
+    ) -> None:
+        """Scan target documents from *start_idx*; pause on a password prompt.
+
+        Shared by the initial run and the resume-after-password path.
+        """
         total_files = len(self.target_paths)
-
-        for file_idx, path in enumerate(self.target_paths):
+        for file_idx in range(start_idx, total_files):
+            path = self.target_paths[file_idx]
             fname = Path(path).name
             self._summary.value = f"Archivo {file_idx + 1} de {total_files}: {fname}"
             self.page_ref.update()
 
             try:
-                password = self.target_passwords.get(file_idx)
-                doc = self._open_source_doc(path, password=password)
-            except _ExtractPasswordRequiredError:
+                doc = engine.open_source_doc(path, password=self.target_passwords.get(file_idx))
+            except ExtractPasswordRequiredError:
                 self._log(f"✗ {fname}: requiere contraseña. Pausando búsqueda…", "#D32F2F")
-                # Pause extraction and ask for password
                 self._extraction_state = {
                     "ref_tokens": ref_tokens,
                     "all_matches": all_matches,
                     "file_idx": file_idx,
-                    "total_files": total_files,
-                    "kws": kws,
+                    "keywords": keywords,
                     "hint_pages_raw": hint_pages_raw,
                 }
                 self._show_password_prompt(path, file_idx=file_idx)
                 self._is_extracting = False
                 return
-            except _ExtractPermissionDeniedError:
+            except ExtractPermissionDeniedError:
                 self._log(f"✗ {fname}: no permite extracción de contenido.", "#D32F2F")
                 continue
             except Exception as ex:
@@ -643,114 +549,40 @@ class PDFExtractionTab:
                 continue
 
             with doc:
-                total_pages = len(doc)
-                doc_kind = self.processor.get_doc_kind(doc)
-                doc_kind_label = self._doc_kind_label(doc_kind)
-
-                self._log(
-                    f"📄 [{file_idx + 1}/{total_files}] {fname} — {doc_kind_label}, {total_pages} página(s)",
-                    "#1565C0",
+                matches = engine.process_document(
+                    doc,
+                    path=path,
+                    fname=fname,
+                    file_idx=file_idx,
+                    total_files=total_files,
+                    keywords=keywords,
+                    ref_tokens=ref_tokens,
+                    hint_pages_raw=hint_pages_raw,
+                    processor=self.processor,
+                    reporter=self._reporter,
                 )
-
-                if doc_kind == "scanned":
-                    self._log(
-                        "  ⚠ Documento escaneado — se ejecutará OCR en cada página sin texto nativo.",
-                        "#ED6C02",
-                    )
-
-                hint_set = self._parse_pages(hint_pages_raw, total_pages)
-                if hint_set:
-                    other_pages = [i for i in range(total_pages) if i not in hint_set]
-                    scan_order = sorted(hint_set) + other_pages
-                    self._log(
-                        f"  ℹ Páginas sugeridas verificadas primero: "
-                        f"{', '.join(str(p + 1) for p in sorted(hint_set))}",
-                        "#666666",
-                    )
-                else:
-                    scan_order = list(range(total_pages))
-
-                file_matches: list[PageMatch] = []
-                pages_with_ocr = 0
-                pages_skipped = 0
-
-                for i in scan_order:
-                    is_hint = i in hint_set
-                    hint_tag = " ⭐" if is_hint else ""
-
-                    self._set_progress(
-                        f"Analizando: {fname} — página {i + 1}/{total_pages}{hint_tag}"
-                    )
-
-                    text, mode, elapsed_ms, used_ocr = self._extract_page_text(doc, i)
-                    page_text_lower = text.lower()
-
-                    if used_ocr:
-                        pages_with_ocr += 1
-
-                    time_tag = f"{elapsed_ms:.0f}ms"
-                    ocr_tag = " | OCR" if used_ocr else ""
-
-                    if not page_text_lower.strip():
-                        pages_skipped += 1
-                        if is_hint:
-                            self._log(
-                                f"  ~ Pág {i + 1}{hint_tag} [{mode} | {time_tag}]: sin texto extraíble",
-                                "#ED6C02",
-                            )
-                        continue
-
-                    kw_hits = [kw for kw in kws if kw in page_text_lower]
-
-                    if len(kw_hits) == len(kws):
-                        score = float(len(kw_hits))
-                        reason = f"keywords={len(kw_hits)}"
-
-                        if ref_tokens:
-                            page_tokens = self._normalize_words(text)
-                            if page_tokens:
-                                inter = len(ref_tokens & page_tokens)
-                                union = len(ref_tokens | page_tokens)
-                                jaccard = inter / union if union else 0.0
-                                score += jaccard * 2
-                                reason += f", sim={jaccard:.2f}"
-
-                        file_matches.append(PageMatch(path, i, score, reason))
-
-                        shown = ", ".join(f'"{k}"' for k in kw_hits[:5])
-                        extra = f" +{len(kw_hits) - 5} más" if len(kw_hits) > 5 else ""
-                        self._log(
-                            f"  ✓ Pág {i + 1}{hint_tag} [{mode}{ocr_tag} | {time_tag}]: "
-                            f"{shown}{extra}",
-                            "#2E7D32",
-                        )
-                    else:
-                        if is_hint:
-                            self._log(
-                                f"  ~ Pág {i + 1}{hint_tag} [{mode}{ocr_tag} | {time_tag}]: no coincide",
-                                "#ED6C02",
-                            )
-
-                file_matches.sort(key=lambda m: m.score, reverse=True)
-                all_matches.extend(file_matches)
-
-                ocr_note = f", OCR en {pages_with_ocr} pág." if pages_with_ocr else ""
-                skip_note = f", {pages_skipped} omitidas" if pages_skipped else ""
-                if file_matches:
-                    self._log(
-                        f"  → {len(file_matches)} página(s) encontrada(s){ocr_note}{skip_note}",
-                        "#1565C0",
-                    )
-                else:
-                    self._log(
-                        f"  → Sin coincidencias{ocr_note}{skip_note}",
-                        "#999999",
-                    )
-                self._log_separator()
+                all_matches.extend(matches)
 
         self._set_progress("")
+        self._finish_extraction(all_matches)
 
-        # ── Save output ───────────────────────────────────────────────────────
+    def _resume_extraction_sync(self) -> None:
+        """Reanuda la extracción tras obtener una contraseña (sincrónico)."""
+        if self._extraction_state is None:
+            return
+        state = self._extraction_state
+        self._extraction_state = None
+        self._is_extracting = True
+        self._process_targets_from(
+            state["file_idx"],
+            state["ref_tokens"],
+            state["all_matches"],
+            state["keywords"],
+            state["hint_pages_raw"],
+        )
+
+    def _finish_extraction(self, all_matches: list) -> None:
+        """Save the collected matches (if any) and update the summary."""
         if not all_matches:
             self._summary.value = "Búsqueda finalizada: no se encontraron páginas coincidentes."
             self._run_btn.disabled = False
@@ -758,240 +590,15 @@ class PDFExtractionTab:
             self.page_ref.update()
             return
 
-        dest = Path(self.destination_dir)
-        dest.mkdir(parents=True, exist_ok=True)
-        out_name = f"extraccion_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-        out_path = dest / out_name
-
-        grouped: dict[str, list[PageMatch]] = {}
-        for match in all_matches:
-            grouped.setdefault(match.source_path, []).append(match)
-
-        out_doc = fitz.open()
-        try:
-            for src_path, matches in grouped.items():
-                # Find the file_idx for this path
-                file_idx = None
-                for idx, target_path in enumerate(self.target_paths):
-                    if target_path == src_path:
-                        file_idx = idx
-                        break
-                password = self.target_passwords.get(file_idx) if file_idx is not None else None
-                with self._open_source_doc(src_path, password=password) as src_doc:
-                    for pidx in sorted({m.page_index for m in matches}):
-                        out_doc.insert_pdf(src_doc, from_page=pidx, to_page=pidx)
-            out_doc.save(str(out_path), garbage=4, deflate=True)
-        finally:
-            out_doc.close()
-
+        out_path = engine.save_matches(
+            all_matches, self.target_paths, self.target_passwords, self.destination_dir
+        )
+        n_files = len({m.source_path for m in all_matches})
         self.last_output_path = str(out_path)
         self._preview_btn.disabled = False
         self._summary.value = (
             f"Finalizado: {len(all_matches)} coincidencia(s) en "
-            f"{len(grouped)} archivo(s). Salida: {out_path.name}"
-        )
-        self._log(f"💾 Archivo guardado: {out_path}", "#1565C0")
-        self._run_btn.disabled = False
-        self._is_extracting = False
-        self._extraction_state = None
-        self.page_ref.update()
-
-    def _resume_extraction_sync(self) -> None:
-        """Reanuda la extracción después de obtener una contraseña (sincrónico)."""
-        if self._extraction_state is None:
-            return
-        
-        state = self._extraction_state
-        ref_tokens = state["ref_tokens"]
-        all_matches = state["all_matches"]
-        file_idx = state["file_idx"]
-        total_files = state["total_files"]
-        kws = state["kws"]
-        hint_pages_raw = state["hint_pages_raw"]
-        
-        # Continuar con el archivo actual que necesitaba contraseña
-        self._is_extracting = True
-        self._extraction_state = None
-        
-        # Re-enter the target documents loop starting from current file_idx
-        all_matches_resume: list[PageMatch] = all_matches
-        
-        for idx in range(file_idx, total_files):
-            path = self.target_paths[idx]
-            fname = Path(path).name
-            self._summary.value = f"Archivo {idx + 1} de {total_files}: {fname}"
-            self.page_ref.update()
-
-            try:
-                password = self.target_passwords.get(idx)
-                doc = self._open_source_doc(path, password=password)
-            except _ExtractPasswordRequiredError:
-                self._log(f"✗ {fname}: requiere contraseña. Pausando búsqueda…", "#D32F2F")
-                self._extraction_state = {
-                    "ref_tokens": ref_tokens,
-                    "all_matches": all_matches_resume,
-                    "file_idx": idx,
-                    "total_files": total_files,
-                    "kws": kws,
-                    "hint_pages_raw": hint_pages_raw,
-                }
-                self._show_password_prompt(path, file_idx=idx)
-                self._is_extracting = False
-                return
-            except _ExtractPermissionDeniedError:
-                self._log(f"✗ {fname}: no permite extracción de contenido.", "#D32F2F")
-                continue
-            except Exception as ex:
-                self._log(f"✗ {fname}: error al abrir — {ex}", "#D32F2F")
-                continue
-
-            with doc:
-                total_pages = len(doc)
-                doc_kind = self.processor.get_doc_kind(doc)
-                doc_kind_label = self._doc_kind_label(doc_kind)
-
-                self._log(
-                    f"📄 [{idx + 1}/{total_files}] {fname} — {doc_kind_label}, {total_pages} página(s)",
-                    "#1565C0",
-                )
-
-                if doc_kind == "scanned":
-                    self._log(
-                        "  ⚠ Documento escaneado — se ejecutará OCR en cada página sin texto nativo.",
-                        "#ED6C02",
-                    )
-
-                hint_set = self._parse_pages(hint_pages_raw, total_pages)
-                if hint_set:
-                    other_pages = [i for i in range(total_pages) if i not in hint_set]
-                    scan_order = sorted(hint_set) + other_pages
-                    self._log(
-                        f"  ℹ Páginas sugeridas verificadas primero: "
-                        f"{', '.join(str(p + 1) for p in sorted(hint_set))}",
-                        "#666666",
-                    )
-                else:
-                    scan_order = list(range(total_pages))
-
-                file_matches: list[PageMatch] = []
-                pages_with_ocr = 0
-                pages_skipped = 0
-
-                for i in scan_order:
-                    is_hint = i in hint_set
-                    hint_tag = " ⭐" if is_hint else ""
-
-                    self._set_progress(
-                        f"Analizando: {fname} — página {i + 1}/{total_pages}{hint_tag}"
-                    )
-
-                    text, mode, elapsed_ms, used_ocr = self._extract_page_text(doc, i)
-                    page_text_lower = text.lower()
-
-                    if used_ocr:
-                        pages_with_ocr += 1
-
-                    time_tag = f"{elapsed_ms:.0f}ms"
-                    ocr_tag = " | OCR" if used_ocr else ""
-
-                    if not page_text_lower.strip():
-                        pages_skipped += 1
-                        if is_hint:
-                            self._log(
-                                f"  ~ Pág {i + 1}{hint_tag} [{mode} | {time_tag}]: sin texto extraíble",
-                                "#ED6C02",
-                            )
-                        continue
-
-                    kw_hits = [kw for kw in kws if kw in page_text_lower]
-
-                    if len(kw_hits) == len(kws):
-                        score = float(len(kw_hits))
-                        reason = f"keywords={len(kw_hits)}"
-
-                        if ref_tokens:
-                            page_tokens = self._normalize_words(text)
-                            if page_tokens:
-                                inter = len(ref_tokens & page_tokens)
-                                union = len(ref_tokens | page_tokens)
-                                jaccard = inter / union if union else 0.0
-                                score += jaccard * 2
-                                reason += f", sim={jaccard:.2f}"
-
-                        file_matches.append(PageMatch(path, i, score, reason))
-
-                        shown = ", ".join(f'"{k}"' for k in kw_hits[:5])
-                        extra = f" +{len(kw_hits) - 5} más" if len(kw_hits) > 5 else ""
-                        self._log(
-                            f"  ✓ Pág {i + 1}{hint_tag} [{mode}{ocr_tag} | {time_tag}]: "
-                            f"{shown}{extra}",
-                            "#2E7D32",
-                        )
-                    else:
-                        if is_hint:
-                            self._log(
-                                f"  ~ Pág {i + 1}{hint_tag} [{mode}{ocr_tag} | {time_tag}]: no coincide",
-                                "#ED6C02",
-                            )
-
-                file_matches.sort(key=lambda m: m.score, reverse=True)
-                all_matches_resume.extend(file_matches)
-
-                ocr_note = f", OCR en {pages_with_ocr} pág." if pages_with_ocr else ""
-                skip_note = f", {pages_skipped} omitidas" if pages_skipped else ""
-                if file_matches:
-                    self._log(
-                        f"  → {len(file_matches)} página(s) encontrada(s){ocr_note}{skip_note}",
-                        "#1565C0",
-                    )
-                else:
-                    self._log(
-                        f"  → Sin coincidencias{ocr_note}{skip_note}",
-                        "#999999",
-                    )
-                self._log_separator()
-
-        self._set_progress("")
-
-        # ── Save output ───────────────────────────────────────────────────────
-        if not all_matches_resume:
-            self._summary.value = "Búsqueda finalizada: no se encontraron páginas coincidentes."
-            self._run_btn.disabled = False
-            self._is_extracting = False
-            self.page_ref.update()
-            return
-
-        dest = Path(self.destination_dir)
-        dest.mkdir(parents=True, exist_ok=True)
-        out_name = f"extraccion_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-        out_path = dest / out_name
-
-        grouped: dict[str, list[PageMatch]] = {}
-        for match in all_matches_resume:
-            grouped.setdefault(match.source_path, []).append(match)
-
-        out_doc = fitz.open()
-        try:
-            for src_path, matches in grouped.items():
-                # Find the file_idx for this path
-                file_idx = None
-                for idx, target_path in enumerate(self.target_paths):
-                    if target_path == src_path:
-                        file_idx = idx
-                        break
-                password = self.target_passwords.get(file_idx) if file_idx is not None else None
-                with self._open_source_doc(src_path, password=password) as src_doc:
-                    for pidx in sorted({m.page_index for m in matches}):
-                        out_doc.insert_pdf(src_doc, from_page=pidx, to_page=pidx)
-            out_doc.save(str(out_path), garbage=4, deflate=True)
-        finally:
-            out_doc.close()
-
-        self.last_output_path = str(out_path)
-        self._preview_btn.disabled = False
-        self._summary.value = (
-            f"Finalizado: {len(all_matches_resume)} coincidencia(s) en "
-            f"{len(grouped)} archivo(s). Salida: {out_path.name}"
+            f"{n_files} archivo(s). Salida: {out_path.name}"
         )
         self._log(f"💾 Archivo guardado: {out_path}", "#1565C0")
         self._run_btn.disabled = False
