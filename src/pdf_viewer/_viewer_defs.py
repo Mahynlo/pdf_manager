@@ -17,7 +17,9 @@ _SEL_BAR_BDR  = "#F0C800"
 _OCR_BOX_CLR  = "#2E7D32"
 _OCR_BOX_BG   = "#331B5E20"
 _OCR_PANEL_BG = "#F7FBF8"
-_PAGE_BG      = "#AAAAAA"   # placeholder grey while page image is not rendered
+_PAGE_BG      = "#FFFFFF"   # placeholder "papel" mientras la página no se renderiza
+                            # (blanco = se funde con el contenido al cargar; antes
+                            # era gris y parecía un bloque de carga al hacer scroll)
 
 # ── Page layout ───────────────────────────────────────────────────────────────
 _PAGE_GAP        = 16    # vertical gap between pages (px)
@@ -25,7 +27,14 @@ _PRELOAD         = 2     # pages to render eagerly on first load
 _EVICT_MARGIN    = 3     # viewport heights to keep rendered on each side
 _EVICT_THRESHOLD = 400   # scroll px between eviction passes
 _CACHE_KEEP_PAGES  = 5     # keep only N pages rendered around current page
-_PREVIEW_MAX_ZOOM  = 0.75  # max zoom for fast scroll preview renders
+# ── LOD (nivel de detalle) ────────────────────────────────────────────────────
+# El tier "preview" rasteriza a una fracción del zoom objetivo: más barato de
+# rasterizar y mucho menos textura/RAM (clave en equipos sin GPU). Se usa para
+# las páginas vecinas (prefetch) y durante el scroll; al detenerse, la página
+# enfocada sube a calidad completa.
+_PREVIEW_QUALITY   = 0.66  # preview = esta fracción del zoom objetivo
+_PREVIEW_MIN_ZOOM  = 0.4   # piso de legibilidad del preview
+_PREVIEW_MAX_ZOOM  = 0.75  # techo absoluto del preview (acota el coste a zoom alto)
 _SCROLL_IDLE_DELAY = 0.2   # seconds to wait before rendering full-res after scroll
 
 # ── Tool button definitions ───────────────────────────────────────────────────

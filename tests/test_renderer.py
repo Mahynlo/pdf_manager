@@ -4,7 +4,8 @@ Recent changes that these tests guard against regressions:
   · Byte-budget eviction (_MAX_BYTES) in addition to count-based eviction
   · shrink(n) method for the on_blur lifecycle
   · 4-tuple cache entry format (path | None, w, h, png_bytes | None)
-  · zoom ≤ 1.0 returns in-memory bytes; zoom > 1.0 returns a temp JPEG path
+  · render_page siempre escribe a disco: PNG para zoom ≤ 1.0, JPEG para zoom > 1.0
+    (el 4º campo png_bytes es siempre None; ya no se transporta base64)
 """
 from __future__ import annotations
 
@@ -203,15 +204,19 @@ class TestPageRenderCache:
 
 
 class TestRenderPage:
-    def test_zoom_low_returns_png_bytes_no_file(self, sample_doc):
-        """zoom ≤ 1.0 should produce in-memory PNG (no temp file)."""
+    def test_zoom_low_returns_png_file_path(self, sample_doc):
+        """zoom ≤ 1.0 should produce a PNG temp file (no in-memory bytes)."""
         path, w, h, png = render_page(sample_doc, 0, 1.0)
-        assert path is None
-        assert png is not None
-        assert isinstance(png, bytes)
-        assert png[:8] == b"\x89PNG\r\n\x1a\n"   # PNG magic bytes
+        assert png is None
+        assert path is not None
+        assert os.path.exists(path)
+        assert path.lower().endswith(".png")
+        with open(path, "rb") as f:
+            magic = f.read(8)
+        assert magic == b"\x89PNG\r\n\x1a\n"   # PNG magic bytes
         assert w > 0
         assert h > 0
+        os.remove(path)   # test isn't using the cache, so no auto-cleanup
 
     def test_zoom_high_returns_jpeg_file_path(self, sample_doc):
         path, w, h, png = render_page(sample_doc, 0, 2.0)
@@ -227,11 +232,13 @@ class TestRenderPage:
         os.remove(path)
 
     def test_dimensions_scale_linearly_with_zoom(self, sample_doc):
-        _, w_05, h_05, _ = render_page(sample_doc, 0, 0.5)
-        _, w_10, h_10, _ = render_page(sample_doc, 0, 1.0)
+        p05, w_05, h_05, _ = render_page(sample_doc, 0, 0.5)
+        p10, w_10, h_10, _ = render_page(sample_doc, 0, 1.0)
         # 1.0 / 0.5 = 2x dimensions (rounded to int by fitz)
         assert w_10 == pytest.approx(w_05 * 2, abs=1)
         assert h_10 == pytest.approx(h_05 * 2, abs=1)
+        os.remove(p05)
+        os.remove(p10)
 
     def test_cache_hit_avoids_repeat_render(self, sample_doc):
         """Second call with same (pn, zoom) returns the cached tuple by identity."""

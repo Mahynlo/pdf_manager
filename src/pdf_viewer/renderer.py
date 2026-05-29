@@ -18,9 +18,10 @@ ZOOM_LEVELS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
 # del viewer (sin cascada visible entre las primeras 4 y la 5ª-6ª).
 _RENDER_SEM = threading.Semaphore(6)
 
-# Cache entry: (file_path: str | None, width: int, height: int, png_bytes: bytes | None)
-# - file_path set, png_bytes=None  → JPEG en disco (zoom > 1.0)
-# - file_path=None, png_bytes set  → PNG en memoria (zoom ≤ 1.0)
+# Cache entry: (file_path: str, width: int, height: int, png_bytes: None)
+# Todas las páginas se cachean como archivo en disco (PNG para zoom ≤ 1.0,
+# JPEG para zoom > 1.0). El 4º campo se conserva por compatibilidad y siempre
+# es None — ya no se mantienen bytes de imagen en RAM ni se transporta base64.
 CacheEntry = tuple
 
 
@@ -126,37 +127,48 @@ def render_page(
     page_num: int,
     zoom: float,
     cache: PageRenderCache | None = None,
+    doc_lock: "threading.Lock | None" = None,
 ) -> CacheEntry:
-    """Render a PDF page.
+    """Render a PDF page to a temp file.
 
-    Returns (file_path, width, height, png_bytes):
-      - zoom ≤ 1.0: PNG en memoria (png_bytes set, file_path=None)
-      - zoom > 1.0: JPEG en disco (file_path set, png_bytes=None)
-    Caller must hold doc_lock before calling this function.
+    Returns (file_path, width, height, None):
+      - zoom ≤ 1.0: PNG en disco (sin pérdida, texto nítido)
+      - zoom > 1.0: JPEG en disco (pixmaps grandes: calidad alta sin exceso)
+
+    Concurrencia: si se pasa ``doc_lock`` se toma SÓLO durante la rasterización
+    (``fitz`` no es thread-safe). La codificación y el IO a disco — la parte
+    cara — corren fuera del lock, de modo que páginas del mismo documento ya no
+    se serializan por completo. Si ``doc_lock`` es None el llamador debe
+    garantizar el acceso exclusivo a ``doc``.
     """
     if cache is not None:
         hit = cache.get(page_num, zoom)
         if hit is not None:
             return hit
 
-    page = doc[page_num]
     mat = fitz.Matrix(zoom * BASE_SCALE, zoom * BASE_SCALE)
 
     # alpha=False: sin canal alfa → 25% menos RAM y conversión evitada.
-    pix = page.get_pixmap(matrix=mat, alpha=False)
-
-    if zoom <= 1.0:
-        # PNG crudo en memoria: sin overhead de base64 (33%) en el caché.
-        # El worker codifica a base64 sólo al asignar a img.src_base64.
-        raw = pix.tobytes("png")
-        result: CacheEntry = (None, pix.width, pix.height, raw)
+    if doc_lock is not None:
+        with doc_lock:
+            pix = doc[page_num].get_pixmap(matrix=mat, alpha=False)
     else:
-        # JPEG a disco para zooms altos (pixmaps grandes: calidad alta sin exceso).
+        pix = doc[page_num].get_pixmap(matrix=mat, alpha=False)
+
+    # ── Codificación + IO fuera del doc_lock ──────────────────────────────────
+    # pix es una copia independiente del bitmap, no toca el documento.
+    if zoom <= 1.0:
+        # PNG sin pérdida: mantiene la nitidez del texto al zoom habitual.
+        # A disco (no base64 en memoria) → transporte ligero hacia Flutter.
+        fd, temp_path = tempfile.mkstemp(suffix=".png")
+        os.close(fd)
+        pix.save(temp_path, output="png")
+    else:
         fd, temp_path = tempfile.mkstemp(suffix=".jpg")
         os.close(fd)
         jpg_q = 90 if zoom <= 2.0 else 82
         pix.save(temp_path, output="jpeg", jpg_quality=jpg_q)
-        result = (temp_path, pix.width, pix.height, None)
+    result: CacheEntry = (temp_path, pix.width, pix.height, None)
 
     del pix  # libera el bitmap (~54 MB a zoom=4) antes de que el GC actúe
 

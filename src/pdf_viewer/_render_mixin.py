@@ -1,9 +1,9 @@
 """Rendering, navigation, zoom and save behaviour for PDFViewerTab."""
 from __future__ import annotations
 
-import base64
 import bisect
 import threading
+import time
 from pathlib import Path
 
 import flet as ft
@@ -15,8 +15,8 @@ from .annotations import Tool
 from .renderer import BASE_SCALE, ZOOM_LEVELS, render_page, _RENDER_SEM
 from ._viewer_defs import (
     _PAGE_BG, _PAGE_GAP, _PRELOAD, _EVICT_MARGIN, _EVICT_THRESHOLD,
-    _CACHE_KEEP_PAGES, _PREVIEW_MAX_ZOOM, _SCROLL_IDLE_DELAY,
-    _SELECTED_BG,
+    _CACHE_KEEP_PAGES, _PREVIEW_MAX_ZOOM, _PREVIEW_QUALITY, _PREVIEW_MIN_ZOOM,
+    _SCROLL_IDLE_DELAY, _SELECTED_BG,
 )
 
 
@@ -78,7 +78,7 @@ class _RenderMixin:
                 if has_old:
                     img.fit = ft.ImageFit.CONTAIN
                     img.visible = True
-                    slot.bgcolor = None
+                    slot.bgcolor = _PAGE_BG
                 else:
                     img.visible = False
                     slot.bgcolor = _PAGE_BG
@@ -184,7 +184,7 @@ class _RenderMixin:
             w, h = page_dims[pn]
 
             img = ft.Image(
-                width=w, height=h, fit=ft.ImageFit.NONE, gapless_playback=True,
+                width=w, height=h, fit=ft.ImageFit.CONTAIN, gapless_playback=True,
                 visible=False,
                 color="#FFFFFFFF" if self._night_mode else None,
                 color_blend_mode=ft.BlendMode.DIFFERENCE if self._night_mode else None,
@@ -463,22 +463,19 @@ class _RenderMixin:
 
             ink_canvas = cv.Canvas(shapes=[], width=w, height=h)
 
+            # Placeholder "hoja en blanco": fondo papel (= _PAGE_BG blanco) con
+            # sólo el número de página muy tenue. Sin icono ni spinner — un
+            # spinner correría un AnimationController que repinta a 60 fps
+            # mientras esté en el árbol (incluso fuera de pantalla), y la
+            # evicción deja decenas de overlays visibles tras el scroll → eso
+            # forzaba repintado continuo (GPU en reposo, CPU/RAM sin GPU). Un
+            # texto estático no programa frames y, al ser blanco, el fling se ve
+            # como pasar hojas en vez de bloques grises "cargando".
             loading_ov = ft.Container(
-                content=ft.Column(
-                    [
-                        ft.ProgressRing(
-                            width=32, height=32, stroke_width=3,
-                            color="#B0BEC5",
-                        ),
-                        ft.Text(
-                            f"Pág. {pn + 1}",
-                            size=11, color="#9E9E9E",
-                            text_align=ft.TextAlign.CENTER,
-                        ),
-                    ],
-                    spacing=10, tight=True,
-                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                    alignment=ft.MainAxisAlignment.CENTER,
+                content=ft.Text(
+                    f"{pn + 1}",
+                    size=13, color="#D8D8D8",
+                    text_align=ft.TextAlign.CENTER,
                 ),
                 left=0, top=0, width=w, height=h,
                 alignment=ft.alignment.center,
@@ -502,7 +499,11 @@ class _RenderMixin:
 
             slot = ft.Container(
                 content=ft.Stack(
-                    [img, loading_ov, text_sel_ov, drag_ov, ink_canvas, sel_ov, ocr_ov, redact_ov, popup_ov, annot_popup_ov],
+                    # loading_ov va PRIMERO (al fondo): respaldo "papel" blanco
+                    # detrás de la imagen. Así, en la ventana en que Flutter aún
+                    # decodifica el archivo recién renderizado, se ve blanco y no
+                    # el gris del fondo del visor → sin flash gris al aparecer.
+                    [loading_ov, img, text_sel_ov, drag_ov, ink_canvas, sel_ov, ocr_ov, redact_ov, popup_ov, annot_popup_ov],
                     clip_behavior=ft.ClipBehavior.NONE,
                 ),
                 width=w, height=h,
@@ -567,7 +568,14 @@ class _RenderMixin:
         return token
 
     def _preview_zoom(self) -> float:
-        return min(self.zoom, _PREVIEW_MAX_ZOOM)
+        """Zoom del tier de baja calidad (LOD).
+
+        Fracción del zoom objetivo (más barato y menos textura), con un piso de
+        legibilidad y un techo absoluto para que el prefetch de vecinas nunca
+        rasterice pixmaps enormes cuando el usuario está a zoom alto.
+        """
+        q = max(_PREVIEW_MIN_ZOOM, self.zoom * _PREVIEW_QUALITY)
+        return min(q, _PREVIEW_MAX_ZOOM, self.zoom)
 
     def _schedule_scroll_idle(self) -> None:
         t = getattr(self, "_scroll_idle_timer", None)
@@ -582,6 +590,7 @@ class _RenderMixin:
         px = getattr(self, "_scroll_px", 0.0)
         vh = getattr(self, "_last_viewport_h", 600.0)
         self._render_visible(float(px), float(vh), preview=False)
+        self._prefetch_neighbors_preview(self.current_page)
         self._prune_render_cache(self.current_page)
         evicted = self._evict_outside_window(self.current_page)
         if evicted:
@@ -630,11 +639,16 @@ class _RenderMixin:
 
     def _render_page_slot(self, pn: int, preview: bool = False) -> None:
         """Schedule a background render for one page (no-op if already rendered)."""
-        if preview and self.zoom <= _PREVIEW_MAX_ZOOM:
+        # El tier preview sólo aporta si rasteriza por debajo del zoom objetivo;
+        # a zooms muy bajos _preview_zoom() iguala al zoom → render directo a full.
+        if preview and self._preview_zoom() >= self.zoom - 1e-3:
             preview = False
 
         if preview:
-            if pn in self._rendered or pn in self._rendering_preview:
+            # No arrancar un preview que compita con un full ya en curso o hecho:
+            # el full siempre gana, así evitamos que el preview pise la versión
+            # nítida (los tokens lo garantizan, pero esto ahorra el render inútil).
+            if pn in self._rendered or pn in self._rendering or pn in self._rendering_preview:
                 return
             self._rendering_preview.add(pn)
         else:
@@ -660,39 +674,45 @@ class _RenderMixin:
                         if gen != self._render_gen or pn >= len(self._page_images):
                             return
                         zoom = self._preview_zoom() if preview else self.zoom
-                        path, w, h, png_bytes = render_page(self.doc, pn, zoom, cache)
+                    # render_page toma _doc_lock sólo para rasterizar; el encode
+                    # y el IO a disco corren fuera → no serializa el documento.
+                    path, w, h, _ = render_page(
+                        self.doc, pn, zoom, cache, doc_lock=self._doc_lock
+                    )
                 if gen != self._render_gen or pn >= len(self._page_images):
                     return
                 if token != getattr(self, "_render_tokens", {}).get(pn, token):
                     return
                 img  = self._page_images[pn]
                 slot = self._page_slots[pn]
-                if png_bytes is not None:
-                    # PNG en memoria → encode a base64 sólo aquí (no en el cache).
-                    img.src_base64 = base64.b64encode(png_bytes).decode()
-                    img.src = None
-                else:
-                    img.src = path
-                    img.src_base64 = None
+                img.src = path
+                img.src_base64 = None
                 if preview:
-                    img.fit = ft.ImageFit.CONTAIN
                     self._previewed.add(pn)
                 else:
-                    img.fit    = ft.ImageFit.NONE  # restaurar desde preview CONTAIN
+                    # fit es CONTAIN siempre (ver creación de img): en un render
+                    # full la imagen ya mide exactamente lo que el slot, así que
+                    # CONTAIN == 1:1 (nítido). Al NO alternar fit entre CONTAIN y
+                    # NONE evitamos el salto de tamaño de un frame durante el zoom
+                    # mientras gapless_playback sostiene la imagen anterior.
                     img.width  = w
                     img.height = h
                     self._previewed.discard(pn)
                 img.visible = True
-                slot.bgcolor = None
+                # Fondo blanco (no None/transparente): durante el instante en
+                # que Flutter decodifica la imagen recién asignada, el slot se ve
+                # blanco en vez del gris del visor → sin flash gris.
+                slot.bgcolor = _PAGE_BG
                 loading_overlays = getattr(self, "_loading_overlays", [])
                 if pn < len(loading_overlays):
                     loading_overlays[pn].visible = False
                 if not preview:
                     self._rendered.add(pn)
                 # Batch updates: si varios workers terminan dentro de 30 ms,
-                # se consolida en un solo update del scroll → elimina la cascada
-                # visual durante cambios de zoom.
-                self._schedule_render_update()
+                # se consolidan. Marcamos sólo ESTE slot como sucio para que el
+                # update parche el contenedor de la página y no re-serialice
+                # toda la columna (menos CPU/GPU por update durante el scroll).
+                self._schedule_render_update(pn)
                 # Notify mixins that the page image is now up-to-date.
                 try:
                     self._on_page_rendered(pn)
@@ -712,14 +732,20 @@ class _RenderMixin:
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _schedule_render_update(self) -> None:
+    def _schedule_render_update(self, pn: int | None = None) -> None:
         """Coalesce concurrent worker completions into a single UI update.
 
-        Sin esto, cada worker llama slot.update() cuando termina; con varios
-        renders concurrentes (cambio de zoom) se ve una cascada de pantallazos.
-        Con un debounce de 30 ms todos los renders que terminan juntos
-        comparten un solo update del scroll.
+        Con un debounce de 30 ms los renders que terminan juntos comparten un
+        solo flush. Los slots que cambiaron se acumulan en ``_dirty_slots`` y se
+        actualizan individualmente (parche del contenedor de cada página) en
+        lugar de re-serializar toda la columna en cada flush.
         """
+        if pn is not None:
+            dirty = getattr(self, "_dirty_slots", None)
+            if dirty is None:
+                dirty = set()
+                self._dirty_slots = dirty
+            dirty.add(pn)
         t = getattr(self, "_render_upd_timer", None)
         if t is not None:
             t.cancel()
@@ -727,15 +753,26 @@ class _RenderMixin:
         self._render_upd_timer.start()
 
     def _do_render_update(self) -> None:
+        dirty = getattr(self, "_dirty_slots", None)
         try:
-            self.viewer_scroll.update()
+            if dirty:
+                slots = getattr(self, "_page_slots", [])
+                for pn in list(dirty):
+                    if 0 <= pn < len(slots):
+                        try:
+                            slots[pn].update()
+                        except Exception:
+                            pass
+                dirty.clear()
+            else:
+                self.viewer_scroll.update()
         except Exception:
             pass
 
     def _render_visible(self, pixels: float, viewport_h: float, preview: bool = False) -> None:
         if not self._page_cum_offsets:
             return
-        if preview and self.zoom <= _PREVIEW_MAX_ZOOM:
+        if preview and self._preview_zoom() >= self.zoom - 1e-3:
             preview = False
         margin = viewport_h * 0.5
         top    = pixels - margin
@@ -750,6 +787,27 @@ class _RenderMixin:
                 break
             if start + self._page_heights[pn] >= top:
                 self._render_page_slot(pn, preview=preview)
+
+    def _prefetch_neighbors_preview(self, center: int) -> None:
+        """Pre-renderiza las páginas vecinas de la ventana en baja calidad (LOD).
+
+        Así, al hacer scroll a la página anterior/siguiente, hay un preview
+        instantáneo en vez de un slot en blanco. _render_page_slot(preview=True)
+        es idempotente y NO toca páginas ya en full ni en render full (esas las
+        cubre _render_visible), por lo que sólo rasteriza —barato— las vecinas
+        que aún no tienen imagen. Las texturas de baja resolución ocupan ~1/4 de
+        la RAM/VRAM de una full: el render caro queda limitado a lo enfocado.
+        """
+        if not self._page_cum_offsets:
+            return
+        if getattr(self, "_display_mode", "continuous") != "continuous":
+            return
+        total = len(self.doc)
+        radius = max(0, (_CACHE_KEEP_PAGES - 1) // 2)
+        start = max(0, center - radius)
+        end = min(total, center + radius + 1)
+        for pn in range(start, end):
+            self._render_page_slot(pn, preview=True)
 
     def _evict_distant(self, pixels: float, viewport_h: float) -> bool:
         """Oculta páginas alejadas del viewport. Retorna True si eviccionó alguna."""
@@ -818,12 +876,18 @@ class _RenderMixin:
         viewport_h = getattr(e, "viewport_dimension", None) or 600.0
         if pixels is None:
             return
+        now     = time.monotonic()
+        prev_px = getattr(self, "_scroll_px", 0.0)
+        prev_t  = getattr(self, "_scroll_t", now)
         self._scroll_px = float(pixels)
+        self._scroll_t  = now
         self._last_viewport_h = float(viewport_h)
         self._scrolling = True
         self._schedule_scroll_idle()
 
-        mid = float(pixels) + float(viewport_h) / 2.0
+        px, vh = float(pixels), float(viewport_h)
+
+        mid = px + vh / 2.0
         page_changed = False
         idx = bisect.bisect_right(self._page_cum_offsets, mid)
         pn = max(0, idx - 1)
@@ -834,8 +898,17 @@ class _RenderMixin:
                 self._refresh_ocr_ui_for_page()
                 page_changed = True
 
-        px, vh = float(pixels), float(viewport_h)
-        self._render_visible(px, vh, preview=True)
+        # Velocidad del scroll (px/seg). En un fling rápido no alcanzamos a
+        # rasterizar antes de que la página salga de pantalla → el preview
+        # borroso aparece y "salta" a nítido (parpadeo). Mejor NO renderizar
+        # durante el fling (placeholder limpio) y dejar que el handler de idle
+        # (0.2 s tras detenerse) renderice nítido lo que quedó visible. En
+        # scroll lento/medio sí renderizamos, y a calidad COMPLETA (sin paso
+        # intermedio borroso): un solo cambio de imagen, sin parpadeo.
+        dt       = max(1e-3, now - prev_t)
+        velocity = abs(px - prev_px) / dt
+        if velocity < vh * 6.0:
+            self._render_visible(px, vh, preview=False)
 
         # Evicción y actualización de UI en un solo bloque:
         # si eviccionamos páginas, necesitamos propagar el visible=False a Flutter
@@ -863,6 +936,7 @@ class _RenderMixin:
         self.current_page = pn
         self._update_nav_state()
         self._render_page_slot(pn)
+        self._prefetch_neighbors_preview(pn)
         self._prune_render_cache(pn)
         self._evict_outside_window(pn)
         self._refresh_ocr_ui_for_page()
@@ -934,8 +1008,11 @@ class _RenderMixin:
                 within = self._scroll_px - self._page_cum_offsets[saved]
                 frac = max(0.0, min(1.0, within / page_h))
 
+        # _rebuild_scroll_content (ruta rápida) ya hace viewer_scroll.update()
+        # con las nuevas dimensiones; aquí sólo reposicionamos el scroll y
+        # consolidamos en UN solo page_ref.update() — antes eran dos, cada uno
+        # re-serializaba todo el árbol de la página en cada paso de zoom.
         self._rebuild_scroll_content(scroll_back=False)
-        self.page_ref.update()
         try:
             if saved < len(self._page_cum_offsets) and saved < len(self._page_heights):
                 target = self._page_cum_offsets[saved] + frac * self._page_heights[saved]
