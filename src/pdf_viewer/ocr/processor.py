@@ -10,7 +10,6 @@ from typing import Any
 
 import fitz
 import numpy as np
-from onnxtr.models import ocr_predictor
 
 
 _SCALE_FOR_OCR = 2.0
@@ -64,6 +63,7 @@ class OCRProcessor:
     @property
     def predictor(self):
         if self._predictor is None:
+            from onnxtr.models import ocr_predictor
             os.environ["DISABLE_MODEL_SOURCE_CHECK"] = "True"
             # Use bundled models (src/onnxtr_cache/) so the compiled app works offline.
             # Falls back to the default ~/.cache/onnxtr/ if the bundled folder is missing.

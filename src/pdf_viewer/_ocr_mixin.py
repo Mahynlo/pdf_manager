@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import gc
 import threading
+from pathlib import Path
 import flet as ft
 
 from .annotations import Tool
@@ -15,7 +16,7 @@ _CHIP_FG   = "#2E7D32"
 _METRIC_BG = "#F1F8E9"
 
 _MAX_OCR_PAGES_CACHED = 8  # max pages kept in memory; oldest are evicted first
-_OCR_MODEL_RELEASE_DELAY = 5.0  # seconds to unload OCR model after idle
+_OCR_MODEL_RELEASE_DELAY = 3.0  # seconds to unload OCR model after idle
 
 
 def _chip(label: str, value: str, icon: str | None = None) -> ft.Container:
@@ -59,6 +60,13 @@ def _metric(icon: str, value: str, sublabel: str) -> ft.Container:
 
 class _OCRMixin:
     """OCR runner, results list, bounding-box overlay and sidebar panel."""
+
+    def _ensure_ocr_processor(self) -> None:
+        if getattr(self, "_ocr_processor", None) is None:
+            from .ocr import OCRProcessor
+            self._ocr_processor = OCRProcessor(
+                str(Path(__file__).resolve().parents[2])
+            )
 
     # ── sidebar panel builder ─────────────────────────────────────────────────
 
@@ -337,7 +345,8 @@ class _OCRMixin:
             self._ocr_model_timer = None
 
     def _release_ocr_model(self) -> None:
-        self._ocr_processor.release_predictor()
+        if getattr(self, "_ocr_processor", None) is not None:
+            self._ocr_processor.release_predictor()
         gc.collect()
 
     # ── copy all text ─────────────────────────────────────────────────────────
@@ -361,6 +370,7 @@ class _OCRMixin:
             self._toggle_sidebar()
 
         self._cancel_ocr_model_release()
+        self._ensure_ocr_processor()
         pn = self.current_page
         self._ocr_set_running(f"Analizando página {pn + 1}…")
         self.page_ref.update()

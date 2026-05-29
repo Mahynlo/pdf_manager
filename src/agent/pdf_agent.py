@@ -516,3 +516,12 @@ class PDFAgent:
             yield from self._stream_gemini(message, history)
         else:
             yield self._ask_openai(message, history)
+
+    def close(self) -> None:
+        """Release cached data to reduce memory footprint."""
+        self._markdown = None
+        with self._cache_lock:
+            self._invalidate_gemini_cache()
+        with self._rag_lock:
+            self._rag = None
+        self._embedder = None

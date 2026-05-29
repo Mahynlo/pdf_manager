@@ -154,7 +154,7 @@ class PDFViewerTab(
         self._text_rects_cache: dict[int, list] = {}
 
         # OCR state
-        self._ocr_processor    = OCRProcessor(str(Path(__file__).resolve().parents[2]))
+        self._ocr_processor    = None
         self._ocr_by_page:     dict[int, OCRPageResult] = {}
         self._ocr_show_boxes   = False
         self._ocr_active_index = 0
@@ -842,6 +842,11 @@ class PDFViewerTab(
             self._render_cache.shrink(self._BLUR_SHRINK_KEEP)
         except Exception:
             pass
+        if hasattr(self, "_schedule_ocr_model_release"):
+            try:
+                self._schedule_ocr_model_release()
+            except Exception:
+                pass
         self._start_suspend_timer()
 
     def _start_suspend_timer(self) -> None:
@@ -865,6 +870,9 @@ class PDFViewerTab(
         self._is_suspended = True
 
     def close(self) -> None:
+        if getattr(self, "_is_closed", False):
+            return
+        self._is_closed = True
         self._cancel_suspend_timer()
         self._render_gen += 1  # signal running workers to exit before doc is closed
         self._render_cache.clear()
@@ -872,7 +880,16 @@ class PDFViewerTab(
             self._cancel_ocr_model_release()
         if getattr(self, "_ocr_processor", None) is not None:
             self._ocr_processor.release_predictor()
-        self.doc.close()
+        if getattr(self, "_agent_instance", None) is not None:
+            try:
+                self._agent_instance.close()
+            except Exception:
+                pass
+            self._agent_instance = None
+        try:
+            self.doc.close()
+        except ValueError:
+            pass
         try:
             self.page_ref.overlay.remove(self._save_picker)
             self.page_ref.update()
