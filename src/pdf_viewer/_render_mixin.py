@@ -586,6 +586,8 @@ class _RenderMixin:
         self._scroll_idle_timer.start()
 
     def _on_scroll_idle(self) -> None:
+        if getattr(self, "_is_closed", False):
+            return
         self._scrolling = False
         px = getattr(self, "_scroll_px", 0.0)
         vh = getattr(self, "_last_viewport_h", 600.0)
@@ -753,6 +755,8 @@ class _RenderMixin:
         self._render_upd_timer.start()
 
     def _do_render_update(self) -> None:
+        if getattr(self, "_is_closed", False):
+            return
         dirty = getattr(self, "_dirty_slots", None)
         try:
             if dirty:
@@ -997,6 +1001,8 @@ class _RenderMixin:
     # ── zoom ──────────────────────────────────────────────────────────────────
 
     def _apply_zoom(self) -> None:
+        if getattr(self, "_is_closed", False):
+            return
         self.zoom_label.value = f"{int(round(self.zoom * 100))}%"
         saved = self.current_page
         # Preserve fractional position within the current page so zooming

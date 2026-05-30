@@ -874,6 +874,19 @@ class PDFViewerTab(
             return
         self._is_closed = True
         self._cancel_suspend_timer()
+        # Cancelar timers pendientes de render/scroll/zoom. Si no, pueden
+        # dispararse tras cerrar el doc (sus callbacks hacen len(self.doc) /
+        # tocan controles) y, sobre todo, cada threading.Timer referencia self,
+        # manteniendo viva toda la instancia (listas de ~20 controles × N
+        # páginas) hasta que disparen → memoria que no se libera.
+        for _attr in ("_scroll_idle_timer", "_zoom_timer", "_render_upd_timer"):
+            _t = getattr(self, _attr, None)
+            if _t is not None:
+                try:
+                    _t.cancel()
+                except Exception:
+                    pass
+                setattr(self, _attr, None)
         self._render_gen += 1  # signal running workers to exit before doc is closed
         self._render_cache.clear()
         if hasattr(self, "_cancel_ocr_model_release"):
@@ -887,7 +900,13 @@ class PDFViewerTab(
                 pass
             self._agent_instance = None
         try:
-            self.doc.close()
+            # Cerrar bajo _doc_lock: un worker puede estar rasterizando
+            # (get_pixmap) sobre self.doc en este instante; cerrar el documento
+            # sin sincronizar sería un use-after-free en MuPDF (crash nativo). El
+            # lock espera a que termine el render en curso; los nuevos ya abortan
+            # por el _render_gen incrementado arriba.
+            with self._doc_lock:
+                self.doc.close()
         except ValueError:
             pass
         try:
