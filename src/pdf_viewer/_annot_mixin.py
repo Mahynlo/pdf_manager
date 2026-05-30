@@ -11,9 +11,6 @@ from ._viewer_defs import _SELECTED_BG, _rgb_to_hex
 # Pixel size of each corner handle (must match _render_mixin.py constant).
 _HS  = 10
 _HHS = _HS / 2
-# Extra height added to sel_ov so the context menu (below the annotation) is
-# within the container's hit-test region (Flutter ignores clicks outside bounds).
-_MENU_EXTRA = 52
 
 
 class _AnnotMixin:
@@ -123,18 +120,29 @@ class _AnnotMixin:
         for name in ("color_sep", "color_btn"):
             h[name].visible = not no_recolor
 
-    def _update_sel_handles(self, pn: int, W: float, H: float) -> None:
-        """Position all handle/menu controls inside the sel_overlay Stack."""
+    def _update_sel_handles(
+        self, pn: int, W: float, H: float,
+        rg_left: float = 0.0, rg_top: float = 0.0,
+        menu_left: float = 0.0, menu_top: float = 0.0,
+    ) -> None:
+        """Position all handle/menu controls inside the sel_overlay Stack.
+
+        Todas las coordenadas son relativas al origen de ``sel_ov`` (que puede
+        extenderse más allá de la anotación para contener el menú). Los handles
+        de esquina son sólo visuales — los clics de redimensión se enrutan por
+        el GestureDetector de la página, no por estos contenedores — así que su
+        posición no necesita quedar dentro de los límites de ``sel_ov``; sólo el
+        menú (botones reales) debe quedar dentro para recibir clics.
+        """
         if pn >= len(self._sel_handles):
             return
         h = self._sel_handles[pn]
 
-        # The rotatable group (border + handles + rot knob) occupies the
-        # bbox rect. The context menu sits outside this group so it does
-        # not rotate with the annotation.
+        # The rotatable group (border + handles) occupies the bbox rect,
+        # offset within sel_ov. The context menu sits outside this group.
         if "rot_group" in h:
-            h["rot_group"].left   = 0
-            h["rot_group"].top    = 0
+            h["rot_group"].left   = rg_left
+            h["rot_group"].top    = rg_top
             h["rot_group"].width  = W
             h["rot_group"].height = H
 
@@ -147,9 +155,9 @@ class _AnnotMixin:
         h["bl"].left = -_HHS;     h["bl"].top = H - _HHS
         h["br"].left = W - _HHS;  h["br"].top = H - _HHS
 
-        # Context menu: just below the bbox, left-aligned.
-        h["menu"].left = 0
-        h["menu"].top  = H + 6
+        # Context menu: posición ya acotada a la página por el llamador.
+        h["menu"].left = menu_left
+        h["menu"].top  = menu_top
         h["menu"].visible = True
 
     # ── annotation selection overlay ──────────────────────────────────────────
@@ -214,15 +222,47 @@ class _AnnotMixin:
         r     = annot_rect
         W     = max(2.0, r.width  * scale)
         H     = max(2.0, r.height * scale)
+        ox    = r.x0 * scale
+        oy    = r.y0 * scale
+
+        page_h = float(self._page_heights[pn]) if pn < len(self._page_heights) else 9999.0
+        page_w = float(self._page_slots[pn].width or 9999) if pn < len(self._page_slots) else 9999.0
+
+        # ── colocar el menú contextual dentro de la página ────────────────────
+        # El menú (botones reales) debe quedar dentro de los límites de sel_ov y,
+        # a su vez, dentro de la página, o Flutter no le entrega los clics.
+        _MENU_W = 300.0   # ancho estimado del menú de iconos
+        _MENU_H = 44.0
+        _MARGIN = 6.0
+        _GAP    = 6.0
+
+        menu_abs_left = max(_MARGIN, min(ox, page_w - _MENU_W - _MARGIN))
+        below_top = oy + H + _GAP
+        above_top = oy - _MENU_H - _GAP
+        if below_top + _MENU_H <= page_h - _MARGIN:
+            menu_abs_top = below_top
+        else:
+            menu_abs_top = max(_MARGIN, above_top)
+
+        # sel_ov abarca la unión del recuadro de la anotación y el menú, de modo
+        # que el menú quede SIEMPRE dentro del contenedor (clickeable).
+        region_left   = min(ox, menu_abs_left)
+        region_top    = min(oy, menu_abs_top)
+        region_right  = max(ox + W, menu_abs_left + _MENU_W)
+        region_bottom = max(oy + H, menu_abs_top + _MENU_H)
 
         sel_ov = self._sel_overlays[pn]
-        sel_ov.left    = r.x0 * scale
-        sel_ov.top     = r.y0 * scale
-        sel_ov.width   = W
-        sel_ov.height  = H + _MENU_EXTRA
+        sel_ov.left    = region_left
+        sel_ov.top     = region_top
+        sel_ov.width   = region_right - region_left
+        sel_ov.height  = region_bottom - region_top
         sel_ov.visible = True
 
-        self._update_sel_handles(pn, W, H)
+        self._update_sel_handles(
+            pn, W, H,
+            rg_left=ox - region_left, rg_top=oy - region_top,
+            menu_left=menu_abs_left - region_left, menu_top=menu_abs_top - region_top,
+        )
 
         try:
             sel_ov.update()

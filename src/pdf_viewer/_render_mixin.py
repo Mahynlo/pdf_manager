@@ -405,7 +405,7 @@ class _RenderMixin:
                         on_click=self._text_sel_dismiss,
                         style=ft.ButtonStyle(padding=ft.padding.all(4)),
                     ),
-                ], spacing=0, tight=True,
+                ], spacing=0, tight=True, wrap=True, run_spacing=2,
                    vertical_alignment=ft.CrossAxisAlignment.CENTER),
                 left=0, top=0, visible=False,
                 bgcolor="#FAFAFA",

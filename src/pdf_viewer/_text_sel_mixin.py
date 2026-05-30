@@ -1,6 +1,7 @@
 """Word-level text selection overlay and action popup for PDFViewerTab."""
 from __future__ import annotations
 
+import math
 import urllib.parse
 from collections import defaultdict
 
@@ -341,24 +342,35 @@ class _TextSelMixin:
         sel_rect = self._text_sel_sel_rect
         scale    = self.zoom * BASE_SCALE
         if sel_rect is not None:
-            _POPUP_H = 44   # estimated popup height in display px
-            _POPUP_W = 310  # estimated popup width in display px
-            _MARGIN  = 8
+            _NATURAL_W = 560  # ancho de la barra con TODAS las etiquetas en una fila
+            _ROW_H     = 32   # alto de cada fila de la barra
+            _MARGIN    = 8
 
             page_h = float(self._page_heights[pn]) if pn < len(self._page_heights) else 9999.0
             page_w = float(self._page_slots[pn].width or 9999) if pn < len(self._page_slots) else 9999.0
 
-            # Vertical: show below selection unless popup would overflow the page bottom
-            below_top = sel_rect.y1 * scale + _MARGIN
-            above_top = sel_rect.y0 * scale - _POPUP_H - _MARGIN
+            # La barra vive DENTRO del contenedor de la página; Flutter no entrega
+            # clics a nada que sobresalga de ese contenedor. Si la barra completa
+            # no cabe a lo ancho (p. ej. a zoom bajo), limitamos su ancho y la Row
+            # hace wrap a una 2ª fila en vez de desbordar → los botones siguen
+            # respondiendo.
+            avail_w = max(120.0, page_w - 2 * _MARGIN)
+            width   = min(float(_NATURAL_W), avail_w)
+            popup.width = width
+            lines   = max(1, math.ceil(_NATURAL_W / width))
+            popup_h = 8 + lines * _ROW_H
 
-            if below_top + _POPUP_H <= page_h - _MARGIN:
+            # Vertical: debajo de la selección salvo que se salga por abajo.
+            below_top = sel_rect.y1 * scale + _MARGIN
+            above_top = sel_rect.y0 * scale - popup_h - _MARGIN
+            if below_top + popup_h <= page_h - _MARGIN:
                 popup.top = below_top
             else:
                 popup.top = max(_MARGIN, above_top)
 
-            # Horizontal: align with selection start, clamped so popup stays on page
-            popup.left = max(0.0, min(sel_rect.x0 * scale, page_w - _POPUP_W))
+            # Horizontal: alineada con el inicio de la selección, acotada para que
+            # la barra quede completamente dentro de la página.
+            popup.left = max(_MARGIN, min(sel_rect.x0 * scale, page_w - width - _MARGIN))
 
         popup.visible = True
         try:
