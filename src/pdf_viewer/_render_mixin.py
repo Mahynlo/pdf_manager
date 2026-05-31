@@ -15,7 +15,8 @@ from .annotations import Tool
 from .renderer import BASE_SCALE, ZOOM_LEVELS, render_page, _RENDER_SEM
 from ._viewer_defs import (
     _PAGE_BG, _PAGE_GAP, _PRELOAD, _EVICT_MARGIN, _EVICT_THRESHOLD,
-    _CACHE_KEEP_PAGES, _PREVIEW_MAX_ZOOM, _PREVIEW_QUALITY, _PREVIEW_MIN_ZOOM,
+    _CACHE_KEEP_PAGES, _TEXT_CACHE_KEEP_PAGES,
+    _PREVIEW_MAX_ZOOM, _PREVIEW_QUALITY, _PREVIEW_MIN_ZOOM,
     _SCROLL_IDLE_DELAY, _SELECTED_BG,
 )
 
@@ -601,7 +602,45 @@ class _RenderMixin:
             except Exception:
                 pass
 
+    def _prune_text_caches(self, center_page: int) -> None:
+        """Acota las cachés de texto por página a una ventana alrededor de la
+        página actual.
+
+        Estas cachés (``_page_words`` char-level rawdict, ``_page_word_bands``,
+        ``_page_blocks_cache``, ``_text_rects_cache``) no estaban acotadas: al
+        recorrer un documento grande con el cursor se acumulaban para todas las
+        páginas y sobrevivían incluso a ``_do_suspend`` (que sólo libera el
+        render cache). La reconstrucción es perezosa (``_get_page_words`` /
+        ``_point_has_text``), así que podar sólo añade una re-extracción si el
+        usuario vuelve a una página lejana.
+        """
+        total = len(self.doc)
+        radius = max(0, (_TEXT_CACHE_KEEP_PAGES - 1) // 2)
+        start = max(0, center_page - radius)
+        end = min(total, center_page + radius + 1)
+        keep = set(range(start, end))
+
+        # No podar páginas dentro de una selección de texto activa: re-extraer
+        # rawdict char-level bajo _doc_lock en medio de un arrastre causaría jank.
+        s_pn = getattr(self, "_text_sel_start_pn", None)
+        e_pn = getattr(self, "_text_sel_end_pn", None)
+        if s_pn is not None and e_pn is not None:
+            lo, hi = sorted((s_pn, e_pn))
+            keep.update(range(max(0, lo), min(total, hi + 1)))
+
+        for cache in (
+            getattr(self, "_page_words", None),
+            getattr(self, "_page_word_bands", None),
+            getattr(self, "_page_blocks_cache", None),
+            getattr(self, "_text_rects_cache", None),
+        ):
+            if not cache:
+                continue
+            for pn in [k for k in cache if k not in keep]:
+                cache.pop(pn, None)
+
     def _prune_render_cache(self, center_page: int) -> None:
+        self._prune_text_caches(center_page)
         cache = getattr(self, "_render_cache", None)
         if cache is None:
             return

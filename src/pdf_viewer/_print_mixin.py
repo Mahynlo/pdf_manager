@@ -207,14 +207,17 @@ def _print_windows(pdf_path: str, printer: str) -> tuple[bool, str]:
                 pix = page.get_pixmap(matrix=fitz.Matrix(3, 3), alpha=False)
                 png_path = os.path.join(tmp_dir, f"page_{i:04d}.png")
                 pix.save(png_path)
+                del pix  # liberar el bitmap nativo antes de la siguiente página
                 r = _run(["mspaint", "/pt", png_path, printer], timeout=30)
                 if r.returncode == 0:
                     ok_count += 1
-            doc.close()
             if ok_count == 0:
                 return False, "mspaint no pudo enviar ninguna página."
             return True, ""
         finally:
+            # close en finally: si el bucle lanza (pix.save / mspaint), el
+            # fitz.Document se cerraba igual y no se fugaba memoria nativa.
+            doc.close()
             shutil.rmtree(tmp_dir, ignore_errors=True)
     except Exception as ex:
         return False, str(ex)
@@ -636,6 +639,7 @@ class _PrintMixin:
 
     def _build_temp_pdf(self, pages: list[int]) -> str | None:
         """Crea un PDF temporal con las páginas indicadas. Retorna la ruta o None."""
+        tmp_pdf = None
         try:
             tmp_pdf = fitz.open()
             lock = getattr(self, "_doc_lock", None)
@@ -650,12 +654,16 @@ class _PrintMixin:
             fd, path = tempfile.mkstemp(suffix=".pdf", prefix="impresion_")
             os.close(fd)
             tmp_pdf.save(path)
-            tmp_pdf.close()
             return path
         except Exception as ex:
             print(f"Error creando PDF temporal: {ex}")
             self._notify_print("Error preparando el documento.", error=True)
             return None
+        finally:
+            # close en finally: si insert_pdf / save lanzan, el documento en
+            # memoria se cierra igual y no se fuga memoria nativa de MuPDF.
+            if tmp_pdf is not None:
+                tmp_pdf.close()
 
     def _print_worker(self, temp_path: str, printer: str) -> None:
         """Hilo de impresión: envía el PDF al sistema operativo."""

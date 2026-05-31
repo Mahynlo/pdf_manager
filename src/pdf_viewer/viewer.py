@@ -867,6 +867,13 @@ class PDFViewerTab(
             return
         self._render_gen += 1      # abort any in-flight renders
         self._render_cache.clear() # release cached page images
+        # Liberar también las cachés de texto por página: sin esto retenían el
+        # rawdict char-level de cada página visitada incluso con el tab suspendido
+        # (se reconstruyen perezosamente al volver). Ver _prune_text_caches.
+        self._page_words.clear()
+        self._page_word_bands.clear()
+        self._page_blocks_cache.clear()
+        self._text_rects_cache.clear()
         self._is_suspended = True
 
     def close(self) -> None:

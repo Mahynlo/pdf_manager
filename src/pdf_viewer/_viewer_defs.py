@@ -27,6 +27,12 @@ _PRELOAD         = 2     # pages to render eagerly on first load
 _EVICT_MARGIN    = 3     # viewport heights to keep rendered on each side
 _EVICT_THRESHOLD = 400   # scroll px between eviction passes
 _CACHE_KEEP_PAGES  = 5     # keep only N pages rendered around current page
+# Las cachés de texto (rawdict char-level, word bands, blocks, word rects) son
+# por página y, sin poda, crecían sin techo al recorrer el documento con el
+# cursor — sobrevivían incluso a la suspensión que libera las imágenes. Se
+# acotan a una ventana más amplia que el render cache: extraer texto es caro
+# (toma _doc_lock) y la lectura normal no debe re-extraer páginas recién vistas.
+_TEXT_CACHE_KEEP_PAGES = 15   # páginas de texto a conservar alrededor de la actual
 # ── LOD (nivel de detalle) ────────────────────────────────────────────────────
 # El tier "preview" rasteriza a una fracción del zoom objetivo: más barato de
 # rasterizar y mucho menos textura/RAM (clave en equipos sin GPU). Se usa para
