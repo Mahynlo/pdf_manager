@@ -27,6 +27,17 @@ _PRELOAD         = 2     # pages to render eagerly on first load
 _EVICT_MARGIN    = 3     # viewport heights to keep rendered on each side
 _EVICT_THRESHOLD = 400   # scroll px between eviction passes
 _CACHE_KEEP_PAGES  = 5     # keep only N pages rendered around current page
+# Virtualización del árbol de controles: cada página arranca como un placeholder
+# liviano (sólo dimensiones + número de página) y su árbol pesado (imagen,
+# overlays de selección/anotación/OCR/censura, menús y GestureDetector — ~50
+# controles) se construye perezosamente al entrar en la ventana visible. Sin
+# esto, abrir un PDF de cientos de páginas instanciaba decenas de miles de
+# controles de golpe (Python + árbol Flutter) → congelaba la carga y disparaba
+# la RAM. Las páginas que se alejan más de _SLOT_TEARDOWN_MARGIN alturas de
+# viewport se "desinflan" de vuelta a placeholder para acotar la RAM al recorrer
+# documentos grandes. Es mayor que _EVICT_MARGIN para que el slot sobreviva un
+# poco más que su imagen y evitar reconstruir al hacer micro-scroll.
+_SLOT_TEARDOWN_MARGIN = 6  # viewport heights: más allá, el slot vuelve a placeholder
 # Las cachés de texto (rawdict char-level, word bands, blocks, word rects) son
 # por página y, sin poda, crecían sin techo al recorrer el documento con el
 # cursor — sobrevivían incluso a la suspensión que libera las imágenes. Se

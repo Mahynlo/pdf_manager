@@ -575,10 +575,50 @@ class _RedactMixin:
 
     # ── preview ───────────────────────────────────────────────────────────────
 
+    def _reapply_redact_page(self, pn: int) -> None:
+        """Redibuja los recuadros de preview de censura sobre UNA página.
+
+        Se llama al construir un slot perezosamente (_build_page_slot): la página
+        pudo materializarse desde un placeholder con el preview ya activo, por lo
+        que _render_redact_preview (ejecutado antes) no pudo poner sus cajas."""
+        if not getattr(self, "_redact_preview", False):
+            return
+        if pn >= len(self._redact_overlays):
+            return
+        ov = self._redact_overlays[pn]
+        if ov is None:
+            return
+        scale = self.zoom * BASE_SCALE
+        color = getattr(self, "_redact_box_color", "#000000")
+        fill  = color + "88"
+        boxes: list[ft.Control] = []
+        for term in self._redact_terms:
+            for mp, rect, _ in self._redact_term_matches.get(term, []):
+                if mp != pn:
+                    continue
+                boxes.append(ft.Container(
+                    left=rect.x0 * scale, top=rect.y0 * scale,
+                    width=max(2, rect.width * scale),
+                    height=max(2, rect.height * scale),
+                    bgcolor=fill,
+                    border=ft.border.all(2, color),
+                    tooltip="Clic para eliminar esta zona de censura",
+                    ink=True,
+                    on_click=lambda e, _t=term, _p=pn, _r=rect: self._remove_redact_match(_t, _p, _r),
+                ))
+        ov.controls = boxes
+        ov.visible  = bool(boxes)
+        try:
+            ov.update()
+        except Exception:
+            pass
+
     def _render_redact_preview(self, *, force_update: bool = False) -> None:
         affected: set[int] = set()
         for pn in range(len(self._redact_overlays)):
             ov = self._redact_overlays[pn]
+            if ov is None:  # slot no construido (placeholder)
+                continue
             if ov.visible or ov.controls:
                 ov.visible  = False
                 ov.controls = []
@@ -594,6 +634,10 @@ class _RedactMixin:
                     by_page.setdefault(pn, []).append((rect, term))
             for pn, rect_terms in by_page.items():
                 if pn >= len(self._redact_overlays):
+                    continue
+                if self._redact_overlays[pn] is None:
+                    # Página no construida (placeholder): las cajas se re-aplican
+                    # al materializar el slot (_reapply_redact_page).
                     continue
                 boxes: list[ft.Control] = []
                 for r, term in rect_terms:
@@ -789,5 +833,7 @@ class _RedactMixin:
         self._update_profile_save_btn()
         self._update_profile_label()
         for ov in self._redact_overlays:
+            if ov is None:  # slot no construido (placeholder)
+                continue
             ov.visible  = False
             ov.controls = []

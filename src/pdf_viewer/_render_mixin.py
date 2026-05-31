@@ -15,7 +15,7 @@ from .annotations import Tool
 from .renderer import BASE_SCALE, ZOOM_LEVELS, render_page, _RENDER_SEM
 from ._viewer_defs import (
     _PAGE_BG, _PAGE_GAP, _PRELOAD, _EVICT_MARGIN, _EVICT_THRESHOLD,
-    _CACHE_KEEP_PAGES, _TEXT_CACHE_KEEP_PAGES,
+    _CACHE_KEEP_PAGES, _TEXT_CACHE_KEEP_PAGES, _SLOT_TEARDOWN_MARGIN,
     _PREVIEW_MAX_ZOOM, _PREVIEW_QUALITY, _PREVIEW_MIN_ZOOM,
     _SCROLL_IDLE_DELAY, _SELECTED_BG,
 )
@@ -67,6 +67,20 @@ class _RenderMixin:
 
             cum = 0.0
             for pn, (w, h) in enumerate(page_dims):
+                # Geometría primero: el scrollbar debe medir bien aunque la
+                # página siga siendo un placeholder no construido.
+                self._page_cum_offsets[pn] = cum
+                self._page_heights[pn]     = float(h)
+                cum += h + _PAGE_GAP
+
+                # Páginas no construidas: sólo reescalar su placeholder.
+                if not self._is_built(pn):
+                    ph = self._page_placeholders[pn] if pn < len(self._page_placeholders) else None
+                    if ph is not None:
+                        ph.width  = w
+                        ph.height = h
+                    continue
+
                 img     = self._page_images[pn]
                 slot    = self._page_slots[pn]
                 ink     = self._ink_canvases[pn]
@@ -104,10 +118,6 @@ class _RenderMixin:
                 self._redact_overlays[pn].controls   = []
                 if getattr(self, "_ocr_show_boxes", False) and pn in self._ocr_by_page:
                     self._render_ocr_boxes(pn=pn)
-
-                self._page_cum_offsets[pn] = cum
-                self._page_heights[pn]     = float(h)
-                cum += h + _PAGE_GAP
 
             display_mode = getattr(self, "_display_mode", "continuous")
             if display_mode == "single":
@@ -149,17 +159,24 @@ class _RenderMixin:
         if _cache is not None:
             _cache.clear()
 
-        self._page_images      = []
-        self._drag_overlays    = []
-        self._sel_overlays     = []
-        self._sel_handles      = []
-        self._ocr_overlays     = []
-        self._text_sel_layers  = []
-        self._redact_overlays  = []
-        self._loading_overlays = []
-        self._ink_canvases     = []
-        self._page_slots       = []
-        self._page_gestures    = []
+        # Las listas pesadas por página arrancan llenas de None: cada slot se
+        # construye perezosamente (_build_page_slot) al entrar en la ventana
+        # visible. Las entradas None marcan "placeholder no construido" — todo
+        # iterador masivo sobre estas listas debe saltarse los None.
+        self._page_images      = [None] * total
+        self._drag_overlays    = [None] * total
+        self._sel_overlays     = [None] * total
+        self._sel_handles      = [None] * total
+        self._ocr_overlays     = [None] * total
+        self._text_sel_layers  = [None] * total
+        self._redact_overlays  = [None] * total
+        self._loading_overlays = [None] * total
+        self._ink_canvases     = [None] * total
+        self._page_slots       = [None] * total
+        self._page_gestures    = [None] * total
+        self._text_sel_popups  = [None] * total
+        self._annot_popups     = [None] * total
+        self._page_placeholders = [None] * total
         self._page_rows        = []
         self._page_cum_offsets = []
         self._page_heights     = []
@@ -174,362 +191,22 @@ class _RenderMixin:
         self._text_sel_sel_rect    = None
         self._smart_text_sel_active = False
         self._sel_drag_handle      = None
-        self._text_sel_popups      = []
-        self._annot_popups         = []
         self._annot_popup_pn       = None
 
+        # Sólo placeholders livianos para TODAS las páginas (barato, O(N)). El
+        # árbol pesado de cada slot se construye on-demand.
         cum   = 0.0
         rows: list[ft.Control] = []
-
         for pn in range(total):
             w, h = page_dims[pn]
-
-            img = ft.Image(
-                width=w, height=h, fit=ft.ImageFit.CONTAIN, gapless_playback=True,
-                visible=False,
-                color="#FFFFFFFF" if self._night_mode else None,
-                color_blend_mode=ft.BlendMode.DIFFERENCE if self._night_mode else None,
-            )
-            drag_ov = ft.Container(
-                visible=False,
-                bgcolor=self._annot.overlay_color,
-                border=ft.border.all(1, "#0055AA"),
-                left=0, top=0, width=0, height=0,
-            )
-
-            # ── interactive selection overlay ─────────────────────────────────
-            _HS  = 10   # corner handle size (px)
-            _HHS = _HS / 2
-            _HANDLE_CLR = "#0055FF"
-            _HANDLE_STYLE = dict(
-                width=_HS, height=_HS,
-                bgcolor=_HANDLE_CLR,
-                border_radius=2,
-                left=0, top=0,
-            )
-            sel_border = ft.Container(
-                left=0, top=0, width=0, height=0,
-                bgcolor="#200055FF",
-                border=ft.border.all(2, _HANDLE_CLR),
-            )
-            sel_tl = ft.Container(**_HANDLE_STYLE)
-            sel_tr = ft.Container(**_HANDLE_STYLE)
-            sel_bl = ft.Container(**_HANDLE_STYLE)
-            sel_br = ft.Container(**_HANDLE_STYLE)
-            _ctx_btn = ft.ButtonStyle(
-                padding=ft.padding.all(5),
-                shape=ft.RoundedRectangleBorder(radius=4),
-            )
-            _mc_color_sep  = ft.Container(width=1, height=22, bgcolor="#E0E0E0")
-            _mc_color_btn  = ft.IconButton(
-                ft.Icons.PALETTE_OUTLINED,
-                icon_color="#7B1FA2",
-                icon_size=18,
-                tooltip="Cambiar color",
-                on_click=self._recolor_selected_menu,
-                style=_ctx_btn,
-            )
-            _mc_scale_sep  = ft.Container(width=1, height=22, bgcolor="#E0E0E0")
-            _mc_scale_down = ft.IconButton(
-                ft.Icons.REMOVE_CIRCLE_OUTLINE,
-                icon_color="#555555",
-                icon_size=18,
-                tooltip="Reducir",
-                on_click=self._scale_down_selected,
-                style=_ctx_btn,
-            )
-            _mc_scale_up   = ft.IconButton(
-                ft.Icons.ADD_CIRCLE_OUTLINE,
-                icon_color="#555555",
-                icon_size=18,
-                tooltip="Agrandar",
-                on_click=self._scale_up_selected,
-                style=_ctx_btn,
-            )
-            _mc_width_sep  = ft.Container(width=1, height=22, bgcolor="#E0E0E0")
-            _mc_width_down = ft.IconButton(
-                ft.Icons.REMOVE_CIRCLE,
-                icon_color="#8B4513",
-                icon_size=18,
-                tooltip="Más fino",
-                on_click=self._thin_selected,
-                style=_ctx_btn,
-            )
-            _mc_width_up   = ft.IconButton(
-                ft.Icons.ADD_CIRCLE,
-                icon_color="#8B4513",
-                icon_size=18,
-                tooltip="Más grueso",
-                on_click=self._thicken_selected,
-                style=_ctx_btn,
-            )
-            sel_menu = ft.Container(
-                left=0, top=0,
-                visible=False,
-                bgcolor="#FFFFFF",
-                border_radius=8,
-                padding=ft.padding.symmetric(horizontal=4, vertical=3),
-                shadow=ft.BoxShadow(
-                    blur_radius=10, spread_radius=1,
-                    color="#33000000", offset=ft.Offset(0, 2),
-                ),
-                border=ft.border.all(1, "#D0D0D0"),
-                content=ft.Row(
-                    [
-                        ft.IconButton(
-                            ft.Icons.DELETE_OUTLINE,
-                            icon_color=ft.Colors.RED_600,
-                            icon_size=18,
-                            tooltip="Eliminar",
-                            on_click=self._delete_selected,
-                            style=_ctx_btn,
-                        ),
-                        _mc_color_sep,
-                        _mc_color_btn,
-                        _mc_scale_sep,
-                        _mc_scale_down,
-                        _mc_scale_up,
-                        _mc_width_sep,
-                        _mc_width_down,
-                        _mc_width_up,
-                        ft.Container(width=1, height=22, bgcolor="#E0E0E0"),
-                        ft.IconButton(
-                            ft.Icons.CLOSE,
-                            icon_color="#9E9E9E",
-                            icon_size=14,
-                            tooltip="Deseleccionar",
-                            on_click=self._deselect_annot,
-                            style=_ctx_btn,
-                        ),
-                    ],
-                    spacing=0, tight=True,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-            )
-            sel_rot_group_inner = ft.Stack(
-                [sel_border, sel_tl, sel_tr, sel_bl, sel_br],
-                clip_behavior=ft.ClipBehavior.NONE,
-            )
-            sel_rot_group = ft.Container(
-                content=sel_rot_group_inner,
-                left=0, top=0, width=0, height=0,
-                clip_behavior=ft.ClipBehavior.NONE,
-            )
-            sel_stack = ft.Stack(
-                [sel_rot_group, sel_menu],
-                clip_behavior=ft.ClipBehavior.NONE,
-            )
-            sel_ov = ft.Container(
-                content=sel_stack,
-                visible=False,
-                left=0, top=0, width=0, height=0,
-                clip_behavior=ft.ClipBehavior.NONE,
-            )
-            self._sel_handles.append({
-                "border":     sel_border,
-                "tl":         sel_tl,
-                "tr":         sel_tr,
-                "bl":         sel_bl,
-                "br":         sel_br,
-                "menu":       sel_menu,
-                "rot_group":  sel_rot_group,
-                "color_sep":  _mc_color_sep,
-                "color_btn":  _mc_color_btn,
-                "scale_sep":  _mc_scale_sep,
-                "scale_down": _mc_scale_down,
-                "scale_up":   _mc_scale_up,
-                "width_sep":  _mc_width_sep,
-                "width_down": _mc_width_down,
-                "width_up":   _mc_width_up,
-            })
-            ocr_ov      = ft.Stack([], visible=False)
-            text_sel_ov = ft.Stack([], visible=False)
-            redact_ov   = ft.Stack([], visible=False)
-
-            _btn_style = ft.ButtonStyle(
-                padding=ft.padding.symmetric(horizontal=6, vertical=3),
-                text_style=ft.TextStyle(size=11, weight=ft.FontWeight.W_500),
-                overlay_color={ft.ControlState.HOVERED: "#12000000"},
-            )
-            popup_ov = ft.Container(
-                content=ft.Row([
-                    ft.TextButton(
-                        "Copiar",
-                        icon=ft.Icons.CONTENT_COPY,
-                        icon_color="#5E5E5E",
-                        on_click=self._text_sel_copy,
-                        style=_btn_style,
-                    ),
-                    ft.Container(width=1, height=20, bgcolor="#E0E0E0"),
-                    ft.TextButton(
-                        "Resaltar",
-                        icon=ft.Icons.HIGHLIGHT,
-                        icon_color="#E6AC00",
-                        on_click=lambda e: self._text_sel_apply(Tool.HIGHLIGHT),
-                        style=_btn_style,
-                    ),
-                    ft.TextButton(
-                        "Subrayar",
-                        icon=ft.Icons.FORMAT_UNDERLINE,
-                        icon_color="#1565C0",
-                        on_click=lambda e: self._text_sel_apply(Tool.UNDERLINE),
-                        style=_btn_style,
-                    ),
-                    ft.TextButton(
-                        "Tachar",
-                        icon=ft.Icons.FORMAT_STRIKETHROUGH,
-                        icon_color="#C62828",
-                        on_click=lambda e: self._text_sel_apply(Tool.STRIKEOUT),
-                        style=_btn_style,
-                    ),
-                    ft.Container(width=1, height=20, bgcolor="#E0E0E0"),
-                    ft.TextButton(
-                        "Censurar",
-                        icon=ft.Icons.VISIBILITY_OFF,
-                        icon_color="#B71C1C",
-                        on_click=lambda e: self._text_sel_send_to_redact(),
-                        style=_btn_style,
-                    ),
-                    ft.Container(width=1, height=20, bgcolor="#E0E0E0"),
-                    ft.TextButton(
-                        "Buscar",
-                        icon=ft.Icons.SEARCH,
-                        icon_color="#1A73E8",
-                        on_click=lambda e: self._text_sel_search_google(),
-                        style=_btn_style,
-                    ),
-                    ft.IconButton(
-                        ft.Icons.CLOSE,
-                        icon_size=14,
-                        icon_color="#9E9E9E",
-                        tooltip="Cerrar selección",
-                        on_click=self._text_sel_dismiss,
-                        style=ft.ButtonStyle(padding=ft.padding.all(4)),
-                    ),
-                ], spacing=0, tight=True, wrap=True, run_spacing=2,
-                   vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                left=0, top=0, visible=False,
-                bgcolor="#FAFAFA",
-                border_radius=8,
-                padding=ft.padding.symmetric(horizontal=4, vertical=2),
-                shadow=ft.BoxShadow(
-                    blur_radius=12, spread_radius=1,
-                    color="#44000000", offset=ft.Offset(0, 3),
-                ),
-                border=ft.border.all(1, "#D0D0D0"),
-            )
-
-            _abtn = ft.ButtonStyle(
-                padding=ft.padding.symmetric(horizontal=6, vertical=3),
-                text_style=ft.TextStyle(size=11, weight=ft.FontWeight.W_500),
-                overlay_color={ft.ControlState.HOVERED: "#12000000"},
-            )
-            annot_popup_ov = ft.Container(
-                content=ft.Row([
-                    ft.TextButton(
-                        "Eliminar",
-                        icon=ft.Icons.DELETE_OUTLINE,
-                        icon_color=ft.Colors.RED_600,
-                        on_click=self._annot_popup_delete,
-                        style=_abtn,
-                    ),
-                    ft.Container(width=1, height=20, bgcolor="#E0E0E0"),
-                    ft.TextButton(
-                        "Color",
-                        icon=ft.Icons.PALETTE_OUTLINED,
-                        icon_color="#7B1FA2",
-                        on_click=self._annot_popup_recolor,
-                        style=_abtn,
-                    ),
-                    ft.IconButton(
-                        ft.Icons.CLOSE,
-                        icon_size=14,
-                        icon_color="#9E9E9E",
-                        tooltip="Cerrar",
-                        on_click=self._hide_annot_popup,
-                        style=ft.ButtonStyle(padding=ft.padding.all(4)),
-                    ),
-                ], spacing=0, tight=True,
-                   vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                left=0, top=0, visible=False,
-                bgcolor="#FAFAFA",
-                border_radius=8,
-                padding=ft.padding.symmetric(horizontal=4, vertical=2),
-                shadow=ft.BoxShadow(
-                    blur_radius=12, spread_radius=1,
-                    color="#44000000", offset=ft.Offset(0, 3),
-                ),
-                border=ft.border.all(1, "#D0D0D0"),
-            )
-
-            ink_canvas = cv.Canvas(shapes=[], width=w, height=h)
-
-            # Placeholder "hoja en blanco": fondo papel (= _PAGE_BG blanco) con
-            # sólo el número de página muy tenue. Sin icono ni spinner — un
-            # spinner correría un AnimationController que repinta a 60 fps
-            # mientras esté en el árbol (incluso fuera de pantalla), y la
-            # evicción deja decenas de overlays visibles tras el scroll → eso
-            # forzaba repintado continuo (GPU en reposo, CPU/RAM sin GPU). Un
-            # texto estático no programa frames y, al ser blanco, el fling se ve
-            # como pasar hojas en vez de bloques grises "cargando".
-            loading_ov = ft.Container(
-                content=ft.Text(
-                    f"{pn + 1}",
-                    size=13, color="#D8D8D8",
-                    text_align=ft.TextAlign.CENTER,
-                ),
-                left=0, top=0, width=w, height=h,
-                alignment=ft.alignment.center,
-                bgcolor=_PAGE_BG,
-                visible=True,
-            )
-
-            self._page_images.append(img)
-            self._drag_overlays.append(drag_ov)
-            self._sel_overlays.append(sel_ov)
-            self._ocr_overlays.append(ocr_ov)
-            self._text_sel_layers.append(text_sel_ov)
-            self._redact_overlays.append(redact_ov)
-            self._loading_overlays.append(loading_ov)
-            self._ink_canvases.append(ink_canvas)
-            self._text_sel_popups.append(popup_ov)
-            self._annot_popups.append(annot_popup_ov)
+            ph = self._make_placeholder(pn, w, h)
+            self._page_placeholders[pn] = ph
+            row = ft.Row([ph], alignment=ft.MainAxisAlignment.CENTER)
+            self._page_rows.append(row)
+            rows.append(row)
             self._page_cum_offsets.append(cum)
             self._page_heights.append(float(h))
             cum += h + _PAGE_GAP
-
-            slot = ft.Container(
-                content=ft.Stack(
-                    # loading_ov va PRIMERO (al fondo): respaldo "papel" blanco
-                    # detrás de la imagen. Así, en la ventana en que Flutter aún
-                    # decodifica el archivo recién renderizado, se ve blanco y no
-                    # el gris del fondo del visor → sin flash gris al aparecer.
-                    [loading_ov, img, text_sel_ov, drag_ov, ink_canvas, sel_ov, ocr_ov, redact_ov, popup_ov, annot_popup_ov],
-                    clip_behavior=ft.ClipBehavior.NONE,
-                ),
-                width=w, height=h,
-                bgcolor=_PAGE_BG,
-                border_radius=2,
-                clip_behavior=ft.ClipBehavior.NONE,
-            )
-            self._page_slots.append(slot)
-
-            gd = ft.GestureDetector(
-                content=slot,
-                on_tap_down       = lambda e, p=pn: self._on_tap_down(e, p),
-                on_tap            = lambda e, p=pn: self._on_tap(e, p),
-                on_pan_start      = lambda e, p=pn: self._on_pan_start(e, p),
-                on_pan_update     = lambda e, p=pn: self._on_pan_update(e, p),
-                on_pan_end        = lambda e, p=pn: self._on_pan_end(e, p),
-                on_secondary_tap  = lambda e, p=pn: self._on_secondary_tap(e, p),
-                on_hover          = lambda e, p=pn: self._on_hover(e, p),
-                on_scroll         = lambda e, p=pn: self._on_page_scroll(e, p),
-                mouse_cursor      = self._current_cursor,
-            )
-            self._page_gestures.append(gd)
-            row = ft.Row([gd], alignment=ft.MainAxisAlignment.CENTER)
-            self._page_rows.append(row)
-            rows.append(row)
 
         self.viewer_scroll.controls = rows
 
@@ -558,6 +235,487 @@ class _RenderMixin:
                 )
             except Exception:
                 pass
+
+    # ── lazy slot construction ────────────────────────────────────────────────
+
+    def _make_placeholder(self, pn: int, w: int, h: int) -> ft.Container:
+        """Stand-in liviano para una página cuyo slot aún no se construyó.
+
+        Mantiene las dimensiones correctas (para el scrollbar) y muestra sólo el
+        número de página muy tenue — igual que el loading overlay. Crear esto
+        para N páginas es barato; el árbol pesado se difiere a _build_page_slot.
+        """
+        return ft.Container(
+            content=ft.Text(
+                f"{pn + 1}", size=13, color="#D8D8D8",
+                text_align=ft.TextAlign.CENTER,
+            ),
+            width=w, height=h,
+            alignment=ft.alignment.center,
+            bgcolor=_PAGE_BG, border_radius=2,
+        )
+
+    def _is_built(self, pn: int) -> bool:
+        return 0 <= pn < len(self._page_images) and self._page_images[pn] is not None
+
+    def _ensure_page_built(self, pn: int) -> None:
+        if 0 <= pn < len(self._page_rows) and not self._is_built(pn):
+            self._build_page_slot(pn)
+
+    def _page_is_active(self, pn: int) -> bool:
+        """True si la página participa en algún estado interactivo vivo y por
+        tanto NO debe desinflarse a placeholder (selección, popup, tinta, etc.)."""
+        if pn == self.current_page:
+            return True
+        sel = getattr(self, "_selected", None)
+        if sel is not None and sel[0] == pn:
+            return True
+        if getattr(self, "_annot_popup_pn", None) == pn:
+            return True
+        if getattr(self, "_ink_page", None) == pn:
+            return True
+        s = getattr(self, "_text_sel_start_pn", None)
+        e = getattr(self, "_text_sel_end_pn", None)
+        if s is not None and e is not None and min(s, e) <= pn <= max(s, e):
+            return True
+        return False
+
+    def _build_page_slot(self, pn: int) -> None:
+        """Construye el árbol pesado de controles para la página *pn* y lo monta
+        en su Row (que hasta ahora mostraba sólo un placeholder)."""
+        if self._is_built(pn) or not (0 <= pn < len(self._page_rows)):
+            return
+
+        with self._doc_lock:
+            r = self.doc[pn].rect
+            w = int(r.width  * BASE_SCALE * self.zoom)
+            h = int(r.height * BASE_SCALE * self.zoom)
+
+        img = ft.Image(
+                width=w, height=h, fit=ft.ImageFit.CONTAIN, gapless_playback=True,
+                visible=False,
+                color="#FFFFFFFF" if self._night_mode else None,
+                color_blend_mode=ft.BlendMode.DIFFERENCE if self._night_mode else None,
+            )
+        drag_ov = ft.Container(
+            visible=False,
+            bgcolor=self._annot.overlay_color,
+            border=ft.border.all(1, "#0055AA"),
+            left=0, top=0, width=0, height=0,
+        )
+
+        # ── interactive selection overlay ─────────────────────────────────
+        _HS  = 10   # corner handle size (px)
+        _HHS = _HS / 2
+        _HANDLE_CLR = "#0055FF"
+        _HANDLE_STYLE = dict(
+            width=_HS, height=_HS,
+            bgcolor=_HANDLE_CLR,
+            border_radius=2,
+            left=0, top=0,
+        )
+        sel_border = ft.Container(
+            left=0, top=0, width=0, height=0,
+            bgcolor="#200055FF",
+            border=ft.border.all(2, _HANDLE_CLR),
+        )
+        sel_tl = ft.Container(**_HANDLE_STYLE)
+        sel_tr = ft.Container(**_HANDLE_STYLE)
+        sel_bl = ft.Container(**_HANDLE_STYLE)
+        sel_br = ft.Container(**_HANDLE_STYLE)
+        _ctx_btn = ft.ButtonStyle(
+            padding=ft.padding.all(5),
+            shape=ft.RoundedRectangleBorder(radius=4),
+        )
+        _mc_color_sep  = ft.Container(width=1, height=22, bgcolor="#E0E0E0")
+        _mc_color_btn  = ft.IconButton(
+            ft.Icons.PALETTE_OUTLINED,
+            icon_color="#7B1FA2",
+            icon_size=18,
+            tooltip="Cambiar color",
+            on_click=self._recolor_selected_menu,
+            style=_ctx_btn,
+        )
+        _mc_scale_sep  = ft.Container(width=1, height=22, bgcolor="#E0E0E0")
+        _mc_scale_down = ft.IconButton(
+            ft.Icons.REMOVE_CIRCLE_OUTLINE,
+            icon_color="#555555",
+            icon_size=18,
+            tooltip="Reducir",
+            on_click=self._scale_down_selected,
+            style=_ctx_btn,
+        )
+        _mc_scale_up   = ft.IconButton(
+            ft.Icons.ADD_CIRCLE_OUTLINE,
+            icon_color="#555555",
+            icon_size=18,
+            tooltip="Agrandar",
+            on_click=self._scale_up_selected,
+            style=_ctx_btn,
+        )
+        _mc_width_sep  = ft.Container(width=1, height=22, bgcolor="#E0E0E0")
+        _mc_width_down = ft.IconButton(
+            ft.Icons.REMOVE_CIRCLE,
+            icon_color="#8B4513",
+            icon_size=18,
+            tooltip="Más fino",
+            on_click=self._thin_selected,
+            style=_ctx_btn,
+        )
+        _mc_width_up   = ft.IconButton(
+            ft.Icons.ADD_CIRCLE,
+            icon_color="#8B4513",
+            icon_size=18,
+            tooltip="Más grueso",
+            on_click=self._thicken_selected,
+            style=_ctx_btn,
+        )
+        sel_menu = ft.Container(
+            left=0, top=0,
+            visible=False,
+            bgcolor="#FFFFFF",
+            border_radius=8,
+            padding=ft.padding.symmetric(horizontal=4, vertical=3),
+            shadow=ft.BoxShadow(
+                blur_radius=10, spread_radius=1,
+                color="#33000000", offset=ft.Offset(0, 2),
+            ),
+            border=ft.border.all(1, "#D0D0D0"),
+            content=ft.Row(
+                [
+                    ft.IconButton(
+                        ft.Icons.DELETE_OUTLINE,
+                        icon_color=ft.Colors.RED_600,
+                        icon_size=18,
+                        tooltip="Eliminar",
+                        on_click=self._delete_selected,
+                        style=_ctx_btn,
+                    ),
+                    _mc_color_sep,
+                    _mc_color_btn,
+                    _mc_scale_sep,
+                    _mc_scale_down,
+                    _mc_scale_up,
+                    _mc_width_sep,
+                    _mc_width_down,
+                    _mc_width_up,
+                    ft.Container(width=1, height=22, bgcolor="#E0E0E0"),
+                    ft.IconButton(
+                        ft.Icons.CLOSE,
+                        icon_color="#9E9E9E",
+                        icon_size=14,
+                        tooltip="Deseleccionar",
+                        on_click=self._deselect_annot,
+                        style=_ctx_btn,
+                    ),
+                ],
+                spacing=0, tight=True,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+        )
+        sel_rot_group_inner = ft.Stack(
+            [sel_border, sel_tl, sel_tr, sel_bl, sel_br],
+            clip_behavior=ft.ClipBehavior.NONE,
+        )
+        sel_rot_group = ft.Container(
+            content=sel_rot_group_inner,
+            left=0, top=0, width=0, height=0,
+            clip_behavior=ft.ClipBehavior.NONE,
+        )
+        sel_stack = ft.Stack(
+            [sel_rot_group, sel_menu],
+            clip_behavior=ft.ClipBehavior.NONE,
+        )
+        sel_ov = ft.Container(
+            content=sel_stack,
+            visible=False,
+            left=0, top=0, width=0, height=0,
+            clip_behavior=ft.ClipBehavior.NONE,
+        )
+        self._sel_handles[pn] = {
+            "border":     sel_border,
+            "tl":         sel_tl,
+            "tr":         sel_tr,
+            "bl":         sel_bl,
+            "br":         sel_br,
+            "menu":       sel_menu,
+            "rot_group":  sel_rot_group,
+            "color_sep":  _mc_color_sep,
+            "color_btn":  _mc_color_btn,
+            "scale_sep":  _mc_scale_sep,
+            "scale_down": _mc_scale_down,
+            "scale_up":   _mc_scale_up,
+            "width_sep":  _mc_width_sep,
+            "width_down": _mc_width_down,
+            "width_up":   _mc_width_up,
+        }
+        ocr_ov      = ft.Stack([], visible=False)
+        text_sel_ov = ft.Stack([], visible=False)
+        redact_ov   = ft.Stack([], visible=False)
+
+        _btn_style = ft.ButtonStyle(
+            padding=ft.padding.symmetric(horizontal=6, vertical=3),
+            text_style=ft.TextStyle(size=11, weight=ft.FontWeight.W_500),
+            overlay_color={ft.ControlState.HOVERED: "#12000000"},
+        )
+        popup_ov = ft.Container(
+            content=ft.Row([
+                ft.TextButton(
+                    "Copiar",
+                    icon=ft.Icons.CONTENT_COPY,
+                    icon_color="#5E5E5E",
+                    on_click=self._text_sel_copy,
+                    style=_btn_style,
+                ),
+                ft.Container(width=1, height=20, bgcolor="#E0E0E0"),
+                ft.TextButton(
+                    "Resaltar",
+                    icon=ft.Icons.HIGHLIGHT,
+                    icon_color="#E6AC00",
+                    on_click=lambda e: self._text_sel_apply(Tool.HIGHLIGHT),
+                    style=_btn_style,
+                ),
+                ft.TextButton(
+                    "Subrayar",
+                    icon=ft.Icons.FORMAT_UNDERLINE,
+                    icon_color="#1565C0",
+                    on_click=lambda e: self._text_sel_apply(Tool.UNDERLINE),
+                    style=_btn_style,
+                ),
+                ft.TextButton(
+                    "Tachar",
+                    icon=ft.Icons.FORMAT_STRIKETHROUGH,
+                    icon_color="#C62828",
+                    on_click=lambda e: self._text_sel_apply(Tool.STRIKEOUT),
+                    style=_btn_style,
+                ),
+                ft.Container(width=1, height=20, bgcolor="#E0E0E0"),
+                ft.TextButton(
+                    "Censurar",
+                    icon=ft.Icons.VISIBILITY_OFF,
+                    icon_color="#B71C1C",
+                    on_click=lambda e: self._text_sel_send_to_redact(),
+                    style=_btn_style,
+                ),
+                ft.Container(width=1, height=20, bgcolor="#E0E0E0"),
+                ft.TextButton(
+                    "Buscar",
+                    icon=ft.Icons.SEARCH,
+                    icon_color="#1A73E8",
+                    on_click=lambda e: self._text_sel_search_google(),
+                    style=_btn_style,
+                ),
+                ft.IconButton(
+                    ft.Icons.CLOSE,
+                    icon_size=14,
+                    icon_color="#9E9E9E",
+                    tooltip="Cerrar selección",
+                    on_click=self._text_sel_dismiss,
+                    style=ft.ButtonStyle(padding=ft.padding.all(4)),
+                ),
+            ], spacing=0, tight=True, wrap=True, run_spacing=2,
+               vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            left=0, top=0, visible=False,
+            bgcolor="#FAFAFA",
+            border_radius=8,
+            padding=ft.padding.symmetric(horizontal=4, vertical=2),
+            shadow=ft.BoxShadow(
+                blur_radius=12, spread_radius=1,
+                color="#44000000", offset=ft.Offset(0, 3),
+            ),
+            border=ft.border.all(1, "#D0D0D0"),
+        )
+
+        _abtn = ft.ButtonStyle(
+            padding=ft.padding.symmetric(horizontal=6, vertical=3),
+            text_style=ft.TextStyle(size=11, weight=ft.FontWeight.W_500),
+            overlay_color={ft.ControlState.HOVERED: "#12000000"},
+        )
+        annot_popup_ov = ft.Container(
+            content=ft.Row([
+                ft.TextButton(
+                    "Eliminar",
+                    icon=ft.Icons.DELETE_OUTLINE,
+                    icon_color=ft.Colors.RED_600,
+                    on_click=self._annot_popup_delete,
+                    style=_abtn,
+                ),
+                ft.Container(width=1, height=20, bgcolor="#E0E0E0"),
+                ft.TextButton(
+                    "Color",
+                    icon=ft.Icons.PALETTE_OUTLINED,
+                    icon_color="#7B1FA2",
+                    on_click=self._annot_popup_recolor,
+                    style=_abtn,
+                ),
+                ft.IconButton(
+                    ft.Icons.CLOSE,
+                    icon_size=14,
+                    icon_color="#9E9E9E",
+                    tooltip="Cerrar",
+                    on_click=self._hide_annot_popup,
+                    style=ft.ButtonStyle(padding=ft.padding.all(4)),
+                ),
+            ], spacing=0, tight=True,
+               vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            left=0, top=0, visible=False,
+            bgcolor="#FAFAFA",
+            border_radius=8,
+            padding=ft.padding.symmetric(horizontal=4, vertical=2),
+            shadow=ft.BoxShadow(
+                blur_radius=12, spread_radius=1,
+                color="#44000000", offset=ft.Offset(0, 3),
+            ),
+            border=ft.border.all(1, "#D0D0D0"),
+        )
+
+        ink_canvas = cv.Canvas(shapes=[], width=w, height=h)
+
+        # Placeholder "hoja en blanco": fondo papel (= _PAGE_BG blanco) con
+        # sólo el número de página muy tenue. Sin icono ni spinner — un
+        # spinner correría un AnimationController que repinta a 60 fps
+        # mientras esté en el árbol (incluso fuera de pantalla), y la
+        # evicción deja decenas de overlays visibles tras el scroll → eso
+        # forzaba repintado continuo (GPU en reposo, CPU/RAM sin GPU). Un
+        # texto estático no programa frames y, al ser blanco, el fling se ve
+        # como pasar hojas en vez de bloques grises "cargando".
+        loading_ov = ft.Container(
+            content=ft.Text(
+                f"{pn + 1}",
+                size=13, color="#D8D8D8",
+                text_align=ft.TextAlign.CENTER,
+            ),
+            left=0, top=0, width=w, height=h,
+            alignment=ft.alignment.center,
+            bgcolor=_PAGE_BG,
+            visible=True,
+        )
+
+        self._page_images[pn]      = img
+        self._drag_overlays[pn]    = drag_ov
+        self._sel_overlays[pn]     = sel_ov
+        self._ocr_overlays[pn]     = ocr_ov
+        self._text_sel_layers[pn]  = text_sel_ov
+        self._redact_overlays[pn]  = redact_ov
+        self._loading_overlays[pn] = loading_ov
+        self._ink_canvases[pn]     = ink_canvas
+        self._text_sel_popups[pn]  = popup_ov
+        self._annot_popups[pn]     = annot_popup_ov
+
+        slot = ft.Container(
+            content=ft.Stack(
+                # loading_ov va PRIMERO (al fondo): respaldo "papel" blanco
+                # detrás de la imagen. Así, en la ventana en que Flutter aún
+                # decodifica el archivo recién renderizado, se ve blanco y no
+                # el gris del fondo del visor → sin flash gris al aparecer.
+                [loading_ov, img, text_sel_ov, drag_ov, ink_canvas, sel_ov, ocr_ov, redact_ov, popup_ov, annot_popup_ov],
+                clip_behavior=ft.ClipBehavior.NONE,
+            ),
+            width=w, height=h,
+            bgcolor=_PAGE_BG,
+            border_radius=2,
+            clip_behavior=ft.ClipBehavior.NONE,
+        )
+        self._page_slots[pn] = slot
+
+        gd = ft.GestureDetector(
+            content=slot,
+            on_tap_down       = lambda e, p=pn: self._on_tap_down(e, p),
+            on_tap            = lambda e, p=pn: self._on_tap(e, p),
+            on_pan_start      = lambda e, p=pn: self._on_pan_start(e, p),
+            on_pan_update     = lambda e, p=pn: self._on_pan_update(e, p),
+            on_pan_end        = lambda e, p=pn: self._on_pan_end(e, p),
+            on_secondary_tap  = lambda e, p=pn: self._on_secondary_tap(e, p),
+            on_hover          = lambda e, p=pn: self._on_hover(e, p),
+            on_scroll         = lambda e, p=pn: self._on_page_scroll(e, p),
+            mouse_cursor      = self._current_cursor,
+        )
+        self._page_gestures[pn] = gd
+
+        # Montar el árbol pesado en el Row (reemplaza al placeholder). El render
+        # de la imagen lo dispara el llamador vía _render_page_slot.
+        self._page_rows[pn].controls = [gd]
+        try:
+            self._page_rows[pn].update()
+        except Exception:
+            pass
+
+        # Re-aplicar overlays dependientes de página que estuvieran activos: la
+        # página acaba de materializarse desde un placeholder, así que cualquier
+        # estado calculado mientras era placeholder (cajas OCR, preview de
+        # censura, overlay de selección) debe re-dibujarse sobre el slot nuevo.
+        try:
+            if getattr(self, "_ocr_show_boxes", False) and pn in self._ocr_by_page:
+                self._render_ocr_boxes(pn=pn)
+        except Exception:
+            pass
+        try:
+            if getattr(self, "_redact_preview", False) and self._redact_matches:
+                self._reapply_redact_page(pn)
+        except Exception:
+            pass
+        try:
+            sel = getattr(self, "_selected", None)
+            if sel is not None and sel[0] == pn:
+                self._refresh_selected_overlay(pn)
+        except Exception:
+            pass
+
+    def _teardown_page_slot(self, pn: int) -> None:
+        """Inverso de _build_page_slot: devuelve la página a un placeholder
+        liviano y libera el árbol pesado de controles. No-op si no está
+        construida o si participa en algún estado interactivo vivo."""
+        if not self._is_built(pn) or self._page_is_active(pn):
+            return
+        # Aborta cualquier render en vuelo para esta página (token y flags).
+        self._bump_render_token(pn)
+        self._rendered.discard(pn)
+        self._previewed.discard(pn)
+        self._rendering.discard(pn)
+        getattr(self, "_rendering_preview", set()).discard(pn)
+        getattr(self, "_pending_rerender", set()).discard(pn)
+
+        w = float(self._page_slots[pn].width or 0)
+        h = float(self._page_heights[pn]) if pn < len(self._page_heights) else 0.0
+        ph = self._make_placeholder(pn, int(w), int(h))
+        self._page_placeholders[pn] = ph
+        row = self._page_rows[pn]
+        row.controls = [ph]
+        try:
+            row.update()
+        except Exception:
+            pass
+
+        for lst in (
+            self._page_images, self._drag_overlays, self._sel_overlays,
+            self._sel_handles, self._ocr_overlays, self._text_sel_layers,
+            self._redact_overlays, self._loading_overlays, self._ink_canvases,
+            self._text_sel_popups, self._annot_popups, self._page_slots,
+            self._page_gestures,
+        ):
+            lst[pn] = None
+
+    def _teardown_built_distant(self, pixels: float, viewport_h: float) -> bool:
+        """Desinfla a placeholder los slots construidos lejos del viewport.
+
+        Acota la RAM al recorrer documentos grandes: sin esto, recorrer las N
+        páginas terminaría construyendo el árbol pesado de todas. El margen es
+        mayor que el de evicción de imágenes para no reconstruir con micro-scroll.
+        """
+        keep_top    = pixels - viewport_h * _SLOT_TEARDOWN_MARGIN
+        keep_bottom = pixels + viewport_h * (1.0 + _SLOT_TEARDOWN_MARGIN)
+        changed = False
+        for pn in range(len(self._page_rows)):
+            if not self._is_built(pn):
+                continue
+            start = self._page_cum_offsets[pn]
+            page_bottom = start + self._page_heights[pn]
+            if page_bottom < keep_top or start > keep_bottom:
+                if self._page_is_active(pn):
+                    continue
+                self._teardown_page_slot(pn)
+                changed = True
+        return changed
 
     def _bump_render_token(self, pn: int) -> int:
         tokens = getattr(self, "_render_tokens", None)
@@ -596,6 +754,10 @@ class _RenderMixin:
         self._prefetch_neighbors_preview(self.current_page)
         self._prune_render_cache(self.current_page)
         evicted = self._evict_outside_window(self.current_page)
+        # Desinflar a placeholder los slots lejos del viewport para acotar la RAM
+        # del árbol de controles al recorrer documentos grandes. _teardown_page_slot
+        # actualiza su propio Row, por lo que no requiere page_ref.update() global.
+        self._teardown_built_distant(float(px), float(vh))
         if evicted:
             try:
                 self.page_ref.update()
@@ -670,16 +832,24 @@ class _RenderMixin:
             self._rendered.discard(pn)
             self._previewed.discard(pn)
             img = self._page_images[pn]
+            if img is None:  # slot ya desinflado a placeholder
+                continue
             img.src = None
             img.src_base64 = None
             img.visible = False
-            if pn < len(loading_overlays):
+            if pn < len(loading_overlays) and loading_overlays[pn] is not None:
                 loading_overlays[pn].visible = True
             evicted = True
         return evicted
 
     def _render_page_slot(self, pn: int, preview: bool = False) -> None:
         """Schedule a background render for one page (no-op if already rendered)."""
+        # Construye el árbol pesado del slot si aún es un placeholder. Es seguro
+        # llamarlo desde el hilo principal (scroll/navegación); el follow-up de
+        # _pending_rerender que corre en el worker sólo toca páginas ya construidas.
+        self._ensure_page_built(pn)
+        if not self._is_built(pn):
+            return
         # El tier preview sólo aporta si rasteriza por debajo del zoom objetivo;
         # a zooms muy bajos _preview_zoom() iguala al zoom → render directo a full.
         if preview and self._preview_zoom() >= self.zoom - 1e-3:
@@ -726,6 +896,8 @@ class _RenderMixin:
                     return
                 img  = self._page_images[pn]
                 slot = self._page_slots[pn]
+                if img is None or slot is None:  # slot desinflado mientras render en vuelo
+                    return
                 img.src = path
                 img.src_base64 = None
                 if preview:
@@ -865,10 +1037,13 @@ class _RenderMixin:
             if page_bottom < keep_top or start > keep_bottom:
                 self._rendered.discard(pn)
                 self._previewed.discard(pn)
-                self._page_images[pn].src = None
-                self._page_images[pn].src_base64 = None
-                self._page_images[pn].visible = False
-                if pn < len(loading_overlays):
+                img = self._page_images[pn]
+                if img is None:  # slot desinflado a placeholder
+                    continue
+                img.src = None
+                img.src_base64 = None
+                img.visible = False
+                if pn < len(loading_overlays) and loading_overlays[pn] is not None:
                     loading_overlays[pn].visible = True
                 evicted = True
         return evicted

@@ -119,6 +119,7 @@ class PDFViewerTab(
         self._redact_overlays:  list[ft.Stack]     = []
         self._loading_overlays: list[ft.Container] = []
         self._page_slots:       list[ft.Container] = []
+        self._page_placeholders: list[ft.Container] = []
         self._page_gestures:    list[ft.GestureDetector] = []
         self._page_cum_offsets: list[float] = []
         self._page_heights:     list[float] = []
@@ -1014,6 +1015,8 @@ class PDFViewerTab(
         _color = "#FFFFFFFF" if self._night_mode else None
         _blend = ft.BlendMode.DIFFERENCE if self._night_mode else None
         for img in self._page_images:
+            if img is None:  # slot no construido (placeholder)
+                continue
             img.color            = _color
             img.color_blend_mode = _blend
         if self._viewer_body:

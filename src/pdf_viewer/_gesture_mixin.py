@@ -289,6 +289,8 @@ class _GestureMixin:
                 self._text_sel_end_pdf       = (pdf_x, pdf_y)
                 # Temporarily switch to text cursor for visual feedback
                 for gd in self._page_gestures:
+                    if gd is None:
+                        continue
                     gd.mouse_cursor = ft.MouseCursor.TEXT
                     try:
                         gd.update()
@@ -312,6 +314,8 @@ class _GestureMixin:
             self._text_sel_start_pdf    = (pdf_x, pdf_y)
             self._text_sel_end_pdf      = (pdf_x, pdf_y)
             for gd in self._page_gestures:
+                if gd is None:
+                    continue
                 gd.mouse_cursor = ft.MouseCursor.TEXT
                 try:
                     gd.update()
@@ -542,6 +546,8 @@ class _GestureMixin:
     def _restore_smart_cursor(self) -> None:
         """Restore the GestureDetector cursor after a smart text-selection drag."""
         for gd in self._page_gestures:
+            if gd is None:
+                continue
             gd.mouse_cursor = self._current_cursor
             try:
                 gd.update()

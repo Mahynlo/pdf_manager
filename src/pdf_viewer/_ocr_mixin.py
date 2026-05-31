@@ -325,8 +325,9 @@ class _OCRMixin:
             del self._ocr_by_page[evict_pn]
             if evict_pn < len(self._ocr_overlays):
                 ov = self._ocr_overlays[evict_pn]
-                ov.controls = []
-                ov.visible = False
+                if ov is not None:  # slot no construido (placeholder)
+                    ov.controls = []
+                    ov.visible = False
 
     def _schedule_ocr_model_release(self) -> None:
         t = getattr(self, "_ocr_model_timer", None)
@@ -423,7 +424,7 @@ class _OCRMixin:
                     padding=ft.padding.all(8),
                 )
             ]
-            if pn < len(self._ocr_overlays):
+            if pn < len(self._ocr_overlays) and self._ocr_overlays[pn] is not None:
                 self._ocr_overlays[pn].visible  = False
                 self._ocr_overlays[pn].controls = []
             return
@@ -474,6 +475,8 @@ class _OCRMixin:
         if pn >= len(self._ocr_overlays):
             return
         ocr_ov = self._ocr_overlays[pn]
+        if ocr_ov is None:  # slot no construido (placeholder) → nada que dibujar
+            return
         result = self._ocr_by_page.get(pn)
         if result is None or not self._ocr_show_boxes:
             ocr_ov.visible  = False

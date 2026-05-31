@@ -208,6 +208,8 @@ class _TextSelMixin:
         scale = self.zoom * BASE_SCALE
         
         for i, layer in enumerate(self._text_sel_layers):
+            if layer is None:  # slot no construido (placeholder)
+                continue
             if i < spn or i > epn:
                 if layer.controls or getattr(layer, "visible", False):
                     layer.controls = []
@@ -233,7 +235,7 @@ class _TextSelMixin:
             selected = self._words_in_sweep(words, page_start_pt, page_end_pt, pn=i)
             if not selected:
                 layer = self._text_sel_layers[i]
-                if layer.controls or getattr(layer, "visible", False):
+                if layer is not None and (layer.controls or getattr(layer, "visible", False)):
                     layer.controls = []
                     layer.visible = False
                     if update_ui:
@@ -285,12 +287,16 @@ class _TextSelMixin:
                 _h = dict(width=_H_R * 2, height=_H_R * 2, border_radius=_H_R, bgcolor="#0088FF", border=ft.border.all(2, "#FFFFFF"), shadow=ft.BoxShadow(blur_radius=4, color="#44000000"))
                 boxes.append(ft.Container(left=e_disp[0] - _H_R, top=e_disp[1] - _H_R, **_h))
 
+            # La página puede estar fuera de pantalla y sin construir (placeholder):
+            # en ese caso no hay capa donde dibujar los recuadros, pero igual
+            # acumulamos su texto abajo para que la copia incluya el rango completo.
             layer = self._text_sel_layers[i]
-            layer.controls = boxes
-            layer.visible  = bool(boxes)
-            if update_ui:
-                try: layer.update()
-                except Exception: pass
+            if layer is not None:
+                layer.controls = boxes
+                layer.visible  = bool(boxes)
+                if update_ui:
+                    try: layer.update()
+                    except Exception: pass
 
             last_r = None
             for r, t in selected:
@@ -318,6 +324,8 @@ class _TextSelMixin:
 
     def _clear_text_selection(self) -> None:
         for layer in self._text_sel_layers:
+            if layer is None:  # slot no construido (placeholder)
+                continue
             if layer.controls or getattr(layer, 'visible', False):
                 layer.controls = []
                 layer.visible  = False
@@ -336,7 +344,7 @@ class _TextSelMixin:
     def _show_text_sel_bar(self, text: str) -> None:
         self._text_sel_text = text
         pn = getattr(self, "_text_sel_end_pn", None)
-        if pn is None or pn >= len(self._text_sel_popups):
+        if pn is None or pn >= len(self._text_sel_popups) or self._text_sel_popups[pn] is None:
             return
         popup    = self._text_sel_popups[pn]
         sel_rect = self._text_sel_sel_rect
@@ -381,6 +389,8 @@ class _TextSelMixin:
     def _hide_text_sel_bar(self) -> None:
         self._clear_text_selection()
         for popup in self._text_sel_popups:
+            if popup is None:  # slot no construido (placeholder)
+                continue
             if popup.visible:
                 popup.visible = False
                 try:

@@ -440,6 +440,8 @@ class _ProfilesMixin:
         self._redact_matches.clear()
         if self._redact_preview:
             for ov in self._redact_overlays:
+                if ov is None:  # slot no construido (placeholder)
+                    continue
                 ov.visible  = False
                 ov.controls = []
             self._redact_preview = False

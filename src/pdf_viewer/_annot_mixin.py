@@ -27,6 +27,8 @@ class _AnnotMixin:
         self._annot.set_tool(tool)
         self._current_cursor = cursor
         for gd in self._page_gestures:
+            if gd is None:  # slot no construido (placeholder)
+                continue
             gd.mouse_cursor = cursor
             gd.update()
         for t, btn in self._tool_btns.items():
@@ -43,7 +45,7 @@ class _AnnotMixin:
     def _show_annot_popup(self, pn: int, xref: int, pdf_rect: fitz.Rect) -> None:
         self._hide_annot_popup()
         self._selected = (pn, xref)
-        if pn >= len(self._annot_popups):
+        if pn >= len(self._annot_popups) or self._annot_popups[pn] is None:
             return
         scale  = self.zoom * BASE_SCALE
         popup  = self._annot_popups[pn]
@@ -70,7 +72,7 @@ class _AnnotMixin:
 
     def _hide_annot_popup(self, e=None) -> None:
         pn = self._annot_popup_pn
-        if pn is not None and pn < len(self._annot_popups):
+        if pn is not None and pn < len(self._annot_popups) and self._annot_popups[pn] is not None:
             popup = self._annot_popups[pn]
             if popup.visible:
                 popup.visible = False
@@ -97,7 +99,7 @@ class _AnnotMixin:
         type/colour.  Makes the overlay read as a live ghost of the annotation
         while its real image is hidden during drag.
         """
-        if pn >= len(self._sel_handles):
+        if pn >= len(self._sel_handles) or self._sel_handles[pn] is None:
             return
         atype = _atype(annot)
         self._selected_atype = atype
@@ -134,7 +136,7 @@ class _AnnotMixin:
         posición no necesita quedar dentro de los límites de ``sel_ov``; sólo el
         menú (botones reales) debe quedar dentro para recibir clics.
         """
-        if pn >= len(self._sel_handles):
+        if pn >= len(self._sel_handles) or self._sel_handles[pn] is None:
             return
         h = self._sel_handles[pn]
 
@@ -165,9 +167,9 @@ class _AnnotMixin:
     def _select_annot(self, pn: int, annot: fitz.Annot) -> None:
         if self._selected is not None and self._selected[0] != pn:
             old_pn = self._selected[0]
-            if old_pn < len(self._sel_overlays):
+            if old_pn < len(self._sel_overlays) and self._sel_overlays[old_pn] is not None:
                 self._sel_overlays[old_pn].visible = False
-                if old_pn < len(self._sel_handles):
+                if old_pn < len(self._sel_handles) and self._sel_handles[old_pn] is not None:
                     self._sel_handles[old_pn]["menu"].visible = False
                 try:
                     self._sel_overlays[old_pn].update()
@@ -196,6 +198,11 @@ class _AnnotMixin:
 
     def _refresh_selected_overlay(self, pn: int, annot_rect: fitz.Rect | None = None) -> None:
         """Reposition the selection overlay for the annotation on page *pn*."""
+        # La página puede no estar construida (placeholder) si el usuario hizo
+        # scroll lejos de la selección: no hay overlay donde dibujar. Se redibuja
+        # al materializar el slot (_build_page_slot llama aquí).
+        if not self._is_built(pn):
+            return
         if annot_rect is None:
             if self._selected is None:
                 return
@@ -291,9 +298,9 @@ class _AnnotMixin:
         self._selected_visual_rect = None
         self._selected_atype = None
         self._drag_mode = None
-        if pn < len(self._sel_overlays):
+        if pn < len(self._sel_overlays) and self._sel_overlays[pn] is not None:
             self._sel_overlays[pn].visible = False
-            if pn < len(self._sel_handles):
+            if pn < len(self._sel_handles) and self._sel_handles[pn] is not None:
                 self._sel_handles[pn]["menu"].visible = False
             try:
                 self._sel_overlays[pn].update()
