@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.14] - 2026-05-31
+## [0.1.15] - 2026-05-31
 
 ### Changed
 - **Visor escalable a documentos de cientos de páginas (virtualización del árbol de controles)**: cada página arranca como un *placeholder* liviano y su árbol pesado de controles (imagen, overlays de selección/anotación/OCR/censura, menús y `GestureDetector`) se construye bajo demanda al entrar en la ventana visible y se libera al alejarse. Antes se construían ~50 controles × N páginas al abrir el PDF (~40.000 para 800 páginas) → la carga se congelaba y la RAM se disparaba. Ahora abrir un PDF de 800 páginas es fluido y la RAM queda acotada a una ventana.
