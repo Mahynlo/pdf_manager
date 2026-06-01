@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.14] - 2026-05-31
+
+### Changed
+- **Visor escalable a documentos de cientos de páginas (virtualización del árbol de controles)**: cada página arranca como un *placeholder* liviano y su árbol pesado de controles (imagen, overlays de selección/anotación/OCR/censura, menús y `GestureDetector`) se construye bajo demanda al entrar en la ventana visible y se libera al alejarse. Antes se construían ~50 controles × N páginas al abrir el PDF (~40.000 para 800 páginas) → la carga se congelaba y la RAM se disparaba. Ahora abrir un PDF de 800 páginas es fluido y la RAM queda acotada a una ventana.
+- **Selección de texto y arrastre de anotaciones fluidos en PDFs grandes**: la conversión de coordenadas viewport↔página (`_get_global_y` / `_get_page_and_local_y`) pasó de un barrido lineal O(N) por evento de arrastre a O(1)/O(log N) usando los offsets acumulados ya cacheados. Antes, seleccionar texto en la página 700 de 800 se sentía lento.
+- **Scroll rápido sin hojas en blanco**: durante un *fling* rápido ahora se renderiza una vista previa de baja resolución (LOD) en vez de dejar la página en blanco; al detenerse se sube a calidad completa con *swap* sin parpadeo. El retardo de render tras detener el scroll bajó de 0.2 s a 0.1 s.
+
+### Fixed
+- **El visor perdía la página al cambiar de pestaña**: al volver a un PDF (desde otra pestaña, inicio, etc.) el scroll saltaba al inicio en vez de mantener la hoja en la que estabas. Ahora `on_focus` restaura la posición exacta de scroll.
+- **`AttributeError: 'NoneType'` en selección de texto / panel OCR**: caminos de la GUI que recorrían las listas por página no toleraban los *slots* no construidos (placeholders) introducidos por la virtualización.
+
 ## [0.1.13] - 2026-05-21
 
 ### Changed

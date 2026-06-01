@@ -9,6 +9,16 @@ Behaviour is split across focused mixin modules:
   _redact_mixin.py   — redaction search, term management, preview, apply
   _profiles_mixin.py — censorship profile dialogs (create, edit, load)
   _agent_mixin.py    — AI document-analysis agent panel and chat
+
+Escala a documentos de cientos de páginas porque el árbol de controles por
+página está **virtualizado**: cada página arranca como un placeholder liviano y
+su árbol pesado se construye/desinfla on-demand según la ventana visible (ver
+el docstring de ``_render_mixin`` para el modelo y la invariante de None). Al
+cambiar de pestaña, ``on_focus`` restaura la posición de scroll donde estaba el
+usuario (``_restore_scroll_position``), ya que re-mostrar el tab reinicia el
+offset del Column en Flutter. La gestión de RAM en dos pasos (shrink en
+``on_blur`` + clear total en ``_do_suspend``) mantiene el documento abierto pero
+libera cachés cuando el tab pierde foco.
 """
 from __future__ import annotations
 

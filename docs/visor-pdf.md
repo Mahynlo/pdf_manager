@@ -5,13 +5,14 @@
 1. [Visión general](#1-visión-general)
 2. [Estructura de clases](#2-estructura-de-clases)
 3. [Cómo se abre y muestra un PDF](#3-cómo-se-abre-y-muestra-un-pdf)
-4. [Sistema de scroll y viewport](#4-sistema-de-scroll-y-viewport)
+4. [Scroll, viewport y virtualización](#4-scroll-viewport-y-virtualización)
 5. [Sistema de zoom](#5-sistema-de-zoom)
 6. [Anotaciones](#6-anotaciones)
 7. [Selección de texto](#7-selección-de-texto)
 8. [Pipeline OCR](#8-pipeline-ocr)
 9. [Caché de renderizado](#9-caché-de-renderizado)
 10. [Variables de estado principales](#10-variables-de-estado-principales)
+11. [Integración con DocumentManagerUI](#11-integración-con-documentmanagerui)
 
 ---
 
@@ -37,15 +38,45 @@ _RENDER_SEM  = threading.Semaphore(6)   # Máx 6 renders concurrentes (todos
                                         #  que un cambio de zoom termine en
                                         #  una sola oleada en lugar de dos)
 _MAX_ENTRIES = 25                       # Entradas máximas en la caché LRU
-_MAX_BYTES   = 8 * 1024 * 1024          # Tope duro de bytes PNG en RAM por tab
-                                        #  (evicción por size + por count)
+_MAX_BYTES   = 8 * 1024 * 1024          # Tope de bytes en RAM por tab (ver nota)
+```
+
+> **Nota de caché (importante):** desde la migración a render en disco, `render_page`
+> guarda **todas** las páginas como archivo temporal (PNG para zoom ≤ 1.0, JPEG para
+> zoom > 1.0) y el 4º campo de la entrada (`png_bytes`) es **siempre `None`** — ya no
+> se mantienen bytes de imagen ni base64 en RAM. En la práctica la caché queda acotada
+> por `_MAX_ENTRIES` (25) y por las ventanas de poda (`_CACHE_KEEP_PAGES`); el tope de
+> bytes sólo contaría `png_bytes`, que hoy es siempre 0.
+
+**Constantes de virtualización / ventana (en `_viewer_defs.py`):**
+
+```
+_PRELOAD              = 2     # páginas a renderizar al abrir
+_EVICT_MARGIN         = 3     # alturas de viewport con IMAGEN retenida a cada lado
+_SLOT_TEARDOWN_MARGIN = 6     # alturas de viewport: más allá, el SLOT vuelve a placeholder
+_CACHE_KEEP_PAGES     = 5     # páginas con render cacheado alrededor de la actual
+_TEXT_CACHE_KEEP_PAGES= 15    # páginas con caché de texto (rawdict) alrededor de la actual
+_SCROLL_IDLE_DELAY    = 0.1   # seg tras detener el scroll antes de subir a calidad completa
+_PREVIEW_QUALITY      = 0.66  # el tier preview rasteriza a esta fracción del zoom objetivo
 ```
 
 ---
 
 ## 2. Estructura de clases
 
-`PDFViewerTab` hereda de seis mixins. Cada uno gestiona un dominio concreto y accede al estado compartido mediante `self`.
+`PDFViewerTab` hereda de **nueve mixins**. Cada uno gestiona un dominio concreto y accede al estado compartido mediante `self`. (El antiguo `_RedactAgentMixin` se dividió en `_RedactMixin`, `_ProfilesMixin` y `_AgentMixin`; la impresión vive en `_PrintMixin`.)
+
+| Mixin | Archivo | Responsabilidad |
+|-------|---------|-----------------|
+| `_RenderMixin` | `_render_mixin.py` | Renderizado, navegación, zoom, guardado y **virtualización de slots** |
+| `_GestureMixin` | `_gesture_mixin.py` | Enrutado de pan / tap; coordenadas viewport↔página |
+| `_AnnotMixin` | `_annot_mixin.py` | Selección y edición de anotaciones |
+| `_TextSelMixin` | `_text_sel_mixin.py` | Overlay de selección de texto a nivel palabra |
+| `_OCRMixin` | `_ocr_mixin.py` | Ejecución de OCR y panel de resultados |
+| `_RedactMixin` | `_redact_mixin.py` | Búsqueda/términos/preview/aplicar censura |
+| `_ProfilesMixin` | `_profiles_mixin.py` | Diálogos de perfiles de censura |
+| `_AgentMixin` | `_agent_mixin.py` | Panel de chat del agente IA |
+| `_PrintMixin` | `_print_mixin.py` | Impresión (PowerShell en Windows, CUPS en Linux/macOS) |
 
 ```mermaid
 classDiagram
@@ -67,14 +98,19 @@ classDiagram
 
     class _RenderMixin {
         +_rebuild_scroll_content()
-        +_render_page_slot(pn)
-        +_render_visible(pixels, vh)
+        +_make_placeholder(pn, w, h)
+        +_build_page_slot(pn)
+        +_ensure_page_built(pn)
+        +_teardown_page_slot(pn)
+        +_is_built(pn) / _page_is_active(pn)
+        +_render_page_slot(pn, preview)
+        +_render_visible(pixels, vh, preview)
         +_evict_distant(pixels, vh)
+        +_teardown_built_distant(px, vh)
         +_on_view_scroll(e)
         +_apply_zoom()
         +_zoom_in() / _zoom_out()
         +_fit_width() / _fit_page()
-        +_on_page_scroll(e, pn)
     }
 
     class _GestureMixin {
@@ -117,12 +153,28 @@ classDiagram
         +_ocr_copy_all()
     }
 
-    class _RedactAgentMixin {
+    class _RedactMixin {
         +_build_redact_sidebar_panel()
-        +_build_agent_sidebar_panel()
         +_add_redact_term()
         +_render_redact_preview()
+        +_reapply_redact_page(pn)
         +_apply_redaction()
+    }
+
+    class _ProfilesMixin {
+        +_open_profile_manager()
+        +_save_current_as_profile()
+        +_load_profile(profile)
+    }
+
+    class _AgentMixin {
+        +_build_agent_sidebar_panel()
+        +_agent_send()
+        +_agent_quick_action(kind)
+    }
+
+    class _PrintMixin {
+        +_print_pdf()
     }
 
     class AnnotationManager {
@@ -158,7 +210,10 @@ classDiagram
     PDFViewerTab --|> _AnnotMixin
     PDFViewerTab --|> _TextSelMixin
     PDFViewerTab --|> _OCRMixin
-    PDFViewerTab --|> _RedactAgentMixin
+    PDFViewerTab --|> _RedactMixin
+    PDFViewerTab --|> _ProfilesMixin
+    PDFViewerTab --|> _AgentMixin
+    PDFViewerTab --|> _PrintMixin
     PDFViewerTab *-- AnnotationManager
     PDFViewerTab *-- PageRenderCache
     PDFViewerTab *-- OCRProcessor
@@ -178,15 +233,15 @@ flowchart TD
 
     D --> E{¿Mismo\nnúmero de páginas?}
 
-    E -- Sí\nFAST PATH --> F["Reusar controles Flet existentes\nActualizar width/height de cada imagen\nLimpiar imágenes obsoletas"]
-    E -- No\nFULL REBUILD --> G["Limpiar caché de renderizado\nCrear controles Flet nuevos\npara todas las páginas"]
+    E -- Sí\nFAST PATH --> F["Reusar controles Flet existentes (construidos)\nActualizar width/height\nReescalar placeholders no construidos"]
+    E -- No\nFULL REBUILD --> G["Limpiar caché de renderizado\nCrear sólo PLACEHOLDERS livianos\npara todas las páginas (O(N) barato)"]
 
-    F --> H["Para cada página visible\n_render_page_slot(pn)"]
+    F --> H["Para cada página visible\n_render_page_slot(pn)\n→ _ensure_page_built(pn) primero"]
     G --> H
 
-    H --> I["Añadir pn a _rendering\nLanzar hilo background"]
+    H --> I["_build_page_slot(pn) si es placeholder\nAñadir pn a _rendering\nLanzar hilo background"]
 
-    I --> J{"¿Adquirir\n_RENDER_SEM?\n(máx 4)"}
+    I --> J{"¿Adquirir\n_RENDER_SEM?\n(máx 6)"}
     J -- Esperar --> J
     J -- Slot libre --> K
 
@@ -196,13 +251,9 @@ flowchart TD
     L -- Sí --> M["Retornar (b64, w, h) cacheado"]
     L -- No --> N["page = doc[pn]\nmat = Matrix(zoom × 1.5, zoom × 1.5)"]
 
-    N --> O["pix = page.get_pixmap(matrix=mat)"]
-    O --> P{¿Canal\nalpha?}
-    P -- Sí --> Q["Convertir a RGB\nfitz.Pixmap(csRGB, pix)"]
-    P -- No --> R
-
-    Q --> R{zoom ≤ 1.0?}
-    R -- Sí\nPNG en RAM --> S["raw = pix.tobytes('png')\nresult = (None, w, h, raw)"]
+    N --> O["pix = page.get_pixmap(matrix=mat, alpha=False)\n(sin canal alfa → −25% RAM, sin conversión)"]
+    O --> R{zoom ≤ 1.0?}
+    R -- Sí\nPNG a disco --> S["mkstemp('.png')\npix.save(temp, 'png')\nresult = (path, w, h, None)"]
     R -- No\nJPEG a disco --> T{zoom ≤ 2.0?}
     T -- Sí --> U["JPEG quality=90"]
     T -- No --> V["JPEG quality=82"]
@@ -213,11 +264,8 @@ flowchart TD
     S --> X["cache.put(pn, zoom, result)"]
     W --> X
     X --> M
-    M --> Y2{¿png_bytes\nestá set?}
-    Y2 -- Sí --> Y3["img.src_base64 =\nb64encode(png_bytes)\nimg.src = None"]
-    Y2 -- No\n(JPEG en disco) --> Y4["img.src = path\nimg.src_base64 = None"]
-    Y3 --> Y5["img.visible = True\n_schedule_render_update()\n→ debounce 30 ms\n→ un solo viewer_scroll.update()"]
-    Y4 --> Y5
+    M --> Y4["img.src = path  (siempre archivo en disco)\nimg.src_base64 = None\n(token vigente y slot construido)"]
+    Y4 --> Y5["img.visible = True\n_schedule_render_update(pn)\n→ debounce 30 ms\n→ update sólo del slot sucio"]
     Y5 --> Z([Página visible en pantalla])
 
     style A fill:#E8F5E9,stroke:#2E7D32
@@ -241,22 +289,41 @@ Conversión inversa (clic en pantalla → posición PDF):
 
 | Zoom | Formato | Calidad | Ubicación | Motivo |
 |------|---------|---------|-----------|--------|
-| ≤ 1.0 | PNG | Lossless | **RAM** (`png_bytes`) | Texto pequeño — JPEG añade artefactos. Sin escritura a disco → menos latencia. |
+| ≤ 1.0 | PNG | Lossless | Disco (`tempfile`) | Texto pequeño — JPEG añade artefactos; el PNG mantiene la nitidez. |
 | 1.0 – 2.0 | JPEG | 90 | Disco (`tempfile`) | Pixmaps medianos; quality 90 ya es indistinguible para vista humana. |
 | > 2.0 | JPEG | 82 | Disco (`tempfile`) | Pixmaps grandes (~5-15 MB de pixmap crudo) → quality 82 ahorra ~40% de tamaño sin pérdida perceptible en visualización. |
 
-**El caché guarda PNG bytes crudos (no base64).** El worker codifica a base64 solo al asignar a `img.src_base64`. Esto evita el overhead del 33% de base64 en RAM:
+**Todas las páginas se rasterizan a un archivo temporal en disco — nunca se guardan bytes de imagen ni base64 en RAM.** La entrada de caché es `(temp_path, w, h, None)` y el control Flet apunta al archivo con `img.src = temp_path` (no `img.src_base64`). Así, transportar la imagen hacia Flutter es ligero (ruta de archivo, no un string base64 inflado un 33 %), y la rasterización/encode/IO corre **fuera** del `_doc_lock` (sólo `get_pixmap` lo toma), de modo que páginas del mismo documento no se serializan por completo entre sí.
 
 ```
-Antes:  cache ←  base64-string (270 KB por página)  → img.src_base64
-Ahora:  cache ←  bytes PNG (200 KB)                  → b64encode()  → img.src_base64
+Render:  page.get_pixmap()  →  pix.save(tempfile, png|jpeg)  →  entry = (path, w, h, None)
+Mostrar: img.src = path     (gapless_playback evita el parpadeo al cambiar de imagen)
 ```
 
 ---
 
-## 4. Sistema de scroll y viewport
+## 4. Scroll, viewport y virtualización
 
 La columna de páginas (`viewer_scroll: ft.Column`) es un scrollable continuo. El visor solo mantiene imágenes **visibles** en memoria; las páginas lejanas son desalojadas y vuelven a renderizarse cuando el usuario regresa.
+
+### Virtualización del árbol de controles (slots perezosos)
+
+Construir el árbol pesado de cada página (imagen + overlays de selección/anotación/OCR/censura + menús flotantes + `GestureDetector`, **~50 controles**) para TODAS las páginas al abrir el PDF era inviable en documentos grandes: ~40.000 controles para 800 páginas → la carga se congelaba y la RAM se disparaba (objetos Python + árbol Flutter). Por eso el árbol está **virtualizado**:
+
+```mermaid
+flowchart LR
+    PH["Placeholder liviano\n(Container con alto correcto\n+ nº de página)"] -- "entra en la ventana visible\n_ensure_page_built / _build_page_slot" --> BUILT["Slot construido\n(imagen + overlays + menús + gesto)"]
+    BUILT -- "se aleja > _SLOT_TEARDOWN_MARGIN\nalturas de viewport (_on_scroll_idle)\n_teardown_page_slot" --> PH
+
+    style PH fill:#FFF3E0,stroke:#E65100
+    style BUILT fill:#E8F5E9,stroke:#2E7D32
+```
+
+- Cada página arranca como **placeholder** (`_make_placeholder`): un `Container` con el alto correcto (para que el scrollbar mida bien) y el número de página tenue. Crear esto para N páginas es **O(N) barato**.
+- El árbol pesado se construye **bajo demanda** (`_build_page_slot`, vía `_ensure_page_built`) al entrar la página en la ventana visible, y se **desinfla** de vuelta a placeholder (`_teardown_page_slot`) al alejarse más de `_SLOT_TEARDOWN_MARGIN` alturas de viewport. Así los slots vivos quedan acotados a una ventana, sin importar el tamaño del PDF.
+- `_page_is_active` evita desinflar páginas con estado interactivo vivo (actual, selección de anotación, rango de texto, popup, tinta). Al re-materializar un slot, `_build_page_slot` re-aplica los overlays activos de esa página (cajas OCR, preview de censura, overlay de selección).
+
+> **INVARIANTE para todos los mixins:** las listas por página (`_page_images`, `_sel_overlays`, `_ocr_overlays`, …) tienen longitud == nº de páginas pero contienen **`None`** para los slots no construidos. Todo acceso indexado o iteración sobre esas listas **debe tolerar `None`** (saltarlo). Romper esta invariante produce `AttributeError: 'NoneType'` en caminos de la GUI.
 
 ```mermaid
 flowchart TD
@@ -299,9 +366,37 @@ flowchart TD
 | Constante | Valor | Significado |
 |-----------|-------|-------------|
 | `_PRELOAD` | 2 | Páginas extras a renderizar al abrir |
-| `_EVICT_MARGIN` | 3.0 | Retener 3 viewports a cada lado antes de desalojar |
-| `_EVICT_THRESHOLD` | 400 px | Correr desalojo solo cada 400 px de scroll |
+| `_EVICT_MARGIN` | 3 | Alturas de viewport con **imagen** retenida a cada lado antes de desalojar |
+| `_SLOT_TEARDOWN_MARGIN` | 6 | Alturas de viewport: más allá, el **slot** entero vuelve a placeholder (`_on_scroll_idle`) |
+| `_EVICT_THRESHOLD` | 400 px | Correr desalojo de imágenes solo cada 400 px de scroll |
+| `_CACHE_KEEP_PAGES` | 5 | Páginas con render cacheado alrededor de la actual (poda del `PageRenderCache`) |
+| `_TEXT_CACHE_KEEP_PAGES` | 15 | Páginas con caché de texto (rawdict) alrededor de la actual |
+| `_SCROLL_IDLE_DELAY` | 0.1 s | Espera tras detener el scroll antes de subir lo visible a calidad completa |
 | `_PAGE_GAP` | 16 px | Separación vertical entre páginas |
+
+### Calidad de render según la velocidad (preview en fling)
+
+`_on_view_scroll` mide la velocidad del scroll (px/seg) y elige el tier de render **en vuelo**:
+
+| Velocidad | Acción | Por qué |
+|-----------|--------|---------|
+| `< 6 × alturas/seg` (lento/medio) | `_render_visible(preview=False)` → **calidad completa** | A esa velocidad sí da tiempo a rasterizar nítido sin desperdicio. |
+| `≥ 6 × alturas/seg` (fling rápido) | `_render_visible(preview=True)` → **tier PREVIEW (LOD)** | Rasteriza a ~1/4 del coste para que las hojas **no aparezcan en blanco** mientras scrolleas. |
+
+Al detenerse, `_on_scroll_idle` (tras `_SCROLL_IDLE_DELAY` = 0.1 s) sube lo visible a **calidad completa**. El swap preview→nítido usa `gapless_playback`, así que la imagen anterior se mantiene hasta que la nueva decodifica → **no parpadea a blanco**, solo se afina la nitidez. (Antes no se renderizaba nada durante el fling → hojas en blanco.)
+
+`_on_scroll_idle` también ejecuta `_teardown_built_distant`, que desinfla a placeholder los slots construidos lejos del viewport, acotando la RAM del árbol de controles al recorrer documentos grandes.
+
+### Coordenadas viewport↔página: O(1) / O(log N)
+
+`_get_global_y(pn, local_y)` y `_get_page_and_local_y(global_y)` (en `_gesture_mixin`) convierten entre coordenadas locales de página y la posición global de scroll. Se ejecutan en **cada evento de arrastre** (selección de texto, resaltado, mover handles). Usan los offsets acumulados ya cacheados (`_page_cum_offsets`):
+
+```
+_get_global_y(pn, ly)      = _page_cum_offsets[pn] + ly            # O(1)
+_get_page_and_local_y(g)   = bisect sobre _page_cum_offsets        # O(log N)
+```
+
+Antes barrían `_page_heights` linealmente (**O(N) por evento**), lo que hacía que seleccionar texto o arrastrar una anotación en la página 700 de 800 se sintiera lento; ahora el coste es independiente de la página.
 
 ---
 
@@ -343,10 +438,12 @@ Los entry points "directos" (botones de fit, menú de zoom específico) llaman a
 | Si la página ya tenía render | Si no |
 |------------------------------|-------|
 | `img.fit = CONTAIN` (escala la imagen vieja al nuevo tamaño) | `img.visible = False` |
-| `slot.bgcolor = None` | `slot.bgcolor = _PAGE_BG` (gris) |
-| `load_overlay.visible = False` | `load_overlay.visible = True` (spinner) |
+| `img.visible = True` (preview escalado) | `load_overlay.visible = True` (respaldo "papel" blanco) |
+| `load_overlay.visible = False` | — |
 
-Mientras el worker renderiza al nuevo zoom (200-300 ms), el usuario ve un preview escalado (borroso) en vez de un gris vacío. Al terminar, el worker restaura `fit = NONE` y asigna el render nítido en un solo update batchedeado (ver `_schedule_render_update`).
+> Las páginas **no construidas** (placeholder) sólo reescalan su placeholder al nuevo tamaño; su slot pesado se construirá al entrar en la ventana visible.
+
+Mientras el worker renderiza al nuevo zoom (200-300 ms), el usuario ve un preview escalado (borroso) en vez de un hueco. `img.fit` se mantiene en `CONTAIN` siempre (en un render completo la imagen ya mide exactamente lo que el slot, así que `CONTAIN` == 1:1 nítido); no se alterna a `NONE`, evitando el salto de tamaño de un frame durante el zoom mientras `gapless_playback` sostiene la imagen anterior. El render nítido se asigna en un update batched (ver `_schedule_render_update`).
 
 ### Coalescing de updates post-render (30 ms)
 
@@ -529,12 +626,26 @@ flowchart TD
 
 ```
 _get_page_words(pn):
-  words  = page.get_text("words")          # Texto nativo PDF
-  if pn in _ocr_by_page:
-      words += [(det.bbox, det.text)        # Detecciones OCR
-                for det in result.detections]
-  return _sort_words_column_aware(words)
+  if pn in _page_words: return _page_words[pn]   # cacheado (ver poda abajo)
+  # Extracción a nivel CARÁCTER (no "words") para una selección más fina:
+  raw = page.get_text("rawdict")
+  words = [(fitz.Rect(char["bbox"]), char["c"])  # un (rect, char) por glifo
+           for block in raw["blocks"] for line in block["lines"]
+           for span in line["spans"] for char in span["chars"]
+           if char["c"].strip()]
+  if pn in _ocr_by_page:                          # + detecciones OCR como chars
+      words += _ocr_chars(_ocr_by_page[pn])
+  words = _sort_words_column_aware(words)
+  _page_words[pn] = words
+  _page_word_bands[pn] = _build_y_band_index(words)   # índice espacial O(k)
+  return words
 ```
+
+> Las cachés de texto por página (`_page_words` rawdict char-level,
+> `_page_word_bands`, `_page_blocks_cache`, `_text_rects_cache`) se **podan a una
+> ventana** (`_TEXT_CACHE_KEEP_PAGES` = 15) alrededor de la página actual: recorrer
+> un PDF grande con el cursor no debe acumular el rawdict de todas las páginas. La
+> reconstrucción es perezosa (re-extrae si vuelves a una página lejana).
 
 ---
 
@@ -546,12 +657,12 @@ flowchart LR
     G --> H{¿Hit?}
     H -- Sí --> RET["Retornar entry\nmover a 'más reciente'"]
     H -- No --> COMPUTE{¿zoom\n≤ 1.0?}
-    COMPUTE -- Sí --> CM["pixmap → tobytes('png')\n→ entry = (None, w, h, raw)"]
-    COMPUTE -- No --> CD["pixmap → mkstemp(.jpg)\n→ entry = (path, w, h, None)"]
+    COMPUTE -- Sí --> CM["pixmap → mkstemp('.png')\npix.save(temp,'png')\n→ entry = (path, w, h, None)"]
+    COMPUTE -- No --> CD["pixmap → mkstemp('.jpg')\npix.save(temp,'jpeg')\n→ entry = (path, w, h, None)"]
     CM --> P["cache.put(pn, zoom, entry)"]
     CD --> P
     P --> EVICT{¿len > 25\nO bytes > 8MB?}
-    EVICT -- Sí --> DEL["popitem(last=False)\nSi entry.path: os.remove\nSi entry.png_bytes: descontar bytes\nLoop hasta cumplir ambos"]
+    EVICT -- Sí --> DEL["popitem(last=False)\nentry.path → os.remove (archivo temporal)\n(png_bytes siempre None → 0 bytes)\nLoop hasta cumplir ambos topes"]
     EVICT -- No --> RET2["Retornar entry"]
     DEL --> EVICT
     EVICT -- Cumple ambos --> RET2
@@ -564,11 +675,15 @@ flowchart LR
 ### Estructura de la entrada del caché
 
 ```python
-CacheEntry = tuple[str | None, int, int, bytes | None]
-#               (path,        w,   h,   png_bytes)
+CacheEntry = tuple[str, int, int, None]
+#               (path,  w,   h,   png_bytes=None)
 #
-# Modo memoria (zoom ≤ 1.0):  (None, w, h, raw_png_bytes)
-# Modo disco   (zoom > 1.0):  ("/tmp/xxx.jpg", w, h, None)
+# Todas las páginas → archivo en disco:
+#   zoom ≤ 1.0:  ("/tmp/xxx.png", w, h, None)   # PNG lossless
+#   zoom > 1.0:  ("/tmp/xxx.jpg", w, h, None)   # JPEG
+#
+# El 4º campo (png_bytes) se conserva por compatibilidad y SIEMPRE es None:
+# ya no se mantienen bytes de imagen ni base64 en RAM.
 ```
 
 ### Propiedades del caché
@@ -579,8 +694,8 @@ CacheEntry = tuple[str | None, int, int, bytes | None]
 | Estructura | `OrderedDict` con `move_to_end` para LRU |
 | Thread-safety | `threading.Lock` en cada operación |
 | Tope por count | `_MAX_ENTRIES = 25` entradas |
-| Tope por bytes | `_MAX_BYTES = 8 MB` (solo cuenta `png_bytes`; los JPEGs en disco no consumen RAM) |
-| Eviction trigger | El que se alcance primero (count o bytes) |
+| Tope por bytes | `_MAX_BYTES = 8 MB` (cuenta `png_bytes`, hoy siempre `None` → 0 bytes; todas las páginas son archivos en disco, no consumen RAM en la caché) |
+| Eviction trigger | El que se alcance primero (count o bytes); en la práctica manda el count y la poda por ventana (`_CACHE_KEEP_PAGES`) |
 
 ### Operaciones públicas
 
@@ -597,7 +712,7 @@ shrink(max_entries)   → None                  # tras on_blur (max_entries=5)
 1. **Tab activo**: hasta 25 entradas o 8 MB, lo que se alcance primero
 2. **Tab pierde foco** (`on_blur`): `shrink(5)` inmediato → libera ~80% de la RAM del caché
 3. **20 s después sin recuperar foco** (`_do_suspend`): `clear()` completo + `_render_gen += 1` para abortar workers en vuelo
-4. **Tab recupera foco** (`on_focus`): si estaba suspendido, fast-resize re-renderiza las páginas visibles
+4. **Tab recupera foco** (`on_focus`): si estaba suspendido, fast-resize re-renderiza las páginas visibles; además `_restore_scroll_position()` vuelve a la hoja donde estaba el usuario (re-mostrar el tab reinicia el scroll del Column en Flutter)
 5. **Tab cerrado** (`close`): `clear()` + `doc.close()`
 
 Esto permite tener 10+ PDFs abiertos simultáneamente reteniendo ~13 MB en total en el peor caso (1 activo × 8 MB + 9 inactivos × ~500 KB), en lugar de 80-200 MB que serían con el caché completo en cada tab.
@@ -623,18 +738,32 @@ self._page_cum_offsets: list[float] # Offset Y acumulado por página (px)
 self._page_heights: list[float]     # Alto renderizado por página (px)
 ```
 
-### Controles Flet por página
+### Controles Flet por página (virtualizados)
+
+> **Todas estas listas tienen longitud == nº de páginas, pero contienen `None`
+> para los slots no construidos (placeholder).** Itera/indexa siempre tolerando
+> `None`. Se pueblan en `_build_page_slot(pn)` y se vuelven a poner en `None` en
+> `_teardown_page_slot(pn)`.
 
 ```python
-self._page_images[pn]: ft.Image            # Imagen renderizada
-self._page_slots[pn]: ft.Container         # Stack de todos los controles
-self._page_gestures[pn]: ft.GestureDetector
-self._loading_overlays[pn]: ft.Container   # Spinner mientras renderiza
-self._drag_overlays[pn]: ft.Container      # Overlay semitransparente al dibujar
-self._sel_overlays[pn]: ft.Container       # Overlay de anotación seleccionada
-self._text_sel_layers[pn]: ft.Stack        # Rectángulos de selección de texto
-self._ocr_overlays[pn]: ft.Stack          # Cajas de detección OCR
-self._ink_canvases[pn]: cv.Canvas          # Previsualización de trazo libre
+self._page_rows[pn]: ft.Row                # SIEMPRE presente; su hijo es el
+                                           #  placeholder o el slot construido
+self._page_placeholders[pn]: ft.Container  # Stand-in liviano (alto + nº de página)
+self._page_cum_offsets[pn]: float          # Offset Y del tope de la página (px)
+self._page_heights[pn]: float              # Alto renderizado de la página (px)
+
+# Árbol pesado — None hasta construir el slot:
+self._page_images[pn]: ft.Image | None            # Imagen renderizada
+self._page_slots[pn]: ft.Container | None         # Stack de todos los controles
+self._page_gestures[pn]: ft.GestureDetector | None
+self._loading_overlays[pn]: ft.Container | None   # Respaldo "papel" mientras renderiza
+self._drag_overlays[pn]: ft.Container | None      # Overlay semitransparente al dibujar
+self._sel_overlays[pn]: ft.Container | None       # Overlay de anotación seleccionada
+self._sel_handles[pn]: dict | None                # Handles + menú de la selección
+self._text_sel_layers[pn]: ft.Stack | None        # Rectángulos de selección de texto
+self._ocr_overlays[pn]: ft.Stack | None           # Cajas de detección OCR
+self._redact_overlays[pn]: ft.Stack | None        # Cajas de preview de censura
+self._ink_canvases[pn]: cv.Canvas | None          # Previsualización de trazo libre
 ```
 
 ### Anotaciones
@@ -692,6 +821,10 @@ def on_focus(self) -> None:
         self._is_suspended = False
         # fast-resize re-renderiza las páginas visibles bajo demanda
         self._rebuild_scroll_content(scroll_back=False)
+    # Restaurar la hoja donde estaba el usuario: re-mostrar el tab (visible
+    # False→True) reinicia el offset del Column en Flutter, así que sin esto el
+    # visor saltaba al inicio. _scroll_px se conserva a través del blur/suspend.
+    self._restore_scroll_position()   # scroll_to(_scroll_px) con un frame de retardo
 
 def on_blur(self) -> None:
     """Llamado por DocumentManagerUI al desactivar esta pestaña."""
@@ -708,7 +841,7 @@ def on_blur(self) -> None:
 |------|---------|--------|--------|
 | 1 | `on_blur` (inmediato) | `cache.shrink(5)` | Libera ~6-7 MB por tab al instante |
 | 2 | 20 s sin recuperar foco | `_do_suspend()`: `_render_gen += 1` + `cache.clear()` | Libera el resto + aborta workers en vuelo |
-| ↩ | `on_focus` | Cancela el timer; fast-resize si estaba suspendido | Re-renderiza las páginas visibles |
+| ↩ | `on_focus` | Cancela el timer; fast-resize si estaba suspendido; `_restore_scroll_position()` | Re-renderiza las páginas visibles y vuelve a la hoja donde estabas |
 
 Sin este lifecycle, con 10 PDFs abiertos cada uno retendría 8 MB de caché → ~80 MB en total solo en imágenes cacheadas. Con el lifecycle de dos pasos, el costo realista cae a ~13 MB (1 activo × 8 MB + 9 inactivos × ~500 KB tras el shrink, hasta que el timer hace el clear completo).
 

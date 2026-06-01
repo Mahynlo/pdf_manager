@@ -1,4 +1,50 @@
-"""Rendering, navigation, zoom and save behaviour for PDFViewerTab."""
+"""Rendering, navigation, zoom and save behaviour for PDFViewerTab.
+
+## Virtualización del árbol de controles (slots perezosos)
+
+El visor usa scroll continuo: una fila (`ft.Row`) por página dentro de un
+`ft.Column`. Construir el árbol pesado de cada página (imagen, overlays de
+selección/anotación/OCR/censura, menús flotantes y `GestureDetector` — ~50
+controles) para TODAS las páginas al abrir el PDF era inviable en documentos
+grandes: ~40.000 controles para 800 páginas → congelaba la carga y disparaba la
+RAM (Python + árbol Flutter). Por eso el árbol se **virtualiza**:
+
+  · Cada página arranca como un **placeholder** liviano (`_make_placeholder`):
+    un `Container` con las dimensiones correctas (para que el scrollbar mida
+    bien) y el número de página tenue. Construir esto para N páginas es O(N)
+    barato.
+  · El árbol pesado se construye **bajo demanda** (`_build_page_slot`) cuando la
+    página entra en la ventana visible, y se **desinfla** de vuelta a placeholder
+    (`_teardown_page_slot`) cuando se aleja más de `_SLOT_TEARDOWN_MARGIN`
+    alturas de viewport (gancho en `_on_scroll_idle`). Así los slots vivos
+    quedan acotados a una ventana, sin importar cuántas páginas tenga el PDF.
+  · `_ensure_page_built` / `_is_built` son el contrato: `_render_page_slot`
+    materializa el slot antes de rasterizar. `_page_is_active` protege de
+    desinflar páginas con estado interactivo vivo (actual, selección de
+    anotación, rango de texto, popup, tinta).
+
+INVARIANTE para el resto de mixins: las listas por página (`_page_images`,
+`_sel_overlays`, `_ocr_overlays`, …) tienen longitud == nº de páginas pero
+contienen **None** para slots no construidos. Todo acceso indexado o iteración
+sobre esas listas debe tolerar None (saltarlo). Al materializarse un slot,
+`_build_page_slot` re-aplica los overlays dependientes de página que estuvieran
+activos (cajas OCR, preview de censura, overlay de selección).
+
+## Render por niveles (LOD) y scroll
+
+`_render_page_slot` rasteriza en hilo de fondo (acotado por un `Semaphore(6)`
+global). Dos tiers: COMPLETO (zoom objetivo) y PREVIEW (fracción del zoom, ~1/4
+del coste). Durante un fling rápido se renderiza PREVIEW (las hojas no quedan en
+blanco); al detenerse, `_on_scroll_idle` las sube a COMPLETO (swap gapless, sin
+parpadeo a blanco). `_evict_distant` descarta las imágenes fuera de la ventana
+para acotar RAM/VRAM; el render cache (`PageRenderCache`) y las cachés de texto
+por página también se podan a una ventana.
+
+Conversión de coordenadas viewport↔página (`_get_global_y` /
+`_get_page_and_local_y`, en `_gesture_mixin`) usa los offsets acumulados
+cacheados (`_page_cum_offsets`) → O(1) / O(log N), no un barrido lineal por
+evento de arrastre.
+"""
 from __future__ import annotations
 
 import bisect
