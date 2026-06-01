@@ -1116,17 +1116,23 @@ class _RenderMixin:
                 self._refresh_ocr_ui_for_page()
                 page_changed = True
 
-        # Velocidad del scroll (px/seg). En un fling rápido no alcanzamos a
-        # rasterizar antes de que la página salga de pantalla → el preview
-        # borroso aparece y "salta" a nítido (parpadeo). Mejor NO renderizar
-        # durante el fling (placeholder limpio) y dejar que el handler de idle
-        # (0.2 s tras detenerse) renderice nítido lo que quedó visible. En
-        # scroll lento/medio sí renderizamos, y a calidad COMPLETA (sin paso
-        # intermedio borroso): un solo cambio de imagen, sin parpadeo.
+        # Velocidad del scroll (px/seg) decide la calidad del render en vuelo:
+        #
+        #   · scroll lento/medio  → render a calidad COMPLETA directamente.
+        #   · fling rápido        → render del tier PREVIEW (baja resolución,
+        #     ~1/4 del coste). Antes no se renderizaba nada en un fling rápido
+        #     → las hojas aparecían en blanco mientras scrolleabas. Tras
+        #     virtualizar, a 6 alturas/seg apenas pasan ~4 páginas/seg, así que
+        #     rasterizar un preview barato por página es asumible y elimina el
+        #     hueco en blanco. El handler de idle sube esas páginas a calidad
+        #     completa; con gapless_playback el swap preview→nítido no parpadea
+        #     a blanco (sólo se afina la nitidez).
         dt       = max(1e-3, now - prev_t)
         velocity = abs(px - prev_px) / dt
         if velocity < vh * 6.0:
             self._render_visible(px, vh, preview=False)
+        else:
+            self._render_visible(px, vh, preview=True)
 
         # Evicción y actualización de UI en un solo bloque:
         # si eviccionamos páginas, necesitamos propagar el visible=False a Flutter

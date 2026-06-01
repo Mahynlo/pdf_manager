@@ -1,6 +1,7 @@
 """Mouse / touch gesture handlers for PDFViewerTab."""
 from __future__ import annotations
 
+import bisect
 import math
 import time
 
@@ -9,6 +10,7 @@ import fitz
 
 from .annotations import Tool
 from .renderer import BASE_SCALE, display_to_pdf
+from ._viewer_defs import _PAGE_GAP
 
 # Pixel hit radius for corner handles.
 _HANDLE_HIT_R = 20
@@ -198,23 +200,36 @@ class _GestureMixin:
     # ── pan events ────────────────────────────────────────────────────────────
 
     def _get_global_y(self, pn: int, local_y: float) -> float:
-        """Convert page-local Y to global scroll Y."""
+        """Convert page-local Y to global scroll Y.
+
+        O(1): el offset global del tope de cada página ya está cacheado en
+        ``_page_cum_offsets``. Antes esto sumaba alturas desde 0 hasta *pn* en
+        cada evento de arrastre — O(N) por frame, lo que hacía que seleccionar
+        texto o mover anotaciones se sintiera lento en páginas altas de un PDF
+        grande (p. ej. la página 700 de 800).
+        """
+        offsets = getattr(self, "_page_cum_offsets", None)
+        if offsets and 0 <= pn < len(offsets):
+            return offsets[pn] + local_y
+        # Fallback O(n) si los offsets aún no se construyeron.
         y = 0.0
-        for i in range(pn):
-            y += getattr(self, "_page_heights", [])[i] + 16  # 16 is spacing
+        heights = getattr(self, "_page_heights", [])
+        for i in range(min(pn, len(heights))):
+            y += heights[i] + _PAGE_GAP
         return y + local_y
 
     def _get_page_and_local_y(self, global_y: float) -> tuple[int, float]:
-        """Convert global scroll Y to page index and local Y."""
-        y = 0.0
-        heights = getattr(self, "_page_heights", [])
-        for i, h in enumerate(heights):
-            if y <= global_y <= y + h + 16:
-                return i, global_y - y
-            y += h + 16
-        if heights:
-            last_pn = len(heights) - 1
-            return last_pn, global_y - (y - heights[-1] - 16)
+        """Convert global scroll Y to page index and local Y.
+
+        O(log N) vía búsqueda binaria sobre ``_page_cum_offsets`` (igual que
+        ``_on_view_scroll``), en vez del barrido lineal previo.
+        """
+        offsets = getattr(self, "_page_cum_offsets", None)
+        if offsets:
+            idx = bisect.bisect_right(offsets, global_y) - 1
+            if idx < 0:
+                idx = 0
+            return idx, global_y - offsets[idx]
         return 0, global_y
 
     def _on_pan_start(self, e: ft.DragStartEvent, pn: int) -> None:

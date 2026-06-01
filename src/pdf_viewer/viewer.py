@@ -270,6 +270,7 @@ class PDFViewerTab(
         # Lazy-suspension state (cache-only — document stays open)
         self._is_suspended:   bool                    = False
         self._suspend_timer:  threading.Timer | None  = None
+        self._restore_scroll_timer: threading.Timer | None = None
 
         self._save_picker = ft.FilePicker(on_result=self._on_save_result)
         page_ref.overlay.append(self._save_picker)
@@ -835,6 +836,49 @@ class PDFViewerTab(
             # fast-resize path: hides stale images, shows loading overlays,
             # and triggers lazy re-render of the first visible pages.
             self._rebuild_scroll_content(scroll_back=False)
+        # Restaurar la posición de scroll donde estaba el usuario. Cambiar de
+        # pestaña alterna content.visible (False/True), y Flutter reinicia el
+        # offset del Column de scroll al re-mostrarlo → volver a un PDF perdía la
+        # hoja y saltaba al inicio. _scroll_px se mantiene a través del blur/
+        # suspend, así que basta con reposicionar al recuperar el foco.
+        self._restore_scroll_position()
+
+    def _restore_scroll_position(self) -> None:
+        """Reposiciona el scroll a `_scroll_px` tras recuperar el foco.
+
+        Se hace con un pequeño retardo: al volverse visible, el scrollable de
+        Flutter aún no tiene su extent calculado, así que un scroll_to inmediato
+        se descartaría. El timer deja pasar un frame y luego reposiciona.
+        """
+        if getattr(self, "_display_mode", "continuous") != "continuous":
+            return
+        px = getattr(self, "_scroll_px", 0.0)
+        if not px or px <= 0:
+            return
+
+        def _do() -> None:
+            if getattr(self, "_is_closed", False):
+                return
+            try:
+                self.viewer_scroll.scroll_to(offset=px, duration=0)
+                self.viewer_scroll.update()
+            except Exception:
+                pass
+
+        self._cancel_restore_scroll_timer()
+        t = threading.Timer(0.10, _do)
+        t.daemon = True
+        t.start()
+        self._restore_scroll_timer = t
+
+    def _cancel_restore_scroll_timer(self) -> None:
+        t = getattr(self, "_restore_scroll_timer", None)
+        if t is not None:
+            try:
+                t.cancel()
+            except Exception:
+                pass
+            self._restore_scroll_timer = None
 
     def on_blur(self) -> None:
         """Called by DocumentManagerUI when another tab becomes active."""
@@ -887,7 +931,7 @@ class PDFViewerTab(
         # tocan controles) y, sobre todo, cada threading.Timer referencia self,
         # manteniendo viva toda la instancia (listas de ~20 controles × N
         # páginas) hasta que disparen → memoria que no se libera.
-        for _attr in ("_scroll_idle_timer", "_zoom_timer", "_render_upd_timer"):
+        for _attr in ("_scroll_idle_timer", "_zoom_timer", "_render_upd_timer", "_restore_scroll_timer"):
             _t = getattr(self, _attr, None)
             if _t is not None:
                 try:

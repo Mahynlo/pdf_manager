@@ -22,13 +22,14 @@ import pytest
 from pdf_viewer._render_mixin import _RenderMixin
 from pdf_viewer._text_sel_mixin import _TextSelMixin
 from pdf_viewer._ocr_mixin import _OCRMixin
+from pdf_viewer._gesture_mixin import _GestureMixin
 from pdf_viewer._viewer_defs import _PAGE_GAP, _SLOT_TEARDOWN_MARGIN
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
 
-class _Viewer(_RenderMixin, _TextSelMixin, _OCRMixin):
+class _Viewer(_RenderMixin, _TextSelMixin, _OCRMixin, _GestureMixin):
     """Instancia mínima de _RenderMixin para probar build/teardown.
 
     Cualquier atributo no fijado explícitamente (los callbacks de los botones que
@@ -263,3 +264,37 @@ class TestUnbuiltSlotsToleratedByGuiPaths:
         # No debe lanzar AttributeError por self._ocr_overlays[1] == None.
         v._refresh_ocr_ui_for_page()
         assert not v._is_built(1)
+
+
+# ── coordenadas global↔página: O(1)/O(log N), no O(N) por evento ─────────────
+#
+# _get_global_y / _get_page_and_local_y se ejecutan en CADA evento de arrastre
+# (selección de texto, resaltado, mover handles). Antes barrían _page_heights
+# linealmente → en la página 700 de 800 cada frame hacía cientos de iteraciones,
+# lo que se sentía como lag. Ahora usan los offsets cacheados.
+
+
+class TestCoordinateHelpersScale:
+    def test_global_y_matches_cached_offset(self):
+        v = _make_viewer(50, page_h=800.0)
+        for pn in (0, 1, 25, 49):
+            assert v._get_global_y(pn, 0.0) == v._page_cum_offsets[pn]
+            assert v._get_global_y(pn, 37.5) == v._page_cum_offsets[pn] + 37.5
+
+    def test_round_trip_global_to_page(self):
+        v = _make_viewer(50, page_h=800.0)
+        for pn in (0, 3, 25, 49):
+            local_y = 120.0  # dentro de la página (< page_h)
+            g = v._get_global_y(pn, local_y)
+            got_pn, got_local = v._get_page_and_local_y(g)
+            assert got_pn == pn
+            assert got_local == pytest.approx(local_y)
+
+    def test_result_is_independent_of_page_index(self):
+        # La página alta (700) no debe costar más que la baja (1): misma cuenta
+        # de operaciones. Comprobamos correctitud sobre un doc grande sin barridos.
+        v = _make_viewer(800, page_h=800.0)
+        for pn in (1, 400, 799):
+            g = v._get_global_y(pn, 50.0)
+            assert g == v._page_cum_offsets[pn] + 50.0
+            assert v._get_page_and_local_y(g) == (pn, pytest.approx(50.0))

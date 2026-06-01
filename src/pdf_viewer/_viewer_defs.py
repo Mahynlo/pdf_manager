@@ -52,7 +52,9 @@ _TEXT_CACHE_KEEP_PAGES = 15   # páginas de texto a conservar alrededor de la ac
 _PREVIEW_QUALITY   = 0.66  # preview = esta fracción del zoom objetivo
 _PREVIEW_MIN_ZOOM  = 0.4   # piso de legibilidad del preview
 _PREVIEW_MAX_ZOOM  = 0.75  # techo absoluto del preview (acota el coste a zoom alto)
-_SCROLL_IDLE_DELAY = 0.2   # seconds to wait before rendering full-res after scroll
+_SCROLL_IDLE_DELAY = 0.1   # seconds to wait before rendering full-res after scroll
+                           # (bajado de 0.2: la página enfocada se afina a
+                           # calidad completa antes tras detener el scroll)
 
 # ── Tool button definitions ───────────────────────────────────────────────────
 _TOOL_DEFS: list[tuple[Tool, str, str, ft.MouseCursor]] = [
