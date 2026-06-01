@@ -629,13 +629,41 @@ def main(page: ft.Page) -> None:
 
     # ── Atajos de teclado ─────────────────────────────────────────────────────
 
+    # Dedupe del auto-repeat de las teclas de zoom: una pulsación = un nivel.
+    # Mientras la tecla se mantiene, el SO emite keydowns repetidos (~30 ms);
+    # como Flet (esta versión) no expone keyup, no podemos saber el "release",
+    # así que ignoramos repeticiones del mismo símbolo dentro de una ventana
+    # (refrescando el timestamp → un hold completo cuenta como una sola pulsación).
+    _zoom_rep = {"key": "", "t": 0.0}
+    _ZOOM_REPEAT_GAP = 0.5  # seg
+
+    def _zoom_key_accept(key: str) -> bool:
+        now  = time.monotonic()
+        same = (key == _zoom_rep["key"])
+        gap  = now - _zoom_rep["t"]
+        _zoom_rep["key"] = key
+        _zoom_rep["t"]   = now
+        return not (same and gap < _ZOOM_REPEAT_GAP)
+
+    def _disarm_zoom_scroll() -> None:
+        # Tras un atajo Ctrl+letra el usuario NO quería zoom. Como Flet no emite
+        # keyup en esta versión, _ctrl_pressed quedaría "pegado" en True y un
+        # scroll inmediato con la rueda haría zoom por error (Ctrl+rueda). Lo
+        # desarmamos explícitamente; el próximo keydown de Ctrl lo re-arma.
+        for v in open_tabs:
+            v._ctrl_pressed = False
+            v._ctrl_time = 0.0
+
     def _on_keyboard(e: ft.KeyboardEvent) -> None:
         t = time.monotonic()
+        # Armar el zoom Ctrl+rueda mientras Ctrl esté presionado.
         for v in open_tabs:
             v._ctrl_pressed = e.ctrl
             if e.ctrl:
                 v._ctrl_time = t
-        if e.ctrl and e.key.upper() == "O":
+
+        if e.ctrl and (e.key or "").upper() == "O":
+            _disarm_zoom_scroll()
             _open_picker()
             return
         if not open_tabs:
@@ -645,9 +673,42 @@ def main(page: ft.Page) -> None:
             return
         v = open_tabs[idx]
 
-        # ── Ctrl + key ────────────────────────────────────────────────────────
+        # ── Ctrl + tecla ───────────────────────────────────────────────────────
         if e.ctrl:
-            k = e.key.upper()
+            _key = e.key or ""
+            _kl  = _key.lower()
+            # Zoom: Ctrl con '+'/'=' (acercar), '-' (alejar), '0' (100%).
+            # Flet/Flutter puede reportar estas teclas de varias formas según el
+            # layout y el numpad (carácter directo, o nombre lógico como "Add",
+            # "Subtract", "Equal", "Minus", "Numpad Add"…). Cubrimos todas.
+            # Una vez por pulsación (no mientras se mantiene), vía _zoom_key_accept.
+            _is_plus  = _key in ("+", "=") or "add" in _kl or "plus" in _kl or _kl == "equal"
+            _is_minus = _key in ("-", "_") or "subtract" in _kl or "minus" in _kl
+            _is_zero  = _key == "0" or _kl in ("numpad 0", "num 0", "digit 0")
+            if _is_plus:
+                if _zoom_key_accept("+"):
+                    v._zoom_in()
+                _disarm_zoom_scroll()  # un scroll posterior debe ser scroll, no zoom
+                return
+            if _is_minus:
+                if _zoom_key_accept("-"):
+                    v._zoom_out()
+                _disarm_zoom_scroll()
+                return
+            if _is_zero:
+                if _zoom_key_accept("0"):
+                    v._set_zoom(1.0)
+                _disarm_zoom_scroll()
+                return
+
+            # Modificador sostenido (Ctrl/Shift/Alt/Meta): mantener armado el
+            # zoom Ctrl+rueda — NO desarmar ni tratar como atajo.
+            if _key and any(m in _key for m in ("Control", "Shift", "Alt", "Meta")):
+                return
+
+            # Resto de atajos Ctrl+letra: NO son zoom → desarmar el zoom-rueda.
+            _disarm_zoom_scroll()
+            k = (e.key or "").upper()
             if k == "Z":
                 v._undo(); return
             if k == "A":
@@ -667,6 +728,8 @@ def main(page: ft.Page) -> None:
             return
 
         # ── Sin modificador ───────────────────────────────────────────────────
+        # El zoom YA NO se activa con '+'/'-' a secas: requiere Ctrl (arriba),
+        # como en un visor típico, para no dispararse por accidente.
         match e.key:
             case "Escape":
                 v._deselect_annot()
@@ -679,10 +742,6 @@ def main(page: ft.Page) -> None:
                 v._scroll_to_page(0)
             case "End":
                 v._scroll_to_page(len(v.doc) - 1)
-            case "+" | "=":
-                v._zoom_in()
-            case "-":
-                v._zoom_out()
             case "w" | "W":
                 v._fit_width()
             case "f" | "F":

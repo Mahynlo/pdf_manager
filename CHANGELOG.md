@@ -6,10 +6,12 @@
 - **Visor escalable a documentos de cientos de páginas (virtualización del árbol de controles)**: cada página arranca como un *placeholder* liviano y su árbol pesado de controles (imagen, overlays de selección/anotación/OCR/censura, menús y `GestureDetector`) se construye bajo demanda al entrar en la ventana visible y se libera al alejarse. Antes se construían ~50 controles × N páginas al abrir el PDF (~40.000 para 800 páginas) → la carga se congelaba y la RAM se disparaba. Ahora abrir un PDF de 800 páginas es fluido y la RAM queda acotada a una ventana.
 - **Selección de texto y arrastre de anotaciones fluidos en PDFs grandes**: la conversión de coordenadas viewport↔página (`_get_global_y` / `_get_page_and_local_y`) pasó de un barrido lineal O(N) por evento de arrastre a O(1)/O(log N) usando los offsets acumulados ya cacheados. Antes, seleccionar texto en la página 700 de 800 se sentía lento.
 - **Scroll rápido sin hojas en blanco**: durante un *fling* rápido ahora se renderiza una vista previa de baja resolución (LOD) en vez de dejar la página en blanco; al detenerse se sube a calidad completa con *swap* sin parpadeo. El retardo de render tras detener el scroll bajó de 0.2 s a 0.1 s.
+- **Atajos de zoom al estilo visor**: el zoom se activa con **Ctrl + `+`/`=` (acercar), `-` (alejar) y `0` (100%)** — una vez por pulsación, sin repetirse mientras se mantiene la tecla. Las teclas `+`/`-` a secas ya no hacen zoom (evita disparos accidentales). Nota: el zoom con **Ctrl+rueda** no es soportable de forma fiable en esta versión de Flet (el evento de scroll no incluye el modificador Ctrl y mantener solo Ctrl no emite evento de teclado), por lo que la rueda siempre hace scroll.
 
 ### Fixed
 - **El visor perdía la página al cambiar de pestaña**: al volver a un PDF (desde otra pestaña, inicio, etc.) el scroll saltaba al inicio en vez de mantener la hoja en la que estabas. Ahora `on_focus` restaura la posición exacta de scroll.
 - **`AttributeError: 'NoneType'` en selección de texto / panel OCR**: caminos de la GUI que recorrían las listas por página no toleraban los *slots* no construidos (placeholders) introducidos por la virtualización.
+- **Ctrl+A / Ctrl+Z disparaban el zoom**: tras un atajo Ctrl+letra, un scroll inmediato con la rueda hacía zoom por error (Flet no emite *keyup*, así que el estado de Ctrl quedaba "pegado" durante ~1 s). Ahora cualquier atajo Ctrl+letra desarma el zoom-rueda explícitamente.
 
 ## [0.1.13] - 2026-05-21
 
