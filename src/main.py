@@ -98,17 +98,63 @@ def _clean_path_argument(arg: str) -> str | None:
     return None
 
 
+def _win32_cmdline_args() -> list[str]:
+    """Devuelve los argumentos reales del proceso en Windows vía Win32.
+
+    En builds de `flet build windows`, el bootstrap de Flet/Flutter resetea
+    sys.argv a [''] y se pierde la ruta del PDF que Windows pasa al hacer
+    "Abrir con" (extraer_pdfs.exe "C:\\ruta\\archivo.pdf"). Sin embargo, la
+    línea de comandos original del proceso sigue intacta a nivel del SO:
+    GetCommandLineW la devuelve sin tocar y CommandLineToArgvW la divide
+    respetando comillas. Best-effort: nunca lanza.
+    """
+    if sys.platform != "win32":
+        return []
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.windll.kernel32
+        shell32  = ctypes.windll.shell32
+
+        kernel32.GetCommandLineW.restype = wintypes.LPCWSTR
+        cmd = kernel32.GetCommandLineW()
+
+        shell32.CommandLineToArgvW.restype  = ctypes.POINTER(wintypes.LPWSTR)
+        shell32.CommandLineToArgvW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int)]
+        argc = ctypes.c_int(0)
+        argv = shell32.CommandLineToArgvW(cmd, ctypes.byref(argc))
+        if not argv:
+            return []
+        try:
+            args = [argv[i] for i in range(argc.value)]
+        finally:
+            kernel32.LocalFree(argv)
+        _dbg_log(f"WIN32 | GetCommandLineW argv = {args!r}")
+        return args[1:]  # descarta el nombre del exe
+    except Exception as ex:
+        _dbg_log(f"WIN32 | GetCommandLineW failed: {ex!r}")
+        return []
+
+
 def _collect_initial_paths() -> list[str]:
-    """Recolecta rutas PDF desde sys.argv y variable de entorno.
+    """Recolecta rutas PDF desde la línea de comandos y la variable de entorno.
 
     Formatos soportados en builds de Flet empaquetado:
       - Ruta directa:    extraer_pdfs.exe "C:\\ruta\\archivo.pdf"
       - Con = :          --dart-entrypoint-args=C:\\ruta\\archivo.pdf
       - Con espacio:     --dart-entrypoint-args C:\\ruta\\archivo.pdf
     Los flags de Flutter/Dart (--dart-*, --observatory-*, etc.) se ignoran.
+
+    En Windows se combinan sys.argv (que Flet suele dejar vacío) con la línea
+    de comandos real del proceso (_win32_cmdline_args), porque "Abrir con" pasa
+    la ruta a nivel del SO aunque no llegue a sys.argv.
     """
     paths: list[str] = []
-    args = sys.argv[1:]
+    args = list(sys.argv[1:])
+    for extra in _win32_cmdline_args():
+        if extra not in args:
+            args.append(extra)
     i = 0
     while i < len(args):
         arg = args[i]
