@@ -243,8 +243,8 @@ def _ipc_server_loop(server_sock: socket.socket) -> None:
                         if isinstance(item, str) and item.strip():
                             _incoming_paths.append(item.strip())
                 _incoming_event.set()
-        except Exception:
-            pass
+        except Exception as ex:
+            _dbg_log(f"IPC   | server recv ERROR: {ex!r}")
         finally:
             try:
                 conn.close()
@@ -279,8 +279,12 @@ def main(page: ft.Page) -> None:
         page.update()
         initial_paths = _collect_initial_paths()
         _dbg_log(f"MAIN  | secondary forwarding {len(initial_paths)} path(s) and exiting")
+        def _secondary_send_and_exit() -> None:
+            ok = _send_to_server(initial_paths)
+            _dbg_log(f"MAIN  | secondary IPC {'OK' if ok else 'FAILED — primary may not be running'}")
+            os._exit(0)
         threading.Thread(
-            target=lambda: (_send_to_server(initial_paths), os._exit(0)),
+            target=_secondary_send_and_exit,
             daemon=True,
             name="ipc-secondary-exit",
         ).start()
@@ -364,7 +368,8 @@ def main(page: ft.Page) -> None:
             page.window.focused   = True
             page.update()
             page.window.to_front()
-        except Exception:
+        except Exception as ex:
+            _dbg_log(f"ACTIVATE | ERROR bringing window to front: {ex!r}")
             try:
                 page.update()
             except Exception:
@@ -501,11 +506,13 @@ def main(page: ft.Page) -> None:
         except PDFPasswordRequiredError:
             if doc is not None:
                 doc.close()
+            _dbg_log(f"OPEN  | password required for {path!r}")
             _enqueue_password_prompt(path)
             return False
         except PDFInvalidPasswordError:
             if doc is not None:
                 doc.close()
+            _dbg_log(f"OPEN  | invalid password for {path!r}")
             if path not in pending_password_paths:
                 pending_password_paths.insert(0, path)
             _show_next_password_dialog("Contraseña incorrecta")
@@ -513,6 +520,7 @@ def main(page: ft.Page) -> None:
         except Exception as ex:
             if doc is not None:
                 doc.close()
+            _dbg_log(f"OPEN  | ERROR opening {path!r}: {ex!r}")
             _show_error(f"Error abriendo {pdf_name}: {ex}")
             return False
         finally:
@@ -870,6 +878,7 @@ def main(page: ft.Page) -> None:
 
     def _on_window_event(e: ft.WindowEvent) -> None:
         if e.type == ft.WindowEventType.CLOSE:
+            _dbg_log("CLOSE | window closed by user")
             try:
                 server_sock.close()
             except Exception:

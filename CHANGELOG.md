@@ -1,12 +1,15 @@
 # Changelog
 
-## [0.1.16] - 2026-06-01
+## [0.1.16] - 2026-06-02
 
 ### Changed
 - **Liberación del modelo OCR por inactividad en el extractor**: la pestaña de extracción ahora descarga el modelo OCR (varios cientos de MB de RAM) ~12 s después de terminar una búsqueda, replicando el patrón de timer del visor. Antes el modelo quedaba cargado en memoria durante toda la sesión una vez usado. El timer se cancela al iniciar/reanudar una extracción (para no descargar el modelo a mitad del trabajo) y se reprograma al finalizar; la siguiente extracción recarga el modelo de forma perezosa.
+- **"Abrir con" abría ventana en blanco en Windows**: el instalador registraba el comando de apertura como `extraer_pdfs.exe "%1"`, pero el shell de Flutter consume los argumentos posicionales antes de que lleguen a Python (`sys.argv = ['']`). Se cambió a `--dart-entrypoint-args="%1"`, formato que Flutter sí reenvía al entrypoint Python. Ahora tanto el escenario sin instancia corriendo (abre el PDF directamente) como con instancia ya activa (reenvía por IPC) funcionan correctamente.
 
 ### Fixed
 - **`ZeroDivisionError: division by zero` durante el OCR del extractor**: algunos PDFs reportan *bounding boxes* de imágenes que caen (total o parcialmente) fuera del área de la página; al recortarlas, PyMuPDF generaba un *pixmap* de 0 px en una dimensión y OnnxTR fallaba al calcular la relación de aspecto (`h / w`). Ahora las regiones se recortan al área de la página y se descartan las imágenes degeneradas (0 px) antes de la inferencia.
+- **Registro de cierre de ventana en el log de diagnóstico**: se añade la línea `CLOSE | window closed by user` al cerrar la aplicación.
+- **Logs de diagnóstico ampliados**: se registran casos que antes fallaban en silencio: contraseña requerida o incorrecta al abrir un PDF, errores genéricos de apertura (PDF corrupto, permisos, etc.), errores de comunicación IPC entre instancias, resultado del reenvío IPC desde la instancia secundaria, y fallos al traer la ventana al frente.
 
 ## [0.1.15] - 2026-05-31
 
