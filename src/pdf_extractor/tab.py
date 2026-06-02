@@ -10,6 +10,8 @@ password is entered — so the initial run and the resume share one code path.
 """
 from __future__ import annotations
 
+import gc
+import threading
 from pathlib import Path
 from typing import Callable
 
@@ -25,6 +27,10 @@ from .engine import (
     Reporter,
 )
 from .model import collect_keywords, doc_kind_label
+
+# Seconds to wait after an extraction finishes before unloading the OCR model
+# (frees a few hundred MB of RAM when the extractor sits idle).
+_OCR_MODEL_RELEASE_DELAY = 12.0
 
 
 class PDFExtractionTab:
@@ -47,6 +53,9 @@ class PDFExtractionTab:
         # Extraction state for pause/resume (set when paused waiting for a password)
         self._extraction_state: dict | None = None
         self._is_extracting = False
+
+        # Idle timer that unloads the OCR model some seconds after a run ends.
+        self._ocr_model_timer: threading.Timer | None = None
 
         self._reporter = Reporter(
             log=self._log,
@@ -477,6 +486,7 @@ class PDFExtractionTab:
 
         self._is_extracting = True
         self._extraction_state = None
+        self._cancel_ocr_model_release()  # keep the model loaded while we run
 
         hint_pages_raw = self._hint_pages.value or ""
         ref_tokens = self._process_reference()
@@ -573,6 +583,7 @@ class PDFExtractionTab:
         state = self._extraction_state
         self._extraction_state = None
         self._is_extracting = True
+        self._cancel_ocr_model_release()  # keep the model loaded while we resume
         self._process_targets_from(
             state["file_idx"],
             state["ref_tokens"],
@@ -581,6 +592,31 @@ class PDFExtractionTab:
             state["hint_pages_raw"],
         )
 
+    # ── OCR model memory management ───────────────────────────────────────────
+
+    def _schedule_ocr_model_release(self) -> None:
+        """(Re)arm the idle timer that unloads the OCR model after a run."""
+        t = self._ocr_model_timer
+        if t is not None:
+            t.cancel()
+        self._ocr_model_timer = threading.Timer(
+            _OCR_MODEL_RELEASE_DELAY, self._release_ocr_model
+        )
+        self._ocr_model_timer.daemon = True
+        self._ocr_model_timer.start()
+
+    def _cancel_ocr_model_release(self) -> None:
+        """Stop a pending release — e.g. when a new extraction starts."""
+        t = self._ocr_model_timer
+        if t is not None:
+            t.cancel()
+            self._ocr_model_timer = None
+
+    def _release_ocr_model(self) -> None:
+        self._ocr_model_timer = None
+        self.processor.release_predictor()
+        gc.collect()
+
     def _finish_extraction(self, all_matches: list) -> None:
         """Save the collected matches (if any) and update the summary."""
         if not all_matches:
@@ -588,6 +624,7 @@ class PDFExtractionTab:
             self._run_btn.disabled = False
             self._is_extracting = False
             self.page_ref.update()
+            self._schedule_ocr_model_release()
             return
 
         out_path = engine.save_matches(
@@ -605,6 +642,7 @@ class PDFExtractionTab:
         self._is_extracting = False
         self._extraction_state = None
         self.page_ref.update()
+        self._schedule_ocr_model_release()
 
     def _open_preview(self, e=None) -> None:
         if not self.last_output_path:

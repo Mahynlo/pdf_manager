@@ -114,6 +114,12 @@ class OCRProcessor:
     def _run_predictor(self, img: np.ndarray) -> tuple[list[tuple[fitz.Rect, str, float]], float]:
         """ Regresa una lista de tuplas (rectángulo, texto, puntuación) para cada palabra detectada en la imagen, junto con el tiempo que tomó ejecutar el predictor.
         """
+        # A degenerate image (0-width/0-height) makes onnxtr's resize divide by
+        # zero (h / w). Skip inference and return no words.
+        h, w = img.shape[:2]
+        if h == 0 or w == 0:
+            return [], 0.0
+
         start = perf_counter()
         document = self.predictor([img])
         elapsed = perf_counter() - start
@@ -230,8 +236,10 @@ class OCRProcessor:
             bbox = info.get("bbox")
             if not bbox:
                 continue
-            rect = fitz.Rect(bbox)
-            if rect.width < 8 or rect.height < 8:
+            # Clip to the page so bboxes that fall (partly) outside it don't
+            # produce a degenerate pixmap later.
+            rect = fitz.Rect(bbox) & page.rect
+            if rect.is_empty or rect.width < 8 or rect.height < 8:
                 continue
             regions.append(rect)
 
@@ -265,6 +273,9 @@ class OCRProcessor:
                 clip=rect,
                 alpha=False,
             )
+            if pix.width == 0 or pix.height == 0:
+                del pix  # nothing to OCR in this region
+                continue
             img = self._pixmap_to_ndarray(pix)
             del pix  # free pixmap memory before inference
 

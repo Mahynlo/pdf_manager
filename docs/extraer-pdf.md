@@ -240,6 +240,28 @@ El `OCRProcessor` es la misma instancia que usa el visor de PDF. El extractor no
 | `"OCR"` | Página procesada con el modelo ONNX |
 | `"Híbrido"` | Mezcla de texto nativo y OCR |
 
+### Recorte de regiones de imagen
+
+Antes de ejecutar la inferencia, `OCRProcessor._image_regions` recorta el *bounding box* de cada imagen al área de la página (`fitz.Rect(bbox) & page.rect`) y descarta las regiones vacías o menores de 8 pt. Sin este recorte, algunos PDFs reportan bboxes que caen (total o parcialmente) **fuera** de la página; al generar el *pixmap* con `clip=rect`, PyMuPDF producía una imagen de **0 px** en una dimensión y OnnxTR fallaba con `ZeroDivisionError` al calcular la relación de aspecto (`h / w`). Como defensa adicional, `_ocr_on_regions` salta cualquier pixmap de `width == 0` o `height == 0`, y `_run_predictor` retorna sin palabras si recibe una imagen degenerada.
+
+### Manejo de memoria del modelo OCR
+
+El modelo OCR (varios cientos de MB en RAM) se gestiona con el **mismo patrón de timer de inactividad que el visor** (`pdf_viewer/_ocr_mixin.py`):
+
+```mermaid
+flowchart TD
+    RUN["_run_extraction() / _resume_extraction_sync()"] --> CANCEL["_cancel_ocr_model_release()\n(conserva el modelo mientras corre)"]
+    CANCEL --> SCAN["… escaneo de páginas …"]
+    SCAN --> FIN["_finish_extraction()"]
+    FIN --> SCHED["_schedule_ocr_model_release()\nthreading.Timer(_OCR_MODEL_RELEASE_DELAY ≈ 12 s)"]
+    SCHED -- "pasan ~12 s sin actividad" --> REL["_release_ocr_model()\nprocessor.release_predictor() + gc.collect()"]
+    SCHED -- "nueva extracción antes de 12 s" --> CANCEL
+```
+
+- **Carga perezosa:** el predictor se instancia la primera vez que una página realmente necesita OCR (propiedad `OCRProcessor.predictor`). Una extracción 100 % texto nativo nunca lo carga.
+- **Liberación por inactividad:** al terminar un run, `_finish_extraction` programa `_schedule_ocr_model_release`; si la pestaña queda inactiva ~12 s (`_OCR_MODEL_RELEASE_DELAY`), el `threading.Timer` (daemon) dispara `release_predictor()` + `gc.collect()` y se recupera la RAM.
+- **Cancelación durante un run:** `_run_extraction` y `_resume_extraction_sync` llaman a `_cancel_ocr_model_release()` para no descargar el modelo a mitad del trabajo. Extracciones consecutivas en menos de 12 s reutilizan el modelo cargado; tras la liberación, la siguiente lo recarga de forma perezosa.
+
 ---
 
 ## 7. Guardado del resultado
@@ -340,6 +362,7 @@ self.last_output_path: str | None     # Ruta del PDF generado en la última bús
 self._is_extracting: bool             # True mientras el scan está en curso
 self._extraction_state: dict | None   # Snapshot de pausa (ver §4); None si no pausado
 self._pending_password_file_idx: int | None  # Objetivo esperando contraseña (-1 = referencia)
+self._ocr_model_timer: threading.Timer | None  # Timer de liberación del modelo OCR por inactividad (ver §6)
 
 # Componentes reutilizados
 self.processor: OCRProcessor          # Motor OCR compartido (mismo que el visor)

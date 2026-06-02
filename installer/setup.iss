@@ -7,7 +7,7 @@
 ; MyAppVersion y MyAppSourceDir pueden sobreescribirse desde la linea de
 ; comandos con: ISCC.exe /DMyAppVersion=1.2.3 /DMyAppSourceDir=ruta ...
 #ifndef MyAppVersion
-  #define MyAppVersion   "0.1.15"
+  #define MyAppVersion   "0.1.16"
 #endif
 #define MyAppPublisher   "Flet"
 #define MyAppExeName     "extraer_pdfs.exe"
