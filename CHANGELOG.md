@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.18] - 2026-06-09
+
+### Added
+- **Rehacer anotaciones (Ctrl+Y / Ctrl+Shift+Z)**: complementa a Deshacer. Al deshacer una anotación, `AnnotationManager` guarda una instantánea de su geometría y estilo (`_snapshot_annot`) en una pila de rehacer; rehacer la recrea con `_recreate_annot`. La pila se invalida al crear una anotación nueva (`_push_history` la limpia), igual que un editor de texto. Nuevo botón **Rehacer** en la barra junto a Deshacer. Soporta resaltado/subrayado/tachado/garabato (quads), rectángulo/elipse (rect), línea (con extremos) y tinta (trazos).
+- **Rotar 90° a la izquierda (antihoraria)**: `_rotate` acepta ahora un `delta` (±90) y `_rotate_ccw` rota en sentido antihorario. Ambas direcciones están en el menú «Más opciones».
+- **Eliminar anotación seleccionada con la tecla Supr (Delete)**: además del menú contextual.
+
+### Changed
+- **Barra de herramientas del visor reorganizada**: el menú «Más opciones» (⋮) pasa a la izquierda y agrupa las acciones poco frecuentes (guardar, imprimir, rotar en ambos sentidos, corregir orientación, insertar/duplicar/eliminar/mover página, cerrar pestaña). Los modos de vista (continuo/simple/doble) quedan en un grupo segmentado al centro. El botón del panel lateral se mueve al extremo derecho. La barra de anotaciones pega el menú de color junto a las herramientas en vez de empujarlo al borde.
+
 ## [0.1.17] - 2026-06-08
 
 ### Fixed

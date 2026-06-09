@@ -111,6 +111,8 @@ classDiagram
         +_apply_zoom()
         +_zoom_in() / _zoom_out()
         +_fit_width() / _fit_page()
+        +_rotate(delta=90) / _rotate_ccw()
+        +_undo() / _redo()
     }
 
     class _GestureMixin {
@@ -181,11 +183,13 @@ classDiagram
         +tool: Tool
         +highlight_color: tuple
         +_history: list
+        +_redo_stack: list
         +begin(x, y)
         +move(x, y)
         +commit(doc, pn)
         +delete_annot(doc, pn, xref)
         +undo_last(doc)
+        +redo_last(doc)
     }
 
     class PageRenderCache {
@@ -313,7 +317,7 @@ El marco depende de la **fuente** del texto (lo elige `_reading_frames(pn)`):
 | **Nativo** (`rawdict`/bloques) | espacio SIN rotar | el texto se autoría horizontal en mediabox; al rotar la hoja se ve vertical en pantalla |
 | **OCR** (detecciones) | **pantalla** | el OCR corre sobre la imagen MOSTRADA (ya derecha), así que sus cajas son horizontales en pantalla |
 
-Por eso un escaneo con `/Rotate 270` que se ve recto (OCR → marco pantalla) y una hoja nativa rotada 90° (nativo → marco sin rotar) necesitan marcos **opuestos**. Identidad si `rotation == 0`. Al rotar con el botón «Rotar 90°» (`_rotate`) se invalida la caché de render de la página (si no, se mostraría el PNG cacheado sin rotar) y sus cachés de texto/OCR.
+Por eso un escaneo con `/Rotate 270` que se ve recto (OCR → marco pantalla) y una hoja nativa rotada 90° (nativo → marco sin rotar) necesitan marcos **opuestos**. Identidad si `rotation == 0`. Al rotar desde el menú «Más opciones» («Rotar 90° a la derecha/izquierda», `_rotate(delta=±90)` / `_rotate_ccw`) se invalida la caché de render de la página (si no, se mostraría el PNG cacheado sin rotar) y sus cachés de texto/OCR.
 
 > **Coste.** El arrastre de selección es camino caliente. `_reading_frames(pn)` devuelve un booleano `rotated_read`; cuando el marco de lectura es la pantalla (rotation==0 u OCR — el caso común), las transformaciones por palabra se **omiten** por completo (sin multiplicaciones de matriz) → mismo coste que antes de la lógica de rotación.
 
@@ -564,15 +568,33 @@ flowchart TD
     style SEL fill:#E8EAF6,stroke:#3949AB
 ```
 
-### Deshacer (Ctrl+Z)
+### Deshacer / Rehacer (Ctrl+Z · Ctrl+Y / Ctrl+Shift+Z)
+
+`AnnotationManager` mantiene dos pilas: `_history` (anotaciones creadas, en orden de inserción) y `_redo_stack` (instantáneas de las deshechas, listas para recrearse).
 
 ```
-_undo()
-  ├─ pn, xref = _annot._history[-1]
+_undo()  →  AnnotationManager.undo_last(doc)
+  ├─ pn, xref = _history[-1]
+  ├─ snap = _snapshot_annot(annot)   # serializa geometría + estilo a un dict
+  ├─ _redo_stack.append(snap)
   ├─ page.delete_annot(annot)
   ├─ _history.pop()
   └─ _refresh_page(pn)
+
+_redo()  →  AnnotationManager.redo_last(doc)
+  ├─ snap = _redo_stack.pop()
+  ├─ annot = _recreate_annot(page, snap)   # vuelve a crear la anotación
+  ├─ _history.append((pn, annot.xref))      # NO limpia _redo_stack
+  └─ _refresh_page(pn)
 ```
+
+> **Invalidación de la pila de rehacer.** Toda anotación nueva se registra vía
+> `_push_history(pn, xref)`, que añade a `_history` **y limpia `_redo_stack`** —
+> igual que un editor de texto: crear algo nuevo descarta el futuro rehacible.
+> `redo_last` re-añade a `_history` directamente (sin pasar por `_push_history`)
+> para no borrarse a sí misma.
+
+`_snapshot_annot` guarda `type`, `rect`, colores (`stroke`/`fill`), `width`, `opacity` y, según el tipo, los `quads` (markup: resaltado/subrayado/tachado/garabato), `points` + `line_ends` (línea) o `strokes` (tinta). `_recreate_annot` reconstruye desde ese dict; los markup rechazan `set_border`, así que sólo se aplica a las formas. Si la página o el tipo no se pueden recrear, devuelve `None` y el rehacer se aborta sin error.
 
 ---
 
