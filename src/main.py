@@ -764,7 +764,13 @@ def main(page: ft.Page) -> None:
             _disarm_zoom_scroll()
             k = (e.key or "").upper()
             if k == "Z":
-                v._undo(); return
+                if getattr(e, "shift", False):
+                    v._redo()      # Ctrl+Shift+Z
+                else:
+                    v._undo()      # Ctrl+Z
+                return
+            if k == "Y":
+                v._redo(); return  # Ctrl+Y
             if k == "A":
                 v._select_all_page_text(); return
             if k == "S":
@@ -788,6 +794,8 @@ def main(page: ft.Page) -> None:
             case "Escape":
                 v._deselect_annot()
                 v._hide_text_sel_bar()
+            case "Delete":
+                v._delete_selected()
             case "Arrow Left" | "Arrow Up" | "Page Up":
                 v._prev()
             case "Arrow Right" | "Arrow Down" | "Page Down":

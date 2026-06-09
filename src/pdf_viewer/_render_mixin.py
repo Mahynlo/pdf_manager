@@ -1367,11 +1367,11 @@ class _RenderMixin:
 
     # ── other toolbar actions ─────────────────────────────────────────────────
 
-    def _rotate(self, e=None) -> None:
+    def _rotate(self, e=None, delta: int = 90) -> None:
         pn = self.current_page
         with self._doc_lock:
             p = self.doc[pn]
-            p.set_rotation((p.rotation + 90) % 360)
+            p.set_rotation((p.rotation + delta) % 360)
         # La rotación cambia tanto el render como las coordenadas de la página.
         # _rebuild_scroll_content (ruta rápida, mismo nº de páginas) reutiliza los
         # controles y NO limpia la caché de render: hay que invalidar la página o
@@ -1392,6 +1392,10 @@ class _RenderMixin:
         except Exception:
             pass
         self.page_ref.update()
+
+    def _rotate_ccw(self, e=None) -> None:
+        """Rotar la página actual 90° en sentido antihorario."""
+        self._rotate(delta=-90)
 
     def _save(self, e=None) -> None:
         self._save_picker.save_file(
@@ -1422,3 +1426,11 @@ class _RenderMixin:
             self._refresh_page(pn)
         else:
             self._show_snack("Nada que deshacer")
+
+    def _redo(self, e=None) -> None:
+        with self._doc_lock:
+            pn = self._annot.redo_last(self.doc)
+        if pn is not None:
+            self._refresh_page(pn)
+        else:
+            self._show_snack("Nada que rehacer")

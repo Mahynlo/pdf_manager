@@ -341,88 +341,109 @@ class PDFViewerTab(
             ],
         )
 
+        # ── modo de vista como grupo segmentado (centro) ─────────────────────
+        view_mode_group = ft.Container(
+            ft.Row(
+                [self._mode_btn_continuous, self._mode_btn_single, self._mode_btn_double],
+                spacing=2, tight=True,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            bgcolor="#E4E4E4",
+            border_radius=8,
+            padding=ft.padding.all(2),
+        )
+
+        # ── menú de desbordamiento (acciones poco frecuentes) ────────────────
+        more_menu = ft.PopupMenuButton(
+            icon=ft.Icons.MORE_VERT,
+            tooltip="Más opciones",
+            items=[
+                ft.PopupMenuItem(
+                    text="Guardar PDF",
+                    icon=ft.Icons.SAVE_ALT,
+                    on_click=self._save,
+                ),
+                ft.PopupMenuItem(
+                    text="Imprimir documento",
+                    icon=ft.Icons.PRINT,
+                    on_click=self._print_pdf,
+                ),
+                ft.PopupMenuItem(),
+                ft.PopupMenuItem(
+                    text="Rotar 90° a la derecha",
+                    icon=ft.Icons.ROTATE_RIGHT,
+                    on_click=self._rotate,
+                ),
+                ft.PopupMenuItem(
+                    text="Rotar 90° a la izquierda",
+                    icon=ft.Icons.ROTATE_LEFT,
+                    on_click=self._rotate_ccw,
+                ),
+                ft.PopupMenuItem(
+                    text="Corregir orientación del escaneo",
+                    icon=ft.Icons.SCREEN_ROTATION,
+                    on_click=self._fix_orientation,
+                ),
+                ft.PopupMenuItem(),
+                ft.PopupMenuItem(
+                    text="Insertar página en blanco",
+                    icon=ft.Icons.NOTE_ADD_OUTLINED,
+                    on_click=self._insert_blank_page,
+                ),
+                ft.PopupMenuItem(
+                    text="Duplicar página actual",
+                    icon=ft.Icons.COPY_ALL_OUTLINED,
+                    on_click=self._duplicate_page,
+                ),
+                ft.PopupMenuItem(
+                    text="Eliminar página actual",
+                    icon=ft.Icons.DELETE_OUTLINE,
+                    on_click=self._delete_page,
+                ),
+                ft.PopupMenuItem(),
+                ft.PopupMenuItem(
+                    text="Mover página arriba",
+                    icon=ft.Icons.ARROW_UPWARD,
+                    on_click=self._move_page_up,
+                ),
+                ft.PopupMenuItem(
+                    text="Mover página abajo",
+                    icon=ft.Icons.ARROW_DOWNWARD,
+                    on_click=self._move_page_down,
+                ),
+                ft.PopupMenuItem(),
+                ft.PopupMenuItem(
+                    text="Cerrar pestaña",
+                    icon=ft.Icons.CLOSE,
+                    on_click=lambda e: self.on_close(self),
+                ),
+            ],
+        )
+
         nav_toolbar = ft.Container(
             ft.Row(
                 [
-                    self._make_sidebar_toggle_btn(),
+                    # ── izquierda · más opciones + navegación + zoom + vista ──
+                    more_menu,
                     _vdivider(),
                     self.prev_btn, self.page_input, self.total_label, self.next_btn,
                     _vdivider(),
                     self.zoom_out_btn, self.zoom_label, self.zoom_in_btn, zoom_menu,
                     _vdivider(),
-                    self._mode_btn_continuous, self._mode_btn_single, self._mode_btn_double,
+                    view_mode_group,
                     _vdivider(),
-                    ft.IconButton(ft.Icons.ROTATE_RIGHT, tooltip="Rotar 90°", on_click=self._rotate),
-                    _vdivider(),
-                    ft.IconButton(ft.Icons.UNDO,         tooltip="Deshacer última anotación (Ctrl+Z)", on_click=self._undo),
-                    ft.IconButton(ft.Icons.SAVE_ALT,     tooltip="Guardar PDF con anotaciones", on_click=self._save),
-                    ft.IconButton(ft.Icons.PRINT,        tooltip="Imprimir documento", on_click=self._print_pdf),
+                    # ── historial + OCR/IA + apariencia (pegados al grupo) ────
+                    ft.IconButton(ft.Icons.UNDO, tooltip="Deshacer última anotación (Ctrl+Z)", on_click=self._undo),
+                    ft.IconButton(ft.Icons.REDO, tooltip="Rehacer (Ctrl+Y)", on_click=self._redo),
                     _vdivider(),
                     ft.IconButton(ft.Icons.DOCUMENT_SCANNER, tooltip="Ejecutar OCR en la página actual", on_click=self._run_ocr),
-                    ft.IconButton(ft.Icons.SCREEN_ROTATION, tooltip="Corregir orientación del escaneo (automático)", on_click=self._fix_orientation),
                     self._make_ocr_toggle_btn(),
                     self._make_agent_toolbar_btn(),
                     _vdivider(),
                     self._make_night_mode_btn(),
-                    ft.PopupMenuButton(
-                        icon=ft.Icons.MORE_VERT,
-                        tooltip="Más opciones",
-                        items=[
-                            ft.PopupMenuItem(
-                                text="Guardar PDF",
-                                icon=ft.Icons.SAVE_ALT,
-                                on_click=self._save,
-                            ),
-                            ft.PopupMenuItem(
-                                text="Cerrar pestaña",
-                                icon=ft.Icons.CLOSE,
-                                on_click=lambda e: self.on_close(self),
-                            ),
-                            ft.PopupMenuItem(),
-                            ft.PopupMenuItem(
-                                text="Ajustar al ancho",
-                                icon=ft.Icons.FIT_SCREEN,
-                                on_click=self._fit_width,
-                            ),
-                            ft.PopupMenuItem(
-                                text="Ajustar a la página",
-                                icon=ft.Icons.FULLSCREEN_OUTLINED,
-                                on_click=self._fit_page,
-                            ),
-                            ft.PopupMenuItem(
-                                text="Tamaño real (100%)",
-                                icon=ft.Icons.CROP_FREE,
-                                on_click=lambda e: self._set_zoom(1.0),
-                            ),
-                            ft.PopupMenuItem(),
-                            ft.PopupMenuItem(
-                                text="Insertar página en blanco",
-                                icon=ft.Icons.NOTE_ADD_OUTLINED,
-                                on_click=self._insert_blank_page,
-                            ),
-                            ft.PopupMenuItem(
-                                text="Duplicar página actual",
-                                icon=ft.Icons.COPY_ALL_OUTLINED,
-                                on_click=self._duplicate_page,
-                            ),
-                            ft.PopupMenuItem(
-                                text="Eliminar página actual",
-                                icon=ft.Icons.DELETE_OUTLINE,
-                                on_click=self._delete_page,
-                            ),
-                            ft.PopupMenuItem(),
-                            ft.PopupMenuItem(
-                                text="Mover página arriba",
-                                icon=ft.Icons.ARROW_UPWARD,
-                                on_click=self._move_page_up,
-                            ),
-                            ft.PopupMenuItem(
-                                text="Mover página abajo",
-                                icon=ft.Icons.ARROW_DOWNWARD,
-                                on_click=self._move_page_down,
-                            ),
-                        ],
-                    ),
+                    # ── separador flexible · solo el panel queda al extremo ───
+                    ft.Container(expand=True),
+                    self._make_sidebar_toggle_btn(),
                 ],
                 spacing=4,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -461,10 +482,9 @@ class PDFViewerTab(
         annot_toolbar = ft.Container(
             ft.Row([
                 ft.Row(tool_btns, spacing=2, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                ft.Container(expand=True), # Spacer to push color menu to the right
                 _vdivider(),
-                color_menu
-            ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                color_menu,
+            ], spacing=2, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             padding=ft.padding.symmetric(horizontal=8, vertical=2),
             bgcolor=_ANNOT_BG,
             border=ft.border.only(bottom=ft.BorderSide(1, _DIVIDER_CLR)),

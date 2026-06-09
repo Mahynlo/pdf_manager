@@ -414,12 +414,20 @@ class AnnotationManager:
         self.last_select_rect: fitz.Rect | None = None
         # History for undo: list of (page_num, annot_xref) in insertion order.
         self._history: list[tuple[int, int]] = []
+        # Redo stack: snapshots of annotations removed by undo, recreated on redo.
+        # A new annotation invalidates it (see _push_history).
+        self._redo_stack: list[dict] = []
         # Visual (unrotated) rect per annotation xref.
         self._visual_rects: dict[int, fitz.Rect] = {}
         # Rotation in degrees per xref.
         self._rotations: dict[int, float] = {}
 
     # ── internal helpers ────────────────────────────────────────────────────────
+
+    def _push_history(self, page_num: int, xref: int) -> None:
+        """Record a newly created annotation and invalidate the redo stack."""
+        self._history.append((page_num, xref))
+        self._redo_stack.clear()
 
     def _remap_xref(self, page_num: int, old_xref: int, new_xref: int) -> None:
         """Update the history entry for (page_num, old_xref) to new_xref in-place."""
@@ -515,7 +523,7 @@ class AnnotationManager:
                 annot = page.add_strikeout_annot(rects)
                 annot.set_colors(stroke=STROKE_COLOR[Tool.STRIKEOUT])
             annot.update()
-            self._history.append((page_num, annot.xref))
+            self._push_history(page_num, annot.xref)
             return True, None
 
         # ── shape tools ──────────────────────────────────────────────────────
@@ -524,7 +532,7 @@ class AnnotationManager:
             annot.set_colors(stroke=STROKE_COLOR[Tool.RECT])
             annot.set_border(width=2)
             annot.update()
-            self._history.append((page_num, annot.xref))
+            self._push_history(page_num, annot.xref)
             return True, None
 
         if self.tool == Tool.CIRCLE:
@@ -532,7 +540,7 @@ class AnnotationManager:
             annot.set_colors(stroke=STROKE_COLOR[Tool.CIRCLE])
             annot.set_border(width=2)
             annot.update()
-            self._history.append((page_num, annot.xref))
+            self._push_history(page_num, annot.xref)
             return True, None
 
         if self.tool == Tool.LINE:
@@ -546,7 +554,7 @@ class AnnotationManager:
             annot.set_colors(stroke=STROKE_COLOR[Tool.LINE])
             annot.set_border(width=2)
             annot.update()
-            self._history.append((page_num, annot.xref))
+            self._push_history(page_num, annot.xref)
             return True, None
 
         if self.tool == Tool.ARROW:
@@ -564,7 +572,7 @@ class AnnotationManager:
             except Exception:
                 pass
             annot.update()
-            self._history.append((page_num, annot.xref))
+            self._push_history(page_num, annot.xref)
             return True, None
 
         return False, None
@@ -592,13 +600,16 @@ class AnnotationManager:
         annot.set_colors(stroke=STROKE_COLOR[Tool.INK])
         annot.set_border(width=2)
         annot.update()
-        self._history.append((page_num, annot.xref))
+        self._push_history(page_num, annot.xref)
         return True
 
     # ── undo ─────────────────────────────────────────────────────────────────────
 
     def undo_last(self, doc: fitz.Document) -> int | None:
         """Remove the most recently added annotation (any page).
+
+        Captures a snapshot of the annotation before deleting so it can be
+        recreated with :meth:`redo_last`.
 
         Returns the page number it was on, or None if nothing to undo.
         """
@@ -608,11 +619,155 @@ class AnnotationManager:
         page = doc[page_num]
         for annot in page.annots():
             if annot.xref == xref:
+                snap = self._snapshot_annot(annot)
+                if snap is not None:
+                    snap["page_num"] = page_num
+                    self._redo_stack.append(snap)
                 page.delete_annot(annot)
                 self._history.pop()
                 return page_num
         self._history.pop()  # xref gone already; clean up history
         return page_num
+
+    # ── redo ───────────────────────────────────────────────────────────────────
+
+    def redo_last(self, doc: fitz.Document) -> int | None:
+        """Recreate the annotation most recently removed by :meth:`undo_last`.
+
+        Returns the page number it was recreated on, or None if nothing to redo.
+        """
+        if not self._redo_stack:
+            return None
+        snap = self._redo_stack.pop()
+        page_num = snap.get("page_num", 0)
+        try:
+            page = doc[page_num]
+        except Exception:
+            return None
+        annot = self._recreate_annot(page, snap)
+        if annot is None:
+            return None
+        # Re-add directly to history (do NOT clear the redo stack here).
+        self._history.append((page_num, annot.xref))
+        return page_num
+
+    @staticmethod
+    def _snapshot_annot(annot: fitz.Annot) -> dict | None:
+        """Serialise an annotation's geometry and style into a plain dict."""
+        try:
+            atype = annot.type[1]
+        except Exception:
+            return None
+        data: dict = {"type": atype, "rect": tuple(annot.rect)}
+        try:
+            colors = annot.colors or {}
+            data["stroke"] = colors.get("stroke")
+            data["fill"]   = colors.get("fill")
+        except Exception:
+            data["stroke"] = data["fill"] = None
+        try:
+            data["width"] = (annot.border or {}).get("width", 2) or 2
+        except Exception:
+            data["width"] = 2
+        try:
+            data["opacity"] = annot.opacity
+        except Exception:
+            data["opacity"] = None
+
+        if atype in ("Highlight", "Underline", "StrikeOut", "Squiggly"):
+            raw = annot.vertices or []
+            pts = []
+            for p in raw:
+                try:
+                    pts.append(fitz.Point(float(p[0]), float(p[1])))
+                except (TypeError, IndexError):
+                    pts.append(fitz.Point(float(p.x), float(p.y)))
+            quads = [
+                fitz.Quad(pts[i], pts[i + 1], pts[i + 2], pts[i + 3])
+                for i in range(0, len(pts) - 3, 4)
+            ]
+            data["quads"] = quads or None
+        elif atype == "Line":
+            raw = annot.vertices or []
+            data["points"] = [tuple(p) for p in raw] if raw else None
+            try:
+                le = annot.line_ends
+                data["line_ends"] = (int(le[0]), int(le[1])) if le else (0, 0)
+            except Exception:
+                data["line_ends"] = (0, 0)
+        elif atype == "Ink":
+            strokes = _ink_verts_from_annot(annot)
+            data["strokes"] = (
+                [[tuple(p) for p in s] for s in strokes] if strokes else None
+            )
+        # Square / Circle are fully described by rect.
+        return data
+
+    @staticmethod
+    def _recreate_annot(page: fitz.Page, data: dict) -> fitz.Annot | None:
+        """Rebuild an annotation from a :meth:`_snapshot_annot` dict."""
+        atype = data.get("type")
+        try:
+            if atype == "Highlight":
+                if not data.get("quads"):
+                    return None
+                annot = page.add_highlight_annot(data["quads"])
+            elif atype == "Underline":
+                if not data.get("quads"):
+                    return None
+                annot = page.add_underline_annot(data["quads"])
+            elif atype == "StrikeOut":
+                if not data.get("quads"):
+                    return None
+                annot = page.add_strikeout_annot(data["quads"])
+            elif atype == "Squiggly":
+                if not data.get("quads"):
+                    return None
+                annot = page.add_squiggly_annot(data["quads"])
+            elif atype == "Square":
+                annot = page.add_rect_annot(fitz.Rect(data["rect"]))
+            elif atype == "Circle":
+                annot = page.add_circle_annot(fitz.Rect(data["rect"]))
+            elif atype == "Line":
+                pts = data.get("points")
+                if not pts or len(pts) < 2:
+                    return None
+                annot = page.add_line_annot(fitz.Point(pts[0]), fitz.Point(pts[1]))
+                le = data.get("line_ends", (0, 0))
+                if le != (0, 0):
+                    try:
+                        annot.set_line_ends(*le)
+                    except Exception:
+                        pass
+            elif atype == "Ink":
+                strokes = data.get("strokes")
+                if not strokes:
+                    return None
+                annot = page.add_ink_annot(strokes)
+            else:
+                return None
+        except Exception:
+            return None
+
+        stroke, fill = data.get("stroke"), data.get("fill")
+        if stroke is not None or fill is not None:
+            try:
+                annot.set_colors(stroke=stroke, fill=fill)
+            except Exception:
+                pass
+        # Markup annots (Highlight/Underline/StrikeOut/Squiggly) reject set_border.
+        if atype not in ("Highlight", "Underline", "StrikeOut", "Squiggly"):
+            try:
+                annot.set_border(width=data.get("width", 2))
+            except Exception:
+                pass
+        if data.get("opacity") is not None:
+            try:
+                annot.set_opacity(data["opacity"])
+            except Exception:
+                pass
+        annot.update()
+        return annot
 
     def undo(self, doc: fitz.Document, page_num: int | None = None) -> bool:
         """Compatibility wrapper used by viewer code."""
@@ -1172,6 +1327,6 @@ class AnnotationManager:
             return False
 
         annot.update()
-        self._history.append((page_num, annot.xref))
+        self._push_history(page_num, annot.xref)
         self.last_rect = None
         return True
