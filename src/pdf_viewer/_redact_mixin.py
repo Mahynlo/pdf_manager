@@ -399,11 +399,18 @@ class _RedactMixin:
             for pn in range(len(self.doc)):
                 page = self.doc[pn]
                 for r in self._search_phrase(page, term, case_sensitive):
+                    # search_for/get_text devuelven coords SIN rotar; el label se
+                    # extrae en ese mismo espacio.
                     try:
                         label = page.get_textbox(r).strip()[:80]
                     except Exception:
                         label = term
-                    matches.append((pn, r, label or term))
+                    # Almacenar SIEMPRE en espacio de pantalla (rotado), igual que
+                    # las detecciones OCR, para que coincida con la imagen mostrada
+                    # y con la vista previa. _apply_redaction des-rota al escribir.
+                    # rotation_matrix es identidad si la página no está rotada.
+                    r_screen = fitz.Rect(r) * page.rotation_matrix
+                    matches.append((pn, r_screen, label or term))
         if self._redact_incl_ocr is not None and self._redact_incl_ocr.value:
             for pn, result in self._ocr_by_page.items():
                 for rect, label in self._search_phrase_in_ocr(
@@ -731,10 +738,18 @@ class _RedactMixin:
                     pass
 
             for pn, rect, _ in self._redact_matches:
-                r = fitz.Rect(rect.x0, rect.y0 - 1,
-                              rect.x1, rect.y1 + 1)
+                page = self.doc[pn]
+                # Las coincidencias están en espacio de PANTALLA (rotado, el de
+                # la imagen renderizada). add_redact_annot opera en el espacio
+                # SIN rotar de la página (mediabox), así que en páginas rotadas
+                # (p. ej. escaneos con /Rotate 90/270) hay que des-rotar el rect
+                # o la censura aparece transpuesta. derotation_matrix es la
+                # identidad cuando rotation == 0, así que es seguro siempre.
+                r = (fitz.Rect(rect.x0, rect.y0 - 1,
+                               rect.x1, rect.y1 + 1)
+                     * page.derotation_matrix)
                 try:
-                    self.doc[pn].add_redact_annot(
+                    page.add_redact_annot(
                         r, fill=fill, cross_out=False,
                     )
                     affected_pages.add(pn)
@@ -765,8 +780,10 @@ class _RedactMixin:
                 by_page = [rect for _pn, rect, _ in self._redact_matches
                            if _pn == pn]
                 for rect in by_page:
-                    r = fitz.Rect(rect.x0 - 1, rect.y0 - 2,
-                                  rect.x1 + 1, rect.y1 + 2)
+                    # mismo espacio sin rotar que add_redact_annot (ver arriba)
+                    r = (fitz.Rect(rect.x0 - 1, rect.y0 - 2,
+                                   rect.x1 + 1, rect.y1 + 2)
+                         * page.derotation_matrix)
                     try:
                         page.draw_rect(r, color=None, fill=fill, width=0)
                     except Exception:

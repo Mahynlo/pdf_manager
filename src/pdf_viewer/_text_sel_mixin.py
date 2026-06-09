@@ -8,13 +8,13 @@ from collections import defaultdict
 import flet as ft
 import fitz
 
-from .annotations import Tool
+from .annotations import Tool, _line_merged_rects
 from .renderer import BASE_SCALE
 
 
 # ── column-aware reading order ────────────────────────────────────────────────
 
-def _sort_words_column_aware(words: list[tuple], page_width: float) -> list[tuple]:
+def _sort_words_column_aware(words: list[tuple], page_width: float, pos=None) -> list[tuple]:
     """Sort words in column-aware reading order.
 
     Detects multi-column layouts by finding significant gaps in the horizontal
@@ -22,14 +22,22 @@ def _sort_words_column_aware(words: list[tuple], page_width: float) -> list[tupl
     preventing cross-column "bleeding" during flow selection.
 
     Falls back to simple row-band sort for single-column pages.
+
+    ``pos`` mapea el rect almacenado (en pantalla) al rect a usar para el ORDEN
+    de lectura. En páginas rotadas (/Rotate 90/270) el texto se ve vertical en
+    pantalla pero es horizontal en el espacio SIN rotar; pasando ``pos`` =
+    des-rotación, el orden de lectura (renglones por Y, columnas por X) vuelve a
+    ser correcto. Por defecto (identidad) opera directamente sobre el rect.
     """
+    if pos is None:
+        pos = lambda r: r
     if len(words) < 4:
         result = list(words)
-        result.sort(key=lambda w: (round(w[0].y0 / 5) * 5, w[0].x0))
+        result.sort(key=lambda w: (round(pos(w[0]).y0 / 5) * 5, pos(w[0]).x0))
         return result
 
     # Compute x-centre for every word and sort them
-    x_centers = sorted((r.x0 + r.x1) / 2.0 for r, _ in words)
+    x_centers = sorted((pos(r).x0 + pos(r).x1) / 2.0 for r, *_ in words)
 
     # Find gaps larger than the threshold to support N columns
     threshold = max(30.0, page_width * 0.08)  # ~48 pt for A4
@@ -42,7 +50,7 @@ def _sort_words_column_aware(words: list[tuple], page_width: float) -> list[tupl
     result = list(words)
     if not splits:
         # Single column: row-band sort
-        result.sort(key=lambda w: (round(w[0].y0 / 5) * 5, w[0].x0))
+        result.sort(key=lambda w: (round(pos(w[0]).y0 / 5) * 5, pos(w[0]).x0))
     else:
         # Multi-column: find column index, then row-band, then x
         def get_col_index(x):
@@ -52,9 +60,9 @@ def _sort_words_column_aware(words: list[tuple], page_width: float) -> list[tupl
             return len(splits)
 
         result.sort(key=lambda w: (
-            get_col_index((w[0].x0 + w[0].x1) / 2.0),
-            round(w[0].y0 / 5) * 5,
-            w[0].x0,
+            get_col_index((pos(w[0]).x0 + pos(w[0]).x1) / 2.0),
+            round(pos(w[0]).y0 / 5) * 5,
+            pos(w[0]).x0,
         ))
 
     return result
@@ -83,27 +91,67 @@ class _TextSelMixin:
         if si > ei:
             si, ei = ei, si
 
-        return [(r, t) for r, t in words[si : ei + 1] if t.strip()]
+        return [w for w in words[si : ei + 1] if w[1].strip()]
+
+    # ── marco de lectura (orden de selección en páginas rotadas) ──────────────
+
+    def _reading_frames(self, pn: int) -> tuple[bool, "fitz.Matrix", "fitz.Matrix"]:
+        """Devuelve (usa_sin_rotar, des-rotación, rotación) para el ORDEN DE
+        LECTURA en una página rotada.
+
+        El marco donde el texto es horizontal depende de la FUENTE:
+        - Texto **nativo** (`rawdict`/bloques): horizontal en el espacio SIN
+          rotar (mediabox). En una página rotada hay que des-rotar el rect de
+          pantalla para ordenar/agrupar, y volver a rotar para dibujar.
+        - Detecciones **OCR**: el OCR corre sobre la imagen MOSTRADA (ya
+          derecha), así que sus cajas son horizontales en PANTALLA → identidad.
+        - Páginas sin rotar: identidad.
+
+        Por eso un escaneo con `/Rotate` que se ve derecho (OCR) y una hoja
+        nativa que el usuario rotó 90° necesitan marcos opuestos.
+        """
+        rot = self.doc[pn].rotation
+        if rot and not (
+            pn in self._ocr_by_page and self._ocr_by_page[pn].detections
+        ):
+            p = self.doc[pn]
+            return True, p.derotation_matrix, p.rotation_matrix
+        return False, fitz.Identity, fitz.Identity
 
     # ── word cache ────────────────────────────────────────────────────────────
 
     def _get_page_words(self, pn: int) -> list[tuple]:
-        """Return (fitz.Rect, str) list for every character/word on page *pn* (cached)."""
+        """Return (fitz.Rect, char, word_start) list for every character on page *pn* (cached).
+
+        ``word_start`` marca el primer carácter de cada palabra OCR. Las cajas
+        OCR de palabras adyacentes se tocan/solapan (hueco ~0), así que el
+        heurístico de espacios por hueco no las separa; con esta marca la
+        reconstrucción de texto inserta el espacio entre palabras OCR. El texto
+        nativo no la usa (``False``): sus caracteres tienen huecos reales y los
+        espacios se infieren por hueco como siempre.
+        """
         if pn in self._page_words:
             return self._page_words[pn]
-            
+
         words: list[tuple] = []
         with self._doc_lock:
-            page_width = self.doc[pn].rect.width
+            page = self.doc[pn]
+            page_width = page.rect.width
+            # rawdict/get_text devuelven coords SIN rotar; las detecciones OCR ya
+            # vienen en espacio de PANTALLA. Llevamos el texto nativo a pantalla
+            # con rotation_matrix (identidad si rotation == 0) para que TODO el
+            # subsistema (overlay de selección, hit-test contra clics que ya están
+            # en pantalla, orden de lectura) trabaje en un único espacio coherente.
+            rot_mat = page.rotation_matrix
             # Extract characters instead of words for finer selection
-            raw_dict = self.doc[pn].get_text("rawdict")
+            raw_dict = page.get_text("rawdict")
             for block in raw_dict.get("blocks", []):
                 for line in block.get("lines", []):
                     for span in line.get("spans", []):
                         for char in span.get("chars", []):
                             c = char.get("c", "")
                             if c.strip():  # ignore purely space chars, we reconstruct spaces via gaps
-                                words.append((fitz.Rect(char["bbox"]), c))
+                                words.append((fitz.Rect(char["bbox"]) * rot_mat, c, False))
 
         if pn in self._ocr_by_page:
             for det in self._ocr_by_page[pn].detections:
@@ -112,18 +160,32 @@ class _TextSelMixin:
                     rect = fitz.Rect(det.bbox)
                     x0, y0, x1, y1 = rect.x0, rect.y0, rect.x1, rect.y1
                     char_w = (x1 - x0) / max(1, len(text))
+                    first = True   # marca el inicio de la palabra OCR
                     for i, char in enumerate(text):
                         if char.strip():
                             char_rect = fitz.Rect(x0 + i * char_w, y0, x0 + (i + 1) * char_w, y1)
-                            words.append((char_rect, char))
-                    
-        # Column-aware reading order
-        words = _sort_words_column_aware(words, page_width)
+                            words.append((char_rect, char, first))
+                            first = False
+
+        # Orden de lectura: en páginas rotadas (/Rotate 90/270) el texto se ve
+        # vertical en pantalla pero es horizontal SIN rotar. Ordenamos en ese
+        # espacio (renglones por Y, columnas por X) des-rotando cada rect; los
+        # rects ALMACENADOS siguen en pantalla (overlay, hit-test, dibujo).
+        use_unrot, derot_read, _ = self._reading_frames(pn)
+        if use_unrot:
+            rot = self.doc[pn].rotation
+            # ancho de la página en el marco de lectura (sin rotar)
+            sort_w = self.doc[pn].rect.height if rot in (90, 270) else page_width
+            words = _sort_words_column_aware(
+                words, sort_w, pos=lambda r: fitz.Rect(r) * derot_read
+            )
+        else:
+            words = _sort_words_column_aware(words, page_width)
         self._page_words[pn] = words
 
         # Build y-band spatial index: {band: [(original_idx, rect), ...]}
         bands: dict[int, list[tuple[int, fitz.Rect]]] = {}
-        for idx, (r, _) in enumerate(words):
+        for idx, (r, *_rest) in enumerate(words):
             band = round(r.y0 / 5) * 5
             if band not in bands:
                 bands[band] = []
@@ -172,11 +234,11 @@ class _TextSelMixin:
             return best_i
 
         # O(n) fallback (band index not yet built)
-        for i, (r, _) in enumerate(words):
+        for i, (r, *_rest) in enumerate(words):
             if r.x0 <= px <= r.x1 and r.y0 <= py <= r.y1:
                 return i
         best_i, best_d = 0, float("inf")
-        for i, (r, _) in enumerate(words):
+        for i, (r, *_rest) in enumerate(words):
             cx, cy = (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2
             d = (px - cx) ** 2 + (py - cy) ** 2
             if d < best_d:
@@ -244,30 +306,41 @@ class _TextSelMixin:
                 continue
                 
             has_any_selection = True
+            # Agrupar por renglón en el marco donde el texto es horizontal
+            # (sin rotar para texto nativo rotado; pantalla para OCR / sin
+            # rotar). Cuando el marco de lectura es la pantalla (caso común:
+            # rotation==0 u OCR), ``rotated_read`` es False y se evitan TODAS las
+            # multiplicaciones de matriz → mismo coste que antes en el camino
+            # caliente del arrastre de selección.
+            rotated_read, derot_i, rot_i = self._reading_frames(i)
             line_bands: dict = defaultdict(list)
-            for word_rect, word_text in selected:
+            for word_rect, word_text, *_ws in selected:
                 if not word_text.strip():
                     continue
-                band = round(word_rect.y0 / 5) * 5
-                line_bands[band].append(word_rect)
+                ur = (fitz.Rect(word_rect) * derot_i) if rotated_read else word_rect
+                band = round(ur.y0 / 5) * 5
+                line_bands[band].append(ur)
 
             boxes: list[ft.Control] = []
             sel_rect: fitz.Rect | None = None
             for band in sorted(line_bands):
-                rects = line_bands[band]
-                x0 = min(r.x0 for r in rects)
-                x1 = max(r.x1 for r in rects)
-                y0 = min(r.y0 for r in rects)
-                y1 = max(r.y1 for r in rects)
+                urects = line_bands[band]
+                ux0 = min(r.x0 for r in urects)
+                ux1 = max(r.x1 for r in urects)
+                uy0 = min(r.y0 for r in urects)
+                uy1 = max(r.y1 for r in urects)
+                # un renglón → franja correcta en pantalla
+                sr = fitz.Rect(ux0, uy0, ux1, uy1)
+                if rotated_read:
+                    sr = sr * rot_i
                 boxes.append(ft.Container(
-                    left   = x0 * scale,
-                    top    = y0 * scale,
-                    width  = max(2.0, (x1 - x0) * scale),
-                    height = max(2.0, (y1 - y0) * scale),
+                    left   = sr.x0 * scale,
+                    top    = sr.y0 * scale,
+                    width  = max(2.0, sr.width * scale),
+                    height = max(2.0, sr.height * scale),
                     bgcolor="#5500AAFF",
                 ))
-                line_r = fitz.Rect(x0, y0, x1, y1)
-                sel_rect = line_r if sel_rect is None else sel_rect | line_r
+                sel_rect = sr if sel_rect is None else sel_rect | sr
 
             if i == epn:
                 self._text_sel_sel_rect = sel_rect
@@ -298,18 +371,25 @@ class _TextSelMixin:
                     try: layer.update()
                     except Exception: pass
 
-            last_r = None
-            for r, t in selected:
+            last_ur = None
+            for r, t, *ws in selected:
+                word_start = bool(ws and ws[0])   # primer char de palabra OCR
                 t = t.strip()
                 if not t: continue
-                if last_r is not None:
-                    if abs(r.y0 - last_r.y0) > 5: full_text_parts.append("\n")
+                ur = (fitz.Rect(r) * derot_i) if rotated_read else r  # renglones/espacios en marco de lectura
+                if last_ur is not None:
+                    if abs(ur.y0 - last_ur.y0) > 5:
+                        full_text_parts.append("\n")
+                    elif word_start:
+                        # frontera de palabra OCR conocida (las cajas se tocan →
+                        # el hueco no la delata); insertar espacio explícito.
+                        full_text_parts.append(" ")
                     else:
-                        char_height = last_r.y1 - last_r.y0
+                        char_height = last_ur.y1 - last_ur.y0
                         threshold = max(2.5, char_height * 0.15)
-                        if r.x0 - last_r.x1 > threshold: full_text_parts.append(" ")
+                        if ur.x0 - last_ur.x1 > threshold: full_text_parts.append(" ")
                 full_text_parts.append(t)
-                last_r = r
+                last_ur = ur
             if i != epn:
                 full_text_parts.append("\n")
 
@@ -430,9 +510,24 @@ class _TextSelMixin:
                 page_start_pt = spt if i == spn else (0, -9999)
                 page_end_pt   = ept if i == epn else (9999, 9999)
                 selected = self._words_in_sweep(words, page_start_pt, page_end_pt, pn=i)
-                rects = [r for r, t in selected if t.strip()]
+                rects = [r for r, t, *_ in selected if t.strip()]
                 if not rects: continue
-                if self._annot.apply_text_tool(self.doc, i, tool, rects=rects):
+                # rects en PANTALLA. La fusión por renglones debe hacerse en el
+                # marco donde el texto es HORIZONTAL (pantalla para OCR, sin rotar
+                # para nativo) o agruparía mal → bandas. Y hay que pasar QUADS
+                # (no rects) al markup: des-rotar un rect pierde la orientación y
+                # el subrayado/tachado caería en el borde equivocado; un quad
+                # conserva las 4 esquinas, así el subrayado queda DEBAJO del texto.
+                page = self.doc[i]
+                use_unrot, derot_read, _ = self._reading_frames(i)
+                read_rects = [fitz.Rect(r) * derot_read for r in rects]
+                merged = _line_merged_rects(read_rects)   # franjas en marco de lectura
+                # marco de lectura → espacio SIN rotar de la página (para add_*_annot)
+                read_to_page = fitz.Identity if use_unrot else page.derotation_matrix
+                quads = [m.quad * read_to_page for m in merged]
+                if self._annot.apply_text_tool(
+                    self.doc, i, tool, rects=quads, rects_are_final=True
+                ):
                     self._refresh_page(i)
 
     def _text_sel_send_to_redact(self, e=None) -> None:
@@ -526,12 +621,20 @@ class _TextSelMixin:
         if not words:
             return
         idx = self._nearest_word_index(words, pdf_pt, pn)
-        
+
+        # «Misma línea / hueco» se evalúa en el marco donde el texto es
+        # horizontal (sin rotar para nativo rotado; pantalla para OCR).
+        # Sin transformaciones cuando el marco ya es la pantalla (caso común).
+        rotated_read, derot, _ = self._reading_frames(pn)
+        def _u(j):
+            r = words[j][0]
+            return (fitz.Rect(r) * derot) if rotated_read else r
+
         # Expand left to find the start of the word
         si = idx
         while si > 0:
-            curr_r = words[si][0]
-            prev_r = words[si - 1][0]
+            curr_r = _u(si)
+            prev_r = _u(si - 1)
             # Same line and small gap (no space)
             char_height = prev_r.y1 - prev_r.y0
             threshold = max(2.5, char_height * 0.15)
@@ -539,12 +642,12 @@ class _TextSelMixin:
                 si -= 1
             else:
                 break
-                
+
         # Expand right to find the end of the word
         ei = idx
         while ei < len(words) - 1:
-            curr_r = words[ei][0]
-            next_r = words[ei + 1][0]
+            curr_r = _u(ei)
+            next_r = _u(ei + 1)
             # Same line and small gap (no space)
             char_height = curr_r.y1 - curr_r.y0
             threshold = max(2.5, char_height * 0.15)
@@ -574,7 +677,16 @@ class _TextSelMixin:
             blocks = self._page_blocks_cache[pn]
         else:
             with self._doc_lock:
-                blocks = self.doc[pn].get_text("blocks")
+                page = self.doc[pn]
+                raw_blocks = page.get_text("blocks")
+                rot_mat = page.rotation_matrix
+            # Almacenar los bloques en espacio de PANTALLA (igual que las palabras
+            # y el punto de clic) para que el hit-test funcione en páginas rotadas.
+            # rotation_matrix es identidad si rotation == 0.
+            blocks = []
+            for b in raw_blocks:
+                r = fitz.Rect(b[0], b[1], b[2], b[3]) * rot_mat
+                blocks.append((r.x0, r.y0, r.x1, r.y1, *b[4:]))
             self._page_blocks_cache[pn] = blocks
 
         # Find the block that contains the click point (type 0 = text block)
@@ -608,7 +720,7 @@ class _TextSelMixin:
         words = self._get_page_words(pn)
         si: int | None = None
         ei: int | None = None
-        for i, (r, _) in enumerate(words):
+        for i, (r, *_rest) in enumerate(words):
             if target_rect.intersects(r):
                 if si is None:
                     si = i

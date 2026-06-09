@@ -1368,11 +1368,23 @@ class _RenderMixin:
     # ── other toolbar actions ─────────────────────────────────────────────────
 
     def _rotate(self, e=None) -> None:
+        pn = self.current_page
         with self._doc_lock:
-            p = self.doc[self.current_page]
+            p = self.doc[pn]
             p.set_rotation((p.rotation + 90) % 360)
-        self._ocr_by_page.pop(self.current_page, None)
-        saved = self.current_page
+        # La rotación cambia tanto el render como las coordenadas de la página.
+        # _rebuild_scroll_content (ruta rápida, mismo nº de páginas) reutiliza los
+        # controles y NO limpia la caché de render: hay que invalidar la página o
+        # se vuelve a mostrar el PNG cacheado SIN rotar (la hoja gira pero el
+        # contenido no). También se descartan las cachés de texto/OCR/censura de
+        # la página, cuyas coordenadas quedaron obsoletas.
+        self._ocr_by_page.pop(pn, None)
+        self._page_words.pop(pn, None)
+        self._page_blocks_cache.pop(pn, None)
+        _rcache = getattr(self, "_render_cache", None)
+        if _rcache is not None:
+            _rcache.invalidate_page(pn)
+        saved = pn
         self._rebuild_scroll_content(scroll_back=False)
         self.page_ref.update()
         try:

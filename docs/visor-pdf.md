@@ -285,6 +285,42 @@ Conversión inversa (clic en pantalla → posición PDF):
   pdf_y = display_y / (zoom × BASE_SCALE)
 ```
 
+#### Páginas rotadas (`/Rotate` 90/180/270 — habitual en escaneos)
+
+Una página con `/Rotate` mezcla **dos sistemas de coordenadas** que hay que no confundir:
+
+| Espacio | Quién lo usa | Cómo se obtiene |
+|---------|--------------|-----------------|
+| **Pantalla / rotado** (`page.rect`) | la imagen renderizada (`get_pixmap` respeta `/Rotate`), las detecciones **OCR**, los overlays (`r.x0 × scale`), los clics (`display_to_pdf`) | — |
+| **Sin rotar** (`page.mediabox`) | `search_for`/`get_text`, `add_redact_annot`, `add_*_annot`, `get_image_info().bbox` | — |
+
+**Invariante del visor:** todo el estado interactivo (matches de censura, palabras de selección, geometría de overlays) se almacena en **espacio de pantalla**; sólo se convierte al escribir/leer geometría de PyMuPDF. Las matrices las deriva PyMuPDF de `page.rotation` y son la **identidad si `rotation == 0`** (sin coste para el caso común):
+
+```
+pantalla → sin rotar :  rect * page.derotation_matrix   (al escribir: censura, anotaciones)
+sin rotar → pantalla :  rect * page.rotation_matrix      (al recolectar: search_for, texto nativo, annot.rect del overlay)
+delta de pantalla → sin rotar : sólo la parte lineal de derotation_matrix (mover anotación)
+```
+
+Puntos de conversión: `_find_term_matches`/`_apply_redaction` (censura), `_get_page_words`/`_select_paragraph_at`/`_text_sel_apply` (selección), `AnnotationManager.commit`/`commit_ink`/`apply_text_tool`/`get_annot_at`/`move_annot`/`resize_annot`/`scale_annot` (anotaciones, vía helpers `_to_page_rect`/`_to_screen_rect`/`_to_page_delta`), y `processor._image_regions` (clip OCR). El recorte OCR se transforma a pantalla **antes** de `& page.rect` para cubrir toda la página rotada.
+
+**Orden de lectura en selección.** Los rects de palabra se almacenan en pantalla (overlay, hit-test, dibujo), pero en una página rotada el texto puede verse vertical y un barrido que asume renglones horizontales agruparía mal (bandas que cruzan columnas). Por eso el **orden de lectura, el barrido y la agrupación de líneas** (`_sort_words_column_aware` con `pos=`, y la agrupación en `_update_text_selection`/`_select_word_at`) se calculan en el marco donde el texto es horizontal, y la franja resultante se transforma a pantalla para dibujarla.
+
+El marco depende de la **fuente** del texto (lo elige `_reading_frames(pn)`):
+
+| Fuente | Texto horizontal en… | Por qué |
+|--------|----------------------|---------|
+| **Nativo** (`rawdict`/bloques) | espacio SIN rotar | el texto se autoría horizontal en mediabox; al rotar la hoja se ve vertical en pantalla |
+| **OCR** (detecciones) | **pantalla** | el OCR corre sobre la imagen MOSTRADA (ya derecha), así que sus cajas son horizontales en pantalla |
+
+Por eso un escaneo con `/Rotate 270` que se ve recto (OCR → marco pantalla) y una hoja nativa rotada 90° (nativo → marco sin rotar) necesitan marcos **opuestos**. Identidad si `rotation == 0`. Al rotar con el botón «Rotar 90°» (`_rotate`) se invalida la caché de render de la página (si no, se mostraría el PNG cacheado sin rotar) y sus cachés de texto/OCR.
+
+> **Coste.** El arrastre de selección es camino caliente. `_reading_frames(pn)` devuelve un booleano `rotated_read`; cuando el marco de lectura es la pantalla (rotation==0 u OCR — el caso común), las transformaciones por palabra se **omiten** por completo (sin multiplicaciones de matriz) → mismo coste que antes de la lógica de rotación.
+
+**Markup (resaltar/subrayar/tachar) en páginas rotadas.** La fusión por renglón (`_line_merged_rects`) debe hacerse en el marco de lectura (si no, en escaneos OCR el texto queda de lado en el espacio sin rotar y agrupa en bandas). Y al crear la anotación hay que pasar **quads orientados**, no rects: un `rect * matriz` da sólo el *bounding box* (pierde las esquinas) y `add_underline_annot`/`add_strikeout_annot` dibujarían la línea en el borde equivocado. `_text_sel_apply` fusiona en el marco de lectura, construye `rect.quad * read_to_page` (preserva las 4 esquinas → la línea va debajo/por el medio del texto) y los pasa a `apply_text_tool(..., rects_are_final=True)`, que entonces no re-fusiona ni des-rota. (`fitz.Quad(rect)` falla en PyMuPDF 1.27 → usar `rect.quad`.)
+
+**Escaneos torcidos sin `/Rotate`** (la página se ve de lado pero `rotation == 0`): no hay metadato que des-rotar. `OCRProcessor.detect_orientation()` puntúa las 4 orientaciones con los modelos OCR ya incluidos y el botón **«Corregir orientación»** aplica `page.set_rotation` a todas las páginas → se ven derechas y todo lo anterior (que ya respeta `/Rotate`) queda correcto. No se guarda hasta que el usuario guarde.
+
 ### Formato y almacenamiento según zoom
 
 | Zoom | Formato | Calidad | Ubicación | Motivo |
@@ -627,14 +663,19 @@ flowchart TD
 ```
 _get_page_words(pn):
   if pn in _page_words: return _page_words[pn]   # cacheado (ver poda abajo)
-  # Extracción a nivel CARÁCTER (no "words") para una selección más fina:
+  # Extracción a nivel CARÁCTER (no "words") para una selección más fina.
+  # Tupla (rect, char, word_start): word_start marca el primer carácter de cada
+  # palabra OCR — las cajas OCR de palabras adyacentes se tocan (hueco ~0) y el
+  # heurístico de espacios por hueco no las separaría; con la marca, la
+  # reconstrucción de texto inserta el espacio. El nativo usa word_start=False
+  # (sus huecos son reales).
   raw = page.get_text("rawdict")
-  words = [(fitz.Rect(char["bbox"]), char["c"])  # un (rect, char) por glifo
+  words = [(fitz.Rect(char["bbox"]), char["c"], False)  # nativo: sin marca
            for block in raw["blocks"] for line in block["lines"]
            for span in line["spans"] for char in span["chars"]
            if char["c"].strip()]
   if pn in _ocr_by_page:                          # + detecciones OCR como chars
-      words += _ocr_chars(_ocr_by_page[pn])
+      words += _ocr_chars(_ocr_by_page[pn])        # word_start=True en el 1er char
   words = _sort_words_column_aware(words)
   _page_words[pn] = words
   _page_word_bands[pn] = _build_y_band_index(words)   # índice espacial O(k)

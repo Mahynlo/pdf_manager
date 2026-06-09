@@ -359,6 +359,7 @@ class PDFViewerTab(
                     ft.IconButton(ft.Icons.PRINT,        tooltip="Imprimir documento", on_click=self._print_pdf),
                     _vdivider(),
                     ft.IconButton(ft.Icons.DOCUMENT_SCANNER, tooltip="Ejecutar OCR en la página actual", on_click=self._run_ocr),
+                    ft.IconButton(ft.Icons.SCREEN_ROTATION, tooltip="Corregir orientación del escaneo (automático)", on_click=self._fix_orientation),
                     self._make_ocr_toggle_btn(),
                     self._make_agent_toolbar_btn(),
                     _vdivider(),

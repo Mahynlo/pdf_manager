@@ -404,6 +404,72 @@ class _OCRMixin:
         self.page_ref.update()
         self._schedule_ocr_model_release()
 
+    # ── auto-corrección de orientación (escaneos sin /Rotate) ─────────────────
+
+    def _fix_orientation(self, e=None) -> None:
+        """Detecta y corrige la orientación de un escaneo cuyo contenido está
+        girado pero sin entrada ``/Rotate`` (la página se ve de lado).
+
+        Detecta sobre la página actual con los modelos OCR ya incluidos y, como
+        los escaneos suelen compartir orientación, aplica el mismo giro a TODAS
+        las páginas vía ``page.set_rotation`` — lo que hace que se muestren
+        derechas y que el resto de funciones (OCR, censura, anotaciones) trabajen
+        con coordenadas correctas. No se guarda hasta que el usuario guarde."""
+        self._cancel_ocr_model_release()
+        self._ensure_ocr_processor()
+        pn = self.current_page
+        self._show_snack("Detectando orientación…")
+        try:
+            self.page_ref.update()
+        except Exception:
+            pass
+
+        try:
+            with self._doc_lock:
+                angle = self._ocr_processor.detect_orientation(self.doc, pn)
+        except Exception as ex:
+            self._show_snack(f"No se pudo detectar la orientación: {ex}")
+            self._schedule_ocr_model_release()
+            return
+
+        if angle == 0:
+            self._show_snack("La orientación ya parece correcta")
+            self._schedule_ocr_model_release()
+            return
+
+        with self._doc_lock:
+            n = len(self.doc)
+            for p in range(n):
+                page = self.doc[p]
+                page.set_rotation((page.rotation + angle) % 360)
+
+        # Las coordenadas cacheadas (imágenes, OCR, texto, censura) quedaron
+        # obsoletas tras cambiar la rotación.
+        _rcache = getattr(self, "_render_cache", None)
+        if _rcache is not None:
+            _rcache.clear()
+        self._ocr_by_page = {}
+        self._page_words = {}
+        self._page_blocks_cache = {}
+        if hasattr(self, "_clear_redact_state"):
+            self._clear_redact_state()
+
+        saved = self.current_page
+        self._rebuild_scroll_content(scroll_back=False)
+        try:
+            self.viewer_scroll.scroll_to(
+                offset=self._page_cum_offsets[saved], duration=0,
+            )
+        except Exception:
+            pass
+        self._refresh_ocr_ui_for_page()
+        self.page_ref.update()
+        self._show_snack(
+            f"Orientación corregida (+{angle}°) en {n} página(s). "
+            f"Guarda el PDF para conservarlo."
+        )
+        self._schedule_ocr_model_release()
+
     # ── OCR UI refresh ────────────────────────────────────────────────────────
 
     @staticmethod

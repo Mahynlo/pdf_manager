@@ -178,7 +178,10 @@ class _AnnotMixin:
 
         self._selected = (pn, annot.xref)
 
-        pdf_rect = fitz.Rect(annot.rect)
+        # annot.rect está SIN rotar; el overlay se dibuja en pantalla (× scale).
+        # Convertir a pantalla para que coincida en páginas rotadas (identidad si
+        # rotation == 0).
+        pdf_rect = fitz.Rect(annot.rect) * self.doc[pn].rotation_matrix
         self._selected_rect        = pdf_rect
         self._selected_visual_rect = fitz.Rect(pdf_rect)
 
@@ -215,7 +218,8 @@ class _AnnotMixin:
                 with self._doc_lock:
                     page = self.doc[pn]
                     annot_rect = next(
-                        (fitz.Rect(a.rect) for a in page.annots() if a.xref == xref),
+                        (fitz.Rect(a.rect) * page.rotation_matrix
+                         for a in page.annots() if a.xref == xref),
                         None,
                     )
                 if annot_rect is None:

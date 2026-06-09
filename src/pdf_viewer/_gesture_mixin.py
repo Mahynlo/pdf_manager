@@ -279,7 +279,8 @@ class _GestureMixin:
                         atype = (annot.type[1]
                                  if isinstance(annot.type, (tuple, list)) and len(annot.type) > 1
                                  else "")
-                        cached_rect = fitz.Rect(annot.rect)
+                        # annot.rect sin rotar → pantalla (para overlay/drag).
+                        cached_rect = fitz.Rect(annot.rect) * page.rotation_matrix
                         found_annot = annot
                         is_markup = atype in ("Highlight", "Underline", "StrikeOut", "Squiggly")
 

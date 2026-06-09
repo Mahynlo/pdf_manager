@@ -146,6 +146,46 @@ class OCRProcessor:
         del page, document
         return words, elapsed
 
+    def detect_orientation(self, doc: fitz.Document, page_num: int) -> int:
+        """Detecta cuántos grados (0/90/180/270) hay que SUMAR a la rotación
+        actual de la página para que el texto quede derecho.
+
+        Pensado para escaneos cuyo *contenido* está girado pero sin entrada
+        ``/Rotate`` (PyMuPDF informa rotation==0 y la página se ve de lado).
+        Reutiliza los modelos OCR ya incluidos (sin descargas): renderiza la
+        página tal como se muestra y puntúa las 4 orientaciones por la suma de
+        confianzas de las palabras reconocidas; la orientación correcta produce
+        palabras reales con alta confianza. Devuelve 0 si ya está derecha o si
+        no hay señal suficiente.
+        """
+        page = doc[page_num]
+        longest = max(page.rect.width, page.rect.height)
+        scale = min(1.5, 1400.0 / max(1.0, longest))
+        pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+        base = self._pixmap_to_ndarray(pix)
+        del pix
+
+        # np.rot90(k) gira la imagen en sentido ANTIHORARIO; /Rotate gira en
+        # sentido HORARIO. Para reproducir con page.set_rotation el mismo efecto
+        # que np.rot90(base, k) hay que sumar ((4-k)%4)*90 grados horarios.
+        candidates = ((0, 0), (1, 270), (2, 180), (3, 90))
+        best_angle, best_score, second = 0, -1.0, 0.0
+        for k, angle in candidates:
+            img = np.rot90(base, k=k).copy() if k else base
+            words, _ = self._run_predictor(img)
+            score = sum(s for _, _, s in words) if words else 0.0
+            if score > best_score:
+                second = best_score
+                best_score, best_angle = score, angle
+            elif score > second:
+                second = score
+        del base
+
+        # Sin señal clara (página sin texto o empate) → no proponer cambio.
+        if best_score <= 0.0 or best_score < second * 1.15:
+            return 0
+        return best_angle
+
     def get_doc_kind(self, doc: fitz.Document) -> str:
         """Clasificar el documento como 'nativo', 'escaneado' o 'híbrido' según el contenido de sus páginas.
          - 'nativo' si tiene al menos una página con texto extraíble y ninguna con imágenes.
@@ -236,9 +276,15 @@ class OCRProcessor:
             bbox = info.get("bbox")
             if not bbox:
                 continue
+            # get_image_info() devuelve el bbox en el espacio SIN rotar de la
+            # página, pero get_pixmap(clip=...) y page.rect viven en el espacio
+            # rotado (el que se muestra). En páginas con /Rotate 90/270 (típico
+            # en escaneos) intersectar directamente recorta a un cuadrado y deja
+            # fuera parte de la página. rotation_matrix mapea sin-rotar → rotado
+            # (identidad si rotation == 0).
             # Clip to the page so bboxes that fall (partly) outside it don't
             # produce a degenerate pixmap later.
-            rect = fitz.Rect(bbox) & page.rect
+            rect = (fitz.Rect(bbox) * page.rotation_matrix) & page.rect
             if rect.is_empty or rect.width < 8 or rect.height < 8:
                 continue
             regions.append(rect)

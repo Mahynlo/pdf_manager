@@ -184,6 +184,32 @@ def _line_merged_rects(rects: list[fitz.Rect]) -> list[fitz.Rect]:
     return merged
 
 
+# ── rotated-page coordinate helpers ────────────────────────────────────────────
+# El subsistema interactivo (gestos, overlay) trabaja en espacio de PANTALLA
+# (el de la imagen renderizada, que respeta /Rotate). PyMuPDF lee/escribe la
+# geometría de las anotaciones en espacio SIN rotar. Estos helpers convierten en
+# la frontera de AnnotationManager. Todas las matrices son identidad si la página
+# no está rotada (rotation == 0), por lo que no afectan al caso común.
+
+def _to_page_rect(page: fitz.Page, r: fitz.Rect) -> fitz.Rect:
+    """Pantalla → espacio sin rotar de la página."""
+    return fitz.Rect(r) * page.derotation_matrix
+
+
+def _to_screen_rect(page: fitz.Page, r: fitz.Rect) -> fitz.Rect:
+    """Espacio sin rotar de la página → pantalla."""
+    return fitz.Rect(r) * page.rotation_matrix
+
+
+def _to_page_delta(page: fitz.Page, dx: float, dy: float) -> tuple[float, float]:
+    """Transforma un vector de desplazamiento de pantalla a espacio sin rotar
+    (sólo la parte lineal de la matriz; la traslación no aplica a un vector)."""
+    m  = page.derotation_matrix
+    p0 = fitz.Point(0.0, 0.0) * m
+    p1 = fitz.Point(dx, dy) * m
+    return p1.x - p0.x, p1.y - p0.y
+
+
 def _map_point(p: fitz.Point, old: fitz.Rect, new: fitz.Rect) -> fitz.Point:
     """Map *p* from *old* rect's coordinate space into *new* rect's space."""
     ow = max(old.width, 0.001)
@@ -459,18 +485,24 @@ class AnnotationManager:
             return False, None
 
         page = doc[page_num]
+        # Las coords de arrastre llegan en espacio de PANTALLA (rotado). Las APIs
+        # de PyMuPDF (get_text(clip), add_*_annot) trabajan en espacio SIN rotar.
+        # derotation_matrix es identidad si la página no está rotada.
+        derot = page.derotation_matrix
 
         # ── text selection (copy / deferred annotation) ──────────────────────
         if self.tool == Tool.SELECT:
+            # last_*rect se conservan en PANTALLA (el resto del código y el
+            # fallback OCR los usan en ese espacio); sólo el clip se des-rota.
             self.last_select_rect = rect   # always saved (OCR fallback uses this)
-            text = page.get_text("text", clip=rect).strip()
+            text = page.get_text("text", clip=rect * derot).strip()
             if text:
                 self.last_rect = rect
             return False, text or None
 
         # ── text markup ──────────────────────────────────────────────────────
         if self.tool in (Tool.HIGHLIGHT, Tool.UNDERLINE, Tool.STRIKEOUT):
-            rects = _line_merged_rects(_char_rects(page, rect))
+            rects = _line_merged_rects(_char_rects(page, rect * derot))
             if not rects:
                 return False, None
             if self.tool == Tool.HIGHLIGHT:
@@ -488,7 +520,7 @@ class AnnotationManager:
 
         # ── shape tools ──────────────────────────────────────────────────────
         if self.tool == Tool.RECT:
-            annot = page.add_rect_annot(rect)
+            annot = page.add_rect_annot(rect * derot)
             annot.set_colors(stroke=STROKE_COLOR[Tool.RECT])
             annot.set_border(width=2)
             annot.update()
@@ -496,7 +528,7 @@ class AnnotationManager:
             return True, None
 
         if self.tool == Tool.CIRCLE:
-            annot = page.add_circle_annot(rect)
+            annot = page.add_circle_annot(rect * derot)
             annot.set_colors(stroke=STROKE_COLOR[Tool.CIRCLE])
             annot.set_border(width=2)
             annot.update()
@@ -506,8 +538,8 @@ class AnnotationManager:
         if self.tool == Tool.LINE:
             if raw_start is None or raw_end is None:
                 return False, None
-            p1 = fitz.Point(*raw_start)
-            p2 = fitz.Point(*raw_end)
+            p1 = fitz.Point(*raw_start) * derot
+            p2 = fitz.Point(*raw_end) * derot
             if math.hypot(p2.x - p1.x, p2.y - p1.y) < 5:
                 return False, None
             annot = page.add_line_annot(p1, p2)
@@ -520,8 +552,8 @@ class AnnotationManager:
         if self.tool == Tool.ARROW:
             if raw_start is None or raw_end is None:
                 return False, None
-            p1 = fitz.Point(*raw_start)
-            p2 = fitz.Point(*raw_end)
+            p1 = fitz.Point(*raw_start) * derot
+            p2 = fitz.Point(*raw_end) * derot
             if math.hypot(p2.x - p1.x, p2.y - p1.y) < 5:
                 return False, None
             annot = page.add_line_annot(p1, p2)
@@ -552,6 +584,10 @@ class AnnotationManager:
         simplified = _rdp_simplify(pdf_points) if len(pdf_points) >= 3 else list(pdf_points)
         smoothed   = _catmull_rom(simplified)  if len(simplified)  >= 3 else simplified
         page  = doc[page_num]
+        # Puntos en espacio de PANTALLA → des-rotar al espacio de la página
+        # (identidad si rotation == 0).
+        derot     = page.derotation_matrix
+        smoothed  = [tuple(fitz.Point(x, y) * derot) for x, y in smoothed]
         annot = page.add_ink_annot([smoothed])
         annot.set_colors(stroke=STROKE_COLOR[Tool.INK])
         annot.set_border(width=2)
@@ -585,9 +621,13 @@ class AnnotationManager:
     # ── annotation hit-test & editing ─────────────────────────────────────────────
 
     def get_annot_at(self, page: fitz.Page, x: float, y: float) -> fitz.Annot | None:
-        """Return the annotation at PDF point (x, y), preferring shapes over markup."""
+        """Return the annotation at PDF point (x, y), preferring shapes over markup.
+
+        (x, y) llega en espacio de PANTALLA (rotado); ``annot.rect`` de PyMuPDF
+        está SIN rotar, así que des-rotamos el punto antes del hit-test
+        (identidad si la página no está rotada)."""
         _MARKUP = {"Highlight", "Underline", "StrikeOut", "Squiggly"}
-        pt = fitz.Point(x, y)
+        pt = fitz.Point(x, y) * page.derotation_matrix
         shape_result  = None
         markup_result = None
         for annot in page.annots():
@@ -660,6 +700,9 @@ class AnnotationManager:
         if annot is None:
             return None
 
+        # El delta llega en pantalla; la geometría interna está sin rotar.
+        dx, dy = _to_page_delta(page, dx, dy)
+
         at = _atype(annot)
 
         if at == "Ink":
@@ -674,7 +717,7 @@ class AnnotationManager:
             self._remap_xref(page_num, xref, new_annot.xref)
             self._visual_rects.pop(xref, None)
             self._rotations.pop(xref, None)
-            return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
+            return _to_screen_rect(page, new_annot.rect), new_annot.xref, 0.0
 
         if at in ("Line", "Polygon", "PolyLine"):
             verts = annot.vertices
@@ -691,7 +734,7 @@ class AnnotationManager:
             self._remap_xref(page_num, xref, new_annot.xref)
             self._visual_rects.pop(xref, None)
             self._rotations.pop(xref, None)
-            return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
+            return _to_screen_rect(page, new_annot.rect), new_annot.xref, 0.0
 
         rotation = self._rotations.get(xref, 0.0)
         cached   = self._visual_rects.get(xref)
@@ -709,7 +752,7 @@ class AnnotationManager:
         except Exception:
             return None
         self._visual_rects[annot.xref] = fitz.Rect(new_visual)
-        return new_visual, annot.xref, rotation
+        return _to_screen_rect(page, new_visual), annot.xref, rotation
 
     def set_annot_hidden(
         self,
@@ -766,6 +809,9 @@ class AnnotationManager:
         if annot is None:
             return None
 
+        # new_rect llega en pantalla; la geometría interna está sin rotar.
+        new_rect = _to_page_rect(page, new_rect)
+
         at = _atype(annot)
 
         if at == "Ink":
@@ -781,7 +827,7 @@ class AnnotationManager:
             self._remap_xref(page_num, xref, new_annot.xref)
             self._visual_rects.pop(xref, None)
             self._rotations.pop(xref, None)
-            return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
+            return _to_screen_rect(page, new_annot.rect), new_annot.xref, 0.0
 
         if at in ("Line", "Polygon", "PolyLine"):
             verts = annot.vertices
@@ -799,7 +845,7 @@ class AnnotationManager:
             self._remap_xref(page_num, xref, new_annot.xref)
             self._visual_rects.pop(xref, None)
             self._rotations.pop(xref, None)
-            return fitz.Rect(new_annot.rect), new_annot.xref, 0.0
+            return _to_screen_rect(page, new_annot.rect), new_annot.xref, 0.0
 
         rotation = self._rotations.get(xref, 0.0)
         try:
@@ -811,7 +857,7 @@ class AnnotationManager:
         except Exception:
             return None
         self._visual_rects[annot.xref] = fitz.Rect(new_rect)
-        return fitz.Rect(new_rect), annot.xref, rotation
+        return _to_screen_rect(page, new_rect), annot.xref, rotation
 
     def rotate_annot(
         self,
@@ -953,7 +999,7 @@ class AnnotationManager:
             self._remap_xref(page_num, xref, new_annot.xref)
             self._visual_rects.pop(xref, None)
             self._rotations.pop(xref, None)
-            return new_rect, new_annot.xref
+            return _to_screen_rect(page, new_rect), new_annot.xref
 
         if at == "Line":
             verts = annot.vertices
@@ -969,7 +1015,7 @@ class AnnotationManager:
                 new_annot = _line_replace(page, annot, [p1, p2])
                 self._remap_xref(page_num, xref, new_annot.xref)
                 self._visual_rects.pop(xref, None)
-                return new_rect, new_annot.xref
+                return _to_screen_rect(page, new_rect), new_annot.xref
 
         rotation = self._rotations.get(xref, 0.0)
         try:
@@ -981,7 +1027,7 @@ class AnnotationManager:
         except Exception:
             return None
         self._visual_rects[annot.xref] = fitz.Rect(new_rect)
-        return new_rect, annot.xref
+        return _to_screen_rect(page, new_rect), annot.xref
 
     def change_annot_width(
         self,
@@ -1082,20 +1128,36 @@ class AnnotationManager:
 
     # ── deferred text annotation ──────────────────────────────────────────────
 
-    def apply_text_tool(self, doc: fitz.Document, page_num: int, tool: Tool, rects: list[fitz.Rect] | None = None) -> bool:
-        """Apply a markup annotation to the area saved from the last SELECT drag, or to explicit rects."""
+    def apply_text_tool(self, doc: fitz.Document, page_num: int, tool: Tool, rects: list[fitz.Rect] | None = None, rects_are_final: bool = False) -> bool:
+        """Apply a markup annotation to the area saved from the last SELECT drag, or to explicit rects.
+
+        ``rects`` y ``last_rect`` llegan en espacio de PANTALLA (rotado); aquí se
+        des-rotan al espacio de la página antes de extraer/crear los markup.
+        derotation_matrix es identidad si la página no está rotada.
+
+        ``rects_are_final``: el llamador ya fusionó (``_line_merged_rects``) en el
+        marco de lectura correcto y convirtió los rects al espacio SIN rotar de la
+        página. Necesario en páginas rotadas con OCR, donde el texto es horizontal
+        en PANTALLA: fusionar tras des-rotar agruparía mal (el texto queda de lado
+        en el espacio sin rotar) → bandas. Ver ``_text_sel_apply``.
+        """
         page = doc[page_num]
+        derot = page.derotation_matrix
         if rects is None:
             if self.last_rect is None:
                 return False
-            rects = _line_merged_rects(_char_rects(page, self.last_rect))
+            rects = _line_merged_rects(_char_rects(page, fitz.Rect(self.last_rect) * derot))
             if not rects:
                 self.last_rect = None
                 return False
+        elif rects_are_final:
+            if not rects:
+                return False
+            # ya fusionados y en espacio sin rotar → usar tal cual
         else:
             if not rects:
                 return False
-            rects = _line_merged_rects(rects)
+            rects = _line_merged_rects([fitz.Rect(r) * derot for r in rects])
 
         if tool == Tool.HIGHLIGHT:
             annot = page.add_highlight_annot(rects)
