@@ -4,6 +4,7 @@ from __future__ import annotations
 import flet as ft
 
 from ._censorship_profiles import get_profile_manager
+from ._viewer_defs import _SELECTED_BG
 
 
 class _ProfilesMixin:
@@ -471,6 +472,17 @@ class _ProfilesMixin:
         self._rebuild_redact_terms_list()
         self._update_profile_label()
         self._update_profile_save_btn()
+        # mostrar las zonas de censura por defecto si el perfil dejó coincidencias
+        if self._redact_matches:
+            self._redact_preview = True
+            if self._redact_preview_btn is not None:
+                self._redact_preview_btn.bgcolor    = _SELECTED_BG
+                self._redact_preview_btn.icon_color = getattr(self, "_redact_box_color", "#000000")
+                try:
+                    self._redact_preview_btn.update()
+                except Exception:
+                    pass
+            self._render_redact_preview(force_update=True)
         try:
             self.page_ref.update()
         except Exception:

@@ -94,7 +94,7 @@ class _RedactMixin:
         self._redact_terms_list = ft.ListView(
             spacing=4,
             padding=ft.padding.only(bottom=4),
-            height=160,
+            expand=True,
         )
 
         # ── guardar en perfil ─────────────────────────────────────────────────
@@ -146,36 +146,42 @@ class _RedactMixin:
             ft.Icons.PREVIEW_OUTLINED, icon_size=18,
             tooltip="Mostrar/ocultar zonas marcadas en el documento",
             on_click=self._toggle_redact_preview,
+            bgcolor=_SELECTED_BG if getattr(self, "_redact_preview", True) else None,
+            icon_color=getattr(self, "_redact_box_color", "#000000")
+                       if getattr(self, "_redact_preview", True) else None,
         )
 
-        self._redact_content_area = ft.Container(
+        # ── ZONA 1 · cabecera compacta (perfil + entrada) ────────────────────
+        _top_zone = ft.Column(
+            [
+                profile_banner,
+                _section_label("Agregar texto a censurar", ft.Icons.ADD_CIRCLE_OUTLINE),
+                ft.Row(
+                    [self._redact_query_field, self._redact_case_btn],
+                    spacing=4,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                self._redact_incl_ocr,
+            ],
+            spacing=8,
+            tight=True,
+        )
+
+        # ── ZONA 2 · lista flexible (crece para llenar el espacio) ────────────
+        _list_header = ft.Row(
+            [
+                _section_label("Lista de censuras", ft.Icons.LIST_ALT_OUTLINED),
+                ft.Container(expand=True),
+                self._redact_count_text,
+            ],
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+        # ── ZONA 3 · barra de acción anclada abajo ────────────────────────────
+        _action_bar = ft.Container(
             ft.Column(
                 [
-                    # ── perfil ────────────────────────────────────────────────
-                    profile_banner,
-                    # ── agregar término ───────────────────────────────────────
-                    ft.Divider(height=1, color="#FFE0B2"),
-                    _section_label("Agregar texto a censurar", ft.Icons.ADD_CIRCLE_OUTLINE),
-                    ft.Row(
-                        [self._redact_query_field, self._redact_case_btn],
-                        spacing=4,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    self._redact_incl_ocr,
-                    # ── lista de términos ─────────────────────────────────────
-                    ft.Divider(height=1, color="#FFE0B2"),
-                    ft.Row(
-                        [
-                            _section_label("Lista de censuras", ft.Icons.LIST_ALT_OUTLINED),
-                            ft.Container(expand=True),
-                            self._redact_count_text,
-                        ],
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    self._redact_terms_list,
                     self._profile_save_btn,
-                    # ── color + vista previa ──────────────────────────────────
-                    ft.Divider(height=1, color="#FFE0B2"),
                     ft.Row(
                         [
                             _section_label("Color", ft.Icons.PALETTE_OUTLINED),
@@ -187,15 +193,30 @@ class _RedactMixin:
                         spacing=6,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
-                    # ── aplicar ───────────────────────────────────────────────
                     ft.ElevatedButton(
                         "Aplicar censura al documento", icon=ft.Icons.EDIT_OFF,
                         color="#FFFFFF", bgcolor=_REDACT_MID,
                         on_click=self._apply_redaction, expand=True,
                         style=ft.ButtonStyle(
-                            padding=ft.padding.symmetric(vertical=10)
+                            padding=ft.padding.symmetric(vertical=12)
                         ),
                     ),
+                ],
+                spacing=8,
+                tight=True,
+            ),
+            padding=ft.padding.only(top=8),
+            border=ft.border.only(top=ft.BorderSide(1, "#FFE0B2")),
+        )
+
+        self._redact_content_area = ft.Container(
+            ft.Column(
+                [
+                    _top_zone,
+                    ft.Divider(height=1, color="#FFE0B2"),
+                    _list_header,
+                    self._redact_terms_list,
+                    _action_bar,
                 ],
                 spacing=8, expand=True,
             ),
@@ -449,8 +470,16 @@ class _RedactMixin:
             pass
         self._rebuild_redact_terms_list()
         self._update_profile_save_btn()
-        if self._redact_preview:
-            self._render_redact_preview(force_update=True)
+        # mostrar las zonas de censura por defecto en cuanto hay términos
+        self._redact_preview = True
+        if self._redact_preview_btn is not None:
+            self._redact_preview_btn.bgcolor    = _SELECTED_BG
+            self._redact_preview_btn.icon_color = getattr(self, "_redact_box_color", "#000000")
+            try:
+                self._redact_preview_btn.update()
+            except Exception:
+                pass
+        self._render_redact_preview(force_update=True)
         self.page_ref.update()
 
     def _add_term_direct(self, term: str) -> None:

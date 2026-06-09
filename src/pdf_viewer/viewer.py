@@ -193,7 +193,7 @@ class PDFViewerTab(
         self._redact_matches:    list[tuple[int, fitz.Rect, str]] = []
         self._redact_terms:      list[str] = []
         self._redact_term_matches: dict[str, list] = {}
-        self._redact_preview        = False
+        self._redact_preview        = True
         self._redact_case_sensitive = True
         self._redact_box_color      = "#000000"
 
