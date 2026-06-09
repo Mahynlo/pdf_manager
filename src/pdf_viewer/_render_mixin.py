@@ -1386,7 +1386,6 @@ class _RenderMixin:
             _rcache.invalidate_page(pn)
         saved = pn
         self._rebuild_scroll_content(scroll_back=False)
-        self.page_ref.update()
         try:
             self.viewer_scroll.scroll_to(offset=self._page_cum_offsets[saved], duration=0)
         except Exception:
