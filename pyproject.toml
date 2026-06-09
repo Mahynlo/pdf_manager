@@ -1,6 +1,6 @@
 [project]
 name = "extraer-pdfs"
-version = "0.1.17"
+version = "0.1.18"
 description = "Manejor de PDFs"
 readme = "README.md"
 requires-python = ">=3.9"
