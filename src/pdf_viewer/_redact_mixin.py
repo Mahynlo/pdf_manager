@@ -17,6 +17,13 @@ class _RedactMixin:
     _REDACT_HDR  = "#E65100"
     _SECTION_CLR = "#795548"
 
+    # Tope de coincidencias por término. Buscar una palabra muy común ("de",
+    # "la"…) con matching de subcadena produce decenas de miles de coincidencias
+    # → congela el hilo de UI al acumularlas/dibujarlas. Al alcanzar el tope se
+    # corta la búsqueda y se avisa al usuario que refine el término. No es un
+    # límite de uso real: censurar miles de zonas no es revisable a mano.
+    _REDACT_MAX_MATCHES = 1000
+
     # ── sidebar panel builder ─────────────────────────────────────────────────
 
     def _build_redact_sidebar_panel(self) -> ft.Container:
@@ -78,6 +85,16 @@ class _RedactMixin:
             tooltip="Distinguir mayúsculas (activo = sí)",
             icon_color=_REDACT_HDR, bgcolor="#FFE0B2",
             on_click=self._toggle_case_sensitive,
+            style=ft.ButtonStyle(padding=ft.padding.all(4)),
+        )
+        _ww = getattr(self, "_redact_whole_word", True)
+        self._redact_whole_word_btn = ft.IconButton(
+            ft.Icons.ABC, icon_size=20,
+            tooltip=("Solo palabras completas (activo = sí): «la» NO coincide "
+                     "dentro de «tabla»"),
+            icon_color=_REDACT_HDR if _ww else "#9E9E9E",
+            bgcolor="#FFE0B2" if _ww else None,
+            on_click=self._toggle_whole_word,
             style=ft.ButtonStyle(padding=ft.padding.all(4)),
         )
         self._redact_incl_ocr = ft.Switch(
@@ -157,7 +174,8 @@ class _RedactMixin:
                 profile_banner,
                 _section_label("Agregar texto a censurar", ft.Icons.ADD_CIRCLE_OUTLINE),
                 ft.Row(
-                    [self._redact_query_field, self._redact_case_btn],
+                    [self._redact_query_field, self._redact_case_btn,
+                     self._redact_whole_word_btn],
                     spacing=4,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
@@ -260,6 +278,24 @@ class _RedactMixin:
             except Exception:
                 pass
 
+    def _toggle_whole_word(self, e=None) -> None:
+        self._redact_whole_word = not getattr(self, "_redact_whole_word", True)
+        btn = self._redact_whole_word_btn
+        if btn is not None:
+            on = self._redact_whole_word
+            btn.icon_color = _REDACT_HDR if on else "#9E9E9E"
+            btn.bgcolor    = "#FFE0B2" if on else None
+            try:
+                btn.update()
+            except Exception:
+                pass
+        # El nuevo modo aplica a los términos que se agreguen a partir de ahora
+        # (igual que el toggle de mayúsculas), no re-busca los ya añadidos.
+        self._show_snack(
+            "Palabra completa activada" if self._redact_whole_word
+            else "Palabra completa desactivada (coincide dentro de otras palabras)"
+        )
+
     def _toggle_redact_panel(self, e=None) -> None:
         pass
 
@@ -301,6 +337,7 @@ class _RedactMixin:
     def _search_phrase(
         self, page, query: str, case_sensitive: bool,
         text_cache: dict | None = None, pn: int | None = None,
+        whole_word: bool = False,
     ) -> list[fitz.Rect]:
         """Return all bounding rects where *query* appears in *page*.
 
@@ -310,6 +347,13 @@ class _RedactMixin:
         2. If no hits AND the query is multi-word, fall back to a word-by-word
            scan using ``get_text("words")``.  This catches phrases spread across
            different text blocks or spans (common in PDF titles/headers).
+
+        ``whole_word``: cuando es True se **omite** ``search_for`` (que hace
+        matching de SUBCADENA — "la" coincide dentro de "tabla", "regla"…) y se
+        matchea contra los **tokens** de ``get_text("words")`` por igualdad, de
+        modo que "la" solo coincide con la palabra "la" suelta. PyMuPDF no tiene
+        un flag nativo de palabra completa, así que el matching por tokens es la
+        vía correcta. Reduce de decenas de miles de coincidencias a unas pocas.
 
         ``text_cache`` (opcional, indexado por ``pn``) memoiza el ``get_text`` /
         ``get_text("words")`` de la página. El texto de una página es idéntico
@@ -336,24 +380,32 @@ class _RedactMixin:
                 entry[kind] = extract()
             return entry[kind]
 
-        # ── 1. Native search_for ──────────────────────────────────────────────
-        native: list[fitz.Rect] = []
-        if case_sensitive:
-            native = [fitz.Rect(r) for r in page.search_for(q)]
-        else:
-            page_text = _cached("text", page.get_text)
-            seen: set[str] = set()
-            for m in re.finditer(re.escape(q), page_text, re_flags):
-                variant = page_text[m.start():m.end()]
-                if variant not in seen:
-                    seen.add(variant)
-                    native.extend(fitz.Rect(r) for r in page.search_for(variant))
-
         q_words = q.split()
-        if native or len(q_words) == 1:
-            return native
 
-        # ── 2. Word-by-word fallback for multi-word phrases ───────────────────
+        # ── 1. Native search_for (matching de subcadena) ──────────────────────
+        # Solo en modo NO palabra-completa. Si encuentra, o si es una sola
+        # palabra, devolvemos; multi-palabra sin hit cae al matching por tokens.
+        if not whole_word:
+            native: list[fitz.Rect] = []
+            if case_sensitive:
+                native = [fitz.Rect(r) for r in page.search_for(q)]
+            else:
+                page_text = _cached("text", page.get_text)
+                seen: set[str] = set()
+                for m in re.finditer(re.escape(q), page_text, re_flags):
+                    variant = page_text[m.start():m.end()]
+                    if variant not in seen:
+                        seen.add(variant)
+                        native.extend(fitz.Rect(r) for r in page.search_for(variant))
+            if native or len(q_words) == 1:
+                return native
+
+        # ── 2. Matching por TOKENS ────────────────────────────────────────────
+        # Modo palabra-completa (cualquier nº de palabras) y también el fallback
+        # multi-palabra del modo subcadena. Compara tokens enteros → nunca matchea
+        # dentro de otra palabra.
+        if not q_words:
+            return []
         pw = _cached("words", lambda: page.get_text("words"))
 
         def _norm(w: str) -> str:
@@ -374,7 +426,8 @@ class _RedactMixin:
         return rects
 
     def _search_phrase_in_ocr(
-        self, detections, query: str, case_sensitive: bool
+        self, detections, query: str, case_sensitive: bool,
+        whole_word: bool = False,
     ) -> list[tuple[fitz.Rect, str]]:
         """Search for *query* across all OCR detections on a page.
 
@@ -383,6 +436,10 @@ class _RedactMixin:
         This method concatenates detections in reading order, runs the regex on
         the resulting string, then maps each match back to the involved
         detections and merges their bounding boxes.
+
+        ``whole_word`` rodea el patrón con límites de palabra (``\\b``) para que
+        "la" no coincida dentro de "tabla" — paridad con el modo palabra-completa
+        del texto nativo.
         """
         if not detections:
             return []
@@ -409,8 +466,11 @@ class _RedactMixin:
 
         full_text = "".join(parts)
 
+        pattern = re.escape(query)
+        if whole_word:
+            pattern = r"\b" + pattern + r"\b"
         results: list[tuple[fitz.Rect, str]] = []
-        for m in re.finditer(re.escape(query), full_text, re_flags):
+        for m in re.finditer(pattern, full_text, re_flags):
             det_indices: set[int] = set()
             for ci in range(m.start(), m.end()):
                 di = char_to_det[ci]
@@ -441,31 +501,42 @@ class _RedactMixin:
 
         ``text_cache`` se reenvía a ``_search_phrase`` para reusar el texto ya
         extraído de cada página entre términos de un mismo lote (ver allí)."""
+        cap = self._REDACT_MAX_MATCHES
+        whole_word = getattr(self, "_redact_whole_word", True)
         matches: list[tuple[int, fitz.Rect, str]] = []
         with self._doc_lock:
             for pn in range(len(self.doc)):
                 page = self.doc[pn]
                 for r in self._search_phrase(
                     page, term, case_sensitive, text_cache=text_cache, pn=pn,
+                    whole_word=whole_word,
                 ):
-                    # search_for/get_text devuelven coords SIN rotar; el label se
-                    # extrae en ese mismo espacio.
-                    try:
-                        label = page.get_textbox(r).strip()[:80]
-                    except Exception:
-                        label = term
+                    # El label de una coincidencia de BÚSQUEDA no se usa en ningún
+                    # lado (_apply_redaction y el preview lo ignoran), así que
+                    # guardamos el término directamente en vez de llamar a
+                    # page.get_textbox(r) por cada coincidencia — esa llamada
+                    # nativa por match era el cuello de botella al buscar palabras
+                    # muy comunes (miles de coincidencias × textbox descartado).
                     # Almacenar SIEMPRE en espacio de pantalla (rotado), igual que
                     # las detecciones OCR, para que coincida con la imagen mostrada
                     # y con la vista previa. _apply_redaction des-rota al escribir.
                     # rotation_matrix es identidad si la página no está rotada.
                     r_screen = fitz.Rect(r) * page.rotation_matrix
-                    matches.append((pn, r_screen, label or term))
+                    matches.append((pn, r_screen, term))
+                # Cortacircuitos: una palabra muy común generaría decenas de miles
+                # de coincidencias y congelaría la UI. Al alcanzar el tope, cortar.
+                if len(matches) >= cap:
+                    del matches[cap:]
+                    return matches
         if self._redact_incl_ocr is not None and self._redact_incl_ocr.value:
             for pn, result in self._ocr_by_page.items():
                 for rect, label in self._search_phrase_in_ocr(
-                    result.detections, term, case_sensitive
+                    result.detections, term, case_sensitive, whole_word=whole_word,
                 ):
                     matches.append((pn, rect, label))
+                    if len(matches) >= cap:
+                        del matches[cap:]
+                        return matches
         return matches
 
     def _flatten_matches(self) -> list[tuple[int, fitz.Rect, str]]:
@@ -488,6 +559,7 @@ class _RedactMixin:
         if not matches:
             self._show_snack("No se encontró la frase en el documento")
             return
+        capped = len(matches) >= self._REDACT_MAX_MATCHES
         self._redact_terms.append(term)
         self._redact_term_matches[term] = matches
         self._redact_matches = self._flatten_matches()
@@ -509,6 +581,11 @@ class _RedactMixin:
                 pass
         self._render_redact_preview(force_update=True)
         self.page_ref.update()
+        if capped:
+            self._show_snack(
+                f"«{term}» es muy común: se limitó a {self._REDACT_MAX_MATCHES} "
+                "zonas. Refiná el término para censurar solo lo que necesitas."
+            )
 
     def _add_term_direct(self, term: str, text_cache: dict | None = None) -> None:
         """Add a term without reading from the input field (for programmatic use).
