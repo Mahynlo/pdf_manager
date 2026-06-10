@@ -53,9 +53,9 @@ import flet as ft
 
 _SYSTEM = platform.system()  # "Windows" | "Darwin" | "Linux"
 
-_PRINT_THUMB_SCALE = 0.35  # A4 → ~208×295 px, suficiente para lista compacta
-_PRINT_THUMB_W     = 74
-_PRINT_THUMB_H     = 104
+_PRINT_THUMB_SCALE = 0.45  # A4 → ~268×379 px, nítido al mostrarse tipo visor
+_PRINT_THUMB_W     = 190    # ancho de la "hoja" en la columna scrollable
+_PRINT_THUMB_H     = 269    # alto (proporción A4 ~0.707)
 
 
 def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -393,55 +393,38 @@ class _PrintMixin:
         for order, pn in enumerate(pages):
             b64 = cache.get(pn)
             if b64:
-                thumb_img: ft.Control = ft.Image(
+                # CONTAIN sobre fondo blanco "papel": la página se ve COMPLETA y
+                # con su proporción real (antes COVER recortaba el contenido y
+                # deformaba las páginas apaisadas).
+                inner: ft.Control = ft.Image(
                     src_base64=b64,
                     width=_PRINT_THUMB_W, height=_PRINT_THUMB_H,
-                    fit=ft.ImageFit.COVER,
+                    fit=ft.ImageFit.CONTAIN,
                 )
             else:
-                thumb_img = ft.Container(
-                    width=_PRINT_THUMB_W, height=_PRINT_THUMB_H,
-                    bgcolor="#D0D0D0",
-                    content=ft.Icon(ft.Icons.PICTURE_AS_PDF, size=16, color=ft.Colors.OUTLINE),
-                    alignment=ft.alignment.center,
-                )
+                inner = ft.Icon(ft.Icons.PICTURE_AS_PDF, size=40, color="#D8D8D8")
 
-            thumb_box = ft.Container(
-                content=thumb_img,
-                width=_PRINT_THUMB_W,
-                height=_PRINT_THUMB_H,
+            paper = ft.Container(
+                content=inner,
+                width=_PRINT_THUMB_W, height=_PRINT_THUMB_H,
+                bgcolor="#FFFFFF",
+                alignment=ft.alignment.center,
                 border=ft.border.all(1, "#BDBDBD"),
                 border_radius=3,
                 clip_behavior=ft.ClipBehavior.HARD_EDGE,
-                shadow=ft.BoxShadow(blur_radius=4, color="#18000000", offset=ft.Offset(1, 2)),
+                shadow=ft.BoxShadow(blur_radius=5, color="#22000000", offset=ft.Offset(0, 2)),
             )
-
-            info_col = ft.Column(
-                [
-                    ft.Text(
-                        f"Página {pn + 1}",
-                        size=13, weight=ft.FontWeight.W_500, color="#1E2A38",
-                    ),
-                    ft.Text(
-                        f"Orden: {order + 1}",
-                        size=11, color="#1976D2",
-                    ),
-                ],
+            caption = ft.Text(
+                f"Página {pn + 1}",
+                size=11,
+                color="#BBBBBB" if getattr(self, "_night_mode", False) else "#666666",
+                text_align=ft.TextAlign.CENTER,
+            )
+            items.append(ft.Column(
+                [paper, caption],
                 spacing=4,
-                alignment=ft.MainAxisAlignment.CENTER,
-            )
-
-            items.append(ft.Container(
-                content=ft.Row(
-                    [thumb_box, info_col],
-                    spacing=12,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                padding=ft.padding.symmetric(horizontal=10, vertical=7),
-                border_radius=6,
-                bgcolor="#FFFFFF18" if getattr(self, "_night_mode", False) else "#FFFFFF",
-                border=ft.border.all(1, "#E0E0E0"),
-                tooltip=f"Página {pn + 1}",
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                tight=True,
             ))
 
         wrap.controls = items
@@ -493,8 +476,11 @@ class _PrintMixin:
             on_submit=lambda e: self._refresh_print_preview(),
         )
 
-        # ── panel derecho: lista vertical de miniaturas ──────────────────────
-        self._print_preview_wrap  = ft.Column([], spacing=6)
+        # ── panel derecho: columna scrollable de "hojas" (tipo visor) ────────
+        self._print_preview_wrap  = ft.Column(
+            [], spacing=12,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        )
         self._print_preview_empty = ft.Container(
             content=ft.Column(
                 [
@@ -559,8 +545,8 @@ class _PrintMixin:
                 vertical_alignment=ft.CrossAxisAlignment.STRETCH,
                 spacing=16,
             ),
-            width=680,
-            height=460,
+            width=700,
+            height=520,
         )
 
         self._print_dialog = ft.AlertDialog(
@@ -598,6 +584,11 @@ class _PrintMixin:
             if self._print_dialog in self.page_ref.overlay:
                 self.page_ref.overlay.remove(self._print_dialog)
             del self._print_dialog
+        # Libera las miniaturas de la vista previa: la caché no estaba acotada y
+        # un PDF grande dejaba decenas de MB de PNG en RAM tras imprimir.
+        cache = getattr(self, "_print_thumb_cache", None)
+        if cache:
+            cache.clear()
 
     # ── Ejecución de impresión ────────────────────────────────────────────────
 
