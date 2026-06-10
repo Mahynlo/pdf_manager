@@ -38,6 +38,7 @@ from ._viewer_defs import (
     _TOOLBAR_BG, _ANNOT_BG, _DIVIDER_CLR, _VIEWER_BG,
     _OCR_PANEL_BG,
     _SELECTED_BG, _vdivider,
+    AGENT_ENABLED,
 )
 from ._render_mixin   import _RenderMixin
 from ._gesture_mixin  import _GestureMixin
@@ -541,6 +542,9 @@ class PDFViewerTab(
         self._sidebar_tab_ocr_btn    = _make_tab_btn(*_TAB_DEFS[1])
         self._sidebar_tab_redact_btn = _make_tab_btn(*_TAB_DEFS[2])
         self._sidebar_tab_agent_btn  = _make_tab_btn(*_TAB_DEFS[3])
+        # Agente oculto mientras está en pulido: sin pestaña no hay forma de
+        # abrir su panel (el código del agente queda intacto, ver AGENT_ENABLED).
+        self._sidebar_tab_agent_btn.visible = AGENT_ENABLED
 
         tab_bar = ft.Container(
             content=ft.Row(
@@ -1075,6 +1079,7 @@ class PDFViewerTab(
             icon_color="#5C35C9" if _is_agent else None,
             bgcolor="#EDE7F6" if _is_agent else None,
             on_click=lambda e: self._switch_sidebar_mode("agent"),
+            visible=AGENT_ENABLED,   # oculto mientras el agente está en pulido
         )
         return self._agent_toolbar_btn
 

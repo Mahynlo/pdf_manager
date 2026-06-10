@@ -6,6 +6,15 @@ import flet as ft
 from .annotations import Tool
 
 
+# ── Feature flags ─────────────────────────────────────────────────────────────
+# Agente IA (panel de análisis con LLM externo). Oculto por ahora mientras se
+# perfecciona: con False NO se muestran ni la pestaña "Agente IA" del panel
+# lateral ni el botón del agente en la barra de herramientas, así que no hay
+# forma de invocarlo desde la UI. El código del agente queda intacto — para
+# reactivarlo basta poner esto en True. (Es opt-in igual: requiere API key.)
+AGENT_ENABLED = False
+
+
 # ── Toolbar / layout colours ──────────────────────────────────────────────────
 _SELECTED_BG  = "#DDEEFF"
 _TOOLBAR_BG   = "#F3F3F3"
