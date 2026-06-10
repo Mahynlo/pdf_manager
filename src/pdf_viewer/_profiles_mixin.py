@@ -465,8 +465,13 @@ class _ProfilesMixin:
         if profile.color in self._redact_color_btns:
             self._select_redact_color(profile.color)
 
+        # Cache de texto local al lote: el texto de cada página se extrae UNA vez
+        # y se reusa para todos los términos del perfil, en vez de re-parsear el
+        # documento entero por término (N términos × P páginas → P extracciones).
+        # Es efímero (se descarta al salir de este método) → nunca queda obsoleto.
+        _text_cache: dict = {}
         for term in profile.terms:
-            self._add_term_direct(term)
+            self._add_term_direct(term, text_cache=_text_cache)
 
         self._active_profile = profile
         self._rebuild_redact_terms_list()

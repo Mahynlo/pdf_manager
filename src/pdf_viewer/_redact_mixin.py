@@ -298,7 +298,10 @@ class _RedactMixin:
 
     # ── text search ───────────────────────────────────────────────────────────
 
-    def _search_phrase(self, page, query: str, case_sensitive: bool) -> list[fitz.Rect]:
+    def _search_phrase(
+        self, page, query: str, case_sensitive: bool,
+        text_cache: dict | None = None, pn: int | None = None,
+    ) -> list[fitz.Rect]:
         """Return all bounding rects where *query* appears in *page*.
 
         Strategy:
@@ -307,6 +310,14 @@ class _RedactMixin:
         2. If no hits AND the query is multi-word, fall back to a word-by-word
            scan using ``get_text("words")``.  This catches phrases spread across
            different text blocks or spans (common in PDF titles/headers).
+
+        ``text_cache`` (opcional, indexado por ``pn``) memoiza el ``get_text`` /
+        ``get_text("words")`` de la página. El texto de una página es idéntico
+        para todos los términos de un lote (cargar un perfil añade N términos en
+        serie), así que reusarlo evita re-parsear el documento entero por término
+        (N×P extracciones → P). Es un cache que provee el llamador del lote y que
+        descarta al terminar, por lo que nunca queda obsoleto. Si es None, el
+        comportamiento es idéntico al de antes (extracción directa).
         """
         q = query.strip()
         if not q:
@@ -314,12 +325,23 @@ class _RedactMixin:
 
         re_flags = 0 if case_sensitive else re.IGNORECASE
 
+        def _cached(kind: str, extract):
+            if text_cache is None or pn is None:
+                return extract()
+            entry = text_cache.get(pn)
+            if entry is None:
+                entry = {}
+                text_cache[pn] = entry
+            if kind not in entry:
+                entry[kind] = extract()
+            return entry[kind]
+
         # ── 1. Native search_for ──────────────────────────────────────────────
         native: list[fitz.Rect] = []
         if case_sensitive:
             native = [fitz.Rect(r) for r in page.search_for(q)]
         else:
-            page_text = page.get_text()
+            page_text = _cached("text", page.get_text)
             seen: set[str] = set()
             for m in re.finditer(re.escape(q), page_text, re_flags):
                 variant = page_text[m.start():m.end()]
@@ -332,7 +354,7 @@ class _RedactMixin:
             return native
 
         # ── 2. Word-by-word fallback for multi-word phrases ───────────────────
-        pw = page.get_text("words")
+        pw = _cached("words", lambda: page.get_text("words"))
 
         def _norm(w: str) -> str:
             w = w.strip(string.punctuation)
@@ -411,15 +433,21 @@ class _RedactMixin:
     # ── term management ───────────────────────────────────────────────────────
 
     def _find_term_matches(
-        self, term: str, case_sensitive: bool
+        self, term: str, case_sensitive: bool,
+        text_cache: dict | None = None,
     ) -> list[tuple[int, fitz.Rect, str]]:
         """Search *term* across the whole document (PDF text + OCR) and return
-        a flat list of (page_num, rect, label) tuples."""
+        a flat list of (page_num, rect, label) tuples.
+
+        ``text_cache`` se reenvía a ``_search_phrase`` para reusar el texto ya
+        extraído de cada página entre términos de un mismo lote (ver allí)."""
         matches: list[tuple[int, fitz.Rect, str]] = []
         with self._doc_lock:
             for pn in range(len(self.doc)):
                 page = self.doc[pn]
-                for r in self._search_phrase(page, term, case_sensitive):
+                for r in self._search_phrase(
+                    page, term, case_sensitive, text_cache=text_cache, pn=pn,
+                ):
                     # search_for/get_text devuelven coords SIN rotar; el label se
                     # extrae en ese mismo espacio.
                     try:
@@ -482,13 +510,17 @@ class _RedactMixin:
         self._render_redact_preview(force_update=True)
         self.page_ref.update()
 
-    def _add_term_direct(self, term: str) -> None:
-        """Add a term without reading from the input field (for programmatic use)."""
+    def _add_term_direct(self, term: str, text_cache: dict | None = None) -> None:
+        """Add a term without reading from the input field (for programmatic use).
+
+        ``text_cache`` permite a un llamador que añade varios términos en serie
+        (cargar perfil, lote del agente) compartir el texto extraído de cada
+        página entre términos. Ver ``_search_phrase``."""
         term = term.strip()
         if not term or term in self._redact_terms:
             return
         case_sensitive = getattr(self, "_redact_case_sensitive", True)
-        matches = self._find_term_matches(term, case_sensitive)
+        matches = self._find_term_matches(term, case_sensitive, text_cache=text_cache)
         if not matches:
             return
         self._redact_terms.append(term)

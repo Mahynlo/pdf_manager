@@ -660,10 +660,13 @@ class _AgentMixin:
         self._add_redact_term()
 
     def _agent_add_all_redact_terms(self, terms: list[str]) -> None:
+        # Cache de texto local al lote (ver _search_phrase): reutiliza el texto
+        # de cada página entre todos los términos en vez de re-extraerlo por cada uno.
+        _text_cache: dict = {}
         added = 0
         for term in terms:
             if term not in self._redact_terms:
-                self._add_term_direct(term)
+                self._add_term_direct(term, text_cache=_text_cache)
                 added += 1
         if added:
             self._rebuild_redact_terms_list()

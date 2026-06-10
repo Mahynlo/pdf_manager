@@ -1,5 +1,10 @@
 # Changelog
 
+## [No publicado]
+
+### Changed
+- **Visor — optimizaciones de eficiencia en caminos calientes (sin cambio de comportamiento)**: cuatro mejoras que reducen el *coste*, no la salida (verificadas con tests en verde y equivalencia exacta de resultados). El trabajo pesado ya corre en C nativo dentro de PyMuPDF/onnxruntime; estas optimizaciones atacan el pegamento Python a su alrededor (ver `docs/visor-pdf.md` §12). (1) **`_get_page_words`**: el bucle Python que arma los miles de caracteres del `rawdict` ahora corre **fuera del `_doc_lock`** (la extracción nativa sigue dentro) — antes seleccionar texto en una página densa retenía el mismo lock que usan los workers de render y **bloqueaba el render de las páginas vecinas**. (2) **`_sort_words_column_aware`**: las claves del orden de lectura column-aware se **precomputan una vez por palabra** en vez de recomputar la multiplicación de matriz 2–3 veces por palabra en el `key` del sort → +24 % en páginas normales y **+211 %** en páginas rotadas, con salida byte-idéntica. (3) **`_point_has_text`** (cursor de hover): el barrido **O(W) lineal** sobre todas las palabras de la página en *cada* movimiento del ratón se reemplaza por un **índice de bandas en Y O(k)** (cada palabra indexada en todas las bandas que abarca → prueba exacta) → de **~16 ms a ~0.24 ms por hover (66.8×)** en una página de 2635 palabras, con 0 discrepancias. (4) **Búsqueda de censura**: cargar un perfil con N términos (o el lote del agente IA) re-extraía el texto de **todas** las páginas **por cada término** (`N × P` `get_text`); ahora un **caché de texto local al lote** (efímero, sin riesgo de quedar obsoleto) extrae cada página **una sola vez** (`P`) → cargar un perfil de 20 términos sobre 60 páginas baja de **~5.3 s a ~0.3 s (18.7×)**. Con `text_cache=None` (añadir un término a mano) el comportamiento es idéntico al anterior.
+
 ## [0.1.19] - 2026-06-09
 
 ### Added

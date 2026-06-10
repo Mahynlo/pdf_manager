@@ -13,6 +13,7 @@
 9. [Caché de renderizado](#9-caché-de-renderizado)
 10. [Variables de estado principales](#10-variables-de-estado-principales)
 11. [Integración con DocumentManagerUI](#11-integración-con-documentmanagerui)
+12. [Optimizaciones de eficiencia (caminos calientes)](#12-optimizaciones-de-eficiencia-caminos-calientes)
 
 ---
 
@@ -909,3 +910,106 @@ def on_blur(self) -> None:
 Sin este lifecycle, con 10 PDFs abiertos cada uno retendría 8 MB de caché → ~80 MB en total solo en imágenes cacheadas. Con el lifecycle de dos pasos, el costo realista cae a ~13 MB (1 activo × 8 MB + 9 inactivos × ~500 KB tras el shrink, hasta que el timer hace el clear completo).
 
 El `fitz.Document` **queda abierto** entre suspend y resume — abrirlo de nuevo serializaría las anotaciones no guardadas. Solo el caché de imágenes se libera.
+
+---
+
+## 12. Optimizaciones de eficiencia (caminos calientes)
+
+El trabajo pesado de cómputo (rasterización, codificación PNG/JPEG, extracción de
+texto, OCR) ya corre en **código nativo C/C++** dentro de PyMuPDF/MuPDF y
+onnxruntime; envolverlo en C propio no aportaría nada. Los cuellos de botella
+reales están en el **pegamento Python** alrededor de esas librerías: bucles por
+carácter/palabra, contención de locks y trabajo recomputado por evento. Las
+optimizaciones de esta familia atacan esos puntos sin reescribir nada en C — la
+única "aceleración nativa" recomendable sería `numpy` (que ya es C por debajo)
+para la geometría de selección, y aún así solo tras medir.
+
+> **Regla de oro:** todas estas optimizaciones **preservan el comportamiento**
+> (mismos resultados, verificado con tests y equivalencia exacta). Solo cambian el
+> *coste*, nunca la salida.
+
+### 12.1 `_get_page_words`: el bucle char-level corre FUERA del `_doc_lock`
+
+`_get_page_words` (en `_text_sel_mixin.py`) extrae el `rawdict` char-level de la
+página y arma la lista de `(Rect, char, word_start)`. La extracción nativa
+(`page.get_text("rawdict")`) ocurre **bajo `_doc_lock`**, pero el bucle Python que
+recorre miles de caracteres se ejecuta **fuera** del lock: opera sobre el dict ya
+extraído y no toca `self.doc`.
+
+Mantenerlo bajo el lock serializaba la selección de texto con los **workers de
+render**, que necesitan el mismo `_doc_lock` para rasterizar → seleccionar texto
+en una página densa bloqueaba el render de las páginas vecinas. Es una mejora de
+*contención*, no de cómputo (por eso C no ayudaría: el bloqueo era el problema).
+
+### 12.2 `_sort_words_column_aware`: claves de orden precomputadas
+
+El orden de lectura column-aware ordena las palabras por `(columna, banda-Y, x0)`.
+La función `pos(...)` que lleva cada rect al marco de lectura es, en páginas
+**rotadas**, una multiplicación de matriz; el `key` del sort la invocaba 2–3 veces
+por palabra. Ahora el rect transformado se **materializa una sola vez por palabra**
+(`prects`) y el sort ordena índices reutilizándolo.
+
+| Caso | Antes | Ahora |
+|------|-------|-------|
+| Página normal (`rotation == 0`, `pos` = identidad) | — | **+24 %** |
+| Página rotada 90° (`pos` = des-rotación) | — | **+211 %** |
+
+Salida byte-idéntica a la versión previa (verificado contra una reimplementación
+de referencia).
+
+### 12.3 `_point_has_text`: índice de bandas en el hover (O(W) → O(k))
+
+`_on_hover` corre en **cada movimiento del ratón** sobre una página (la herramienta
+CURSOR es la default) y consulta `_point_has_text` para decidir el cursor
+(texto vs. normal). Antes hacía `any(r.contains(pt) for r in todas_las_palabras)`
+— un barrido **O(W) lineal** sobre todas las palabras de la página por cada evento.
+
+Ahora `_text_rects_cache[pn]` guarda un **índice de bandas en Y** (clave = banda de
+5 pt); cada hover solo prueba las palabras de la banda del puntero — **O(k)**. Cada
+palabra se indexa en *todas* las bandas que su rect abarca en Y, así que la prueba
+de contención sigue siendo **exacta** (sin ventana de tolerancia). Es el mismo
+patrón que `_page_word_bands` usa en la selección; aquí simplemente faltaba.
+
+> Medido sobre una página de 2635 palabras: de **~16 ms por hover a ~0.24 ms**
+> (**66.8×**), con 0 discrepancias respecto al barrido lineal. Además, cada hover
+> tomaba `_doc_lock` para el `get_text("words")` solo en el primer acceso (cacheado),
+> pero el escaneo lineal posterior corría en cada evento.
+>
+> **Nota de formato:** solo `_point_has_text` lee `_text_rects_cache`; los puntos de
+> poda/clear operan por **clave** (`pop(pn)` / `clear()`), por lo que el formato del
+> *valor* (ahora un dict de bandas en vez de una lista plana) es interno a ese método.
+
+### 12.4 Búsqueda de censura: caché de texto **por lote**
+
+`_find_term_matches` (en `_redact_mixin.py`) busca un término recorriendo **todas
+las páginas** y, en las ramas insensible-a-mayúsculas y multi-palabra, extrae el
+texto con `page.get_text()` / `page.get_text("words")`. El problema aparece al
+**cargar un perfil de censura** (`_profiles_mixin._load_profile`) o al aplicar el
+lote del agente IA: añaden **N términos en serie**, cada uno re-parseando el
+documento entero → **N × P** extracciones, aunque el texto de cada página es el
+mismo para todos los términos.
+
+La solución es un **caché de texto local al lote**: el llamador (`_load_profile`,
+`_agent_add_all_redact_terms`) crea un `dict` efímero y lo hila por la cadena
+`_add_term_direct → _find_term_matches → _search_phrase`. Cada página se extrae
+**una sola vez** y se reutiliza para todos los términos → **P** extracciones.
+
+- **Efímero ⇒ nunca obsoleto:** el caché vive solo durante la carga del lote y se
+  descarta; no requiere invalidación cuando se editan/rotan/reordenan páginas.
+- **Sin riesgo en el camino interactivo:** con `text_cache=None` (añadir un término
+  suelto a mano) el código corre **idéntico** a antes (extracción directa).
+- La rama case-sensitive de una sola palabra usa `search_for` (nativo, específico
+  del término) y no se cachea — pero ya es rápida; el caché ataca justo las ramas
+  caras.
+
+> Medido sobre 60 páginas densas × 20 términos: de **~5.3 s a ~0.3 s** al cargar el
+> perfil (**18.7×**); las llamadas a `get_text` cayeron de **1200 a 60**.
+
+### Resumen
+
+| # | Función | Técnica | Naturaleza del coste evitado |
+|---|---------|---------|------------------------------|
+| 12.1 | `_get_page_words` | Soltar `_doc_lock` en el bucle char-level | Contención con renders |
+| 12.2 | `_sort_words_column_aware` | Precomputar claves de orden | Recálculo de matriz por palabra |
+| 12.3 | `_point_has_text` | Índice de bandas en Y | Barrido O(W) por evento de hover |
+| 12.4 | Búsqueda de censura | Caché de texto por lote | Re-extracción N×P → P |
