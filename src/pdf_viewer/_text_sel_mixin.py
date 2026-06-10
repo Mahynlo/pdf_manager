@@ -31,13 +31,23 @@ def _sort_words_column_aware(words: list[tuple], page_width: float, pos=None) ->
     """
     if pos is None:
         pos = lambda r: r
+
+    # Precompute the reading-frame rect once per word. En páginas rotadas ``pos``
+    # es una multiplicación de matriz; el key del sort la invocaba 2-3 veces por
+    # palabra. Materializarla una sola vez elimina ese trabajo redundante (y en el
+    # caso común sin rotar ``pos`` es identidad → casi gratis). Ordenamos índices
+    # —el sort de Python es estable— y reproyectamos al final.
+    prects = [pos(w[0]) for w in words]
+
     if len(words) < 4:
-        result = list(words)
-        result.sort(key=lambda w: (round(pos(w[0]).y0 / 5) * 5, pos(w[0]).x0))
-        return result
+        order = sorted(
+            range(len(words)),
+            key=lambda i: (round(prects[i].y0 / 5) * 5, prects[i].x0),
+        )
+        return [words[i] for i in order]
 
     # Compute x-centre for every word and sort them
-    x_centers = sorted((pos(r).x0 + pos(r).x1) / 2.0 for r, *_ in words)
+    x_centers = sorted((r.x0 + r.x1) / 2.0 for r in prects)
 
     # Find gaps larger than the threshold to support N columns
     threshold = max(30.0, page_width * 0.08)  # ~48 pt for A4
@@ -47,25 +57,30 @@ def _sort_words_column_aware(words: list[tuple], page_width: float, pos=None) ->
         if gap > threshold:
             splits.append((x_centers[i] + x_centers[i + 1]) / 2.0)
 
-    result = list(words)
     if not splits:
         # Single column: row-band sort
-        result.sort(key=lambda w: (round(pos(w[0]).y0 / 5) * 5, pos(w[0]).x0))
+        order = sorted(
+            range(len(words)),
+            key=lambda i: (round(prects[i].y0 / 5) * 5, prects[i].x0),
+        )
     else:
         # Multi-column: find column index, then row-band, then x
         def get_col_index(x):
-            for i, split_x in enumerate(splits):
+            for k, split_x in enumerate(splits):
                 if x < split_x:
-                    return i
+                    return k
             return len(splits)
 
-        result.sort(key=lambda w: (
-            get_col_index((pos(w[0]).x0 + pos(w[0]).x1) / 2.0),
-            round(pos(w[0]).y0 / 5) * 5,
-            pos(w[0]).x0,
-        ))
+        order = sorted(
+            range(len(words)),
+            key=lambda i: (
+                get_col_index((prects[i].x0 + prects[i].x1) / 2.0),
+                round(prects[i].y0 / 5) * 5,
+                prects[i].x0,
+            ),
+        )
 
-    return result
+    return [words[i] for i in order]
 
 
 class _TextSelMixin:
@@ -133,7 +148,11 @@ class _TextSelMixin:
         if pn in self._page_words:
             return self._page_words[pn]
 
-        words: list[tuple] = []
+        # Extracción nativa (MuPDF) bajo el lock; el armado de la lista de chars
+        # —Python puro sobre el dict YA extraído— corre FUERA del lock. El bucle
+        # no toca self.doc, y mantenerlo bajo el lock serializaba con los workers
+        # de render, que necesitan el mismo _doc_lock para rasterizar: seleccionar
+        # texto en una página densa bloqueaba el render de las páginas vecinas.
         with self._doc_lock:
             page = self.doc[pn]
             page_width = page.rect.width
@@ -145,13 +164,15 @@ class _TextSelMixin:
             rot_mat = page.rotation_matrix
             # Extract characters instead of words for finer selection
             raw_dict = page.get_text("rawdict")
-            for block in raw_dict.get("blocks", []):
-                for line in block.get("lines", []):
-                    for span in line.get("spans", []):
-                        for char in span.get("chars", []):
-                            c = char.get("c", "")
-                            if c.strip():  # ignore purely space chars, we reconstruct spaces via gaps
-                                words.append((fitz.Rect(char["bbox"]) * rot_mat, c, False))
+
+        words: list[tuple] = []
+        for block in raw_dict.get("blocks", []):
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    for char in span.get("chars", []):
+                        c = char.get("c", "")
+                        if c.strip():  # ignore purely space chars, we reconstruct spaces via gaps
+                            words.append((fitz.Rect(char["bbox"]) * rot_mat, c, False))
 
         if pn in self._ocr_by_page:
             for det in self._ocr_by_page[pn].detections:
