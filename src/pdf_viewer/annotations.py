@@ -51,6 +51,10 @@ HIGHLIGHT_COLORS: list[tuple[str, tuple[float, float, float]]] = [
     ("Naranja",  (1.0, 0.70, 0.0)),
     ("Rojo",     (0.9, 0.2,  0.2)),
     ("Morado",   (0.6, 0.3,  1.0)),
+    ("Cian",     (0.0, 0.80, 0.90)),
+    ("Verde os.",(0.0, 0.55, 0.0)),
+    ("Gris",     (0.5, 0.5,  0.5)),
+    ("Negro",    (0.0, 0.0,  0.0)),
 ]
 
 
