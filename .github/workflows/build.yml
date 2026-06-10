@@ -132,7 +132,26 @@ jobs:
 
           Write-Host "Usando gcc: $gcc"
           & $gcc --version | Select-Object -First 1
-          & $gcc launcher\launcher.c -o "$buildDir\launcher.exe" `
+
+          # Compilar el recurso de icono (launcher.rc -> .o) y enlazarlo, para que
+          # launcher.exe lleve el icono de la app embebido y "Abrir con" no muestre
+          # el generico. windres esta junto a gcc en el toolchain MinGW.
+          $windres = Join-Path (Split-Path $gcc) "windres.exe"
+          if (-not (Test-Path $windres)) { $windres = (Get-Command windres -ErrorAction SilentlyContinue).Source }
+          $resArgs = @()
+          if ($windres) {
+            & $windres launcher\launcher.rc -O coff --include-dir launcher -o "$buildDir\launcher_res.o"
+            if ($LASTEXITCODE -eq 0 -and (Test-Path "$buildDir\launcher_res.o")) {
+              $resArgs = @("$buildDir\launcher_res.o")
+              Write-Host "Recurso de icono compilado (windres)"
+            } else {
+              Write-Host "AVISO: windres fallo; launcher sin icono."
+            }
+          } else {
+            Write-Host "AVISO: windres no encontrado; launcher sin icono."
+          }
+
+          & $gcc launcher\launcher.c @resArgs -o "$buildDir\launcher.exe" `
             -municode -static -mwindows -O2 -s -lws2_32 -lshell32
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$buildDir\launcher.exe")) {
             Write-Error "Fallo la compilacion del launcher (codigo $LASTEXITCODE)"

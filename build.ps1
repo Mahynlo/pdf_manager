@@ -57,7 +57,10 @@ Write-Host ""
 Write-Host "==> [1b/2] Compilando launcher.exe (puente 'Abrir con') ..." -ForegroundColor Cyan
 
 $LauncherSrc = Join-Path $ProjectRoot "launcher\launcher.c"
+$LauncherRc  = Join-Path $ProjectRoot "launcher\launcher.rc"
+$LauncherDir = Join-Path $ProjectRoot "launcher"
 $LauncherOut = Join-Path $BuildOutput "launcher.exe"
+$LauncherResObj = Join-Path $BuildOutput "launcher_res.o"
 
 $gcc = (Get-Command gcc -ErrorAction SilentlyContinue).Source
 if (-not $gcc -and (Test-Path "C:\TDM-GCC-64\bin\gcc.exe")) {
@@ -71,7 +74,30 @@ if (-not $gcc) {
     exit 1
 }
 
-& $gcc $LauncherSrc -o $LauncherOut -municode -static -mwindows -O2 -s -lws2_32 -lshell32
+# Compilar el recurso de ícono (launcher.rc -> .o) con windres y enlazarlo, para
+# que launcher.exe lleve el ícono de la app embebido y "Abrir con" no muestre el
+# genérico. windres viene junto a gcc en MinGW/TDM-GCC; si por algún motivo no
+# está, se compila SIN ícono (no se aborta el build por algo cosmético).
+$windres = (Get-Command windres -ErrorAction SilentlyContinue).Source
+if (-not $windres) {
+    $windres = Join-Path (Split-Path $gcc) "windres.exe"
+    if (-not (Test-Path $windres)) { $windres = $null }
+}
+
+$LauncherResArg = @()
+if ($windres) {
+    & $windres $LauncherRc -O coff --include-dir $LauncherDir -o $LauncherResObj
+    if ($LASTEXITCODE -eq 0 -and (Test-Path $LauncherResObj)) {
+        $LauncherResArg = @($LauncherResObj)
+        Write-Host "Recurso de icono compilado: launcher_res.o" -ForegroundColor DarkGray
+    } else {
+        Write-Host "AVISO: windres fallo; launcher.exe se compilara sin icono." -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "AVISO: windres no encontrado; launcher.exe se compilara sin icono." -ForegroundColor Yellow
+}
+
+& $gcc $LauncherSrc @LauncherResArg -o $LauncherOut -municode -static -mwindows -O2 -s -lws2_32 -lshell32
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $LauncherOut)) {
     Write-Host "ERROR: fallo la compilacion del launcher (codigo $LASTEXITCODE)" -ForegroundColor Red
     exit 1

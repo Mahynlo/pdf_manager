@@ -1,0 +1,8 @@
+/* Recurso de ícono para launcher.exe.
+ *
+ * Sin esto, el launcher (compilado de launcher.c) no lleva ícono embebido y
+ * Windows muestra el genérico en la entrada "Abrir con". El ID 1 (el más bajo)
+ * hace que el Explorador lo tome como ícono principal del exe. app.ico se genera
+ * desde src/assets/icon.png (mismo ícono de la app). Ver build.ps1 / build.yml.
+ */
+1 ICON "app.ico"
