@@ -201,9 +201,6 @@ class PDFViewerTab(
         self._redact_term_matches: dict[str, list] = {}
         self._redact_preview        = True
         self._redact_case_sensitive = True
-        # Palabra completa por defecto: "la" NO coincide dentro de "tabla". Evita
-        # la explosión de coincidencias (y el freeze) al buscar palabras comunes.
-        self._redact_whole_word     = True
         self._redact_box_color      = "#000000"
 
         # Redaction panel UI refs (set by _build_redact_sidebar_panel)
@@ -215,7 +212,6 @@ class PDFViewerTab(
         self._redact_count_text:   ft.Text       | None = None
         self._redact_incl_ocr:     ft.Switch     | None = None
         self._redact_case_btn:     ft.IconButton | None = None
-        self._redact_whole_word_btn: ft.IconButton | None = None
         self._redact_preview_btn:  ft.IconButton | None = None
         self._redact_color_btns:   dict          = {}
 

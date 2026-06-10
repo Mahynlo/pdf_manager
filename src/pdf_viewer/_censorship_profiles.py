@@ -17,7 +17,6 @@ class CensorshipProfile:
     terms: list[str] # list of terms to censor (exact matches, not regex)
     color: str = "#000000" # hex color code for highlighting censored terms
     case_sensitive: bool = True # whether term matching is case-sensitive
-    whole_word: bool = True # whether to match whole words only ("la" ≠ "tabla")
 
     def to_dict(self) -> dict:
         """Funcion se encarga de convertir el perfil a un diccionario para su almacenamiento."""
@@ -27,7 +26,6 @@ class CensorshipProfile:
             "terms": list(self.terms),
             "color": self.color,
             "case_sensitive": self.case_sensitive,
-            "whole_word": self.whole_word,
         }
 
     @classmethod
@@ -41,7 +39,6 @@ class CensorshipProfile:
             terms=list(d.get("terms", [])),
             color=d.get("color", "#000000"),
             case_sensitive=bool(d.get("case_sensitive", True)),
-            whole_word=bool(d.get("whole_word", True)),
         )
 
 
@@ -106,7 +103,6 @@ class ProfileManager:
         terms: list[str],
         color: str = "#000000",
         case_sensitive: bool = True,
-        whole_word: bool = True,
     ) -> CensorshipProfile:
         """
         Crea un nuevo perfil de censura.
@@ -117,7 +113,6 @@ class ProfileManager:
             terms=list(terms),
             color=color,
             case_sensitive=case_sensitive,
-            whole_word=whole_word,
         )
         self._profiles.append(profile)
         self._save()
@@ -131,7 +126,6 @@ class ProfileManager:
         terms: list[str] | None = None,
         color: str | None = None,
         case_sensitive: bool | None = None,
-        whole_word: bool | None = None,
     ) -> bool:
         """
         Actualiza un perfil de censura existente.
@@ -147,8 +141,6 @@ class ProfileManager:
             p.color = color
         if case_sensitive is not None:
             p.case_sensitive = case_sensitive
-        if whole_word is not None:
-            p.whole_word = whole_word
         self._save()
         return True
 

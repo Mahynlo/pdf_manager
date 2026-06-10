@@ -261,7 +261,6 @@ class _ProfilesMixin:
                     name, self._profile_edit_terms,
                     color=self._redact_box_color,
                     case_sensitive=self._redact_case_sensitive,
-                    whole_word=getattr(self, "_redact_whole_word", True),
                 )
             try:
                 self.page_ref.close(self._profile_edit_dlg)
@@ -460,18 +459,6 @@ class _ProfilesMixin:
                 self._redact_case_btn.tooltip = "Ignorar mayúsculas (activo = no)"
             try:
                 self._redact_case_btn.update()
-            except Exception:
-                pass
-
-        # Restaurar el modo palabra-completa del perfil (se aplica al re-buscar
-        # los términos más abajo). Perfiles viejos sin el campo → True por defecto.
-        self._redact_whole_word = getattr(profile, "whole_word", True)
-        if self._redact_whole_word_btn is not None:
-            on = self._redact_whole_word
-            self._redact_whole_word_btn.icon_color = "#E65100" if on else "#9E9E9E"
-            self._redact_whole_word_btn.bgcolor    = "#FFE0B2" if on else None
-            try:
-                self._redact_whole_word_btn.update()
             except Exception:
                 pass
 

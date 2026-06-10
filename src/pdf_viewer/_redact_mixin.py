@@ -11,6 +11,23 @@ from .renderer import BASE_SCALE
 from ._viewer_defs import _SELECTED_BG
 
 
+# Plegado de acentos para la búsqueda de censura: es habitual escribir los
+# términos sin tilde, así que "COMITÉ" debe coincidir con "COMITE" y "Pública"
+# con "Publica" — para la búsqueda son la misma palabra (solo cambia el acento).
+# La ñ/Ñ se PRESERVA a propósito: es una letra propia del español, no una "n con
+# tilde" ("año" ≠ "ano"). La tabla es 1:1 (no cambia la longitud), lo que importa
+# para mapear posiciones de caracteres en la búsqueda OCR.
+_ACCENT_FOLD = str.maketrans(
+    "áàäâãéèëêíìïîóòöôõúùüûÁÀÄÂÃÉÈËÊÍÌÏÎÓÒÖÔÕÚÙÜÛ",
+    "aaaaaeeeeiiiiooooouuuuAAAAAEEEEIIIIOOOOOUUUU",
+)
+
+
+def _fold_accents(s: str) -> str:
+    """Pliega tildes/diéresis a la vocal base, conservando la ñ."""
+    return s.translate(_ACCENT_FOLD)
+
+
 class _RedactMixin:
     """Text redaction: term management, search, preview and apply."""
 
@@ -85,16 +102,6 @@ class _RedactMixin:
             tooltip="Distinguir mayúsculas (activo = sí)",
             icon_color=_REDACT_HDR, bgcolor="#FFE0B2",
             on_click=self._toggle_case_sensitive,
-            style=ft.ButtonStyle(padding=ft.padding.all(4)),
-        )
-        _ww = getattr(self, "_redact_whole_word", True)
-        self._redact_whole_word_btn = ft.IconButton(
-            ft.Icons.ABC, icon_size=20,
-            tooltip=("Solo palabras completas (activo = sí): «la» NO coincide "
-                     "dentro de «tabla»"),
-            icon_color=_REDACT_HDR if _ww else "#9E9E9E",
-            bgcolor="#FFE0B2" if _ww else None,
-            on_click=self._toggle_whole_word,
             style=ft.ButtonStyle(padding=ft.padding.all(4)),
         )
         self._redact_incl_ocr = ft.Switch(
@@ -174,8 +181,7 @@ class _RedactMixin:
                 profile_banner,
                 _section_label("Agregar texto a censurar", ft.Icons.ADD_CIRCLE_OUTLINE),
                 ft.Row(
-                    [self._redact_query_field, self._redact_case_btn,
-                     self._redact_whole_word_btn],
+                    [self._redact_query_field, self._redact_case_btn],
                     spacing=4,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
@@ -277,24 +283,6 @@ class _RedactMixin:
                 self._redact_case_btn.update()
             except Exception:
                 pass
-
-    def _toggle_whole_word(self, e=None) -> None:
-        self._redact_whole_word = not getattr(self, "_redact_whole_word", True)
-        btn = self._redact_whole_word_btn
-        if btn is not None:
-            on = self._redact_whole_word
-            btn.icon_color = _REDACT_HDR if on else "#9E9E9E"
-            btn.bgcolor    = "#FFE0B2" if on else None
-            try:
-                btn.update()
-            except Exception:
-                pass
-        # El nuevo modo aplica a los términos que se agreguen a partir de ahora
-        # (igual que el toggle de mayúsculas), no re-busca los ya añadidos.
-        self._show_snack(
-            "Palabra completa activada" if self._redact_whole_word
-            else "Palabra completa desactivada (coincide dentro de otras palabras)"
-        )
 
     def _toggle_redact_panel(self, e=None) -> None:
         pass
@@ -409,7 +397,7 @@ class _RedactMixin:
         pw = _cached("words", lambda: page.get_text("words"))
 
         def _norm(w: str) -> str:
-            w = w.strip(string.punctuation)
+            w = _fold_accents(w.strip(string.punctuation))
             return w.lower() if not case_sensitive else w
 
         cmp_q = [_norm(w) for w in q_words]
@@ -464,9 +452,12 @@ class _RedactMixin:
                 parts.append(ch)
                 char_to_det.append(i)
 
-        full_text = "".join(parts)
+        # Plegar acentos en el texto y la consulta (tabla 1:1 → las posiciones de
+        # caracteres siguen alineadas con char_to_det) para que "COMITÉ" coincida
+        # con "COMITE", igual que en la búsqueda de texto nativo.
+        full_text = _fold_accents("".join(parts))
 
-        pattern = re.escape(query)
+        pattern = re.escape(_fold_accents(query))
         if whole_word:
             pattern = r"\b" + pattern + r"\b"
         results: list[tuple[fitz.Rect, str]] = []
@@ -502,7 +493,10 @@ class _RedactMixin:
         ``text_cache`` se reenvía a ``_search_phrase`` para reusar el texto ya
         extraído de cada página entre términos de un mismo lote (ver allí)."""
         cap = self._REDACT_MAX_MATCHES
-        whole_word = getattr(self, "_redact_whole_word", True)
+        # La búsqueda de censura es SIEMPRE por palabra completa: "la" no coincide
+        # dentro de "tabla". Evita la explosión de coincidencias (y el freeze) con
+        # palabras comunes y es el comportamiento esperable al censurar términos.
+        whole_word = True
         matches: list[tuple[int, fitz.Rect, str]] = []
         with self._doc_lock:
             for pn in range(len(self.doc)):
