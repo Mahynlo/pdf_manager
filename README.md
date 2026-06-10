@@ -156,3 +156,7 @@ flet build windows -v
 ```
 
 Para más detalles, consulta la [Guía de Empaquetado para Windows](https://flet.dev/docs/publish/windows/).
+
+> Para generar el instalador completo (exe + launcher de "Abrir con" + Inno Setup) usa `.\build.ps1`.
+
+📚 [Más información sobre "Abrir con" e instalador en Windows](docs/abrir-con-windows.md)

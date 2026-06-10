@@ -7,10 +7,13 @@
 ; MyAppVersion y MyAppSourceDir pueden sobreescribirse desde la linea de
 ; comandos con: ISCC.exe /DMyAppVersion=1.2.3 /DMyAppSourceDir=ruta ...
 #ifndef MyAppVersion
-  #define MyAppVersion   "0.1.18"
+  #define MyAppVersion   "0.1.19"
 #endif
 #define MyAppPublisher   "Flet"
 #define MyAppExeName     "extraer_pdfs.exe"
+; Puente para "Abrir con": el exe de Flet no arranca si recibe argumentos, asi
+; que Windows invoca este launcher, que entrega la ruta por env var / socket IPC.
+#define MyAppLauncher    "launcher.exe"
 #ifndef MyAppSourceDir
   ; Ruta de salida del build de Flet/Flutter (ajustar si difiere)
   #define MyAppSourceDir "..\build\windows\x64\runner\Release"
@@ -58,7 +61,18 @@ Name: "{commondesktop}\{#MyAppName}";      Filename: "{app}\{#MyAppExeName}"; Ta
 ; ── ProgID para archivos PDF ───────────────────────────────────────────────
 Root: HKCR; Subkey: "{#MyAppProgID}";                          ValueType: string; ValueName: "";        ValueData: "Documento PDF (Extraer PDFs)"; Flags: uninsdeletekey
 Root: HKCR; Subkey: "{#MyAppProgID}\DefaultIcon";              ValueType: string; ValueName: "";        ValueData: "{app}\{#MyAppExeName},0"
-Root: HKCR; Subkey: "{#MyAppProgID}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
+; IMPORTANTE: se invoca el LAUNCHER, no el exe de Flet (el exe se queda en blanco
+; si recibe la ruta como argumento).
+Root: HKCR; Subkey: "{#MyAppProgID}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppLauncher}"" ""%1"""
+
+; ── "Abrir con" directo sobre el launcher (entrada "Buscar otra aplicacion") ──
+Root: HKCR; Subkey: "Applications\{#MyAppLauncher}";                          ValueType: string; ValueName: "FriendlyAppName"; ValueData: "{#MyAppName}"; Flags: uninsdeletekey
+Root: HKCR; Subkey: "Applications\{#MyAppLauncher}\DefaultIcon";              ValueType: string; ValueName: "";                ValueData: "{app}\{#MyAppExeName},0"
+Root: HKCR; Subkey: "Applications\{#MyAppLauncher}\shell\open\command";       ValueType: string; ValueName: "";                ValueData: """{app}\{#MyAppLauncher}"" ""%1"""
+Root: HKCR; Subkey: "Applications\{#MyAppLauncher}\SupportedTypes";           ValueType: string; ValueName: ".pdf";            ValueData: ""
+; Oculta el exe crudo de "Abrir con" para que nadie elija la variante que se
+; queda en blanco; el handler valido es el launcher.
+Root: HKCR; Subkey: "Applications\{#MyAppExeName}";                           ValueType: string; ValueName: "NoOpenWith";      ValueData: ""
 
 ; ── Registro de capacidades de la aplicacion (modo moderno de Windows) ─────
 Root: HKLM; Subkey: "Software\{#MyAppName}";                                          Flags: uninsdeletekey

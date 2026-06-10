@@ -49,6 +49,36 @@ if (-not (Test-Path $ExePath)) {
 
 Write-Host "Build OK: $BuildOutput" -ForegroundColor Green
 
+# ── 1b. Compilar el launcher de "Abrir con" ───────────────────────────────────
+# El exe de Flet no arranca si recibe argumentos (se queda en blanco); Windows
+# invoca este launcher, que entrega la ruta por env var / socket IPC. Se compila
+# dentro de $BuildOutput para que el [Files] del .iss lo copie al instalador.
+Write-Host ""
+Write-Host "==> [1b/2] Compilando launcher.exe (puente 'Abrir con') ..." -ForegroundColor Cyan
+
+$LauncherSrc = Join-Path $ProjectRoot "launcher\launcher.c"
+$LauncherOut = Join-Path $BuildOutput "launcher.exe"
+
+$gcc = (Get-Command gcc -ErrorAction SilentlyContinue).Source
+if (-not $gcc -and (Test-Path "C:\TDM-GCC-64\bin\gcc.exe")) {
+    $gcc = "C:\TDM-GCC-64\bin\gcc.exe"
+}
+
+if (-not $gcc) {
+    Write-Host "ERROR: no se encontro gcc (mingw/TDM-GCC) para compilar el launcher." -ForegroundColor Red
+    Write-Host "  Instala TDM-GCC o MinGW-w64 y vuelve a ejecutar, o compila a mano:" -ForegroundColor Yellow
+    Write-Host "    gcc `"$LauncherSrc`" -o `"$LauncherOut`" -municode -static -mwindows -O2 -s -lws2_32 -lshell32" -ForegroundColor White
+    exit 1
+}
+
+& $gcc $LauncherSrc -o $LauncherOut -municode -static -mwindows -O2 -s -lws2_32 -lshell32
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $LauncherOut)) {
+    Write-Host "ERROR: fallo la compilacion del launcher (codigo $LASTEXITCODE)" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "Launcher OK: $LauncherOut" -ForegroundColor Green
+
 # ── 2. Generar el instalador con InnoSetup ────────────────────────────────────
 Write-Host ""
 Write-Host "==> [2/2] Generando instalador con InnoSetup ..." -ForegroundColor Cyan

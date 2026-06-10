@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.19] - 2026-06-09
+
+### Fixed
+- **"Abrir con" abría una ventana en blanco (de verdad esta vez)**: el arreglo de 0.1.16 (`GetCommandLineW`) solo funciona en desarrollo. En el **exe empaquetado** por `flet build windows`, pasar CUALQUIER argumento (ni la ruta posicional ni `--dart-entrypoint-args`) impide que el runner de Flutter arranque el backend de Python: queda una ventana de Flutter en blanco y el workaround de `GetCommandLineW` nunca llega a ejecutarse. Verificado por el log diagnóstico: con argumento, Python no escribe ni la línea `LAUNCH`. Lo que sí funciona es lanzar el exe **sin argumentos** con la ruta en la variable de entorno `EXTRAR_PDF_PATH`. Solución: un pequeño **`launcher.exe`** nativo (C/Win32, `launcher/launcher.c`) al que ahora apunta el registro de "Abrir con". El launcher recibe la ruta sin problema (es un exe normal) y (1) la reenvía a la instancia abierta por el socket IPC `127.0.0.1:57423` —mismo protocolo `u32`+JSON UTF-8, sin parpadeo de ventana— o (2) si no hay instancia, lanza `extraer_pdfs.exe` con `EXTRAR_PDF_PATH`. El instalador ahora compila el launcher (`build.ps1`), lo registra como handler del ProgID, le pone `FriendlyAppName`/`SupportedTypes` y oculta el exe crudo de "Abrir con" (`NoOpenWith`) para que nadie elija la variante que se queda en blanco.
+
 ## [0.1.18] - 2026-06-09
 
 ### Added

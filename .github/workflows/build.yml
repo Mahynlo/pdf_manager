@@ -101,6 +101,45 @@ jobs:
             echo "BUILD_DIR=$($found.DirectoryName)" >> $env:GITHUB_OUTPUT
           }
 
+      # ── 7b. Compilar el launcher de "Abrir con" ─────────────────────────────
+      #   El exe de Flet no arranca si recibe argumentos (ventana en blanco), asi
+      #   que "Abrir con" pasa por este launcher nativo. Se compila DENTRO de
+      #   BUILD_DIR para que el [Files] del .iss lo copie al instalador.
+      - name: Compile launcher
+        shell: pwsh
+        run: |
+          $buildDir = "${{ steps.buildout.outputs.BUILD_DIR }}"
+
+          # windows-latest (Windows Server 2025) trae gcc via MSYS2 en C:\msys64
+          # pero NO en el PATH. Hay que usar el toolchain NATIVO (ucrt64/mingw64);
+          # NO usar C:\msys64\usr\bin\gcc.exe -> genera binarios que dependen de
+          # msys-2.0.dll (no autonomos). Se sondean rutas conocidas y, como ultimo
+          # recurso, se instala mingw via choco.
+          $candidates = @(
+            "C:\msys64\ucrt64\bin\gcc.exe",
+            "C:\msys64\mingw64\bin\gcc.exe"
+          )
+          $gcc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $gcc) { $gcc = (Get-Command gcc -ErrorAction SilentlyContinue).Source }
+          if (-not $gcc) {
+            Write-Host "gcc nativo no encontrado; instalando mingw via choco ..."
+            choco install mingw --no-progress -y
+            $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + `
+                        [System.Environment]::GetEnvironmentVariable("Path","User")
+            $gcc = (Get-Command gcc -ErrorAction SilentlyContinue).Source
+          }
+          if (-not $gcc) { Write-Error "No se encontro gcc (mingw) para compilar el launcher"; exit 1 }
+
+          Write-Host "Usando gcc: $gcc"
+          & $gcc --version | Select-Object -First 1
+          & $gcc launcher\launcher.c -o "$buildDir\launcher.exe" `
+            -municode -static -mwindows -O2 -s -lws2_32 -lshell32
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$buildDir\launcher.exe")) {
+            Write-Error "Fallo la compilacion del launcher (codigo $LASTEXITCODE)"
+            exit 1
+          }
+          Write-Host "launcher.exe OK en $buildDir"
+
       # ── 8. Instalar InnoSetup via Chocolatey ────────────────────────────────
       - name: Install InnoSetup
         run: choco install innosetup --no-progress -y

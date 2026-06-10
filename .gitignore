@@ -6,6 +6,10 @@ __pycache__/
 # C extensions
 *.so
 
+# Launcher de "Abrir con" compilado (build.ps1 lo genera; el .c si se versiona)
+launcher/launcher.exe
+launcher/*.o
+
 # Distribution / packaging
 .Python
 build/
