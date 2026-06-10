@@ -46,7 +46,9 @@ class EntryCard:
 
         def _chip(pg: int) -> ft.Container:
             sel = entry.selected[pg]
-            thumb_b64 = self._thumbs.get(entry.path, pg, password=entry.password)
+            # Solo-cache: construir la UI no debe renderizar (lo hace el worker
+            # async disparado por _on_request_thumbs más abajo).
+            thumb_b64 = self._thumbs.peek(entry.path, pg)
 
             if thumb_b64:
                 thumb: ft.Control = ft.Image(

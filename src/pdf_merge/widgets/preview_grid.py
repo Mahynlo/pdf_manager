@@ -14,9 +14,16 @@ from ..thumbnails import ThumbnailCache
 
 
 class PreviewGrid:
-    def __init__(self, thumbs: ThumbnailCache, *, on_open: Callable[[int], None]):
+    def __init__(
+        self,
+        thumbs: ThumbnailCache,
+        *,
+        on_open: Callable[[int], None],
+        on_request_thumbs: Callable[[str, list[int], str | None], None] | None = None,
+    ):
         self._thumbs = thumbs
         self._on_open = on_open
+        self._on_request_thumbs = on_request_thumbs
         self.items: list[tuple[PDFEntry, int]] = []
 
         self._wrap = ft.Row([], wrap=True, spacing=4, run_spacing=4)
@@ -59,10 +66,19 @@ class PreviewGrid:
         else:
             self._wrap.controls = items
             self.control.controls = [self._wrap]
+
+        # Pide al worker async que renderice (en lote, una apertura por PDF) las
+        # páginas que falten en cache; al terminar refresca y aparecen.
+        if self._on_request_thumbs is not None:
+            for entry in entries:
+                pages = list(entry.selected_pages)
+                if pages:
+                    self._on_request_thumbs(entry.path, pages, entry.password)
         return total
 
     def _make_cell(self, entry: PDFEntry, pg: int, seq: int, flat_idx: int) -> ft.Container:
-        thumb_b64 = self._thumbs.get(entry.path, pg, password=entry.password)
+        # Solo-cache: el render lo hace el worker async (ver rebuild()).
+        thumb_b64 = self._thumbs.peek(entry.path, pg)
         if thumb_b64:
             thumb_ctrl: ft.Control = ft.Image(
                 src_base64=thumb_b64, width=56, height=76, fit=ft.ImageFit.COVER,

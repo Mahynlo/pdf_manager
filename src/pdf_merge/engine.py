@@ -105,6 +105,37 @@ def render_thumbnail(
         return None
 
 
+def render_thumbnails_batch(
+    path: str,
+    pages: list[int],
+    scale: float,
+    password: str | None = None,
+) -> dict[int, str]:
+    """Render several pages of one PDF to base64 PNGs in a SINGLE document open.
+
+    Returns ``{page: base64_png}`` for the pages that rendered. Mucho más
+    eficiente que llamar a `render_thumbnail` por página (que reabre y reparsea
+    el PDF cada vez): aquí se abre una sola vez para todas las páginas pedidas.
+    """
+    out: dict[int, str] = {}
+    if not pages:
+        return out
+    try:
+        with open_source_doc(path, password=password, enforce_permissions=False) as doc:
+            n = len(doc)
+            mat = fitz.Matrix(scale, scale)
+            for pg in pages:
+                if 0 <= pg < n:
+                    try:
+                        pix = doc[pg].get_pixmap(matrix=mat, alpha=False)
+                        out[pg] = base64.b64encode(pix.tobytes("png")).decode()
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    return out
+
+
 # ── merge operation ───────────────────────────────────────────────────────────
 
 ProgressFn = Callable[[int, int], None]

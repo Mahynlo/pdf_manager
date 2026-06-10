@@ -77,7 +77,11 @@ class MergePDFTab:
             on_clear=self._clear_all,
             entry_card=entry_card,
         )
-        self._preview  = PreviewGrid(self._thumbs, on_open=self._open_preview_dialog)
+        self._preview  = PreviewGrid(
+            self._thumbs,
+            on_open=self._open_preview_dialog,
+            on_request_thumbs=self._render_thumbs_async,
+        )
         self._lightbox = LightboxDialog(self.page_ref, self._large_thumbs)
         self._pwd      = PasswordDialog(
             self.page_ref,
@@ -154,8 +158,8 @@ class MergePDFTab:
             return
 
         def _worker() -> None:
-            for pg in uncached:
-                self._thumbs.get(path, pg, password=password)
+            # Una sola apertura del PDF para todas las páginas pendientes.
+            self._thumbs.warm_many(path, uncached, password=password)
             self._refresh_list()
             self._refresh_preview()
             try:

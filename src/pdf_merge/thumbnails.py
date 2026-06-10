@@ -52,6 +52,47 @@ class ThumbnailCache:
                 self._evict_locked()
         return b64
 
+    def peek(self, path: str, page: int) -> str | None:
+        """Devuelve la miniatura cacheada o None — NUNCA renderiza.
+
+        Pensada para construir la UI en el hilo de Flet sin riesgo de bloquearlo:
+        en miss se muestra un placeholder y el render lo hace el worker async
+        (`warm_many`), que luego refresca.
+        """
+        key = (path, page)
+        with self._lock:
+            cached = self._cache.get(key)
+            if cached is not None:
+                self._cache.move_to_end(key)
+            return cached
+
+    def warm_many(
+        self, path: str, pages: list[int], password: str | None = None
+    ) -> bool:
+        """Renderiza y cachea las páginas no cacheadas de *path* en UNA apertura.
+
+        Devuelve True si añadió algo nuevo (el llamador puede refrescar la UI).
+        """
+        missing = [p for p in pages if not self.has(path, p)]
+        if not missing:
+            return False
+        rendered = engine.render_thumbnails_batch(
+            path, missing, self._scale, password=password
+        )
+        if not rendered:
+            return False
+        with self._lock:
+            for pg, b64 in rendered.items():
+                key = (path, pg)
+                prev = self._cache.get(key)
+                if prev is not None:
+                    self._bytes_used -= len(prev)
+                self._cache[key] = b64
+                self._cache.move_to_end(key)
+                self._bytes_used += len(b64)
+            self._evict_locked()
+        return True
+
     def has(self, path: str, page: int) -> bool:
         with self._lock:
             return (path, page) in self._cache
