@@ -8,12 +8,28 @@ import time
 import flet as ft
 import fitz
 
-from .annotations import Tool
+from .annotations import Tool, STROKE_COLOR
 from .renderer import BASE_SCALE, display_to_pdf
-from ._viewer_defs import _PAGE_GAP
+from ._viewer_defs import _PAGE_GAP, _rgb_to_hex
 
 # Pixel hit radius for corner handles.
 _HANDLE_HIT_R = 20
+
+# Mínimo desplazamiento en pantalla (px) entre puntos de tinta consecutivos en la
+# previsualización en vivo. Descartar micro-movimientos reduce la cantidad de
+# puntos que el canvas reserializa en cada frame → el trazo se siente más fluido,
+# sin pérdida perceptible (el trazo final además se simplifica con RDP al fijarlo).
+_INK_MIN_STEP_PX = 2.0
+
+
+def _preview_hex(tool: Tool) -> str:
+    """Color de previsualización (#AARRGGBB) para la forma del *tool*.
+
+    Usa el color de trazo real de la anotación con algo de transparencia, para
+    que el contorno en vivo se parezca al resultado final.
+    """
+    r, g, b = STROKE_COLOR.get(tool, (0.3, 0.3, 0.3))
+    return "#CC" + _rgb_to_hex(r, g, b)[1:]
 
 
 class _GestureMixin:
@@ -51,6 +67,11 @@ class _GestureMixin:
             "tr": (x1, y0),
             "bl": (x0, y1),
             "br": (x1, y1),
+            # Puntos medios de cada lado (redimensión de un solo eje).
+            "tm": (cx, y0),
+            "bm": (cx, y1),
+            "lm": (x0, cy),
+            "rm": (x1, cy),
             "cx": cx,
             "cy": cy,
             "r":  r,
@@ -62,7 +83,9 @@ class _GestureMixin:
         if positions is None:
             return "none"
 
-        for name in ("tl", "tr", "bl", "br"):
+        # Las esquinas tienen prioridad sobre los puntos medios si se solapan
+        # (cajas muy pequeñas): se comprueban primero.
+        for name in ("tl", "tr", "bl", "br", "tm", "bm", "lm", "rm"):
             hx, hy = positions[name]
             if math.hypot(dx - hx, dy - hy) <= _HANDLE_HIT_R:
                 return f"resize_{name}"
@@ -446,6 +469,12 @@ class _GestureMixin:
             ink_pts = getattr(self, "_ink_points", None)
             ink_pg  = getattr(self, "_ink_page",   None)
             if ink_pts is not None and ink_pg == pn:
+                # Descarta micro-movimientos (< _INK_MIN_STEP_PX en pantalla) para
+                # no reserializar el canvas en cada frame con puntos casi iguales.
+                if ink_pts:
+                    lx, ly = ink_pts[-1]
+                    if math.hypot(pdf_x - lx, pdf_y - ly) * (self.zoom * BASE_SCALE) < _INK_MIN_STEP_PX:
+                        return
                 ink_pts.append((pdf_x, pdf_y))
                 self._update_ink_canvas_preview(pn)
             return
@@ -494,17 +523,11 @@ class _GestureMixin:
                     is_arrow=(self._annot.tool == Tool.ARROW),
                 )
         else:
-            dov = self._drag_overlays[pn]
-            dov.left    = pdf_rect.x0    * scale
-            dov.top     = pdf_rect.y0    * scale
-            dov.width   = pdf_rect.width  * scale
-            dov.height  = pdf_rect.height * scale
-            dov.bgcolor = self._annot.overlay_color
-            dov.visible = True
-            try:
-                dov.update()
-            except Exception:
-                pass
+            # RECT / CIRCLE: previsualizar con la FORMA real (contorno) en el
+            # canvas. Antes se usaba un Container rectangular relleno, así que un
+            # círculo se dibujaba como un cuadrado hasta soltar. El contorno
+            # coincide con el resultado final (las formas se crean solo con trazo).
+            self._update_shape_canvas_preview(pn, self._annot.tool, pdf_rect, scale)
 
     # ── committed-ink overlay helpers ─────────────────────────────────────────
 
@@ -756,7 +779,8 @@ class _GestureMixin:
             self._ink_page   = None
             return
 
-        if self._annot.tool in (Tool.LINE, Tool.ARROW):
+        if self._annot.tool in (Tool.LINE, Tool.ARROW, Tool.RECT, Tool.CIRCLE):
+            # Línea/flecha/rectángulo/círculo previsualizan en el canvas.
             self._clear_ink_canvas_preview(pn)
             self._line_drag_start_disp = None
         else:
@@ -936,6 +960,38 @@ class _GestureMixin:
         except Exception:
             pass
 
+    def _update_shape_canvas_preview(
+        self, pn: int, tool: Tool, pdf_rect: fitz.Rect, scale: float,
+    ) -> None:
+        """Dibuja el contorno en vivo de un RECT/CIRCLE en el canvas de la página.
+
+        ``pdf_rect`` es la caja normalizada (espacio PDF); se escala a pantalla.
+        El círculo se previsualiza como elipse inscrita en la caja, igual que
+        ``add_circle_annot``; el rectángulo, como su contorno.
+        """
+        canvases = getattr(self, "_ink_canvases", [])
+        if pn >= len(canvases) or canvases[pn] is None:
+            return
+        import flet.canvas as cv
+        x = pdf_rect.x0    * scale
+        y = pdf_rect.y0    * scale
+        w = pdf_rect.width  * scale
+        h = pdf_rect.height * scale
+        paint = ft.Paint(
+            stroke_width=2,
+            color=_preview_hex(tool),
+            style=ft.PaintingStyle.STROKE,
+        )
+        if tool == Tool.CIRCLE:
+            shape = cv.Oval(x, y, w, h, paint=paint)
+        else:
+            shape = cv.Rect(x, y, w, h, paint=paint)
+        canvases[pn].shapes = [shape]
+        try:
+            canvases[pn].update()
+        except Exception:
+            pass
+
     def _on_hover(self, e: ft.HoverEvent, pn: int) -> None:
         """Update the mouse cursor as it moves over a page in CURSOR tool mode."""
         if self._annot.tool != Tool.CURSOR:
@@ -1012,4 +1068,13 @@ class _GestureMixin:
         elif handle == "br":
             x1 = max(x1 + dx, x0 + _MIN)
             y1 = max(y1 + dy, y0 + _MIN)
+        # Puntos medios: mueven un solo lado (un eje), ignorando el otro delta.
+        elif handle == "tm":
+            y0 = min(y0 + dy, y1 - _MIN)
+        elif handle == "bm":
+            y1 = max(y1 + dy, y0 + _MIN)
+        elif handle == "lm":
+            x0 = min(x0 + dx, x1 - _MIN)
+        elif handle == "rm":
+            x1 = max(x1 + dx, x0 + _MIN)
         return fitz.Rect(x0, y0, x1, y1)

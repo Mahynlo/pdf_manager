@@ -369,6 +369,12 @@ class _RenderMixin:
         sel_tr = ft.Container(**_HANDLE_STYLE)
         sel_bl = ft.Container(**_HANDLE_STYLE)
         sel_br = ft.Container(**_HANDLE_STYLE)
+        # Tiradores de punto medio de cada lado: redimensionan un solo eje
+        # (alto desde arriba/abajo, ancho desde izquierda/derecha).
+        sel_tm = ft.Container(**_HANDLE_STYLE)
+        sel_bm = ft.Container(**_HANDLE_STYLE)
+        sel_lm = ft.Container(**_HANDLE_STYLE)
+        sel_rm = ft.Container(**_HANDLE_STYLE)
         _ctx_btn = ft.ButtonStyle(
             padding=ft.padding.all(5),
             shape=ft.RoundedRectangleBorder(radius=4),
@@ -459,8 +465,16 @@ class _RenderMixin:
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
         )
+        # "Ghost" de la forma: dibuja el contorno real de la anotación
+        # (elipse para círculo, rectángulo para cuadrado) dentro de la caja de
+        # selección. Hace que la caja represente la figura y, sobre todo, que la
+        # figura siga visible y se desplace con la caja durante un arrastre
+        # (mientras la anotación real está oculta para no quedar "atrás").
+        sel_ghost = cv.Canvas(shapes=[], left=0, top=0, width=0, height=0)
         sel_rot_group_inner = ft.Stack(
-            [sel_border, sel_tl, sel_tr, sel_bl, sel_br],
+            [sel_ghost, sel_border,
+             sel_tl, sel_tr, sel_bl, sel_br,
+             sel_tm, sel_bm, sel_lm, sel_rm],
             clip_behavior=ft.ClipBehavior.NONE,
         )
         sel_rot_group = ft.Container(
@@ -480,10 +494,15 @@ class _RenderMixin:
         )
         self._sel_handles[pn] = {
             "border":     sel_border,
+            "ghost":      sel_ghost,
             "tl":         sel_tl,
             "tr":         sel_tr,
             "bl":         sel_bl,
             "br":         sel_br,
+            "tm":         sel_tm,
+            "bm":         sel_bm,
+            "lm":         sel_lm,
+            "rm":         sel_rm,
             "menu":       sel_menu,
             "rot_group":  sel_rot_group,
             "color_sep":  _mc_color_sep,

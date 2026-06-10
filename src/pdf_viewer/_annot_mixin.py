@@ -2,11 +2,16 @@
 from __future__ import annotations
 
 import flet as ft
+import flet.canvas as cv
 import fitz
 
 from .annotations import HIGHLIGHT_COLORS, Tool, _atype
 from .renderer import BASE_SCALE
 from ._viewer_defs import _SELECTED_BG, _rgb_to_hex
+
+# Tipos de anotación de forma cerrada cuyo contorno se puede dibujar exactamente
+# desde su caja (sin conocer vértices): cuadrado → rectángulo, círculo → elipse.
+_GHOST_KIND = {"Square": "rect", "Circle": "oval"}
 
 # Pixel size of each corner handle (must match _render_mixin.py constant).
 _HS  = 10
@@ -106,16 +111,34 @@ class _AnnotMixin:
 
         h = self._sel_handles[pn]
 
-        # Fixed neutral border regardless of annotation color
+        # ── ghost de la forma (elipse/rectángulo) ─────────────────────────────
+        # Se cachea el tipo y el color de trazo real para redibujar el contorno
+        # mientras se mueve/redimensiona (cuando la anotación real está oculta).
+        ghost_kind = _GHOST_KIND.get(atype)
+        self._sel_ghost_kind = ghost_kind
+        ghost_hex = "#0055FF"
+        try:
+            stroke = (annot.colors or {}).get("stroke")
+            if stroke and len(stroke) >= 3:
+                ghost_hex = _rgb_to_hex(stroke[0], stroke[1], stroke[2])
+        except Exception:
+            pass
+        self._sel_ghost_color = ghost_hex
+
+        # Cuando hay ghost, el marco rectangular se atenúa (1 px claro) para que
+        # la figura sea el elemento dominante y la caja no "gane" a un círculo.
         h["border"].border_radius = 2
         h["border"].bgcolor = None
-        h["border"].border  = ft.border.all(2, "#555555")
+        h["border"].border  = (
+            ft.border.all(1, "#7FA8D9") if ghost_kind
+            else ft.border.all(2, "#555555")
+        )
 
         # Markup annotations (highlight/underline/strikeout) cannot be
         # moved or resized — hide corner handles and size/thickness buttons.
         is_markup  = atype in ("Highlight", "Underline", "StrikeOut", "Squiggly")
         no_recolor = atype in ("Squiggly",)
-        for name in ("tl", "tr", "bl", "br"):
+        for name in ("tl", "tr", "bl", "br", "tm", "bm", "lm", "rm"):
             h[name].visible = not is_markup
         for name in ("scale_sep", "scale_down", "scale_up", "width_sep", "width_down", "width_up"):
             h[name].visible = not is_markup
@@ -152,10 +175,43 @@ class _AnnotMixin:
         h["border"].height = H
         h["border"].border_radius = 2
 
+        # Redibuja el ghost de la forma al tamaño actual de la caja, de modo que
+        # siga a la figura al mover/redimensionar (la anotación real está oculta
+        # durante el arrastre). El borde se enmarca 1 px adentro para no solaparse.
+        ghost = h.get("ghost")
+        if ghost is not None:
+            kind = getattr(self, "_sel_ghost_kind", None)
+            if kind:
+                paint = ft.Paint(
+                    stroke_width=2,
+                    color=getattr(self, "_sel_ghost_color", "#0055FF"),
+                    style=ft.PaintingStyle.STROKE,
+                )
+                gw = max(1.0, W - 2.0)
+                gh = max(1.0, H - 2.0)
+                ghost.shapes = [
+                    cv.Oval(1.0, 1.0, gw, gh, paint=paint) if kind == "oval"
+                    else cv.Rect(1.0, 1.0, gw, gh, paint=paint)
+                ]
+                ghost.left = 0; ghost.top = 0
+                ghost.width = W; ghost.height = H
+                ghost.visible = True
+            elif ghost.shapes:
+                ghost.shapes = []
+                ghost.visible = False
+
         h["tl"].left = -_HHS;     h["tl"].top = -_HHS
         h["tr"].left = W - _HHS;  h["tr"].top = -_HHS
         h["bl"].left = -_HHS;     h["bl"].top = H - _HHS
         h["br"].left = W - _HHS;  h["br"].top = H - _HHS
+
+        # Puntos medios de cada lado (redimensión de un solo eje).
+        cx = W / 2 - _HHS
+        cy = H / 2 - _HHS
+        h["tm"].left = cx;        h["tm"].top = -_HHS
+        h["bm"].left = cx;        h["bm"].top = H - _HHS
+        h["lm"].left = -_HHS;     h["lm"].top = cy
+        h["rm"].left = W - _HHS;  h["rm"].top = cy
 
         # Context menu: posición ya acotada a la página por el llamador.
         h["menu"].left = menu_left
