@@ -1121,17 +1121,34 @@ class _GestureMixin:
         """Return True if (pdf_x, pdf_y) falls inside any text word on page pn
         (native PDF text or OCR detections)."""
         pt = fitz.Point(pdf_x, pdf_y)
-        # Native text (cached per page)
+        # Native text, cacheado por página como índice de bandas en Y (clave =
+        # banda de 5 pt). Este método corre en CADA evento de hover (la
+        # herramienta CURSOR es la default), así que el escaneo lineal O(W) sobre
+        # todas las palabras de la página se sentía en páginas densas. Con el
+        # índice, cada hover sólo prueba las palabras de la banda del puntero —
+        # O(k). Cada palabra se indexa en TODAS las bandas que su rect abarca, de
+        # modo que la prueba sigue siendo exacta en el eje Y (sin ventana ±).
+        # Sólo _point_has_text lee este cache; los puntos de poda/clear operan
+        # por clave, así que el formato del valor es interno a este método.
         cache = self._text_rects_cache
-        if pn not in cache:
+        bands = cache.get(pn)
+        if bands is None:
+            bands = {}
             try:
                 with self._doc_lock:
                     words = self.doc[pn].get_text("words")
-                cache[pn] = [fitz.Rect(w[0], w[1], w[2], w[3]) for w in words]
+                for w in words:
+                    r = fitz.Rect(w[0], w[1], w[2], w[3])
+                    for bi in range(int(r.y0 // 5), int(r.y1 // 5) + 1):
+                        bands.setdefault(bi * 5, []).append(r)
             except Exception:
-                cache[pn] = []
-        if any(r.contains(pt) for r in cache[pn]):
-            return True
+                bands = {}
+            cache[pn] = bands
+        band_rects = bands.get(int(pdf_y // 5) * 5)
+        if band_rects:
+            for r in band_rects:
+                if r.contains(pt):
+                    return True
         # OCR detections (already computed; bbox is in PDF space)
         ocr_result = self._ocr_by_page.get(pn)
         if ocr_result is not None:
