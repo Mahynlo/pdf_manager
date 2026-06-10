@@ -99,6 +99,12 @@ class PDFViewerTab(
         # Cached rects for lock-free dragging (written at pan_start, applied at pan_end)
         self._drag_start_rect:   fitz.Rect | None = None
         self._drag_current_rect: fitz.Rect | None = None
+        # Arrastre de "mover" entre páginas: offset puntero→esquina de la caja
+        # (espacio pantalla) y página actualmente bajo el puntero. Permiten que la
+        # anotación siga al cursor aunque cruce a otra página (la escritura al doc
+        # ocurre una vez al soltar).
+        self._move_grab_off: tuple[float, float] | None = None
+        self._drag_target_pn: int | None = None
         # Current PDF rect of the selected annotation — kept in sync with the
         # document so hit-tests / handle-positioning / pan-start never need to
         # acquire the doc lock (which may be held by a background page render).

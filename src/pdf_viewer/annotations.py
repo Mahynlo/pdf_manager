@@ -909,6 +909,69 @@ class AnnotationManager:
         self._visual_rects[annot.xref] = fitz.Rect(new_visual)
         return _to_screen_rect(page, new_visual), annot.xref, rotation
 
+    @staticmethod
+    def _translate_snapshot(snap: dict, dx: float, dy: float) -> None:
+        """Desplaza in-place la geometría de un snapshot por (dx, dy) sin rotar."""
+        r = snap.get("rect")
+        if r:
+            snap["rect"] = (r[0] + dx, r[1] + dy, r[2] + dx, r[3] + dy)
+        pts = snap.get("points")
+        if pts:
+            snap["points"] = [(p[0] + dx, p[1] + dy) for p in pts]
+        strokes = snap.get("strokes")
+        if strokes:
+            snap["strokes"] = [[(x + dx, y + dy) for (x, y) in s] for s in strokes]
+        quads = snap.get("quads")
+        if quads:
+            m = fitz.Matrix(1, 0, 0, 1, dx, dy)
+            snap["quads"] = [q * m for q in quads]
+
+    def move_annot_to_page(
+        self,
+        doc: fitz.Document,
+        src_pn: int,
+        xref: int,
+        dst_pn: int,
+        new_rect_unrot: fitz.Rect,
+    ) -> tuple[fitz.Rect, int] | None:
+        """Mueve una anotación de ``src_pn`` a ``dst_pn``.
+
+        Reubica su geometría (sin rotar) para que su caja quede en
+        ``new_rect_unrot`` en la página destino. Recrea en destino ANTES de
+        borrar en origen, de modo que un fallo no pierda la anotación.
+        Devuelve ``(new_rect_unrot, new_xref)`` o ``None``.
+        """
+        if src_pn == dst_pn:
+            return None
+        try:
+            src   = doc[src_pn]
+            annot = _find_annot_by_xref(src, xref)
+            if annot is None:
+                return None
+            snap = self._snapshot_annot(annot)
+            if snap is None or not snap.get("rect"):
+                return None
+            old = snap["rect"]
+            self._translate_snapshot(
+                snap, new_rect_unrot.x0 - old[0], new_rect_unrot.y0 - old[1]
+            )
+            dst = doc[dst_pn]
+            new_annot = self._recreate_annot(dst, snap)
+            if new_annot is None:
+                return None
+            # Sólo tras recrear con éxito se borra el original.
+            src.delete_annot(annot)
+            new_xref = new_annot.xref
+            self._history = [
+                (dst_pn, new_xref) if (p == src_pn and x == xref) else (p, x)
+                for p, x in self._history
+            ]
+            self._visual_rects.pop(xref, None)
+            self._rotations.pop(xref, None)
+            return fitz.Rect(new_annot.rect), new_xref
+        except Exception:
+            return None
+
     def set_annot_hidden(
         self,
         doc: fitz.Document,

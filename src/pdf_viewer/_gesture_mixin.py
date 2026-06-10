@@ -277,6 +277,9 @@ class _GestureMixin:
                             self._drag_current_rect = fitz.Rect(drag_seed)
                             self._drag_mode         = mode
                             self._move_last_pdf     = (pdf_x, pdf_y)
+                            self._drag_target_pn    = pn
+                            if mode == "move":
+                                self._move_grab_off = (drag_seed.x0 - pdf_x, drag_seed.y0 - pdf_y)
                             return
                     # Click outside active annotation (or on markup): deselect,
                     # then fall through to text-selection / new annotation.
@@ -316,6 +319,8 @@ class _GestureMixin:
                         self._move_last_pdf     = (pdf_x, pdf_y)
                         self._drag_start_rect   = cached_rect
                         self._drag_current_rect = fitz.Rect(cached_rect)
+                        self._drag_target_pn    = pn
+                        self._move_grab_off     = (cached_rect.x0 - pdf_x, cached_rect.y0 - pdf_y)
                     return
 
                 # ── 4. Nothing found → start smart text-selection drag ────────
@@ -409,20 +414,36 @@ class _GestureMixin:
                     and self._selected[0] == pn
                     and self._move_last_pdf is not None):
                 try:
-                    pdf_x, pdf_y   = display_to_pdf(e.local_x, e.local_y, self.zoom)
-                    last_x, last_y = self._move_last_pdf
-                    dx = pdf_x - last_x
-                    dy = pdf_y - last_y
-                    if math.isclose(dx, 0.0, abs_tol=0.01) and math.isclose(dy, 0.0, abs_tol=0.01):
-                        return
                     if self._drag_mode == "move":
-                        r = self._drag_current_rect
-                        new_rect = fitz.Rect(r.x0+dx, r.y0+dy, r.x1+dx, r.y1+dy)
+                        # Mover con posible cruce de página: el puntero se mapea a
+                        # la página objetivo por Y global y la caja lo sigue con el
+                        # offset de agarre (absoluto, no incremental: así el salto
+                        # de coordenadas al cambiar de página no descuadra la caja).
+                        grab = self._move_grab_off
+                        if grab is None or self._drag_start_rect is None:
+                            return
+                        global_y = self._get_global_y(pn, e.local_y)
+                        target_pn, target_local_y = self._get_page_and_local_y(global_y)
+                        px, py = display_to_pdf(e.local_x, target_local_y, self.zoom)
+                        w = self._drag_start_rect.width
+                        h = self._drag_start_rect.height
+                        nx0, ny0 = px + grab[0], py + grab[1]
+                        new_rect = fitz.Rect(nx0, ny0, nx0 + w, ny0 + h)
                         self._drag_current_rect = new_rect
-                        self._move_last_pdf     = (pdf_x, pdf_y)
-                        self._ensure_drag_ghost_active(pn)
-                        self._refresh_selected_overlay(pn, annot_rect=new_rect)
+                        self._ensure_drag_ghost_active(pn)  # oculta la real en origen
+                        if target_pn != self._drag_target_pn:
+                            prev = self._drag_target_pn
+                            if prev is not None and prev != target_pn:
+                                self._hide_overlay_on(prev)
+                            self._drag_target_pn = target_pn
+                        self._refresh_selected_overlay(target_pn, annot_rect=new_rect)
                     elif self._drag_mode.startswith("resize_"):
+                        pdf_x, pdf_y   = display_to_pdf(e.local_x, e.local_y, self.zoom)
+                        last_x, last_y = self._move_last_pdf
+                        dx = pdf_x - last_x
+                        dy = pdf_y - last_y
+                        if math.isclose(dx, 0.0, abs_tol=0.01) and math.isclose(dy, 0.0, abs_tol=0.01):
+                            return
                         handle   = self._drag_mode[len("resize_"):]
                         new_rect = self._compute_resize_rect(self._drag_current_rect, handle, dx, dy)
                         self._drag_current_rect = new_rect
@@ -628,6 +649,24 @@ class _GestureMixin:
                 self._move_last_pdf = None
                 was_hidden = self._drag_annot_hidden
 
+                # ── Mover terminó en OTRA página → recrear allí ───────────────
+                src_pn    = self._selected[0] if self._selected is not None else pn
+                target_pn = self._drag_target_pn if self._drag_target_pn is not None else src_pn
+                if (prev_mode == "move" and target_pn != src_pn
+                        and self._selected is not None
+                        and self._drag_current_rect is not None
+                        and self._drag_start_rect is not None):
+                    try:
+                        self._finish_cross_page_move(src_pn, target_pn)
+                    except Exception:
+                        pass
+                    finally:
+                        self._drag_start_rect   = None
+                        self._drag_current_rect = None
+                        self._drag_target_pn    = None
+                        self._move_grab_off     = None
+                    return
+
                 try:
                     if (prev_mode == "move" or prev_mode.startswith("resize_")) \
                             and self._selected is not None \
@@ -693,6 +732,8 @@ class _GestureMixin:
                 finally:
                     self._drag_start_rect   = None
                     self._drag_current_rect = None
+                    self._drag_target_pn    = None
+                    self._move_grab_off     = None
                 return
 
             # ── Smart text-selection drag end ─────────────────────────────────
@@ -865,6 +906,62 @@ class _GestureMixin:
         if ok:
             self._drag_annot_hidden = True
             self._rerender_page_image(pn)
+
+    def _hide_overlay_on(self, pn: int) -> None:
+        """Oculta el overlay de selección (y su menú) de la página *pn*."""
+        if 0 <= pn < len(self._sel_overlays) and self._sel_overlays[pn] is not None:
+            self._sel_overlays[pn].visible = False
+            if pn < len(self._sel_handles) and self._sel_handles[pn] is not None:
+                self._sel_handles[pn]["menu"].visible = False
+            try:
+                self._sel_overlays[pn].update()
+            except Exception:
+                pass
+
+    def _finish_cross_page_move(self, src_pn: int, target_pn: int) -> None:
+        """Cierra un arrastre de 'mover' que terminó en otra página.
+
+        Recrea la anotación en ``target_pn`` en la posición soltada y borra la de
+        ``src_pn``; re-renderiza ambas páginas y re-selecciona en destino. La
+        anotación real ya estaba oculta en origen; al borrarse no hace falta
+        des-ocultarla salvo si el movimiento falla.
+        """
+        xref = self._selected[1]
+        final_rect_screen = fitz.Rect(self._drag_current_rect)
+        new_annot = None
+        try:
+            with self._doc_lock:
+                dst = self.doc[target_pn]
+                # pantalla → coords sin rotar de la página destino
+                new_rect_unrot = final_rect_screen * dst.derotation_matrix
+                result = self._annot.move_annot_to_page(
+                    self.doc, src_pn, xref, target_pn, new_rect_unrot,
+                )
+                if result is not None:
+                    _rect, new_xref = result
+                    new_annot = next(
+                        (a for a in dst.annots() if a.xref == new_xref), None
+                    )
+        except Exception:
+            new_annot = None
+
+        self._drag_annot_hidden = False
+
+        if new_annot is None:
+            # Falló: la anotación sigue en origen (oculta) → des-ocultar.
+            try:
+                with self._doc_lock:
+                    self._annot.set_annot_hidden(self.doc, src_pn, xref, False)
+            except Exception:
+                pass
+            self._rerender_page_image(src_pn)
+            return
+
+        self._hide_overlay_on(src_pn)
+        self._rerender_page_image(src_pn)
+        self.current_page = target_pn
+        self._select_annot(target_pn, new_annot)
+        self._rerender_page_image(target_pn)
 
     def _get_selected_annot_nolock(self, pn: int) -> fitz.Annot | None:
         """Return selected annot WITHOUT acquiring the doc lock (caller holds it)."""
