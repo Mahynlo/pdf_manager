@@ -704,6 +704,8 @@ def main(page: ft.Page) -> None:
             v._ctrl_time = 0.0
 
     def _on_keyboard(e: ft.KeyboardEvent) -> None:
+        # NOTA: si agregas/cambias un atajo aquí, actualiza también la lista que
+        # se muestra al usuario en settings_tab.py → _KEYBOARD_SHORTCUTS.
         t = time.monotonic()
         # Armar el zoom Ctrl+rueda mientras Ctrl esté presionado.
         for v in open_tabs:
@@ -772,6 +774,10 @@ def main(page: ft.Page) -> None:
                 v._save(); return
             if k == "P":
                 v._print_pdf(); return
+            if k == "F":
+                v._fit_page(); return   # Ctrl+F: ajustar a página
+            if k == "W":
+                v._fit_width(); return  # Ctrl+W: ajustar al ancho
             if k == "C":
                 if getattr(v, "_text_sel_text", ""):
                     v._text_sel_copy()
@@ -791,18 +797,14 @@ def main(page: ft.Page) -> None:
                 v._hide_text_sel_bar()
             case "Delete":
                 v._delete_selected()
-            case "Arrow Left" | "Arrow Up" | "Page Up":
+            case "Arrow Up" | "Page Up":
                 v._prev()
-            case "Arrow Right" | "Arrow Down" | "Page Down":
+            case "Arrow Down" | "Page Down":
                 v._next()
             case "Home":
                 v._scroll_to_page(0)
             case "End":
                 v._scroll_to_page(len(v.doc) - 1)
-            case "w" | "W":
-                v._fit_width()
-            case "f" | "F":
-                v._fit_page()
 
     def _on_keyboard_up(e: ft.KeyboardEvent) -> None:
         # Cuando el propio Ctrl se suelta, e.ctrl puede seguir siendo True en

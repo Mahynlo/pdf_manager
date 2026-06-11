@@ -83,6 +83,100 @@ def _sort_words_column_aware(words: list[tuple], page_width: float, pos=None) ->
     return [words[i] for i in order]
 
 
+# ── line clustering (robustez para OCR: jitter de baseline y leve sesgo) ───────
+
+def _line_tol(rects: list) -> float:
+    """Tolerancia vertical adaptativa para agrupar rects en renglones.
+
+    Basada en la altura MEDIANA de caja → escala con el tamaño de fuente / del
+    escaneo. El texto nativo da ~5 pt (igual que el umbral fijo de antes); el
+    OCR, cuyas cajas son por palabra (alto = renglón) y con ``y0`` ruidoso, da
+    una tolerancia mayor que absorbe el jitter sin fundir renglones vecinos.
+    """
+    if not rects:
+        return 5.0
+    heights = sorted(max(0.0, r.y1 - r.y0) for r in rects)
+    med = heights[len(heights) // 2]
+    return max(3.0, med * 0.6)
+
+
+def _assign_line_indices(words: list[tuple], pos=None) -> list[tuple]:
+    """Anexa un índice de renglón (4º elem) a palabras YA en orden de lectura.
+
+    Recorre la lista (ya ordenada) y abre un renglón nuevo cuando el centro
+    vertical salta más que la tolerancia adaptativa; sigue la deriva gradual de
+    la baseline para no partir un renglón ligeramente inclinado. No reordena.
+    """
+    if pos is None:
+        pos = lambda r: r
+    if not words:
+        return []
+    prects = [pos(w[0]) for w in words]
+    tol = _line_tol(prects)
+    out: list[tuple] = []
+    ref: float | None = None
+    lid = -1
+    for w, pr in zip(words, prects):
+        cy = (pr.y0 + pr.y1) / 2
+        if ref is None or abs(cy - ref) > tol:
+            lid += 1
+        ref = cy
+        out.append((*w[:3], lid))
+    return out
+
+
+def _sort_words_clustered(words: list[tuple], page_width: float, pos=None) -> list[tuple]:
+    """Orden de lectura por CLUSTERING de renglones, robusto para OCR.
+
+    En vez de bandear por ``round(y0/5)*5`` (frágil: dos palabras de un mismo
+    renglón con ``y0`` a 3 pt caen en bandas distintas y, en un escaneo con leve
+    inclinación, el renglón se invierte), agrupa por centro vertical con
+    tolerancia adaptativa siguiendo la baseline. Devuelve tuplas de longitud 4
+    ``(rect, char, word_start, line_idx)``.
+    """
+    if pos is None:
+        pos = lambda r: r
+    n = len(words)
+    if n == 0:
+        return []
+    prects = [pos(w[0]) for w in words]
+    cy = [(r.y0 + r.y1) / 2 for r in prects]
+    cx = [(r.x0 + r.x1) / 2 for r in prects]
+    tol = _line_tol(prects)
+
+    # Detección de columnas (mismo heurístico de huecos que el sorter por bandas).
+    xs = sorted(cx)
+    threshold = max(30.0, page_width * 0.08)
+    splits = []
+    for i in range(len(xs) - 1):
+        if xs[i + 1] - xs[i] > threshold:
+            splits.append((xs[i] + xs[i + 1]) / 2.0)
+
+    def col_of(x: float) -> int:
+        for k, sx in enumerate(splits):
+            if x < sx:
+                return k
+        return len(splits)
+
+    cols = [col_of(x) for x in cx]
+
+    # Dentro de cada columna, recorrer de arriba a abajo y agrupar renglones.
+    order0 = sorted(range(n), key=lambda i: (cols[i], cy[i], prects[i].x0))
+    line_id = [0] * n
+    cur_col: int | None = None
+    ref: float | None = None
+    lid = -1
+    for i in order0:
+        if cols[i] != cur_col or ref is None or abs(cy[i] - ref) > tol:
+            lid += 1
+            cur_col = cols[i]
+        ref = cy[i]               # seguir la deriva de baseline
+        line_id[i] = lid
+
+    order = sorted(range(n), key=lambda i: (line_id[i], prects[i].x0))
+    return [(*words[i][:3], line_id[i]) for i in order]
+
+
 class _TextSelMixin:
     """Flow-based text selection: word highlights + floating action popup."""
 
@@ -132,6 +226,10 @@ class _TextSelMixin:
             p = self.doc[pn]
             return True, p.derotation_matrix, p.rotation_matrix
         return False, fitz.Identity, fitz.Identity
+
+    def _is_ocr_page(self, pn: int) -> bool:
+        """True si la página tiene detecciones OCR (cajas por palabra, no nativas)."""
+        return pn in self._ocr_by_page and bool(self._ocr_by_page[pn].detections)
 
     # ── word cache ────────────────────────────────────────────────────────────
 
@@ -192,16 +290,27 @@ class _TextSelMixin:
         # vertical en pantalla pero es horizontal SIN rotar. Ordenamos en ese
         # espacio (renglones por Y, columnas por X) des-rotando cada rect; los
         # rects ALMACENADOS siguen en pantalla (overlay, hit-test, dibujo).
+        #
+        # Cada palabra queda como tupla de longitud 4 ``(rect, char, word_start,
+        # line_idx)``: el índice de renglón lo consumen el resaltado, la
+        # reconstrucción de texto y la selección por palabra/párrafo para
+        # comportarse como en texto nativo (sin saltos de línea falsos ni
+        # resaltados partidos) aun cuando las cajas OCR tienen ``y0`` ruidoso.
         use_unrot, derot_read, _ = self._reading_frames(pn)
         if use_unrot:
             rot = self.doc[pn].rotation
             # ancho de la página en el marco de lectura (sin rotar)
             sort_w = self.doc[pn].rect.height if rot in (90, 270) else page_width
-            words = _sort_words_column_aware(
-                words, sort_w, pos=lambda r: fitz.Rect(r) * derot_read
-            )
+            pos = lambda r: fitz.Rect(r) * derot_read
+            words = _sort_words_column_aware(words, sort_w, pos=pos)
+            words = _assign_line_indices(words, pos=pos)
+        elif self._is_ocr_page(pn):
+            # OCR: orden por clustering de renglones (robusto a jitter/sesgo).
+            # Las cajas OCR ya están en espacio de PANTALLA → pos identidad.
+            words = _sort_words_clustered(words, page_width)
         else:
             words = _sort_words_column_aware(words, page_width)
+            words = _assign_line_indices(words)
         self._page_words[pn] = words
 
         # Build y-band spatial index: {band: [(original_idx, rect), ...]}
@@ -335,12 +444,14 @@ class _TextSelMixin:
             # caliente del arrastre de selección.
             rotated_read, derot_i, rot_i = self._reading_frames(i)
             line_bands: dict = defaultdict(list)
-            for word_rect, word_text, *_ws in selected:
+            for word_rect, word_text, *rest in selected:
                 if not word_text.strip():
                     continue
                 ur = (fitz.Rect(word_rect) * derot_i) if rotated_read else word_rect
-                band = round(ur.y0 / 5) * 5
-                line_bands[band].append(ur)
+                # Agrupar por índice de renglón precomputado (consistente con el
+                # orden de lectura); fallback a banda por y0 si faltara.
+                key = rest[1] if len(rest) >= 2 else round(ur.y0 / 5) * 5
+                line_bands[key].append(ur)
 
             boxes: list[ft.Control] = []
             sel_rect: fitz.Rect | None = None
@@ -393,13 +504,19 @@ class _TextSelMixin:
                     except Exception: pass
 
             last_ur = None
+            last_li = None
             for r, t, *ws in selected:
                 word_start = bool(ws and ws[0])   # primer char de palabra OCR
+                li = ws[1] if len(ws) >= 2 else None   # índice de renglón
                 t = t.strip()
                 if not t: continue
                 ur = (fitz.Rect(r) * derot_i) if rotated_read else r  # renglones/espacios en marco de lectura
                 if last_ur is not None:
-                    if abs(ur.y0 - last_ur.y0) > 5:
+                    if li is not None and last_li is not None:
+                        new_line = li != last_li      # salto por renglón (robusto)
+                    else:
+                        new_line = abs(ur.y0 - last_ur.y0) > 5   # fallback
+                    if new_line:
                         full_text_parts.append("\n")
                     elif word_start:
                         # frontera de palabra OCR conocida (las cajas se tocan →
@@ -411,6 +528,7 @@ class _TextSelMixin:
                         if ur.x0 - last_ur.x1 > threshold: full_text_parts.append(" ")
                 full_text_parts.append(t)
                 last_ur = ur
+                last_li = li
             if i != epn:
                 full_text_parts.append("\n")
 
@@ -651,31 +769,48 @@ class _TextSelMixin:
             r = words[j][0]
             return (fitz.Rect(r) * derot) if rotated_read else r
 
+        def _li(j):
+            return words[j][3] if len(words[j]) > 3 else None
+
+        def _word_start(j):
+            return bool(words[j][2]) if len(words[j]) > 2 else False
+
+        def _same_word(a: int, b: int) -> bool:
+            """Mismo renglón y hueco horizontal pequeño → misma palabra.
+
+            En OCR las cajas de palabras vecinas se tocan (hueco ~0); ``word_start``
+            marca la frontera. En texto nativo ``word_start`` es siempre False y
+            manda el hueco, como antes.
+            """
+            la, lb = _li(a), _li(b)
+            ra, rb = _u(a), _u(b)
+            if la is not None and lb is not None:
+                if la != lb:
+                    return False
+            elif abs(ra.y0 - rb.y0) > 5:
+                return False
+            gap = max(ra.x0, rb.x0) - min(ra.x1, rb.x1)
+            char_height = max(ra.y1 - ra.y0, rb.y1 - rb.y0)
+            threshold = max(2.5, char_height * 0.15)
+            return gap <= threshold
+
         # Expand left to find the start of the word
         si = idx
         while si > 0:
-            curr_r = _u(si)
-            prev_r = _u(si - 1)
-            # Same line and small gap (no space)
-            char_height = prev_r.y1 - prev_r.y0
-            threshold = max(2.5, char_height * 0.15)
-            if abs(curr_r.y0 - prev_r.y0) <= 5 and (curr_r.x0 - prev_r.x1) <= threshold:
-                si -= 1
-            else:
+            if _word_start(si):           # 'si' inicia su palabra OCR → frenar
                 break
+            if not _same_word(si, si - 1):
+                break
+            si -= 1
 
         # Expand right to find the end of the word
         ei = idx
         while ei < len(words) - 1:
-            curr_r = _u(ei)
-            next_r = _u(ei + 1)
-            # Same line and small gap (no space)
-            char_height = curr_r.y1 - curr_r.y0
-            threshold = max(2.5, char_height * 0.15)
-            if abs(curr_r.y0 - next_r.y0) <= 5 and (next_r.x0 - curr_r.x1) <= threshold:
-                ei += 1
-            else:
+            if _word_start(ei + 1):       # el siguiente char inicia otra palabra
                 break
+            if not _same_word(ei, ei + 1):
+                break
+            ei += 1
 
         start_r = words[si][0]
         end_r   = words[ei][0]
@@ -735,6 +870,13 @@ class _TextSelMixin:
                     best_dist   = d
                     target_rect = fitz.Rect(x0, y0, x1, y1)
 
+        # OCR: no hay bloques nativos → sintetizar el párrafo agrupando renglones
+        # contiguos (separación vertical regular) alrededor del clic, usando los
+        # índices de renglón precomputados. Replica el triple-tap nativo.
+        if target_rect is None and self._is_ocr_page(pn):
+            self._select_ocr_paragraph_at(pn, pdf_pt)
+            return
+
         if target_rect is None:
             return
 
@@ -755,6 +897,70 @@ class _TextSelMixin:
         start_pt = ((start_r.x0 + start_r.x1) / 2, (start_r.y0 + start_r.y1) / 2)
         end_pt   = ((end_r.x0   + end_r.x1)   / 2, (end_r.y0   + end_r.y1)   / 2)
 
+        sel_text = self._update_text_selection(pn, start_pt, pn, end_pt, update_ui=True)
+        if sel_text:
+            self._show_text_sel_bar(sel_text)
+
+    def _select_ocr_paragraph_at(self, pn: int, pdf_pt: tuple) -> None:
+        """Triple-tap en páginas OCR: selecciona el párrafo (renglones contiguos).
+
+        Sin bloques de layout, aproxima el párrafo expandiendo desde el renglón
+        del clic hacia arriba/abajo mientras la separación entre renglones
+        consecutivos sea regular; corta en huecos grandes (cambio de párrafo) y
+        nunca cruza de columna (el salto de columna da un hueco muy negativo).
+        """
+        words = self._get_page_words(pn)
+        if not words:
+            return
+        idx = self._nearest_word_index(words, pdf_pt, pn)
+        click_li = words[idx][3] if len(words[idx]) > 3 else None
+        if click_li is None:
+            return
+
+        # Extensión vertical (y0/y1) por renglón.
+        line_y0: dict[int, float] = {}
+        line_y1: dict[int, float] = {}
+        for w in words:
+            li = w[3] if len(w) > 3 else None
+            if li is None:
+                continue
+            r = w[0]
+            line_y0[li] = min(line_y0.get(li, r.y0), r.y0)
+            line_y1[li] = max(line_y1.get(li, r.y1), r.y1)
+
+        order = sorted(line_y0)
+        if click_li not in line_y0:
+            return
+        heights = sorted(line_y1[k] - line_y0[k] for k in line_y0)
+        med_h = heights[len(heights) // 2] if heights else 10.0
+        gap_max = med_h * 1.6        # hueco mayor → frontera de párrafo
+        gap_min = -med_h * 0.5       # leve solape (descendentes) permitido
+
+        pos = order.index(click_li)
+        p = pos
+        while p > 0:                 # expandir hacia arriba
+            a, b = order[p], order[p - 1]
+            if gap_min <= line_y0[a] - line_y1[b] <= gap_max:
+                p -= 1
+            else:
+                break
+        lo = order[p]
+        p = pos
+        while p < len(order) - 1:    # expandir hacia abajo
+            a, b = order[p], order[p + 1]
+            if gap_min <= line_y0[b] - line_y1[a] <= gap_max:
+                p += 1
+            else:
+                break
+        hi = order[p]
+
+        sel_idx = [j for j, w in enumerate(words) if len(w) > 3 and lo <= w[3] <= hi]
+        if not sel_idx:
+            return
+        si, ei = min(sel_idx), max(sel_idx)
+        start_r, end_r = words[si][0], words[ei][0]
+        start_pt = ((start_r.x0 + start_r.x1) / 2, (start_r.y0 + start_r.y1) / 2)
+        end_pt   = ((end_r.x0   + end_r.x1)   / 2, (end_r.y0   + end_r.y1)   / 2)
         sel_text = self._update_text_selection(pn, start_pt, pn, end_pt, update_ui=True)
         if sel_text:
             self._show_text_sel_bar(sel_text)

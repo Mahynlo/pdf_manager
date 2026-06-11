@@ -12,6 +12,105 @@ def _section_label(text: str) -> ft.Text:
     return ft.Text(text, size=14, weight="bold", color="primary")
 
 
+# ── Atajos de teclado ─────────────────────────────────────────────────────────
+# Referencia mostrada al usuario. Si cambias los atajos reales en
+# ``main.py`` → ``_on_keyboard``, actualiza también esta lista.
+_KEYBOARD_SHORTCUTS: list[tuple[str, list[tuple[str, list[list[str]]]]]] = [
+    ("Archivo", [
+        ("Abrir PDF",  [["Ctrl", "O"]]),
+        ("Guardar",    [["Ctrl", "S"]]),
+        ("Imprimir",   [["Ctrl", "P"]]),
+    ]),
+    ("Navegación", [
+        ("Página anterior",  [["↑"], ["Re Pág"]]),
+        ("Página siguiente", [["↓"], ["Av Pág"]]),
+        ("Primera página",   [["Inicio"], ["Ctrl", "Inicio"]]),
+        ("Última página",    [["Fin"], ["Ctrl", "Fin"]]),
+    ]),
+    ("Zoom y vista", [
+        ("Acercar",             [["Ctrl", "+"]]),
+        ("Alejar",              [["Ctrl", "−"]]),
+        ("Zoom 100 %",          [["Ctrl", "0"]]),
+        ("Zoom con la rueda",   [["Ctrl", "Rueda"]]),
+        ("Ajustar a la página", [["Ctrl", "F"]]),
+        ("Ajustar al ancho",    [["Ctrl", "W"]]),
+    ]),
+    ("Edición y texto", [
+        ("Deshacer",                   [["Ctrl", "Z"]]),
+        ("Rehacer",                    [["Ctrl", "Y"], ["Ctrl", "Shift", "Z"]]),
+        ("Seleccionar todo el texto",  [["Ctrl", "A"]]),
+        ("Copiar texto seleccionado",  [["Ctrl", "C"]]),
+        ("Eliminar selección",         [["Supr"]]),
+        ("Cancelar selección",         [["Esc"]]),
+    ]),
+]
+
+
+def _keycap(label: str) -> ft.Container:
+    """Una tecla individual con apariencia de 'keycap'."""
+    return ft.Container(
+        content=ft.Text(label, size=12, weight="w600"),
+        padding=ft.padding.symmetric(horizontal=8, vertical=3),
+        bgcolor="surface",
+        border_radius=6,
+        border=ft.border.all(1, "outlineVariant"),
+    )
+
+
+def _combo(keys: list[str]) -> ft.Row:
+    """Secuencia de teclas unida con '+', p. ej. Ctrl + Z."""
+    controls: list[ft.Control] = []
+    for i, k in enumerate(keys):
+        if i:
+            controls.append(ft.Text("+", size=12, color="onSurfaceVariant"))
+        controls.append(_keycap(k))
+    return ft.Row(controls, spacing=4, tight=True, vertical_alignment="center")
+
+
+def _shortcut_row(desc: str, combos: list[list[str]]) -> ft.Container:
+    """Una fila: descripción a la izquierda, combinaciones a la derecha.
+
+    ``combos`` admite varias alternativas (se separan con 'o').
+    """
+    combo_controls: list[ft.Control] = []
+    for i, c in enumerate(combos):
+        if i:
+            combo_controls.append(ft.Text("o", size=12, color="onSurfaceVariant"))
+        combo_controls.append(_combo(c))
+    return ft.Container(
+        content=ft.Row(
+            [
+                ft.Text(desc, size=13, expand=True),
+                ft.Row(combo_controls, spacing=8, tight=True, vertical_alignment="center"),
+            ],
+            vertical_alignment="center",
+        ),
+        padding=ft.padding.symmetric(horizontal=10, vertical=8),
+        border_radius=8,
+    )
+
+
+def _shortcuts_card() -> ft.Container:
+    """Tarjeta con todas las combinaciones de teclas de la app."""
+    children: list[ft.Control] = [
+        _section_label("Atajos de teclado"),
+        ft.Divider(height=1, color="outlineVariant"),
+    ]
+    for gi, (group, rows) in enumerate(_KEYBOARD_SHORTCUTS):
+        if gi:
+            children.append(ft.Container(height=4))
+        children.append(ft.Text(group, size=13, weight="w600", color="onSurfaceVariant"))
+        for desc, combos in rows:
+            children.append(_shortcut_row(desc, combos))
+    return ft.Container(
+        content=ft.Column(children, spacing=6),
+        padding=20,
+        bgcolor="surfaceVariant",
+        border_radius=12,
+        border=ft.border.all(1, "outlineVariant"),
+    )
+
+
 def _row_setting(
     icon: str,
     title: str,
@@ -140,7 +239,11 @@ class SettingsTab:
         )
 
         tabs_container = ft.Container(
-            content=ft.Column([settings_card], spacing=16),
+            content=ft.Column(
+                [settings_card, _shortcuts_card()],
+                spacing=16,
+                scroll="auto",   # la lista de atajos puede exceder el alto visible
+            ),
             padding=30,
             expand=True,
         )
