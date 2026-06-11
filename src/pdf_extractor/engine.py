@@ -178,7 +178,7 @@ def process_document(
         reporter.log(
             f"  ℹ Páginas sugeridas verificadas primero: "
             f"{', '.join(str(p + 1) for p in sorted(hint_set))}",
-            "#666666",
+            "onSurfaceVariant",
         )
     else:
         scan_order = list(range(total_pages))
@@ -231,7 +231,7 @@ def process_document(
     if file_matches:
         reporter.log(f"  → {len(file_matches)} página(s) encontrada(s){ocr_note}{skip_note}", "#1565C0")
     else:
-        reporter.log(f"  → Sin coincidencias{ocr_note}{skip_note}", "#999999")
+        reporter.log(f"  → Sin coincidencias{ocr_note}{skip_note}", "onSurfaceVariant")
     reporter.log_separator()
     return file_matches
 

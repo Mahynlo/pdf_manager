@@ -57,7 +57,7 @@ class EntryCard:
                 )
             else:
                 thumb = ft.Container(
-                    width=_TW, height=_TH, bgcolor="#D0D0D0",
+                    width=_TW, height=_TH, bgcolor="surfaceVariant",
                     content=ft.Icon(ft.Icons.PICTURE_AS_PDF, size=20, color=ft.Colors.OUTLINE),
                     alignment=ft.alignment.center,
                 )

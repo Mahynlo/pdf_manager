@@ -87,7 +87,7 @@ class PDFExtractionTab:
             autofocus=True,
             on_submit=lambda _: self._confirm_protected_pdf_password(),
         )
-        self._pwd_error = ft.Text("", color="#D32F2F", size=12, visible=False)
+        self._pwd_error = ft.Text("", color="error", size=12, visible=False)
         self._pwd_dialog = ft.AlertDialog(
             modal=True,
             title=ft.Text("PDF protegido"),
@@ -106,8 +106,8 @@ class PDFExtractionTab:
                 [
                     ft.Icon(ft.Icons.FIND_IN_PAGE, size=32, color="#1565C0"),
                     ft.Column([
-                        ft.Text("Extracción Inteligente de PDFs", size=22, weight="bold", color="#1E2A38"),
-                        ft.Text("Busca palabras clave y extrae páginas específicas de múltiples documentos", size=13, color="#666666"),
+                        ft.Text("Extracción Inteligente de PDFs", size=22, weight="bold", color="onSurface"),
+                        ft.Text("Busca palabras clave y extrae páginas específicas de múltiples documentos", size=13, color="onSurfaceVariant"),
                     ], spacing=2)
                 ],
                 alignment="start",
@@ -117,16 +117,16 @@ class PDFExtractionTab:
         )
 
         # ─── PANEL IZQUIERDO (Configuración) ─────────────────────────────────
-        self._ref_path_text = ft.Text("Referencia: sin archivo", size=12, color="#666666")
-        self._ref_kind_text = ft.Text("Tipo: -", size=12, color="#666666")
+        self._ref_path_text = ft.Text("Referencia: sin archivo", size=12, color="onSurfaceVariant")
+        self._ref_kind_text = ft.Text("Tipo: -", size=12, color="onSurfaceVariant")
 
         ref_info_container = ft.Container(
             content=ft.Column([
-                ft.Row([ft.Icon(ft.Icons.PICTURE_AS_PDF, size=16, color="#999999"), self._ref_path_text]),
-                ft.Row([ft.Icon(ft.Icons.INFO_OUTLINE, size=16, color="#999999"), self._ref_kind_text])
+                ft.Row([ft.Icon(ft.Icons.PICTURE_AS_PDF, size=16, color="onSurfaceVariant"), self._ref_path_text]),
+                ft.Row([ft.Icon(ft.Icons.INFO_OUTLINE, size=16, color="onSurfaceVariant"), self._ref_kind_text])
             ], spacing=4),
             padding=15,
-            bgcolor="#F5F5F5",
+            bgcolor="surfaceVariant",
             border_radius=8,
         )
 
@@ -134,7 +134,7 @@ class PDFExtractionTab:
             label="Páginas de referencia (ej: 1,3-5)",
             hint_text="Vacío = todas",
             dense=True,
-            border_color="#1E2A38",
+            border_color="outline",
             prefix_icon=ft.Icons.NUMBERS,
         )
 
@@ -142,7 +142,7 @@ class PDFExtractionTab:
             label="Páginas sugeridas en objetivos (ej: 1,2)",
             hint_text="Se verifican primero; vacío = todas",
             dense=True,
-            border_color="#1E2A38",
+            border_color="outline",
             prefix_icon=ft.Icons.LIGHTBULB_OUTLINE,
         )
 
@@ -152,13 +152,13 @@ class PDFExtractionTab:
             multiline=True,
             min_lines=4,
             max_lines=8,
-            border_color="#1E2A38",
+            border_color="outline",
             prefix_icon=ft.Icons.KEY,
         )
 
         left_panel = ft.Column(
             [
-                ft.Text("Paso 1: Documento de Referencia", size=16, weight="bold", color="#1E2A38"),
+                ft.Text("Paso 1: Documento de Referencia", size=16, weight="bold", color="onSurface"),
                 ft.ElevatedButton(
                     "Abrir PDF Referencia",
                     icon=ft.Icons.UPLOAD_FILE,
@@ -172,9 +172,9 @@ class PDFExtractionTab:
                 ref_info_container,
                 ft.Container(height=4),
                 self._reference_pages,
-                ft.Divider(height=24, color="#E0E0E0"),
+                ft.Divider(height=24, color="outlineVariant"),
 
-                ft.Text("Paso 2: Patrón de Búsqueda", size=16, weight="bold", color="#1E2A38"),
+                ft.Text("Paso 2: Patrón de Búsqueda", size=16, weight="bold", color="onSurface"),
                 self._keywords,
                 self._hint_pages,
             ],
@@ -184,22 +184,22 @@ class PDFExtractionTab:
         )
 
         # ─── PANEL DERECHO (Objetivos y Resultados) ──────────────────────────
-        self._target_count_text = ft.Text("Archivos objetivo: 0", size=12, color="#666666")
-        self._dest_text = ft.Text(f"Destino: {self.destination_dir}", size=12, color="#666666")
+        self._target_count_text = ft.Text("Archivos objetivo: 0", size=12, color="onSurfaceVariant")
+        self._dest_text = ft.Text(f"Destino: {self.destination_dir}", size=12, color="onSurfaceVariant")
 
         target_info_container = ft.Container(
             content=ft.Column([
-                ft.Row([ft.Icon(ft.Icons.LIBRARY_BOOKS, size=16, color="#999999"), self._target_count_text]),
-                ft.Row([ft.Icon(ft.Icons.FOLDER_SPECIAL, size=16, color="#999999"), self._dest_text])
+                ft.Row([ft.Icon(ft.Icons.LIBRARY_BOOKS, size=16, color="onSurfaceVariant"), self._target_count_text]),
+                ft.Row([ft.Icon(ft.Icons.FOLDER_SPECIAL, size=16, color="onSurfaceVariant"), self._dest_text])
             ], spacing=4),
             padding=15,
-            bgcolor="#F5F5F5",
+            bgcolor="surfaceVariant",
             border_radius=8,
         )
 
         self._results = ft.ListView(expand=True, spacing=4, auto_scroll=True)
         self._progress = ft.Text("", size=13, color="#1565C0", weight="w500", italic=True)
-        self._summary = ft.Text("Sin búsqueda ejecutada", size=13, color="#666666", weight="bold")
+        self._summary = ft.Text("Sin búsqueda ejecutada", size=13, color="onSurfaceVariant", weight="bold")
 
         self._run_btn = ft.ElevatedButton(
             "Buscar y Extraer",
@@ -221,7 +221,7 @@ class PDFExtractionTab:
 
         right_panel = ft.Column(
             [
-                ft.Text("Paso 3: Objetivos y Extracción", size=16, weight="bold", color="#1E2A38"),
+                ft.Text("Paso 3: Objetivos y Extracción", size=16, weight="bold", color="onSurface"),
                 ft.Row(
                     [
                         ft.ElevatedButton(
@@ -248,9 +248,9 @@ class PDFExtractionTab:
                 target_info_container,
                 ft.Row([self._run_btn, self._preview_btn], spacing=12),
 
-                ft.Divider(height=16, color="#E0E0E0"),
+                ft.Divider(height=16, color="outlineVariant"),
 
-                ft.Row([ft.Icon(ft.Icons.TERMINAL, size=16, color="#1E2A38"), ft.Text("Registro de Operación", size=14, weight="bold", color="#1E2A38")]),
+                ft.Row([ft.Icon(ft.Icons.TERMINAL, size=16, color="onSurface"), ft.Text("Registro de Operación", size=14, weight="bold", color="onSurface")]),
                 self._progress,
                 self._summary,
 
@@ -258,8 +258,8 @@ class PDFExtractionTab:
                 ft.Container(
                     content=self._results,
                     expand=True,
-                    bgcolor="#FAFAFA",
-                    border=ft.border.all(1, "#E0E0E0"),
+                    bgcolor="surfaceVariant",
+                    border=ft.border.all(1, "outlineVariant"),
                     border_radius=8,
                     padding=12,
                 ),
@@ -272,7 +272,7 @@ class PDFExtractionTab:
         tabs_container = ft.Container(
             content=ft.Row([
                 ft.Container(left_panel, expand=4, padding=ft.padding.only(right=20)),
-                ft.VerticalDivider(width=1, color="#E0E0E0"),
+                ft.VerticalDivider(width=1, color="outlineVariant"),
                 ft.Container(right_panel, expand=6, padding=ft.padding.only(left=10))
             ], spacing=0, vertical_alignment="start"),
             padding=20,
@@ -280,7 +280,7 @@ class PDFExtractionTab:
         )
 
         self.view = ft.Card(
-            content=ft.Column([header, ft.Divider(height=1, color="#E0E0E0"), tabs_container], spacing=0),
+            content=ft.Column([header, ft.Divider(height=1, color="outlineVariant"), tabs_container], spacing=0),
             elevation=2,
             margin=10,
             expand=True
@@ -321,7 +321,7 @@ class PDFExtractionTab:
     def _snack(self, message: str) -> None:
         self.page_ref.snack_bar = ft.SnackBar(ft.Text(message), open=True)
 
-    def _log(self, text: str, color: str = "#666666") -> None:
+    def _log(self, text: str, color: str = "onSurfaceVariant") -> None:
         """Append a line to the results log and refresh."""
         self._results.controls.append(
             ft.Container(
@@ -332,7 +332,7 @@ class PDFExtractionTab:
         self.page_ref.update()
 
     def _log_separator(self) -> None:
-        self._results.controls.append(ft.Divider(height=1, color="#E0E0E0"))
+        self._results.controls.append(ft.Divider(height=1, color="outlineVariant"))
         self.page_ref.update()
 
     def _set_progress(self, text: str) -> None:

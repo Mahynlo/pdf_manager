@@ -45,8 +45,8 @@ class PDFSecurityTab:
                 [
                     ft.Icon(ft.Icons.SECURITY, size=32, color="#F9A825"),
                     ft.Column([
-                        ft.Text("Gestión de Seguridad de PDFs", size=22, weight="bold", color="#1E2A38"),
-                        ft.Text("Desbloquea archivos encriptados y protege tus documentos confidenciales", size=13, color="#666666"),
+                        ft.Text("Gestión de Seguridad de PDFs", size=22, weight="bold", color="onSurface"),
+                        ft.Text("Desbloquea archivos encriptados y protege tus documentos confidenciales", size=13, color="onSurfaceVariant"),
                     ], spacing=2)
                 ],
                 alignment="start",
@@ -61,12 +61,12 @@ class PDFSecurityTab:
                 animation_duration=300,
                 tabs=[
                     ft.Tab(
-                        tab_content=ft.Row([ft.Icon(ft.Icons.LOCK_OPEN), ft.Text("Desbloquear")]), 
-                        content=ft.Container(content=unlock_section, padding=20)
+                        tab_content=ft.Row([ft.Icon(ft.Icons.LOCK_OPEN), ft.Text("Desbloquear")]),
+                        content=ft.Container(content=unlock_section, padding=20, expand=True)
                     ),
                     ft.Tab(
-                        tab_content=ft.Row([ft.Icon(ft.Icons.LOCK), ft.Text("Proteger")]), 
-                        content=ft.Container(content=protect_section, padding=20)
+                        tab_content=ft.Row([ft.Icon(ft.Icons.LOCK), ft.Text("Proteger")]),
+                        content=ft.Container(content=protect_section, padding=20, expand=True)
                     ),
                 ],
                 expand=True,
@@ -75,9 +75,10 @@ class PDFSecurityTab:
         )
 
         self._tab = ft.Card(
-            content=ft.Column([header, ft.Divider(height=1, color="#E0E0E0"), tabs_container], spacing=0), 
+            content=ft.Column([header, ft.Divider(height=1, color="outlineVariant"), tabs_container], spacing=0, expand=True),
             elevation=2,
-            margin=10
+            margin=10,
+            expand=True,
         )
     
     def _build_unlock_section(self) -> ft.Container:
@@ -93,11 +94,11 @@ class PDFSecurityTab:
             style=ft.ButtonStyle(padding=20)
         )
         
-        self.unlock_file_info_text = ft.Text("No hay PDF seleccionado", size=13, color="#999999")
+        self.unlock_file_info_text = ft.Text("No hay PDF seleccionado", size=13, color="onSurfaceVariant")
         file_info_container = ft.Container(
-            content=ft.Row([ft.Icon(ft.Icons.PICTURE_AS_PDF, color="#999999"), self.unlock_file_info_text], expand=True),
+            content=ft.Row([ft.Icon(ft.Icons.PICTURE_AS_PDF, color="onSurfaceVariant"), self.unlock_file_info_text], expand=True),
             padding=15,
-            bgcolor="#F5F5F5",
+            bgcolor="surfaceVariant",
             border_radius=8,
         )
         
@@ -105,7 +106,7 @@ class PDFSecurityTab:
         security_info_card = ft.Container(
             content=self.unlock_security_info_column,
             padding=15,
-            border=ft.border.all(1, "#E0E0E0"),
+            border=ft.border.all(1, "outlineVariant"),
             border_radius=8,
             visible=False
         )
@@ -118,7 +119,7 @@ class PDFSecurityTab:
             prefix_icon=ft.Icons.PASSWORD,
             width=300,
             visible=False,
-            border_color="#1E2A38",
+            border_color="outline",
             on_submit=lambda _: self._try_unlock()
         )
         
@@ -147,13 +148,13 @@ class PDFSecurityTab:
         )
         
         left_col = ft.Column([
-            ft.Text("Paso 1: Archivo", weight="bold", size=16, color="#1E2A38"),
+            ft.Text("Paso 1: Archivo", weight="bold", size=16, color="onSurface"),
             select_btn,
             file_info_container,
         ], spacing=15)
 
         right_col = ft.Column([
-            ft.Text("Paso 2: Acciones", weight="bold", size=16, color="#1E2A38"),
+            ft.Text("Paso 2: Acciones", weight="bold", size=16, color="onSurface"),
             security_info_card,
             self.unlock_password_field,
             ft.Row([self.unlock_btn, self.unlock_export_btn], spacing=10, wrap=True),
@@ -161,14 +162,24 @@ class PDFSecurityTab:
         ], spacing=15)
 
         return ft.Container(
-            content=ft.Row([
-                ft.Container(left_col, expand=1, padding=ft.padding.only(right=20)), 
-                ft.VerticalDivider(width=1, color="#E0E0E0"),
-                ft.Container(right_col, expand=2, padding=ft.padding.only(left=10))
-            ], spacing=0, vertical_alignment="start"),
+            content=ft.Column(
+                [
+                    ft.ResponsiveRow(
+                        [
+                            ft.Container(left_col, col={"xs": 12, "md": 4}, padding=ft.padding.only(right=10)),
+                            ft.Container(right_col, col={"xs": 12, "md": 8}, padding=ft.padding.only(left=10)),
+                        ],
+                        spacing=10,
+                        run_spacing=20,
+                        vertical_alignment=ft.CrossAxisAlignment.START,
+                    ),
+                ],
+                scroll=ft.ScrollMode.AUTO,
+                expand=True,
+            ),
             expand=True,
         )
-    
+
     def _build_protect_section(self) -> ft.Container:
         """Build the protect section UI."""
         
@@ -182,11 +193,11 @@ class PDFSecurityTab:
             style=ft.ButtonStyle(padding=20)
         )
         
-        self.protect_file_info_text = ft.Text("No hay PDF seleccionado", size=13, color="#999999")
+        self.protect_file_info_text = ft.Text("No hay PDF seleccionado", size=13, color="onSurfaceVariant")
         file_info_container = ft.Container(
-            content=ft.Row([ft.Icon(ft.Icons.PICTURE_AS_PDF, color="#999999"), self.protect_file_info_text], expand=True),
+            content=ft.Row([ft.Icon(ft.Icons.PICTURE_AS_PDF, color="onSurfaceVariant"), self.protect_file_info_text], expand=True),
             padding=15,
-            bgcolor="#F5F5F5",
+            bgcolor="surfaceVariant",
             border_radius=8,
         )
         
@@ -243,7 +254,7 @@ class PDFSecurityTab:
                     self.protect_allow_annotate, self.protect_allow_forms, self.protect_allow_assembly, self.protect_allow_print_hq,
                 ], spacing=2),
                 padding=ft.padding.only(left=20, bottom=20, right=20),
-                bgcolor="#F5F5F5",
+                bgcolor="surfaceVariant",
             )
         )
         
@@ -263,7 +274,7 @@ class PDFSecurityTab:
         )
         
         left_col = ft.Column([
-            ft.Text("Paso 1: Archivo y Nivel", weight="bold", size=16, color="#1E2A38"),
+            ft.Text("Paso 1: Archivo y Nivel", weight="bold", size=16, color="onSurface"),
             select_btn,
             file_info_container,
             ft.Container(height=5),
@@ -272,38 +283,38 @@ class PDFSecurityTab:
         ], spacing=15)
 
         right_col = ft.Column([
-            ft.Text("Paso 2: Contraseñas y Permisos", weight="bold", size=16, color="#1E2A38"),
-            ft.Text("Define quién puede acceder y qué acciones están permitidas", size=12, color="#666666"),
+            ft.Text("Paso 2: Contraseñas y Permisos", weight="bold", size=16, color="onSurface"),
+            ft.Text("Define quién puede acceder y qué acciones están permitidas", size=12, color="onSurfaceVariant"),
             ft.Container(height=8),
             
             # Info box explaining both password types
             ft.Container(
                 content=ft.Column([
                     ft.Row([
-                        ft.Icon(ft.Icons.INFO_OUTLINE, size=18, color="#1565C0"),
-                        ft.Text("¿Cuál es la diferencia?", size=13, weight="bold", color="#1565C0")
+                        ft.Icon(ft.Icons.INFO_OUTLINE, size=18, color="primary"),
+                        ft.Text("¿Cuál es la diferencia?", size=13, weight="bold", color="onPrimaryContainer")
                     ], spacing=8),
-                    ft.Divider(height=10, color="#E0E0E0"),
+                    ft.Divider(height=10, color="outlineVariant"),
                     ft.Row([
-                        ft.Icon(ft.Icons.PASSWORD, size=16, color="#666666"),
+                        ft.Icon(ft.Icons.PASSWORD, size=16, color="onPrimaryContainer"),
                         ft.Column([
-                            ft.Text("Contraseña de Usuario", weight="bold", size=11, color="#1E2A38"),
-                            ft.Text("El usuario final la necesita para abrir el PDF. Restringe acciones según los permisos.", size=10, color="#666666")
+                            ft.Text("Contraseña de Usuario", weight="bold", size=11, color="onPrimaryContainer"),
+                            ft.Text("El usuario final la necesita para abrir el PDF. Restringe acciones según los permisos.", size=10, color="onPrimaryContainer")
                         ], tight=True, spacing=2)
                     ], spacing=10),
                     ft.Container(height=8),
                     ft.Row([
                         ft.Icon(ft.Icons.ADMIN_PANEL_SETTINGS, size=16, color="#F9A825"),
                         ft.Column([
-                            ft.Text("Contraseña de Propietario", weight="bold", size=11, color="#1E2A38"),
-                            ft.Text("Te permite cambiar los permisos y eliminar la contraseña sin necesitar la original.", size=10, color="#666666")
+                            ft.Text("Contraseña de Propietario", weight="bold", size=11, color="onPrimaryContainer"),
+                            ft.Text("Te permite cambiar los permisos y eliminar la contraseña sin necesitar la original.", size=10, color="onPrimaryContainer")
                         ], tight=True, spacing=2)
                     ], spacing=10),
                 ], spacing=8, tight=True),
                 padding=12,
-                bgcolor="#F0F7FF",
+                bgcolor="primaryContainer",
                 border_radius=8,
-                border=ft.border.all(1, "#D0E8FF")
+                border=ft.border.all(1, "outlineVariant")
             ),
             
             ft.Container(height=12),
@@ -315,12 +326,22 @@ class PDFSecurityTab:
         ], spacing=15)
 
         return ft.Container(
-            content=ft.Row([
-                ft.Container(left_col, expand=5, padding=ft.padding.only(right=20)),
-                ft.VerticalDivider(width=1, color="#E0E0E0"),
-                ft.Container(right_col, expand=4, padding=ft.padding.only(left=10))
-            ], spacing=0, vertical_alignment="start"),
-            expand=True
+            content=ft.Column(
+                [
+                    ft.ResponsiveRow(
+                        [
+                            ft.Container(left_col, col={"xs": 12, "md": 6}, padding=ft.padding.only(right=10)),
+                            ft.Container(right_col, col={"xs": 12, "md": 6}, padding=ft.padding.only(left=10)),
+                        ],
+                        spacing=10,
+                        run_spacing=20,
+                        vertical_alignment=ft.CrossAxisAlignment.START,
+                    ),
+                ],
+                scroll=ft.ScrollMode.AUTO,
+                expand=True,
+            ),
+            expand=True,
         )
     
     # ─── UNLOCK HANDLERS ───────────────────────────────────────────────────
@@ -371,7 +392,7 @@ class PDFSecurityTab:
             controls = []
             
             is_prot = self.security_info.is_protected
-            status_color = "#D32F2F" if is_prot else "#2E7D32"
+            status_color = ft.Colors.RED if is_prot else ft.Colors.GREEN
             status_icon = ft.Icons.LOCK if is_prot else ft.Icons.LOCK_OPEN
             status_text = "Requiere Contraseña" if is_prot else "Sin Protección"
             
@@ -383,16 +404,16 @@ class PDFSecurityTab:
             )
             
             if self.security_info.is_encrypted:
-                controls.append(ft.Text(f"Cifrado: {self.security_info.encryption_method}", size=12, color="#666666"))
+                controls.append(ft.Text(f"Cifrado: {self.security_info.encryption_method}", size=12, color="onSurfaceVariant"))
                 if not password:
-                    controls.append(ft.Text("Nota: ingresa la contraseña para ver permisos reales.", size=11, color="#9E9E9E"))
-            
-            controls.append(ft.Divider(height=10, color="#E0E0E0"))
-            controls.append(ft.Text("Permisos actuales:", size=12, weight="w500", color="#1E2A38"))
-            
+                    controls.append(ft.Text("Nota: ingresa la contraseña para ver permisos reales.", size=11, color="onSurfaceVariant"))
+
+            controls.append(ft.Divider(height=10, color="outlineVariant"))
+            controls.append(ft.Text("Permisos actuales:", size=12, weight="w500", color="onSurface"))
+
             perms = self.security_info.get_permissions_text()
             for perm in perms:
-                controls.append(ft.Text(f"• {perm}", size=12, color="#666666"))
+                controls.append(ft.Text(f"• {perm}", size=12, color="onSurfaceVariant"))
             
             self.unlock_security_info_column.controls = controls
             # Make sure the column and its container are visible
@@ -464,9 +485,10 @@ class PDFSecurityTab:
     
     def _show_unlock_message(self, msg: str, error: bool = False) -> None:
         self.unlock_message_text.value = msg
-        color = "#D32F2F" if error else "#2E7D32"
-        bg_color = "#FFEBEE" if error else "#E8F5E9"
-        
+        base = ft.Colors.RED if error else ft.Colors.GREEN
+        color = base
+        bg_color = ft.Colors.with_opacity(0.12, base)
+
         self.unlock_message_text.color = color
         self.unlock_message_container.bgcolor = bg_color
         self.unlock_message_container.content.controls[0].color = color
@@ -536,9 +558,10 @@ class PDFSecurityTab:
     
     def _show_protect_message(self, msg: str, error: bool = False) -> None:
         self.protect_message_text.value = msg
-        color = "#D32F2F" if error else "#2E7D32"
-        bg_color = "#FFEBEE" if error else "#E8F5E9"
-        
+        base = ft.Colors.RED if error else ft.Colors.GREEN
+        color = base
+        bg_color = ft.Colors.with_opacity(0.12, base)
+
         self.protect_message_text.color = color
         self.protect_message_container.bgcolor = bg_color
         self.protect_message_container.content.controls[0].color = color

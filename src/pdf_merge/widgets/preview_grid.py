@@ -30,10 +30,10 @@ class PreviewGrid:
         self._empty = ft.Container(
             content=ft.Column(
                 [
-                    ft.Icon(ft.Icons.PREVIEW, size=40, color="#BDBDBD"),
+                    ft.Icon(ft.Icons.PREVIEW, size=40, color=ft.Colors.OUTLINE),
                     ft.Text(
                         "Sin páginas seleccionadas",
-                        size=13, color="#999999", italic=True,
+                        size=13, color=ft.Colors.OUTLINE, italic=True,
                         text_align=ft.TextAlign.CENTER,
                     ),
                 ],
@@ -85,7 +85,7 @@ class PreviewGrid:
             )
         else:
             thumb_ctrl = ft.Container(
-                width=56, height=76, bgcolor="#E0E0E0",
+                width=56, height=76, bgcolor="surfaceVariant",
                 content=ft.Icon(ft.Icons.PICTURE_AS_PDF, size=18, color=ft.Colors.OUTLINE),
                 alignment=ft.alignment.center,
             )

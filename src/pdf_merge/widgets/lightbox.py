@@ -56,7 +56,7 @@ class LightboxDialog:
                     [
                         ft.Container(
                             content=self._img,
-                            bgcolor="#E8ECF0",
+                            bgcolor="surfaceVariant",
                             border_radius=6,
                             alignment=ft.alignment.center,
                             width=300, height=420,

@@ -177,8 +177,8 @@ class MergePDFTab:
                 [
                     ft.Icon(ft.Icons.MERGE_TYPE, size=32, color="#2E7D32"),
                     ft.Column([
-                        ft.Text("Combinar PDFs", size=22, weight="bold", color="#1E2A38"),
-                        ft.Text("Selecciona páginas de varios documentos y crea un PDF único", size=13, color="#666666"),
+                        ft.Text("Combinar PDFs", size=22, weight="bold", color="onSurface"),
+                        ft.Text("Selecciona páginas de varios documentos y crea un PDF único", size=13, color="onSurfaceVariant"),
                     ], spacing=2)
                 ],
                 alignment="start",
@@ -187,11 +187,11 @@ class MergePDFTab:
             padding=ft.padding.only(left=20, top=20, right=20, bottom=10)
         )
 
-        self._status_text  = ft.Text("", size=12, color="#666666")
-        self._progress_bar = ft.ProgressBar(visible=False, color="#2E7D32", bgcolor="#E0E0E0")
+        self._status_text  = ft.Text("", size=12, color="onSurfaceVariant")
+        self._progress_bar = ft.ProgressBar(visible=False, color="#2E7D32", bgcolor="outlineVariant")
         self._output_label = ft.Text(
             "Sin ruta de salida seleccionada",
-            size=12, color="#666666", max_lines=1, overflow="ellipsis", expand=True,
+            size=12, color="onSurfaceVariant", max_lines=1, overflow="ellipsis", expand=True,
         )
         self._merge_btn = ft.ElevatedButton(
             "Combinar y guardar",
@@ -208,7 +208,7 @@ class MergePDFTab:
             content=ft.Row(
                 [
                     ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE, color="#2E7D32", size=18),
-                    ft.Text("", size=12, expand=True, overflow="ellipsis", color="#1E2A38"),
+                    ft.Text("", size=12, expand=True, overflow="ellipsis", color="onSurface"),
                     ft.TextButton("Abrir", on_click=self._open_result, style=ft.ButtonStyle(color="#2E7D32")),
                 ],
                 spacing=8,
@@ -216,7 +216,7 @@ class MergePDFTab:
             ),
             visible=False,
             padding=ft.padding.symmetric(horizontal=12, vertical=10),
-            bgcolor="#E8F5E9",
+            bgcolor=ft.Colors.with_opacity(0.12, ft.Colors.GREEN),
             border_radius=8,
         )
 
@@ -228,7 +228,7 @@ class MergePDFTab:
                             ft.Icon(ft.Icons.PREVIEW, color="#2E7D32", size=20),
                             ft.Text(
                                 "Paso 2: Vista previa del resultado",
-                                size=15, weight="bold", color="#1E2A38",
+                                size=15, weight="bold", color="onSurface",
                             ),
                             ft.Container(expand=True),
                             self._status_text,
@@ -236,13 +236,13 @@ class MergePDFTab:
                         vertical_alignment="center",
                         spacing=8,
                     ),
-                    ft.Divider(height=1, color="#E0E0E0"),
+                    ft.Divider(height=1, color="outlineVariant"),
                     ft.Container(self._preview.control, expand=True),
                     self._progress_bar,
-                    ft.Divider(height=1, color="#E0E0E0"),
+                    ft.Divider(height=1, color="outlineVariant"),
                     ft.Row(
                         [
-                            ft.Icon(ft.Icons.SAVE_ALT, size=16, color="#666666"),
+                            ft.Icon(ft.Icons.SAVE_ALT, size=16, color="onSurfaceVariant"),
                             self._output_label,
                             ft.IconButton(
                                 ft.Icons.FOLDER_OPEN_OUTLINED, icon_size=16,
@@ -261,7 +261,7 @@ class MergePDFTab:
             ),
             width=420,
             padding=20,
-            bgcolor="#FAFAFA",
+            bgcolor="surfaceVariant",
         )
 
         main_content = ft.Row(
@@ -272,7 +272,7 @@ class MergePDFTab:
         )
 
         self.view = ft.Card(
-            content=ft.Column([header, ft.Divider(height=1, color="#E0E0E0"), main_content], spacing=0),
+            content=ft.Column([header, ft.Divider(height=1, color="outlineVariant"), main_content], spacing=0),
             elevation=2,
             margin=10,
             expand=True

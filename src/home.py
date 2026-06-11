@@ -15,8 +15,8 @@ _CARD_H = 195
 
 # ========[Helper Functions]========================================================
 def _row_hover(e: ft.HoverEvent) -> None:
-    # Usamos un color hexadecimal en lugar de ft.Colors para evitar errores
-    e.control.bgcolor = "#F0F4F8" if e.data == "true" else None
+    # Tinte translúcido sobre el color primario: se adapta a tema claro/oscuro
+    e.control.bgcolor = ft.Colors.with_opacity(0.08, ft.Colors.PRIMARY) if e.data == "true" else None
     e.control.update()
 
 # ========[Main Class Home page]==============================================================
@@ -87,7 +87,7 @@ class HomePage:
                     ft.Text(
                         "Sin archivos recientes",
                         size=13,
-                        color="#999999",
+                        color="onSurfaceVariant",
                         italic=True,
                     ),
                     padding=ft.padding.symmetric(horizontal=12, vertical=20),
@@ -117,12 +117,12 @@ class HomePage:
                                         weight="w500",
                                         max_lines=1,
                                         overflow="ellipsis",
-                                        color="#1E2A38",
+                                        color="onSurface",
                                     ),
                                     ft.Text(
                                         str(p.parent),
                                         size=11,
-                                        color="#666666",
+                                        color="onSurfaceVariant",
                                         max_lines=1,
                                         overflow="ellipsis",
                                     ),
@@ -134,7 +134,7 @@ class HomePage:
                                 ft.Icons.OPEN_IN_NEW,
                                 icon_size=16,
                                 tooltip="Abrir",
-                                icon_color="#666666",
+                                icon_color="onSurfaceVariant",
                                 on_click=lambda e, p=_path: self._on_open_pdf(p),
                             ),
                         ],
@@ -169,13 +169,13 @@ class HomePage:
                                 "Archivos recientes",
                                 size=15,
                                 weight="bold",
-                                color="#1E2A38",
+                                color="onSurface",
                             ),
                         ],
                         spacing=8,
                         vertical_alignment="center",
                     ),
-                    ft.Divider(height=1, color="#E0E0E0"),
+                    ft.Divider(height=1, color="outlineVariant"),
                     ft.Container(self._recent_list, expand=True),
                 ],
                 spacing=12,
@@ -183,8 +183,8 @@ class HomePage:
             ),
             width=_RECENT_W,
             padding=ft.padding.all(20),
-            bgcolor="#FAFAFA", 
-            border=ft.border.only(right=ft.BorderSide(1, "#E0E0E0")),
+            bgcolor="surfaceVariant",
+            border=ft.border.only(right=ft.BorderSide(1, "outlineVariant")),
         )
 
         # ========[Action Cards]============================================================
@@ -211,12 +211,12 @@ class HomePage:
                             size=15,
                             weight="bold",
                             text_align="center",
-                            color="#1E2A38",
+                            color="onSurface",
                         ),
                         ft.Text(
                             subtitle,
                             size=12,
-                            color="#666666",
+                            color="onSurfaceVariant",
                             text_align="center",
                         ),
                     ],
@@ -227,9 +227,9 @@ class HomePage:
                 width=_CARD_W,
                 height=_CARD_H,
                 padding=20,
-                bgcolor="#FFFFFF",
+                bgcolor="surface",
                 border_radius=16,
-                border=ft.border.all(1, "#E0E0E0"),
+                border=ft.border.all(1, "outlineVariant"),
                 shadow=ft.BoxShadow(
                     spread_radius=0,
                     blur_radius=10,
@@ -244,7 +244,7 @@ class HomePage:
             [
                 _card(
                     icon=ft.Icons.FIND_IN_PAGE,
-                    container_color="#E3F2FD",  # Azul muy claro
+                    container_color=ft.Colors.with_opacity(0.15, "#1565C0"),  # Tinte azul
                     on_container_color="#1565C0", # Azul fuerte
                     title="Extraer texto de PDF",
                     subtitle="Busca y extrae páginas\npor palabras clave",
@@ -252,7 +252,7 @@ class HomePage:
                 ),
                 _card(
                     icon=ft.Icons.MERGE_TYPE,
-                    container_color="#E8F5E9",  # Verde muy claro
+                    container_color=ft.Colors.with_opacity(0.15, "#2E7D32"),  # Tinte verde
                     on_container_color="#2E7D32", # Verde fuerte
                     title="Combinar PDFs",
                     subtitle="Une varios PDFs\neligiendo las páginas",
@@ -260,7 +260,7 @@ class HomePage:
                 ),
                 _card(
                     icon=ft.Icons.DOCUMENT_SCANNER,
-                    container_color="#FFF3E0",  # Naranja muy claro
+                    container_color=ft.Colors.with_opacity(0.15, "#E65100"),  # Tinte naranja
                     on_container_color="#E65100", # Naranja fuerte
                     title="OCR de PDF",
                     subtitle="Abre un PDF y ejecuta\nreconocimiento de texto",
@@ -268,7 +268,7 @@ class HomePage:
                 ),
                 _card(
                     icon=ft.Icons.SECURITY,
-                    container_color="#FFF8E1",  # Amarillo muy claro
+                    container_color=ft.Colors.with_opacity(0.15, "#F9A825"),  # Tinte dorado
                     on_container_color="#F9A825", # Naranja/Dorado fuerte
                     title="Gestión de Seguridad",
                     subtitle="Desbloquea y protege\ntus documentos",
@@ -282,17 +282,17 @@ class HomePage:
 
         center_panel = ft.Column(
             [
-                ft.Icon(ft.Icons.GRID_VIEW, size=48, color="#E0E0E0"),
+                ft.Icon(ft.Icons.GRID_VIEW, size=48, color="outlineVariant"),
                 ft.Text(
                     "¿Qué quieres hacer hoy?",
                     size=26,
                     weight="w800",
-                    color="#1E2A38",
+                    color="onSurface",
                 ),
                 ft.Text(
                     "Selecciona una herramienta para comenzar a trabajar",
                     size=14,
-                    color="#666666",
+                    color="onSurfaceVariant",
                 ),
                 ft.Container(height=32), 
                 cards_row,
@@ -313,6 +313,6 @@ class HomePage:
 
         self.view = ft.Container(
             content=main_row,
-            bgcolor="#FFFFFF",
+            bgcolor="surface",
             expand=True,
         )

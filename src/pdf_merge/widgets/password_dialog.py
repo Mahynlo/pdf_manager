@@ -29,7 +29,7 @@ class PasswordDialog:
             autofocus=True,
             on_submit=lambda _: on_confirm(self._field.value or ""),
         )
-        self._error = ft.Text("", color="#D32F2F", size=12, visible=False)
+        self._error = ft.Text("", color="error", size=12, visible=False)
         self._dialog = ft.AlertDialog(
             modal=True,
             title=ft.Text("PDF protegido"),

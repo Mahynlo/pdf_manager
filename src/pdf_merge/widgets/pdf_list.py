@@ -31,7 +31,7 @@ class PdfListPanel:
                             ft.Text(
                                 "Paso 1: Selecciona PDFs",
                                 size=15, weight="bold",
-                                color="#1E2A38",
+                                color="onSurface",
                             ),
                             ft.Container(expand=True),
                             ft.TextButton(
@@ -54,7 +54,7 @@ class PdfListPanel:
                         vertical_alignment="center",
                         spacing=8,
                     ),
-                    ft.Divider(height=1, color="#E0E0E0"),
+                    ft.Divider(height=1, color="outlineVariant"),
                     ft.Container(self._col, expand=True),
                 ],
                 spacing=12,
@@ -62,8 +62,8 @@ class PdfListPanel:
             ),
             expand=True,
             padding=20,
-            bgcolor="#FAFAFA",
-            border=ft.border.only(right=ft.BorderSide(1, "#E0E0E0")),
+            bgcolor="surfaceVariant",
+            border=ft.border.only(right=ft.BorderSide(1, "outlineVariant")),
         )
 
     def rebuild(self, entries: list[PDFEntry]) -> None:
