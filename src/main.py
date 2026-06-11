@@ -587,6 +587,9 @@ def main(page: ft.Page) -> None:
             allow_multiple=True,
         )
 
+    # Botón "+" de la barra de pestañas → abrir un PDF en una pestaña nueva.
+    doc_mgr.on_new_tab = _open_picker
+
     # ── Pestaña extractor ─────────────────────────────────────────────────────
 
     def _open_extractor() -> None:

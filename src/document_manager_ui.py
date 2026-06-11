@@ -12,6 +12,10 @@ if TYPE_CHECKING:
 _TAB_H       = 36
 _TAB_W       = 180
 _SCROLL_STEP = 160
+# Ancho aproximado de los controles fijos de la barra (flechas + divisor + menú +
+# botón "+" fijo + paddings). Se usa para decidir si las pestañas desbordan.
+_RESERVED_W  = 150
+_PLUS_W      = 44   # ancho del botón "+" inline (mini-pestaña)
 
 # Chrome de la barra de pestañas: tokens de tema (se adaptan a claro/oscuro).
 _TABBAR_BG   = "surfaceVariant"          # fondo de la barra
@@ -47,6 +51,9 @@ class DocumentManagerUI:
         self._entries: list[_TabEntry] = []
         self._active  = 0
         self._uid_seq = 0
+        # Acción del botón "+" (abrir un PDF en una pestaña nueva). La fija main
+        # tras definir su file-picker; si queda None el botón no hace nada.
+        self.on_new_tab: Callable | None = None
 
         # Horizontally scrollable row of tab buttons.
         self._tabs_row = ft.Row(
@@ -71,6 +78,30 @@ class DocumentManagerUI:
             on_click=lambda _: self._scroll(_SCROLL_STEP),
             style=ft.ButtonStyle(padding=ft.padding.symmetric(horizontal=4)),
         )
+        # Dos variantes del botón "+", se muestra una u otra según desborde:
+        #  • inline: mini-pestaña pegada a la derecha de la última tab (dentro del
+        #    scroll) — visible mientras las pestañas caben sin scroll.
+        #  • fijo: en la barra (no scrollea) — visible cuando hay tantas pestañas
+        #    que la fila hace scroll, para no tener que recorrer hasta el final.
+        # Ambos abren un PDF en una pestaña nueva.
+        self._new_tab_inline = ft.Container(
+            content=ft.Icon(ft.Icons.ADD, size=16, color=_TEXT_INACT),
+            height=_TAB_H,
+            width=40,
+            alignment=ft.alignment.center,
+            bgcolor=_INACTIVE_BG,
+            border=ft.border.only(right=ft.BorderSide(1, _BORDER_CLR)),
+            tooltip="Abrir un PDF en una pestaña nueva",
+            on_click=lambda _: self.on_new_tab() if self.on_new_tab else None,
+            ink=True,
+        )
+        self._new_tab_btn = ft.IconButton(
+            ft.Icons.ADD,
+            icon_size=20,
+            tooltip="Abrir un PDF en una pestaña nueva",
+            on_click=lambda _: self.on_new_tab() if self.on_new_tab else None,
+            style=ft.ButtonStyle(padding=ft.padding.symmetric(horizontal=4)),
+        )
         self._overflow_btn = ft.PopupMenuButton(
             icon=ft.Icons.MORE_VERT,
             icon_size=18,
@@ -90,6 +121,7 @@ class DocumentManagerUI:
                     self._arr_right,
                     ft.Container(width=1, height=_TAB_H - 10, bgcolor=_BORDER_CLR),
                     self._overflow_btn,
+                    self._new_tab_btn,
                 ],
                 spacing=0,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -161,8 +193,18 @@ class DocumentManagerUI:
             if stale.content in self._stack.controls:
                 self._stack.controls.remove(stale.content)
 
-        # Rebuild the tab row with the new order.
-        self._tabs_row.controls = [e.btn for e in new_entries]
+        # Rebuild the tab row with the new order. El botón "+" va inline (pegado a
+        # la derecha de la última pestaña) mientras las pestañas caben sin scroll;
+        # cuando desbordan, se oculta el inline y se usa el "+" fijo de la barra,
+        # para no tener que recorrer toda la fila hasta el final para abrir otro.
+        avail = max(0.0, (self._page.width or 1280) - _RESERVED_W)
+        overflowing = (len(new_entries) * _TAB_W + _PLUS_W) > avail
+        self._new_tab_btn.visible    = overflowing
+        self._new_tab_inline.visible = not overflowing
+        tab_controls = [e.btn for e in new_entries]
+        if not overflowing:
+            tab_controls.append(self._new_tab_inline)
+        self._tabs_row.controls = tab_controls
         self._entries = new_entries
 
         # Apply active/inactive styling.
