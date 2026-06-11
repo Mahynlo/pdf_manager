@@ -35,17 +35,17 @@ class _AgentMixin:
         "dato_médico":     (ft.Icons.MEDICAL_SERVICES_OUTLINED, "#AD1457", "Médico"),
         "contraseña":      (ft.Icons.KEY_OUTLINED,              "#C62828", "Contraseña"),
         "fecha_nacimiento":(ft.Icons.CAKE_OUTLINED,             "#4527A0", "F. Nac."),
-        "otro":            (ft.Icons.LABEL_OUTLINED,            "#616161", "Otro"),
+        "otro":            (ft.Icons.LABEL_OUTLINED,            "onSurfaceVariant", "Otro"),
     }
 
     # ── sidebar panel builder ─────────────────────────────────────────────────
 
     def _build_agent_sidebar_panel(self) -> ft.Container:
         """Build the AI Agent panel — dedicated full-height section with Markdown chat."""
-        _AGENT_BG   = "#F3F0FF"
+        _AGENT_BG   = ft.Colors.with_opacity(0.06, "#5C35C9")
         _AGENT_HDR  = "#5C35C9"
-        _AGENT_LINE = "#D1C4E9"
-        _AGENT_SURF = "#EDE7F6"
+        _AGENT_LINE = "outlineVariant"
+        _AGENT_SURF = ft.Colors.with_opacity(0.12, "#5C35C9")
 
         try:
             from agent.config import get_provider
@@ -68,7 +68,7 @@ class _AgentMixin:
             content_padding=ft.padding.symmetric(horizontal=12, vertical=8),
             border_radius=20,
             filled=True,
-            fill_color="#FFFFFF",
+            fill_color="surface",
             border_color=_AGENT_LINE,
             focused_border_color=_AGENT_HDR,
         )
@@ -88,11 +88,11 @@ class _AgentMixin:
             is_sel = (self._agent_provider_selected == provider)
             return ft.Container(
                 ft.Text(label, size=11, weight=ft.FontWeight.W_500,
-                        color=_AGENT_HDR if is_sel else "#757575"),
+                        color=_AGENT_HDR if is_sel else "onSurfaceVariant"),
                 padding=ft.padding.symmetric(horizontal=10, vertical=4),
                 border_radius=12,
                 bgcolor=_AGENT_SURF if is_sel else None,
-                border=ft.border.all(1, _AGENT_HDR if is_sel else "#BDBDBD"),
+                border=ft.border.all(1, _AGENT_HDR if is_sel else "outlineVariant"),
                 on_click=lambda e, p=provider: self._agent_select_provider(p),
                 ink=True,
             )
@@ -102,7 +102,7 @@ class _AgentMixin:
         self._agent_provider_btns = {"gemini": gemini_btn, "openai": openai_btn}
 
         # ── key status label ──────────────────────────────────────────────────
-        self._agent_key_status = ft.Text("", size=10, color="#757575")
+        self._agent_key_status = ft.Text("", size=10, color="onSurfaceVariant")
         self._update_agent_key_status()
 
         # ── config section ────────────────────────────────────────────────────
@@ -111,7 +111,7 @@ class _AgentMixin:
                 [
                     ft.Row(
                         [
-                            ft.Text("Proveedor:", size=11, color="#616161"),
+                            ft.Text("Proveedor:", size=11, color="onSurfaceVariant"),
                             gemini_btn,
                             openai_btn,
                         ],
@@ -204,7 +204,7 @@ class _AgentMixin:
 
         sensitivity_row = ft.Row(
             [
-                ft.Text("Nivel de censura:", size=10, color="#9E9E9E"),
+                ft.Text("Nivel de censura:", size=10, color="onSurfaceVariant"),
                 s_low, s_med, s_high,
             ],
             spacing=6,
@@ -222,7 +222,7 @@ class _AgentMixin:
                     ft.Container(
                         self._agent_chat_list,
                         expand=True,
-                        bgcolor="#FAFAFE",
+                        bgcolor="surface",
                         border_radius=10,
                         border=ft.border.all(1, _AGENT_LINE),
                         clip_behavior=ft.ClipBehavior.HARD_EDGE,
@@ -271,7 +271,7 @@ class _AgentMixin:
                             ft.IconButton(
                                 ft.Icons.DELETE_SWEEP_OUTLINED, icon_size=16,
                                 tooltip="Limpiar conversación",
-                                icon_color="#9E9E9E",
+                                icon_color="onSurfaceVariant",
                                 on_click=self._agent_clear_chat,
                                 style=ft.ButtonStyle(padding=ft.padding.all(4)),
                             ),
@@ -350,7 +350,7 @@ class _AgentMixin:
                 self._agent_key_status.color = "#C62828"
         except Exception:
             self._agent_key_status.value = "Módulo de agente no disponible"
-            self._agent_key_status.color = "#9E9E9E"
+            self._agent_key_status.color = "onSurfaceVariant"
         try:
             self._agent_key_status.update()
         except Exception:
@@ -358,15 +358,15 @@ class _AgentMixin:
 
     def _agent_select_provider(self, provider: str) -> None:
         _AGENT_HDR  = "#5C35C9"
-        _AGENT_SURF = "#EDE7F6"
+        _AGENT_SURF = ft.Colors.with_opacity(0.12, "#5C35C9")
         self._agent_provider_selected = provider
         self._agent_instance = None
         for p, btn in self._agent_provider_btns.items():
             is_sel = (p == provider)
             btn.bgcolor = _AGENT_SURF if is_sel else None
-            btn.border  = ft.border.all(1, _AGENT_HDR if is_sel else "#BDBDBD")
+            btn.border  = ft.border.all(1, _AGENT_HDR if is_sel else "outlineVariant")
             if isinstance(btn.content, ft.Text):
-                btn.content.color = _AGENT_HDR if is_sel else "#757575"
+                btn.content.color = _AGENT_HDR if is_sel else "onSurfaceVariant"
             try:
                 btn.update()
             except Exception:
@@ -379,7 +379,7 @@ class _AgentMixin:
         self._agent_config_section.visible = not self._agent_config_section.visible
         if self._agent_config_toggle_btn is not None:
             self._agent_config_toggle_btn.icon_color = (
-                "#5C35C9" if self._agent_config_section.visible else "#9E9E9E"
+                "#5C35C9" if self._agent_config_section.visible else "onSurfaceVariant"
             )
             try:
                 self._agent_config_toggle_btn.update()
@@ -414,7 +414,7 @@ class _AgentMixin:
 
         if is_user:
             body: ft.Control = ft.Text(
-                text, size=12, selectable=True, color="#1A237E",
+                text, size=12, selectable=True, color="onSurface",
             )
         else:
             body = ft.Markdown(
@@ -438,14 +438,14 @@ class _AgentMixin:
 
         bubble = ft.Container(
             content=body,
-            bgcolor="#E8EAF6" if is_user else "#FFFFFF",
+            bgcolor=ft.Colors.with_opacity(0.15, "#3949AB") if is_user else "surfaceVariant",
             border_radius=ft.border_radius.only(
                 top_left=12, top_right=12,
                 bottom_left=2  if is_user else 12,
                 bottom_right=12 if is_user else 2,
             ),
             padding=ft.padding.symmetric(horizontal=10, vertical=8),
-            border=ft.border.all(1, "#C5CAE9" if is_user else "#E8EAF6"),
+            border=ft.border.all(1, "outlineVariant" if is_user else "outlineVariant"),
             expand=True,
         )
 
@@ -546,19 +546,19 @@ class _AgentMixin:
 
             if count == 0:
                 count_label = "no hallada"
-                count_color = "#9E9E9E"
-                count_bg    = "#F5F5F5"
-                text_color  = "#9E9E9E"
+                count_color = "onSurfaceVariant"
+                count_bg    = "surfaceVariant"
+                text_color  = "onSurfaceVariant"
             elif count == 1:
                 count_label = "1 coincid."
                 count_color = _WARN
-                count_bg    = "#FFE0B2"
-                text_color  = "#4E342E"
+                count_bg    = ft.Colors.with_opacity(0.15, "#E65100")
+                text_color  = "onSurface"
             else:
                 count_label = f"{count} coincid."
                 count_color = _WARN
-                count_bg    = "#FFE0B2"
-                text_color  = "#4E342E"
+                count_bg    = ft.Colors.with_opacity(0.15, "#E65100")
+                text_color  = "onSurface"
 
             chips.append(
                 ft.Container(
@@ -593,7 +593,7 @@ class _AgentMixin:
                                     f"Agregar a censura\n{motivo}" if motivo
                                     else "Agregar a la lista de censura"
                                 ),
-                                icon_color=_WARN if count > 0 else "#BDBDBD",
+                                icon_color=_WARN if count > 0 else "outlineVariant",
                                 disabled=(count == 0),
                                 on_click=lambda e, _t=texto: self._agent_apply_redaction_term(_t),
                                 style=ft.ButtonStyle(padding=ft.padding.all(2)),
@@ -602,10 +602,10 @@ class _AgentMixin:
                         spacing=4,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
-                    bgcolor="#FFFFFF",
+                    bgcolor="surface",
                     border_radius=6,
                     padding=ft.padding.symmetric(horizontal=8, vertical=4),
-                    border=ft.border.all(1, "#FFCCBC" if count > 0 else "#E0E0E0"),
+                    border=ft.border.all(1, "outlineVariant" if count > 0 else "outlineVariant"),
                     tooltip=motivo or None,
                 )
             )
@@ -642,9 +642,9 @@ class _AgentMixin:
                     ],
                     spacing=4,
                 ),
-                bgcolor="#FFF8F0", border_radius=8,
+                bgcolor=ft.Colors.with_opacity(0.06, "#E65100"), border_radius=8,
                 padding=ft.padding.all(10),
-                border=ft.border.all(1, "#FFCCBC"),
+                border=ft.border.all(1, "outlineVariant"),
             )
         )
         try:

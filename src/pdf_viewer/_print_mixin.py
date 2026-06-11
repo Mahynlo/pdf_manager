@@ -409,7 +409,7 @@ class _PrintMixin:
                 width=_PRINT_THUMB_W, height=_PRINT_THUMB_H,
                 bgcolor="#FFFFFF",
                 alignment=ft.alignment.center,
-                border=ft.border.all(1, "#BDBDBD"),
+                border=ft.border.all(1, "outlineVariant"),
                 border_radius=3,
                 clip_behavior=ft.ClipBehavior.HARD_EDGE,
                 shadow=ft.BoxShadow(blur_radius=5, color="#22000000", offset=ft.Offset(0, 2)),
@@ -417,7 +417,7 @@ class _PrintMixin:
             caption = ft.Text(
                 f"Página {pn + 1}",
                 size=11,
-                color="#BBBBBB" if getattr(self, "_night_mode", False) else "#666666",
+                color="#BBBBBB" if getattr(self, "_night_mode", False) else "onSurfaceVariant",
                 text_align=ft.TextAlign.CENTER,
             )
             items.append(ft.Column(
@@ -484,8 +484,8 @@ class _PrintMixin:
         self._print_preview_empty = ft.Container(
             content=ft.Column(
                 [
-                    ft.Icon(ft.Icons.PICTURE_AS_PDF, size=36, color="#BDBDBD"),
-                    ft.Text("Sin páginas", size=11, color="#999999", italic=True),
+                    ft.Icon(ft.Icons.PICTURE_AS_PDF, size=36, color="outlineVariant"),
+                    ft.Text("Sin páginas", size=11, color="onSurfaceVariant", italic=True),
                 ],
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                 spacing=6,
@@ -495,7 +495,7 @@ class _PrintMixin:
             alignment=ft.alignment.center,
         )
         self._print_preview_count = ft.Text(
-            f"{total_pages} página(s)", size=11, color="#666666"
+            f"{total_pages} página(s)", size=11, color="onSurfaceVariant"
         )
         self._print_preview_col = ft.Column(
             [self._print_preview_wrap],
@@ -516,7 +516,7 @@ class _PrintMixin:
                 ),
                 ft.Container(
                     content=self._print_preview_col,
-                    bgcolor="#2C2C2C" if is_night else "#EFEFEF",
+                    bgcolor="#2C2C2C" if is_night else "surfaceVariant",
                     border_radius=8,
                     padding=6,
                     expand=True,

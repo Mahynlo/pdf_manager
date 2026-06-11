@@ -379,7 +379,7 @@ class _RenderMixin:
             padding=ft.padding.all(5),
             shape=ft.RoundedRectangleBorder(radius=4),
         )
-        _mc_color_sep  = ft.Container(width=1, height=22, bgcolor="#E0E0E0")
+        _mc_color_sep  = ft.Container(width=1, height=22, bgcolor="outlineVariant")
         _mc_color_btn  = ft.IconButton(
             ft.Icons.PALETTE_OUTLINED,
             icon_color="#7B1FA2",
@@ -388,10 +388,10 @@ class _RenderMixin:
             on_click=self._recolor_selected_menu,
             style=_ctx_btn,
         )
-        _mc_scale_sep  = ft.Container(width=1, height=22, bgcolor="#E0E0E0")
+        _mc_scale_sep  = ft.Container(width=1, height=22, bgcolor="outlineVariant")
         _mc_scale_down = ft.IconButton(
             ft.Icons.REMOVE_CIRCLE_OUTLINE,
-            icon_color="#555555",
+            icon_color="onSurfaceVariant",
             icon_size=18,
             tooltip="Reducir",
             on_click=self._scale_down_selected,
@@ -399,13 +399,13 @@ class _RenderMixin:
         )
         _mc_scale_up   = ft.IconButton(
             ft.Icons.ADD_CIRCLE_OUTLINE,
-            icon_color="#555555",
+            icon_color="onSurfaceVariant",
             icon_size=18,
             tooltip="Agrandar",
             on_click=self._scale_up_selected,
             style=_ctx_btn,
         )
-        _mc_width_sep  = ft.Container(width=1, height=22, bgcolor="#E0E0E0")
+        _mc_width_sep  = ft.Container(width=1, height=22, bgcolor="outlineVariant")
         _mc_width_down = ft.IconButton(
             ft.Icons.REMOVE_CIRCLE,
             icon_color="#8B4513",
@@ -425,14 +425,14 @@ class _RenderMixin:
         sel_menu = ft.Container(
             left=0, top=0,
             visible=False,
-            bgcolor="#FFFFFF",
+            bgcolor="surface",
             border_radius=8,
             padding=ft.padding.symmetric(horizontal=4, vertical=3),
             shadow=ft.BoxShadow(
                 blur_radius=10, spread_radius=1,
                 color="#33000000", offset=ft.Offset(0, 2),
             ),
-            border=ft.border.all(1, "#D0D0D0"),
+            border=ft.border.all(1, "outlineVariant"),
             content=ft.Row(
                 [
                     ft.IconButton(
@@ -451,10 +451,10 @@ class _RenderMixin:
                     _mc_width_sep,
                     _mc_width_down,
                     _mc_width_up,
-                    ft.Container(width=1, height=22, bgcolor="#E0E0E0"),
+                    ft.Container(width=1, height=22, bgcolor="outlineVariant"),
                     ft.IconButton(
                         ft.Icons.CLOSE,
-                        icon_color="#9E9E9E",
+                        icon_color="onSurfaceVariant",
                         icon_size=14,
                         tooltip="Deseleccionar",
                         on_click=self._deselect_annot,
@@ -528,11 +528,11 @@ class _RenderMixin:
                 ft.TextButton(
                     "Copiar",
                     icon=ft.Icons.CONTENT_COPY,
-                    icon_color="#5E5E5E",
+                    icon_color="onSurfaceVariant",
                     on_click=self._text_sel_copy,
                     style=_btn_style,
                 ),
-                ft.Container(width=1, height=20, bgcolor="#E0E0E0"),
+                ft.Container(width=1, height=20, bgcolor="outlineVariant"),
                 ft.TextButton(
                     "Resaltar",
                     icon=ft.Icons.HIGHLIGHT,
@@ -554,7 +554,7 @@ class _RenderMixin:
                     on_click=lambda e: self._text_sel_apply(Tool.STRIKEOUT),
                     style=_btn_style,
                 ),
-                ft.Container(width=1, height=20, bgcolor="#E0E0E0"),
+                ft.Container(width=1, height=20, bgcolor="outlineVariant"),
                 ft.TextButton(
                     "Censurar",
                     icon=ft.Icons.VISIBILITY_OFF,
@@ -562,7 +562,7 @@ class _RenderMixin:
                     on_click=lambda e: self._text_sel_send_to_redact(),
                     style=_btn_style,
                 ),
-                ft.Container(width=1, height=20, bgcolor="#E0E0E0"),
+                ft.Container(width=1, height=20, bgcolor="outlineVariant"),
                 ft.TextButton(
                     "Buscar",
                     icon=ft.Icons.SEARCH,
@@ -573,7 +573,7 @@ class _RenderMixin:
                 ft.IconButton(
                     ft.Icons.CLOSE,
                     icon_size=14,
-                    icon_color="#9E9E9E",
+                    icon_color="onSurfaceVariant",
                     tooltip="Cerrar selección",
                     on_click=self._text_sel_dismiss,
                     style=ft.ButtonStyle(padding=ft.padding.all(4)),
@@ -581,14 +581,14 @@ class _RenderMixin:
             ], spacing=0, tight=True, wrap=True, run_spacing=2,
                vertical_alignment=ft.CrossAxisAlignment.CENTER),
             left=0, top=0, visible=False,
-            bgcolor="#FAFAFA",
+            bgcolor="surface",
             border_radius=8,
             padding=ft.padding.symmetric(horizontal=4, vertical=2),
             shadow=ft.BoxShadow(
                 blur_radius=12, spread_radius=1,
                 color="#44000000", offset=ft.Offset(0, 3),
             ),
-            border=ft.border.all(1, "#D0D0D0"),
+            border=ft.border.all(1, "outlineVariant"),
         )
 
         _abtn = ft.ButtonStyle(
@@ -605,7 +605,7 @@ class _RenderMixin:
                     on_click=self._annot_popup_delete,
                     style=_abtn,
                 ),
-                ft.Container(width=1, height=20, bgcolor="#E0E0E0"),
+                ft.Container(width=1, height=20, bgcolor="outlineVariant"),
                 ft.TextButton(
                     "Color",
                     icon=ft.Icons.PALETTE_OUTLINED,
@@ -616,7 +616,7 @@ class _RenderMixin:
                 ft.IconButton(
                     ft.Icons.CLOSE,
                     icon_size=14,
-                    icon_color="#9E9E9E",
+                    icon_color="onSurfaceVariant",
                     tooltip="Cerrar",
                     on_click=self._hide_annot_popup,
                     style=ft.ButtonStyle(padding=ft.padding.all(4)),
@@ -624,14 +624,14 @@ class _RenderMixin:
             ], spacing=0, tight=True,
                vertical_alignment=ft.CrossAxisAlignment.CENTER),
             left=0, top=0, visible=False,
-            bgcolor="#FAFAFA",
+            bgcolor="surface",
             border_radius=8,
             padding=ft.padding.symmetric(horizontal=4, vertical=2),
             shadow=ft.BoxShadow(
                 blur_radius=12, spread_radius=1,
                 color="#44000000", offset=ft.Offset(0, 3),
             ),
-            border=ft.border.all(1, "#D0D0D0"),
+            border=ft.border.all(1, "outlineVariant"),
         )
 
         ink_canvas = cv.Canvas(shapes=[], width=w, height=h)

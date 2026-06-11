@@ -11,9 +11,9 @@ from .ocr import OCRPageResult
 from .renderer import BASE_SCALE
 from ._viewer_defs import _OCR_BOX_BG, _OCR_BOX_CLR, _OCR_PANEL_BG, _SELECTED_BG
 
-_CHIP_BG   = "#E8F5E9"
+_CHIP_BG   = ft.Colors.with_opacity(0.15, "#2E7D32")
 _CHIP_FG   = "#2E7D32"
-_METRIC_BG = "#F1F8E9"
+_METRIC_BG = "surfaceVariant"
 
 _MAX_OCR_PAGES_CACHED = 8  # max pages kept in memory; oldest are evicted first
 _OCR_MODEL_RELEASE_DELAY = 3.0  # seconds to unload OCR model after idle
@@ -24,7 +24,7 @@ def _chip(label: str, value: str, icon: str | None = None) -> ft.Container:
     kids: list[ft.Control] = []
     if icon:
         kids.append(ft.Icon(icon, size=13, color=_CHIP_FG))
-    kids.append(ft.Text(label, size=11, color="#607D8B", weight=ft.FontWeight.W_500))
+    kids.append(ft.Text(label, size=11, color="onSurfaceVariant", weight=ft.FontWeight.W_500))
     kids.append(ft.Text(value, size=11, color=_CHIP_FG, weight=ft.FontWeight.W_600))
     return ft.Container(
         content=ft.Row(kids, spacing=4, tight=True,
@@ -42,11 +42,11 @@ def _metric(icon: str, value: str, sublabel: str) -> ft.Container:
             [
                 ft.Row(
                     [ft.Icon(icon, size=15, color=_CHIP_FG),
-                     ft.Text(value, size=13, weight=ft.FontWeight.BOLD, color="#1B5E20")],
+                     ft.Text(value, size=13, weight=ft.FontWeight.BOLD, color="onSurface")],
                     spacing=4, tight=True,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
-                ft.Text(sublabel, size=10, color="#78909C"),
+                ft.Text(sublabel, size=10, color="onSurfaceVariant"),
             ],
             spacing=1, tight=True,
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -78,10 +78,10 @@ class _OCRMixin:
             width=28, height=28, stroke_width=3, color="#2E7D32", visible=False,
         )
         self._ocr_stage_text   = ft.Text(
-            "", size=11, color="#546E7A", italic=True, visible=False,
+            "", size=11, color="onSurfaceVariant", italic=True, visible=False,
         )
         self._ocr_progress_bar = ft.ProgressBar(
-            color="#43A047", bgcolor="#C8E6C9",
+            color="#43A047", bgcolor=ft.Colors.with_opacity(0.15, "#2E7D32"),
             height=4, border_radius=2,
             value=None,   # indeterminate
             visible=False,
@@ -111,7 +111,7 @@ class _OCRMixin:
         # ── status text (idle / error) ────────────────────────────────────────
         self._ocr_status_text  = ft.Text(
             "Ejecuta OCR para ver el texto extraído aquí.",
-            size=12, color="#607D68", italic=True,
+            size=12, color="onSurfaceVariant", italic=True,
         )
 
         # ── copy button + header of result area ──────────────────────────────
@@ -119,7 +119,7 @@ class _OCRMixin:
             ft.Icons.CONTENT_COPY_OUTLINED,
             icon_size=16,
             tooltip="Copiar todo el texto",
-            icon_color="#455A64",
+            icon_color="onSurfaceVariant",
             visible=False,
             on_click=self._ocr_copy_all,
             style=ft.ButtonStyle(padding=ft.padding.all(4)),
@@ -127,7 +127,7 @@ class _OCRMixin:
         self._ocr_result_header = ft.Row(
             [
                 ft.Text("Texto extraído", size=12,
-                        weight=ft.FontWeight.W_600, color="#37474F"),
+                        weight=ft.FontWeight.W_600, color="onSurface"),
                 ft.Container(expand=True),
                 self._ocr_copy_btn,
             ],
@@ -148,7 +148,7 @@ class _OCRMixin:
                     self._ocr_status_text,
                     self._ocr_chips_row,
                     self._ocr_metrics_row,
-                    ft.Divider(height=1, color="#DCE8DF"),
+                    ft.Divider(height=1, color="outlineVariant"),
                     self._ocr_result_header,
                     ft.Container(self._ocr_results_list, expand=True),
                 ],
@@ -383,7 +383,7 @@ class _OCRMixin:
             self._ocr_set_idle(f"Error en página {pn + 1}: {ex}")
             self._ocr_results_list.controls = [
                 ft.Container(
-                    ft.Text(f"Error OCR: {ex}", size=12, color="#B00020", selectable=True),
+                    ft.Text(f"Error OCR: {ex}", size=12, color="error", selectable=True),
                     padding=ft.padding.all(8),
                 )
             ]
@@ -486,7 +486,7 @@ class _OCRMixin:
             self._ocr_results_list.controls = [
                 ft.Container(
                     ft.Text("Ejecuta OCR para ver texto extraído aquí.",
-                            size=12, color="#607D68"),
+                            size=12, color="onSurfaceVariant"),
                     padding=ft.padding.all(8),
                 )
             ]
@@ -518,7 +518,7 @@ class _OCRMixin:
         if not result.segments:
             self._ocr_results_list.controls = [
                 ft.Container(
-                    ft.Text("Sin texto extraído", size=12, color="#607D68"),
+                    ft.Text("Sin texto extraído", size=12, color="onSurfaceVariant"),
                     padding=ft.padding.all(8),
                 )
             ]
@@ -529,8 +529,8 @@ class _OCRMixin:
                 ft.Text(text_body or "Sin texto extraído",
                         size=12, selectable=True),
                 padding=ft.padding.all(10),
-                border=ft.border.all(1, "#E3ECE5"),
-                bgcolor="#FFFFFF",
+                border=ft.border.all(1, "outlineVariant"),
+                bgcolor="surface",
                 border_radius=8,
             )
         ]

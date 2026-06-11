@@ -390,7 +390,7 @@ def main(page: ft.Page) -> None:
         autofocus=True,
         on_submit=lambda _: _confirm_password_open(),
     )
-    password_error = ft.Text("", color="#D32F2F", size=12, visible=False)
+    password_error = ft.Text("", color="error", size=12, visible=False)
 
     password_dialog = ft.AlertDialog(
         modal=True,

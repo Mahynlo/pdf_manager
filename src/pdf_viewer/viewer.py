@@ -321,7 +321,7 @@ class PDFViewerTab(
 
         self._mode_btn_continuous = ft.IconButton(
             ft.Icons.VIEW_STREAM, tooltip="Scroll continuo",
-            icon_color="#1565C0", bgcolor="#DDEEFF",
+            icon_color="#1565C0", bgcolor=ft.Colors.with_opacity(0.20, ft.Colors.PRIMARY),
             on_click=lambda e: self._set_display_mode("continuous"),
         )
         self._mode_btn_single = ft.IconButton(
@@ -355,7 +355,7 @@ class PDFViewerTab(
                 spacing=2, tight=True,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            bgcolor="#E4E4E4",
+            bgcolor="surfaceVariant",
             border_radius=8,
             padding=ft.padding.all(2),
         )
@@ -467,7 +467,7 @@ class PDFViewerTab(
                 tool_btns.append(_vdivider())
             btn = ft.IconButton(
                 icon, tooltip=tooltip,
-                icon_color="#444444",
+                icon_color="onSurfaceVariant",
                 bgcolor=_SELECTED_BG if tool == Tool.CURSOR else None,
                 on_click=lambda e, t=tool, c=cursor: self._select_tool(t, c),
             )
@@ -505,10 +505,10 @@ class PDFViewerTab(
 
         # ── sidebar mode tab bar (4 tabs) ─────────────────────────────────────
         _TAB_DEFS = [
-            ("toc",    ft.Icons.LIST_ALT_OUTLINED,     "Índice",    "#1565C0", "#E3F2FD"),
-            ("ocr",    ft.Icons.TEXT_SNIPPET_OUTLINED, "OCR",       "#2E7D32", "#E8F5E9"),
-            ("redact", ft.Icons.EDIT_OFF_OUTLINED,     "Censura",   "#E65100", "#FFF3E0"),
-            ("agent",  ft.Icons.SMART_TOY_OUTLINED,    "Agente IA", "#5C35C9", "#EDE7F6"),
+            ("toc",    ft.Icons.LIST_ALT_OUTLINED,     "Índice",    "#1565C0", ft.Colors.with_opacity(0.15, "#1565C0")),
+            ("ocr",    ft.Icons.TEXT_SNIPPET_OUTLINED, "OCR",       "#2E7D32", ft.Colors.with_opacity(0.15, "#2E7D32")),
+            ("redact", ft.Icons.EDIT_OFF_OUTLINED,     "Censura",   "#E65100", ft.Colors.with_opacity(0.15, "#E65100")),
+            ("agent",  ft.Icons.SMART_TOY_OUTLINED,    "Agente IA", "#5C35C9", ft.Colors.with_opacity(0.15, "#5C35C9")),
         ]
 
         def _make_tab_btn(mode: str, icon: str, label: str,
@@ -518,10 +518,10 @@ class PDFViewerTab(
                 content=ft.Column(
                     [
                         ft.Icon(icon, size=16,
-                                color=active_color if is_active else "#9E9E9E"),
+                                color=active_color if is_active else "onSurfaceVariant"),
                         ft.Text(label, size=10,
                                 weight=ft.FontWeight.W_600,
-                                color=active_color if is_active else "#9E9E9E",
+                                color=active_color if is_active else "onSurfaceVariant",
                                 text_align=ft.TextAlign.CENTER),
                     ],
                     spacing=2, tight=True,
@@ -531,7 +531,7 @@ class PDFViewerTab(
                 expand=True,
                 bgcolor=active_bg if is_active else None,
                 border=ft.border.only(
-                    bottom=ft.BorderSide(2, active_color if is_active else "#E0E0E0")
+                    bottom=ft.BorderSide(2, active_color if is_active else "outlineVariant")
                 ),
                 on_click=lambda e, m=mode: self._switch_sidebar_mode(m),
                 ink=True,
@@ -555,7 +555,7 @@ class PDFViewerTab(
                 spacing=0,
             ),
             bgcolor=_OCR_PANEL_BG,
-            border=ft.border.only(bottom=ft.BorderSide(1, "#CCCCCC")),
+            border=ft.border.only(bottom=ft.BorderSide(1, "outlineVariant")),
         )
 
         # ── four sidebar views (one visible at a time) ────────────────────────
@@ -591,7 +591,7 @@ class PDFViewerTab(
             ),
             width=360,
             bgcolor=_OCR_PANEL_BG,
-            border=ft.border.only(left=ft.BorderSide(1, "#D5E6D8")),
+            border=ft.border.only(left=ft.BorderSide(1, "outlineVariant")),
         )
 
         # ── scroll area ───────────────────────────────────────────────────────
@@ -634,10 +634,10 @@ class PDFViewerTab(
             return ft.Container(
                 content=ft.Column(
                     [
-                        ft.Icon(ft.Icons.LIST_ALT_OUTLINED, size=40, color="#BDBDBD"),
+                        ft.Icon(ft.Icons.LIST_ALT_OUTLINED, size=40, color="outlineVariant"),
                         ft.Text(
                             "Sin tabla de contenidos",
-                            color="#9E9E9E",
+                            color="onSurfaceVariant",
                             text_align=ft.TextAlign.CENTER,
                         ),
                     ],
@@ -671,12 +671,12 @@ class PDFViewerTab(
                                 title,
                                 size=12 if is_top else 11,
                                 weight=ft.FontWeight.W_600 if is_top else ft.FontWeight.NORMAL,
-                                color="#1A237E" if is_top else "#424242",
+                                color="onSurface" if is_top else "onSurfaceVariant",
                                 expand=True,
                                 max_lines=2,
                                 overflow=ft.TextOverflow.ELLIPSIS,
                             ),
-                            ft.Text(str(page_num), size=11, color="#9E9E9E"),
+                            ft.Text(str(page_num), size=11, color="onSurfaceVariant"),
                         ],
                         spacing=0,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -697,10 +697,10 @@ class PDFViewerTab(
                         "Tabla de Contenidos",
                         size=12,
                         weight=ft.FontWeight.W_600,
-                        color="#1A237E",
+                        color="onSurface",
                     ),
                     padding=ft.padding.symmetric(horizontal=12, vertical=8),
-                    border=ft.border.only(bottom=ft.BorderSide(1, "#CCCCCC")),
+                    border=ft.border.only(bottom=ft.BorderSide(1, "outlineVariant")),
                 ),
                 ft.ListView(items, expand=True, spacing=0),
             ],
@@ -721,7 +721,7 @@ class PDFViewerTab(
             if btn is None:
                 continue
             btn.icon_color = "#1565C0" if m == mode else None
-            btn.bgcolor    = "#DDEEFF" if m == mode else None
+            btn.bgcolor    = ft.Colors.with_opacity(0.20, ft.Colors.PRIMARY) if m == mode else None
             try:
                 btn.update()
             except Exception:
@@ -1020,10 +1020,10 @@ class PDFViewerTab(
         self._sidebar_mode = mode
 
         _TAB_META = {
-            "toc":    ("#1565C0", "#E3F2FD", "_sidebar_tab_toc_btn",    "_sidebar_toc_view"),
-            "ocr":    ("#2E7D32", "#E8F5E9", "_sidebar_tab_ocr_btn",    "_sidebar_ocr_view"),
-            "redact": ("#E65100", "#FFF3E0", "_sidebar_tab_redact_btn", "_sidebar_redact_view"),
-            "agent":  ("#5C35C9", "#EDE7F6", "_sidebar_tab_agent_btn",  "_sidebar_agent_view"),
+            "toc":    ("#1565C0", ft.Colors.with_opacity(0.15, "#1565C0"), "_sidebar_tab_toc_btn",    "_sidebar_toc_view"),
+            "ocr":    ("#2E7D32", ft.Colors.with_opacity(0.15, "#2E7D32"), "_sidebar_tab_ocr_btn",    "_sidebar_ocr_view"),
+            "redact": ("#E65100", ft.Colors.with_opacity(0.15, "#E65100"), "_sidebar_tab_redact_btn", "_sidebar_redact_view"),
+            "agent":  ("#5C35C9", ft.Colors.with_opacity(0.15, "#5C35C9"), "_sidebar_tab_agent_btn",  "_sidebar_agent_view"),
         }
 
         for m, (active_color, active_bg, tab_attr, view_attr) in _TAB_META.items():
@@ -1042,19 +1042,19 @@ class PDFViewerTab(
                 if isinstance(col, ft.Column):
                     for ctrl in col.controls:
                         if isinstance(ctrl, ft.Icon):
-                            ctrl.color = active_color if is_active else "#9E9E9E"
+                            ctrl.color = active_color if is_active else "onSurfaceVariant"
                         elif isinstance(ctrl, ft.Text):
-                            ctrl.color = active_color if is_active else "#9E9E9E"
+                            ctrl.color = active_color if is_active else "onSurfaceVariant"
                 btn.bgcolor = active_bg if is_active else None
                 btn.border  = ft.border.only(
-                    bottom=ft.BorderSide(2, active_color if is_active else "#E0E0E0")
+                    bottom=ft.BorderSide(2, active_color if is_active else "outlineVariant")
                 )
 
         # Toolbar agent button highlight
         if self._agent_toolbar_btn is not None:
             is_agent = (mode == "agent")
             self._agent_toolbar_btn.icon_color = "#5C35C9" if is_agent else None
-            self._agent_toolbar_btn.bgcolor    = "#EDE7F6" if is_agent else None
+            self._agent_toolbar_btn.bgcolor    = ft.Colors.with_opacity(0.15, "#5C35C9") if is_agent else None
             try:
                 self._agent_toolbar_btn.update()
             except Exception:
@@ -1077,7 +1077,7 @@ class PDFViewerTab(
             ft.Icons.SMART_TOY_OUTLINED,
             tooltip="Agente IA — abrir panel del agente",
             icon_color="#5C35C9" if _is_agent else None,
-            bgcolor="#EDE7F6" if _is_agent else None,
+            bgcolor=ft.Colors.with_opacity(0.15, "#5C35C9") if _is_agent else None,
             on_click=lambda e: self._switch_sidebar_mode("agent"),
             visible=AGENT_ENABLED,   # oculto mientras el agente está en pulido
         )

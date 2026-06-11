@@ -20,7 +20,7 @@ class _ProfilesMixin:
             prefix_icon=ft.Icons.SEARCH,
             dense=True,
             border_radius=8,
-            border_color="#FFCCBC",
+            border_color="outlineVariant",
             focused_border_color=_HDR,
             content_padding=ft.padding.symmetric(horizontal=10, vertical=8),
             on_change=lambda e: self._filter_profiles(),
@@ -53,7 +53,7 @@ class _ProfilesMixin:
                             self._profile_list_view,
                             height=300,
                             width=400,
-                            border=ft.border.all(1, "#FFE0B2"),
+                            border=ft.border.all(1, "outlineVariant"),
                             border_radius=8,
                         ),
                     ],
@@ -94,7 +94,7 @@ class _ProfilesMixin:
                     ft.Text(
                         "No hay perfiles. Crea uno con el botón ＋" if not query
                         else "Sin resultados para esa búsqueda.",
-                        size=12, color="#9E9E9E", italic=True,
+                        size=12, color="onSurfaceVariant", italic=True,
                         text_align=ft.TextAlign.CENTER,
                     ),
                     padding=ft.padding.all(24),
@@ -117,7 +117,7 @@ class _ProfilesMixin:
                                         ft.Text(
                                             p.name, size=13,
                                             weight=ft.FontWeight.W_600 if is_active else ft.FontWeight.W_500,
-                                            color=_HDR if is_active else "#4E342E",
+                                            color=_HDR if is_active else "onSurface",
                                             overflow=ft.TextOverflow.ELLIPSIS,
                                             max_lines=1, expand=True,
                                         ),
@@ -135,7 +135,7 @@ class _ProfilesMixin:
                                 ),
                                 ft.Text(
                                     f"{n} término{'s' if n != 1 else ''}",
-                                    size=11, color="#9E9E9E",
+                                    size=11, color="onSurfaceVariant",
                                 ),
                             ],
                             spacing=2, expand=True,
@@ -171,7 +171,7 @@ class _ProfilesMixin:
                 ),
                 padding=ft.padding.symmetric(horizontal=10, vertical=7),
                 border_radius=6,
-                bgcolor="#FFF3E0" if is_active else ("#FFFFFF" if idx % 2 == 0 else "#FFF8F0"),
+                bgcolor=ft.Colors.with_opacity(0.15, "#E65100") if is_active else ("surface" if idx % 2 == 0 else ft.Colors.with_opacity(0.05, "#E65100")),
                 border=ft.border.all(1, _HDR) if is_active else None,
             )
             tiles.append(tile)
@@ -208,13 +208,13 @@ class _ProfilesMixin:
             value=existing.name if existing else "",
             hint_text="Ej: PII – Datos personales",
             dense=True,
-            border_color="#FFCCBC",
+            border_color="outlineVariant",
             focused_border_color=_HDR,
         )
         self._profile_edit_term_input = ft.TextField(
             hint_text="Agregar término…",
             dense=True, expand=True,
-            border_color="#FFCCBC",
+            border_color="outlineVariant",
             focused_border_color=_HDR,
             on_submit=self._profile_dlg_add_term,
             content_padding=ft.padding.symmetric(horizontal=10, vertical=8),
@@ -291,7 +291,7 @@ class _ProfilesMixin:
                 ft.Column(
                     [
                         self._profile_edit_name,
-                        ft.Divider(height=1, color="#FFE0B2"),
+                        ft.Divider(height=1, color="outlineVariant"),
                         ft.Row(
                             [
                                 ft.Icon(ft.Icons.LIST_ALT_OUTLINED, size=13, color=_SEC),
@@ -318,7 +318,7 @@ class _ProfilesMixin:
                         ),
                         ft.Container(
                             self._profile_edit_terms_list,
-                            border=ft.border.all(1, "#FFE0B2"),
+                            border=ft.border.all(1, "outlineVariant"),
                             border_radius=8,
                             padding=ft.padding.all(4),
                         ),
@@ -348,7 +348,7 @@ class _ProfilesMixin:
         if not self._profile_edit_terms:
             self._profile_edit_terms_list.controls = [
                 ft.Container(
-                    ft.Text("Sin términos", size=11, color="#9E9E9E", italic=True),
+                    ft.Text("Sin términos", size=11, color="onSurfaceVariant", italic=True),
                     padding=ft.padding.symmetric(horizontal=8, vertical=6),
                 )
             ]
@@ -364,12 +364,12 @@ class _ProfilesMixin:
                             ft.Text(
                                 term, size=12, expand=True,
                                 overflow=ft.TextOverflow.ELLIPSIS, max_lines=1,
-                                color="#4E342E",
+                                color="onSurface",
                             ),
                             ft.IconButton(
                                 ft.Icons.CLOSE, icon_size=14,
                                 tooltip="Quitar",
-                                icon_color="#9E9E9E",
+                                icon_color="onSurfaceVariant",
                                 on_click=lambda e, idx=i: self._profile_dlg_remove_term(idx),
                                 style=ft.ButtonStyle(padding=ft.padding.all(2)),
                             ),
@@ -379,8 +379,8 @@ class _ProfilesMixin:
                     ),
                     padding=ft.padding.symmetric(horizontal=8, vertical=4),
                     border_radius=6,
-                    bgcolor="#FFFFFF",
-                    border=ft.border.all(1, "#FFCCBC"),
+                    bgcolor="surface",
+                    border=ft.border.all(1, "outlineVariant"),
                 )
             )
         self._profile_edit_terms_list.controls = chips
@@ -451,7 +451,7 @@ class _ProfilesMixin:
         if self._redact_case_btn is not None:
             if self._redact_case_sensitive:
                 self._redact_case_btn.icon    = ft.Icons.FONT_DOWNLOAD_OUTLINED
-                self._redact_case_btn.bgcolor = "#FFE0B2"
+                self._redact_case_btn.bgcolor = ft.Colors.with_opacity(0.15, "#E65100")
                 self._redact_case_btn.tooltip = "Distinguir mayúsculas (activo = sí)"
             else:
                 self._redact_case_btn.icon    = ft.Icons.FONT_DOWNLOAD_OFF_OUTLINED

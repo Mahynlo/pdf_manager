@@ -13,13 +13,14 @@ _TAB_H       = 36
 _TAB_W       = 180
 _SCROLL_STEP = 160
 
-_TABBAR_BG   = "#EAEFF5"
-_ACTIVE_BG   = "#FFFFFF"
-_ACTIVE_TOP  = "#1565C0"
-_INACTIVE_BG = "#DDE5EE"
-_TEXT_ACT    = "#1A2733"
-_TEXT_INACT  = "#546E7A"
-_BORDER_CLR  = "#C5CDD8"
+# Chrome de la barra de pestañas: tokens de tema (se adaptan a claro/oscuro).
+_TABBAR_BG   = "surfaceVariant"          # fondo de la barra
+_ACTIVE_BG   = "surface"                 # pestaña activa: resalta como el contenido de abajo
+_ACTIVE_TOP  = "#1565C0"                 # línea superior de acento (azul de marca)
+_INACTIVE_BG = "surfaceVariant"          # pestañas inactivas: se funden con la barra
+_TEXT_ACT    = "onSurface"
+_TEXT_INACT  = "onSurfaceVariant"
+_BORDER_CLR  = "outlineVariant"
 
 
 @dataclass
@@ -270,7 +271,7 @@ class DocumentManagerUI:
             ),
             on_click=lambda _, e=entry: self._select(e),
             ink=True,
-            ink_color="#00000015",
+            ink_color=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
         )
 
     def _set_btn_active(self, btn: ft.Container, active: bool) -> None:

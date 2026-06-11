@@ -45,7 +45,7 @@ class _RedactMixin:
 
     def _build_redact_sidebar_panel(self) -> ft.Container:
         """Build the Redaction collapsible panel and initialise its controls."""
-        _REDACT_BG   = "#FFF8F0"
+        _REDACT_BG   = ft.Colors.with_opacity(0.06, "#E65100")
         _REDACT_HDR  = "#E65100"
         _REDACT_MID  = "#BF360C"
         _SECTION_CLR = "#795548"
@@ -83,7 +83,7 @@ class _RedactMixin:
                 spacing=4,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            bgcolor="#FFECB3",
+            bgcolor=ft.Colors.with_opacity(0.18, "#E65100"),
             border_radius=6,
             padding=ft.padding.symmetric(horizontal=8, vertical=4),
         )
@@ -94,13 +94,13 @@ class _RedactMixin:
             dense=True, expand=True,
             on_submit=self._add_redact_term,
             content_padding=ft.padding.symmetric(horizontal=10, vertical=8),
-            border_color="#FFCCBC",
+            border_color="outlineVariant",
             focused_border_color=_REDACT_HDR,
         )
         self._redact_case_btn = ft.IconButton(
             ft.Icons.FONT_DOWNLOAD_OUTLINED, icon_size=18,
             tooltip="Distinguir mayúsculas (activo = sí)",
-            icon_color=_REDACT_HDR, bgcolor="#FFE0B2",
+            icon_color=_REDACT_HDR, bgcolor=ft.Colors.with_opacity(0.15, "#E65100"),
             on_click=self._toggle_case_sensitive,
             style=ft.ButtonStyle(padding=ft.padding.all(4)),
         )
@@ -138,7 +138,7 @@ class _RedactMixin:
             ink=True,
             border_radius=6,
             padding=ft.padding.symmetric(horizontal=10, vertical=6),
-            border=ft.border.all(1, "#FFCCBC"),
+            border=ft.border.all(1, "outlineVariant"),
             visible=False,
         )
 
@@ -157,7 +157,7 @@ class _RedactMixin:
                 width=22, height=22,
                 bgcolor=hex_c,
                 border_radius=11,
-                border=ft.border.all(3, _REDACT_HDR if is_sel else "#DDDDDD"),
+                border=ft.border.all(3, _REDACT_HDR if is_sel else "outlineVariant"),
                 tooltip=name,
                 on_click=lambda e, c=hex_c: self._select_redact_color(c),
                 ink=True,
@@ -230,14 +230,14 @@ class _RedactMixin:
                 tight=True,
             ),
             padding=ft.padding.only(top=8),
-            border=ft.border.only(top=ft.BorderSide(1, "#FFE0B2")),
+            border=ft.border.only(top=ft.BorderSide(1, "outlineVariant")),
         )
 
         self._redact_content_area = ft.Container(
             ft.Column(
                 [
                     _top_zone,
-                    ft.Divider(height=1, color="#FFE0B2"),
+                    ft.Divider(height=1, color="outlineVariant"),
                     _list_header,
                     self._redact_terms_list,
                     _action_bar,
@@ -273,7 +273,7 @@ class _RedactMixin:
         if self._redact_case_btn is not None:
             if self._redact_case_sensitive:
                 self._redact_case_btn.icon        = ft.Icons.FONT_DOWNLOAD_OUTLINED
-                self._redact_case_btn.bgcolor     = "#FFE0B2"
+                self._redact_case_btn.bgcolor     = ft.Colors.with_opacity(0.15, "#E65100")
                 self._redact_case_btn.tooltip     = "Distinguir mayúsculas (activo = sí)"
             else:
                 self._redact_case_btn.icon        = ft.Icons.FONT_DOWNLOAD_OFF_OUTLINED
@@ -620,7 +620,7 @@ class _RedactMixin:
                 ft.Container(
                     ft.Text(
                         "Sin términos — escribe una frase y pulsa Enter",
-                        size=11, color="#BCAAA4", italic=True,
+                        size=11, color="onSurfaceVariant", italic=True,
                     ),
                     padding=ft.padding.symmetric(horizontal=8, vertical=8),
                 )
@@ -656,7 +656,7 @@ class _RedactMixin:
                                     term, size=11, expand=True,
                                     max_lines=1,
                                     overflow=ft.TextOverflow.ELLIPSIS,
-                                    color="#4E342E",
+                                    color="onSurface",
                                 ),
                                 ft.Container(
                                     content=ft.Text(
@@ -684,8 +684,8 @@ class _RedactMixin:
                         ),
                         padding=ft.padding.symmetric(horizontal=8, vertical=5),
                         border_radius=6,
-                        border=ft.border.all(1, "#FFCCBC"),
-                        bgcolor="#FFFFFF",
+                        border=ft.border.all(1, "outlineVariant"),
+                        bgcolor="surface",
                     )
                 )
             self._redact_terms_list.controls = rows
@@ -703,7 +703,7 @@ class _RedactMixin:
     def _select_redact_color(self, color: str) -> None:
         self._redact_box_color = color
         for c, btn in self._redact_color_btns.items():
-            btn.border = ft.border.all(3, "#E65100" if c == color else "#DDDDDD")
+            btn.border = ft.border.all(3, "#E65100" if c == color else "outlineVariant")
             try:
                 btn.update()
             except Exception:

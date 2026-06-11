@@ -16,19 +16,18 @@ AGENT_ENABLED = False
 
 
 # ── Toolbar / layout colours ──────────────────────────────────────────────────
-_SELECTED_BG  = "#DDEEFF"
-_TOOLBAR_BG   = "#F3F3F3"
-_ANNOT_BG     = "#EBEBEB"
-_DIVIDER_CLR  = "#BDBDBD"
-_VIEWER_BG    = "#757575"
-_SEL_BAR_BG   = "#FFF9C4"
+# Chrome de UI: tokens de tema Material que se adaptan a claro/oscuro.
+_SELECTED_BG  = ft.Colors.with_opacity(0.20, ft.Colors.PRIMARY)  # botón de herramienta activa
+_TOOLBAR_BG   = "surfaceVariant"
+_ANNOT_BG     = "surface"
+_DIVIDER_CLR  = "outlineVariant"
+_VIEWER_BG    = "#757575"   # "escritorio" gris neutro detrás de las páginas (igual en ambos temas)
+_SEL_BAR_BG   = "#FFF9C4"   # barra flotante de selección de texto (amarilla, sobre la página)
 _SEL_BAR_BDR  = "#F0C800"
-_OCR_BOX_CLR  = "#2E7D32"
+_OCR_BOX_CLR  = "#2E7D32"   # caja OCR dibujada sobre la imagen de la página (siempre clara)
 _OCR_BOX_BG   = "#331B5E20"
-_OCR_PANEL_BG = "#F7FBF8"
-_PAGE_BG      = "#FFFFFF"   # placeholder "papel" mientras la página no se renderiza
-                            # (blanco = se funde con el contenido al cargar; antes
-                            # era gris y parecía un bloque de carga al hacer scroll)
+_OCR_PANEL_BG = "surfaceVariant"
+_PAGE_BG      = "#FFFFFF"   # placeholder "papel": las páginas PDF son blancas en ambos temas
 
 # ── Page layout ───────────────────────────────────────────────────────────────
 _PAGE_GAP        = 16    # vertical gap between pages (px)
