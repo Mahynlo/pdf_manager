@@ -109,9 +109,19 @@ class DocumentManagerUI:
             items=[],
         )
 
+        # Slot fijo a la izquierda de la barra: marca de la app + menú desplegable
+        # con las acciones globales. Lo rellena main vía set_leading() (allí están
+        # los callbacks). Mientras esté vacío no ocupa espacio visible.
+        self._leading_slot = ft.Container()
+        self._leading_divider = ft.Container(
+            width=1, height=_TAB_H - 10, bgcolor=_BORDER_CLR, visible=False
+        )
+
         tab_bar = ft.Container(
             content=ft.Row(
                 [
+                    self._leading_slot,
+                    self._leading_divider,
                     self._arr_left,
                     ft.Container(
                         content=self._tabs_row,
@@ -146,6 +156,11 @@ class DocumentManagerUI:
     @property
     def selected_index(self) -> int:
         return self._active
+
+    def set_leading(self, control: ft.Control | None) -> None:
+        """Coloca (o quita) el widget de marca + menú a la izquierda de la barra."""
+        self._leading_slot.content = control
+        self._leading_divider.visible = control is not None
 
     def rebuild(self, tab_infos: list[dict], selected_index: int) -> None:
         """Synchronise the tab list.

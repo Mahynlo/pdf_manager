@@ -1,4 +1,4 @@
-"""App entry point: navbar + home screen + tab shell + file picker.
+"""App entry point: tab shell (con marca + menú integrados) + home screen + file picker.
 
 IPC de instancia única via TCP loopback.
 
@@ -299,14 +299,6 @@ def _ipc_server_loop(server_sock: socket.socket) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Constantes de UI
-# ---------------------------------------------------------------------------
-
-_NAVBAR_BG     = "#1E2A38"
-_NAVBAR_FG     = "#FFFFFF"
-_NAVBAR_FG_DIM = "#90A4AE"
-
-
 # ---------------------------------------------------------------------------
 # App principal
 # ---------------------------------------------------------------------------
@@ -819,90 +811,55 @@ def main(page: ft.Page) -> None:
         for v in open_tabs:
             v._ctrl_pressed = False if released_ctrl else e.ctrl
 
-    # ── Navbar persistente ────────────────────────────────────────────────────
-
-    def _nav_btn(icon: str, label: str, on_click, tooltip: str = "") -> ft.Container:
-        return ft.Container(
-            content=ft.Row(
-                [
-                    ft.Icon(icon, size=16, color=_NAVBAR_FG),
-                    ft.Text(
-                        label,
-                        size=13,
-                        color=_NAVBAR_FG,
-                        weight=ft.FontWeight.W_500,
-                    ),
-                ],
-                spacing=6,
-                tight=True,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    # ── Marca + menú de la app (vive en la barra de pestañas) ───────────────────
+    # Antes esto era una barra superior propia; ahora el nombre/ícono quedan fijos
+    # a la izquierda de las pestañas y sus acciones se despliegan desde un menú.
+    app_menu = ft.PopupMenuButton(
+        icon=ft.Icons.MENU,
+        tooltip="Menú de la aplicación",
+        items=[
+            ft.PopupMenuItem(
+                text="Abrir PDF", icon=ft.Icons.FOLDER_OPEN_OUTLINED,
+                on_click=lambda e: _open_picker(),
             ),
-            padding=ft.padding.symmetric(horizontal=14, vertical=8),
-            border_radius=8,
-            tooltip=tooltip,
-            on_click=on_click,
-            ink=True,
-            ink_color="#FFFFFF22",
-        )
-
-    navbar = ft.Container(
+            ft.PopupMenuItem(
+                text="Extraer texto", icon=ft.Icons.FIND_IN_PAGE_OUTLINED,
+                on_click=lambda e: _open_extractor(),
+            ),
+            ft.PopupMenuItem(
+                text="Combinar PDFs", icon=ft.Icons.MERGE_TYPE,
+                on_click=lambda e: _open_merge(),
+            ),
+            ft.PopupMenuItem(
+                text="Seguridad", icon=ft.Icons.LOCK,
+                on_click=lambda e: _open_security(),
+            ),
+            ft.PopupMenuItem(),  # divisor
+            ft.PopupMenuItem(
+                text="Configuración", icon=ft.Icons.SETTINGS_OUTLINED,
+                on_click=lambda e: _open_settings(),
+            ),
+        ],
+    )
+    app_brand = ft.Container(
         content=ft.Row(
             [
-                ft.Row(
-                    [
-                        ft.Icon(ft.Icons.PICTURE_AS_PDF, size=22, color="#EF5350"),
-                        ft.Text(
-                            "Extraer PDFs",
-                            size=16,
-                            weight=ft.FontWeight.BOLD,
-                            color=_NAVBAR_FG,
-                        ),
-                    ],
-                    spacing=10,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ft.Icon(ft.Icons.PICTURE_AS_PDF, size=20, color="#EF5350"),
+                ft.Text(
+                    "Extraer PDFs",
+                    size=14,
+                    weight=ft.FontWeight.BOLD,
+                    color="onSurface",
                 ),
-                ft.Container(expand=True),
-                _nav_btn(
-                    ft.Icons.FOLDER_OPEN_OUTLINED,
-                    "Abrir PDF",
-                    lambda e: _open_picker(),
-                    tooltip="Abrir uno o varios PDF (Ctrl+O)",
-                ),
-                _nav_btn(
-                    ft.Icons.FIND_IN_PAGE_OUTLINED,
-                    "Extraer texto",
-                    lambda e: _open_extractor(),
-                    tooltip="Abrir pestaña de extracción por palabras clave",
-                ),
-                _nav_btn(
-                    ft.Icons.MERGE_TYPE,
-                    "Combinar PDFs",
-                    lambda e: _open_merge(),
-                    tooltip="Combinar múltiples PDFs en uno",
-                ),
-                _nav_btn(
-                    ft.Icons.LOCK,
-                    "Seguridad",
-                    lambda e: _open_security(),
-                    tooltip="Desbloquear PDFs protegidos",
-                ),
-                ft.Container(width=4),
-                ft.Container(width=1, height=20, bgcolor=_NAVBAR_FG_DIM),
-                ft.Container(width=4),
-                _nav_btn(
-                    ft.Icons.SETTINGS_OUTLINED,
-                    "Configuración",
-                    lambda e: _open_settings(),
-                    tooltip="Abrir configuración de la aplicación",
-                ),
+                app_menu,
             ],
-            spacing=4,
+            spacing=8,
+            tight=True,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
-        bgcolor=_NAVBAR_BG,
-        padding=ft.padding.symmetric(horizontal=16, vertical=6),
-        border=ft.border.only(bottom=ft.BorderSide(1, "#2E3E50")),
+        padding=ft.padding.only(left=10, right=4),
     )
+    doc_mgr.set_leading(app_brand)
 
     # ── Wiring ────────────────────────────────────────────────────────────────
 
@@ -921,11 +878,7 @@ def main(page: ft.Page) -> None:
         on_open_pdf=_open_pdf_path,
     )
 
-    body = ft.Column(
-        [navbar, doc_mgr.control],
-        expand=True,
-        spacing=0,
-    )
+    body = doc_mgr.control
 
     _rebuild_tabs(0)
     page.controls.clear()   # remueve el spinner
