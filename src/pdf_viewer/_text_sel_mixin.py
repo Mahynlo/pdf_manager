@@ -104,8 +104,9 @@ def _assign_line_indices(words: list[tuple], pos=None) -> list[tuple]:
     """Anexa un índice de renglón (4º elem) a palabras YA en orden de lectura.
 
     Recorre la lista (ya ordenada) y abre un renglón nuevo cuando el centro
-    vertical salta más que la tolerancia adaptativa; sigue la deriva gradual de
-    la baseline para no partir un renglón ligeramente inclinado. No reordena.
+    vertical salta más que la tolerancia respecto a la MEDIA MÓVIL del renglón
+    (no la palabra previa): así una caja con jitter no arrastra el ancla al
+    renglón siguiente y los vecinos no se fusionan. No reordena.
     """
     if pos is None:
         pos = lambda r: r
@@ -114,13 +115,18 @@ def _assign_line_indices(words: list[tuple], pos=None) -> list[tuple]:
     prects = [pos(w[0]) for w in words]
     tol = _line_tol(prects)
     out: list[tuple] = []
-    ref: float | None = None
+    mean: float | None = None      # media móvil del centro vertical del renglón
+    cnt = 0
     lid = -1
     for w, pr in zip(words, prects):
         cy = (pr.y0 + pr.y1) / 2
-        if ref is None or abs(cy - ref) > tol:
+        if mean is None or abs(cy - mean) > tol:
             lid += 1
-        ref = cy
+            mean = cy
+            cnt = 1
+        else:
+            cnt += 1
+            mean += (cy - mean) / cnt
         out.append((*w[:3], lid))
     return out
 
@@ -161,16 +167,25 @@ def _sort_words_clustered(words: list[tuple], page_width: float, pos=None) -> li
     cols = [col_of(x) for x in cx]
 
     # Dentro de cada columna, recorrer de arriba a abajo y agrupar renglones.
+    # El ancla del renglón es su MEDIA MÓVIL de centro vertical (no la palabra
+    # previa): una sola caja con jitter no arrastra el ancla hasta el renglón
+    # siguiente, así que renglones vecinos NO se fusionan (era la causa del
+    # "bloque": al fundirse, el resaltado dibujaba un único rectángulo enorme).
     order0 = sorted(range(n), key=lambda i: (cols[i], cy[i], prects[i].x0))
     line_id = [0] * n
     cur_col: int | None = None
-    ref: float | None = None
+    mean: float | None = None
+    cnt = 0
     lid = -1
     for i in order0:
-        if cols[i] != cur_col or ref is None or abs(cy[i] - ref) > tol:
+        if cols[i] != cur_col or mean is None or abs(cy[i] - mean) > tol:
             lid += 1
             cur_col = cols[i]
-        ref = cy[i]               # seguir la deriva de baseline
+            mean = cy[i]
+            cnt = 1
+        else:
+            cnt += 1
+            mean += (cy[i] - mean) / cnt   # media móvil del renglón
         line_id[i] = lid
 
     order = sorted(range(n), key=lambda i: (line_id[i], prects[i].x0))
