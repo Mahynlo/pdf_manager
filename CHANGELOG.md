@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.21] - 2026-06-11
+
+### Added
+- **Deduplicación OCR en PDFs híbridos**: se descartan coincidencias OCR solapadas que estén cubiertas por texto nativo en `_find_term_matches`.
+- **Pruebas unitarias**: se añadieron tests que verifican el comportamiento de deduplicación de las detecciones OCR en PDFs híbridos.
+- **Selección de texto mejorada**: mejoras para manejar páginas OCR, asegurando límites de palabras y saltos de línea correctos al reconstruir el texto seleccionado.
+- **Optimización de overlays durante arrastre**: el sistema omite reconstruir las superposiciones mientras se arrastra si la selección no ha cambiado, reduciendo parpadeos y trabajo innecesario.
+
 ## [No publicado]
 
 ## [0.1.20] - 2026-06-10
