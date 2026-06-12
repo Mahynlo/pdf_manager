@@ -406,11 +406,21 @@ class _RedactMixin:
         for i in range(len(pw) - n + 1):
             chunk = pw[i:i + n]
             if [_norm(w[4]) for w in chunk] == cmp_q:
-                x0 = min(w[0] for w in chunk)
-                y0 = min(w[1] for w in chunk)
-                x1 = max(w[2] for w in chunk)
-                y1 = max(w[3] for w in chunk)
-                rects.append(fitz.Rect(x0, y0, x1, y1))
+                # Una frase puede CRUZAR de renglón o de columna. Fusionar todo
+                # en un solo min/max producía un rect gigante que abarcaba el
+                # ancho completo entre ambas líneas y censuraba texto ajeno.
+                # Un rect por (bloque, línea) censura exactamente las palabras
+                # de la frase. get_text("words") → (x0,y0,x1,y1, word, block,
+                # line, word_no).
+                runs: dict[tuple, list] = {}
+                for w in chunk:
+                    runs.setdefault((w[5], w[6]), []).append(w)
+                for run in runs.values():
+                    x0 = min(w[0] for w in run)
+                    y0 = min(w[1] for w in run)
+                    x1 = max(w[2] for w in run)
+                    y1 = max(w[3] for w in run)
+                    rects.append(fitz.Rect(x0, y0, x1, y1))
         return rects
 
     def _search_phrase_in_ocr(
@@ -470,14 +480,33 @@ class _RedactMixin:
             if not det_indices:
                 continue
             involved = [sorted_dets[di] for di in sorted(det_indices)]
-            merged = fitz.Rect(
-                min(d.bbox.x0 for d in involved),
-                min(d.bbox.y0 for d in involved),
-                max(d.bbox.x1 for d in involved),
-                max(d.bbox.y1 for d in involved),
-            )
             label = full_text[m.start():m.end()][:80]
-            results.append((merged, label))
+
+            # Igual que en el camino nativo: una frase que cruza de renglón no
+            # debe fusionarse en un solo rect gigante (censuraría el bloque
+            # completo entre líneas). Agrupar las detecciones por renglón
+            # (centro vertical con tolerancia) y emitir un rect por línea.
+            involved.sort(key=lambda d: (d.bbox.y0, d.bbox.x0))
+            line_grp: list = [involved[0]]
+            grps: list[list] = [line_grp]
+            for d in involved[1:]:
+                ref = line_grp[-1].bbox
+                tol = max(3.0, min(ref.y1 - ref.y0, d.bbox.y1 - d.bbox.y0) * 0.7)
+                cy_d   = (d.bbox.y0 + d.bbox.y1) / 2
+                cy_ref = (ref.y0 + ref.y1) / 2
+                if abs(cy_d - cy_ref) > tol:
+                    line_grp = [d]
+                    grps.append(line_grp)
+                else:
+                    line_grp.append(d)
+            for grp in grps:
+                merged = fitz.Rect(
+                    min(d.bbox.x0 for d in grp),
+                    min(d.bbox.y0 for d in grp),
+                    max(d.bbox.x1 for d in grp),
+                    max(d.bbox.y1 for d in grp),
+                )
+                results.append((merged, label))
 
         return results
 

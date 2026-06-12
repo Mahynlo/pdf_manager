@@ -98,3 +98,97 @@ class TestRedactOCRDedupe:
             assert len(matches) == 1
         finally:
             doc.close()
+
+
+class TestNativePhraseSearch:
+    """Búsqueda de censura sobre texto nativo: palabra, frase y palabra completa."""
+
+    def _page(self, *lines: str):
+        doc = fitz.open()
+        page = doc.new_page(width=595, height=842)
+        for i, ln in enumerate(lines):
+            page.insert_text((72, 100 + i * 14), ln, fontsize=11)
+        return doc, page
+
+    def test_single_word_whole_word_only(self):
+        """"la" NO debe coincidir dentro de "tabla" (siempre palabra completa)."""
+        doc, page = self._page("la tabla grande")
+        stub = _Stub(doc, {})
+        try:
+            matches = stub._find_term_matches("la", case_sensitive=True)
+            assert len(matches) == 1
+        finally:
+            doc.close()
+
+    def test_phrase_same_line_single_rect(self):
+        doc, page = self._page("uno dos tres")
+        stub = _Stub(doc, {})
+        try:
+            rects = stub._search_phrase(page, "uno dos", True, whole_word=True)
+            assert len(rects) == 1
+        finally:
+            doc.close()
+
+    def test_phrase_wrapping_lines_gives_one_rect_per_line(self):
+        """Frase que cruza de renglón: un rect por línea, no un bloque gigante
+        que abarque todo el ancho entre ambas líneas."""
+        doc, page = self._page("uno dos", "tres cuatro")
+        stub = _Stub(doc, {})
+        try:
+            rects = stub._search_phrase(page, "dos tres", True, whole_word=True)
+            assert len(rects) == 2
+            for r in rects:
+                assert r.height < 20  # altura de UNA línea, no de las dos
+
+            # y cada rect cubre solo su palabra, no el renglón completo
+            w_uno = page.get_text("words")[0]
+            assert all(r.x0 > w_uno[2] - 1 for r in rects if abs(r.y0 - w_uno[1]) < 5)
+        finally:
+            doc.close()
+
+    def test_accent_folding_case_insensitive(self):
+        doc, page = self._page("Comisión Federal")
+        stub = _Stub(doc, {})
+        try:
+            matches = stub._find_term_matches("comision", case_sensitive=False)
+            assert len(matches) == 1
+        finally:
+            doc.close()
+
+
+class TestOCRPhraseSearch:
+    """Búsqueda de censura sobre detecciones OCR (una det por palabra)."""
+
+    def test_phrase_across_detections_same_line(self):
+        stub = _Stub(fitz.open(), {})
+        dets = [
+            _det("hola",  50, 100, 90, 112),
+            _det("mundo", 95, 100, 140, 112),
+        ]
+        results = stub._search_phrase_in_ocr(dets, "hola mundo", True, whole_word=True)
+        assert len(results) == 1
+        rect, label = results[0]
+        assert rect.x0 == 50 and rect.x1 == 140
+
+    def test_phrase_wrapping_lines_gives_one_rect_per_line(self):
+        stub = _Stub(fitz.open(), {})
+        dets = [
+            _det("gastos", 400, 100, 450, 112),   # fin del renglón 1
+            _det("de",      50, 130,  70, 142),   # inicio del renglón 2
+        ]
+        results = stub._search_phrase_in_ocr(dets, "gastos de", True, whole_word=True)
+        assert len(results) == 2
+        for rect, _label in results:
+            assert rect.height < 20
+
+    def test_whole_word_does_not_match_inside_detection(self):
+        stub = _Stub(fitz.open(), {})
+        dets = [_det("tabla", 50, 100, 90, 112)]
+        results = stub._search_phrase_in_ocr(dets, "la", True, whole_word=True)
+        assert results == []
+
+    def test_accent_folding_in_ocr(self):
+        stub = _Stub(fitz.open(), {})
+        dets = [_det("Comisión", 50, 100, 110, 112)]
+        results = stub._search_phrase_in_ocr(dets, "Comision", True, whole_word=True)
+        assert len(results) == 1
