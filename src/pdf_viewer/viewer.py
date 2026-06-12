@@ -158,6 +158,10 @@ class PDFViewerTab(
         # por página: permite saltar el rebuild del overlay durante el arrastre
         # cuando el puntero no cambió de palabra (la mayoría de los eventos).
         self._text_sel_sig:       dict[int, tuple] = {}
+        # Páginas cuya capa tiene resaltado dibujado AHORA: limpiar/recorrer
+        # sólo éstas (O(selección)) en vez de las N páginas del documento por
+        # evento de arrastre.
+        self._text_sel_active_pages: set[int] = set()
         self._text_sel_start_pn:  int | None = None
         self._text_sel_end_pn:    int | None = None
         self._text_sel_text:      str = ""

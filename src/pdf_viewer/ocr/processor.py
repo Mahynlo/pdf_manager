@@ -51,6 +51,24 @@ class OCRPageResult:
     detections: list[OCRDetection]
 
 
+@dataclass
+class PreparedPage:
+    """Fase 1 del OCR de una página: clasificación + texto nativo + regiones ya
+    RASTERIZADAS, sin inferencia.
+
+    Es todo lo que necesita tocar el ``fitz.Document``: el llamador la produce
+    bajo su lock de documento (``prepare_page``) y corre la inferencia —lo
+    lento— FUERA del lock (``recognize_page``), de modo que el render/scroll
+    del visor no se quede esperando el lock durante los segundos que tarda el
+    modelo.
+    """
+    page_kind: str
+    doc_kind: str
+    native_segments: list[OCRSegment]
+    regions: list[tuple[fitz.Rect, float, np.ndarray]]   # (rect, scale, img)
+    start: float   # perf_counter() al iniciar, para el tiempo total reportado
+
+
 class OCRProcessor:
 
     def __init__(self, workspace_root: str):
@@ -146,25 +164,35 @@ class OCRProcessor:
         del page, document
         return words, elapsed
 
-    def detect_orientation(self, doc: fitz.Document, page_num: int) -> int:
-        """Detecta cuántos grados (0/90/180/270) hay que SUMAR a la rotación
-        actual de la página para que el texto quede derecho.
+    def render_orientation_probe(self, doc: fitz.Document, page_num: int) -> np.ndarray:
+        """Rasteriza la página para sondear su orientación (fase BAJO lock).
 
-        Pensado para escaneos cuyo *contenido* está girado pero sin entrada
-        ``/Rotate`` (PyMuPDF informa rotation==0 y la página se ve de lado).
-        Reutiliza los modelos OCR ya incluidos (sin descargas): renderiza la
-        página tal como se muestra y puntúa las 4 orientaciones por la suma de
-        confianzas de las palabras reconocidas; la orientación correcta produce
-        palabras reales con alta confianza. Devuelve 0 si ya está derecha o si
-        no hay señal suficiente.
-        """
+        Separa el único acceso al documento de ``score_orientation`` (la
+        inferencia ×4, lenta), para que el llamador no retenga su lock de
+        documento mientras corre el modelo."""
         page = doc[page_num]
         longest = max(page.rect.width, page.rect.height)
         scale = min(1.5, 1400.0 / max(1.0, longest))
         pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
         base = self._pixmap_to_ndarray(pix)
         del pix
+        return base
 
+    def detect_orientation(self, doc: fitz.Document, page_num: int) -> int:
+        """Conveniencia: sondeo + puntuación en un paso (sin lock que liberar)."""
+        return self.score_orientation(self.render_orientation_probe(doc, page_num))
+
+    def score_orientation(self, base: np.ndarray) -> int:
+        """Detecta cuántos grados (0/90/180/270) hay que SUMAR a la rotación
+        actual de la página para que el texto quede derecho (fase SIN lock).
+
+        Pensado para escaneos cuyo *contenido* está girado pero sin entrada
+        ``/Rotate`` (PyMuPDF informa rotation==0 y la página se ve de lado).
+        Reutiliza los modelos OCR ya incluidos (sin descargas): puntúa las 4
+        orientaciones por la suma de confianzas de las palabras reconocidas; la
+        orientación correcta produce palabras reales con alta confianza.
+        Devuelve 0 si ya está derecha o si no hay señal suficiente.
+        """
         # np.rot90(k) gira la imagen en sentido ANTIHORARIO; /Rotate gira en
         # sentido HORARIO. Para reproducir con page.set_rotation el mismo efecto
         # que np.rot90(base, k) hay que sumar ((4-k)%4)*90 grados horarios.
@@ -307,28 +335,50 @@ class OCRProcessor:
             scale = _MAX_OCR_PX / longest
         return max(scale, 1.0)
 
-    def _ocr_on_regions(self, page: fitz.Page) -> tuple[list[OCRSegment], list[OCRDetection], float]:
-        segments: list[OCRSegment] = []
+    def prepare_page(self, doc: fitz.Document, page_num: int, force_ocr: bool = False) -> PreparedPage:
+        """Fase 1 (BAJO el lock del documento): clasificar la página, extraer el
+        texto nativo y rasterizar las regiones a OCRear. Es rápida (decenas de
+        ms); todo lo que toca ``doc`` ocurre aquí."""
+        page = doc[page_num]  # número de página 0-indexed en PyMuPDF
+        doc_kind = self.get_doc_kind(doc)
+        page_kind = self.page_kind(page)
+
+        start = perf_counter()
+        native_segments = self._native_segments(page)
+        regions: list[tuple[fitz.Rect, float, np.ndarray]] = []
+        if force_ocr or page_kind in ("hybrid", "scanned"):
+            for rect in self._image_regions(page):
+                scale = self._ocr_scale(rect)
+                pix = page.get_pixmap(
+                    matrix=fitz.Matrix(scale, scale),
+                    clip=rect,
+                    alpha=False,
+                )
+                if pix.width == 0 or pix.height == 0:
+                    del pix  # nothing to OCR in this region
+                    continue
+                img = self._pixmap_to_ndarray(pix)
+                del pix  # free pixmap memory before inference
+                regions.append((rect, scale, img))
+
+        return PreparedPage(
+            page_kind=page_kind,
+            doc_kind=doc_kind,
+            native_segments=native_segments,
+            regions=regions,
+            start=start,
+        )
+
+    def recognize_page(self, prep: PreparedPage) -> OCRPageResult:
+        """Fase 2 (SIN lock): inferencia del modelo sobre las imágenes ya
+        rasterizadas — los segundos lentos del OCR. No toca el documento."""
+        ocr_segments: list[OCRSegment] = []
         detections: list[OCRDetection] = []
-        total_elapsed = 0.0
+        ocr_elapsed = 0.0
 
-        for rect in self._image_regions(page):
-            scale = self._ocr_scale(rect)
-            pix = page.get_pixmap(
-                matrix=fitz.Matrix(scale, scale),
-                clip=rect,
-                alpha=False,
-            )
-            if pix.width == 0 or pix.height == 0:
-                del pix  # nothing to OCR in this region
-                continue
-            img = self._pixmap_to_ndarray(pix)
-            del pix  # free pixmap memory before inference
-
+        for rect, scale, img in prep.regions:
             words, elapsed = self._run_predictor(img)
-            del img  # free image array after inference
-            total_elapsed += elapsed
-
+            ocr_elapsed += elapsed
             for px_rect, text, score in words:
                 x0 = rect.x0 + px_rect.x0 / scale
                 y0 = rect.y0 + px_rect.y0 / scale
@@ -336,46 +386,37 @@ class OCRProcessor:
                 y1 = rect.y0 + px_rect.y1 / scale
                 pdf_rect = fitz.Rect(x0, y0, x1, y1)
 
-                segments.append(OCRSegment(text=text, source="ocr", bbox=pdf_rect))
+                ocr_segments.append(OCRSegment(text=text, source="ocr", bbox=pdf_rect))
                 detections.append(OCRDetection(text=text, score=score, source="ocr", bbox=pdf_rect))
+        prep.regions.clear()  # liberar las imágenes rasterizadas cuanto antes
 
-        return segments, detections, total_elapsed
-
-    def process_page(self, doc: fitz.Document, page_num: int, force_ocr: bool = False) -> OCRPageResult:
-        page = doc[page_num] # numeo de página es 0-indexed en PyMuPDF
-        doc_kind = self.get_doc_kind(doc) #Clasificación del documento: Nativo, Escaneado o Híbrido
-        page_kind = self.page_kind(page) #Clasificación de la página: Nativa, Escaneada o Híbrida
-
-        start = perf_counter() #Tiempo de inicio para medir el tiempo total de procesamiento de la página
-        native_segments = self._native_segments(page) #Extracción de segmentos de texto nativos de la página
-        ocr_segments: list[OCRSegment] = [] #Inicialización de la lista de segmentos OCR, se llenará solo si se necesita OCR
-        detections: list[OCRDetection] = [] #Inicialización de la lista de detecciones OCR, se llenará solo si se necesita OCR
-        ocr_elapsed = 0.0 #Inicialización del tiempo de OCR, se actualizará solo si se realiza OCR
-
-        if force_ocr or page_kind in ("hybrid", "scanned"): 
-            ocr_segments, detections, ocr_elapsed = self._ocr_on_regions(page)
-
-        segments = [*native_segments, *ocr_segments]
+        segments = [*prep.native_segments, *ocr_segments]
         segments.sort(key=lambda s: (s.bbox.y0, s.bbox.x0))
 
-        #Tipo de página: Nativo, Escaneado o Híbrido
-        if native_segments and ocr_segments:
+        # Tipo de página: Nativo, Escaneado o Híbrido
+        if prep.native_segments and ocr_segments:
             mode = "Hibrido"
-        elif native_segments:
+        elif prep.native_segments:
             mode = "Nativo"
         elif ocr_segments:
             mode = "OCR"
         else:
             mode = "Sin texto"
 
-        wall_elapsed = perf_counter() - start
+        wall_elapsed = perf_counter() - prep.start
         elapsed_ms = max(wall_elapsed, ocr_elapsed) * 1000
 
         return OCRPageResult(
-            page_kind=page_kind,
-            doc_kind=doc_kind,
+            page_kind=prep.page_kind,
+            doc_kind=prep.doc_kind,
             mode_label=mode,
             elapsed_ms=elapsed_ms,
             segments=segments,
             detections=detections,
         )
+
+    def process_page(self, doc: fitz.Document, page_num: int, force_ocr: bool = False) -> OCRPageResult:
+        """Conveniencia (todo en uno) para llamadores sin lock que liberar —
+        p. ej. el extractor por lotes. El visor usa las dos fases por separado
+        para no retener su ``_doc_lock`` durante la inferencia."""
+        return self.recognize_page(self.prepare_page(doc, page_num, force_ocr))

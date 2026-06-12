@@ -192,3 +192,20 @@ class TestOCRPhraseSearch:
         dets = [_det("Comisión", 50, 100, 110, 112)]
         results = stub._search_phrase_in_ocr(dets, "Comision", True, whole_word=True)
         assert len(results) == 1
+
+    def test_concat_cache_reused_between_terms(self):
+        """El concatenado de detecciones se memoiza en cache_entry: cargar un
+        perfil con N términos no debe re-concatenar la página N veces."""
+        stub = _Stub(fitz.open(), {})
+        dets = [_det("hola", 50, 100, 90, 112), _det("mundo", 95, 100, 140, 112)]
+        entry: dict = {}
+        r1 = stub._search_phrase_in_ocr(dets, "hola", True, whole_word=True,
+                                        cache_entry=entry)
+        assert len(r1) == 1 and "ocr_concat" in entry
+        # Segunda búsqueda con detecciones VACIADAS: si reutiliza el cache,
+        # sigue encontrando; si re-concatenara, no encontraría nada.
+        dets.clear()
+        dets.append(_det("x", 0, 0, 5, 5))   # contenido distinto, mismo cache
+        r2 = stub._search_phrase_in_ocr(dets, "mundo", True, whole_word=True,
+                                        cache_entry=entry)
+        assert len(r2) == 1

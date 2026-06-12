@@ -384,8 +384,13 @@ class _OCRMixin:
         self.page_ref.update()
 
         try:
+            # Solo la rasterización necesita el documento; la inferencia (los
+            # segundos lentos) corre SIN _doc_lock para que los workers de
+            # render no se bloqueen — antes, hacer scroll durante el OCR dejaba
+            # las páginas en blanco hasta que terminara.
             with self._doc_lock:
-                result = self._ocr_processor.process_page(self.doc, pn, force_ocr=True)
+                prep = self._ocr_processor.prepare_page(self.doc, pn, force_ocr=True)
+            result = self._ocr_processor.recognize_page(prep)
         except Exception as ex:
             self._ocr_set_idle(f"Error en página {pn + 1}: {ex}")
             self._ocr_results_list.controls = [
@@ -436,8 +441,11 @@ class _OCRMixin:
             pass
 
         try:
+            # Igual que en _run_ocr: rasterizar bajo lock, inferir (4 pasadas
+            # del modelo) sin él.
             with self._doc_lock:
-                angle = self._ocr_processor.detect_orientation(self.doc, pn)
+                probe = self._ocr_processor.render_orientation_probe(self.doc, pn)
+            angle = self._ocr_processor.score_orientation(probe)
         except Exception as ex:
             self._show_snack(f"No se pudo detectar la orientación: {ex}")
             self._schedule_ocr_model_release()

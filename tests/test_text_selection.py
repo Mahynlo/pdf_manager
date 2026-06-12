@@ -62,6 +62,7 @@ class _Stub:
         self.zoom = 1.0
         self._text_sel_layers = [_FakeLayer() for _ in range(len(doc))]
         self._text_sel_sig: dict[int, tuple] = {}
+        self._text_sel_active_pages: set[int] = set()
         self._text_sel_sel_rect = None
         self._text_sel_handle_start_disp = None
         self._text_sel_handle_end_disp = None

@@ -426,6 +426,7 @@ class _RedactMixin:
     def _search_phrase_in_ocr(
         self, detections, query: str, case_sensitive: bool,
         whole_word: bool = False,
+        cache_entry: dict | None = None,
     ) -> list[tuple[fitz.Rect, str]]:
         """Search for *query* across all OCR detections on a page.
 
@@ -438,34 +439,46 @@ class _RedactMixin:
         ``whole_word`` rodea el patrón con límites de palabra (``\\b``) para que
         "la" no coincida dentro de "tabla" — paridad con el modo palabra-completa
         del texto nativo.
+
+        ``cache_entry`` (dict por página del ``text_cache`` del lote) memoiza el
+        concatenado (sorted_dets, char_to_det, full_text): cargar un perfil con
+        N términos re-concatenaba las detecciones de cada página OCR N veces.
+        Igual que el cache nativo, lo provee el llamador del lote y se descarta
+        al terminar — nunca queda obsoleto.
         """
         if not detections:
             return []
 
         re_flags = 0 if case_sensitive else re.IGNORECASE
 
-        sorted_dets = sorted(
-            [d for d in detections if d.text.strip()],
-            key=lambda d: (round(d.bbox.y0 / 10) * 10, d.bbox.x0),
-        )
+        prep = cache_entry.get("ocr_concat") if cache_entry is not None else None
+        if prep is None:
+            sorted_dets = sorted(
+                [d for d in detections if d.text.strip()],
+                key=lambda d: (round(d.bbox.y0 / 10) * 10, d.bbox.x0),
+            )
+
+            parts: list[str] = []
+            char_to_det: list[int] = []
+            for i, det in enumerate(sorted_dets):
+                if parts:
+                    parts.append(" ")
+                    char_to_det.append(-1)
+                for ch in det.text:
+                    parts.append(ch)
+                    char_to_det.append(i)
+
+            # Plegar acentos en el texto y la consulta (tabla 1:1 → las posiciones
+            # de caracteres siguen alineadas con char_to_det) para que "COMITÉ"
+            # coincida con "COMITE", igual que en la búsqueda de texto nativo.
+            full_text = _fold_accents("".join(parts))
+            prep = (sorted_dets, char_to_det, full_text)
+            if cache_entry is not None:
+                cache_entry["ocr_concat"] = prep
+
+        sorted_dets, char_to_det, full_text = prep
         if not sorted_dets:
             return []
-
-        parts: list[str] = []
-        char_to_det: list[int] = []
-
-        for i, det in enumerate(sorted_dets):
-            if parts:
-                parts.append(" ")
-                char_to_det.append(-1)
-            for ch in det.text:
-                parts.append(ch)
-                char_to_det.append(i)
-
-        # Plegar acentos en el texto y la consulta (tabla 1:1 → las posiciones de
-        # caracteres siguen alineadas con char_to_det) para que "COMITÉ" coincida
-        # con "COMITE", igual que en la búsqueda de texto nativo.
-        full_text = _fold_accents("".join(parts))
 
         pattern = re.escape(_fold_accents(query))
         if whole_word:
@@ -533,8 +546,17 @@ class _RedactMixin:
         # recuadros de censura por hit (el nativo, más alto por métrica de
         # fuente, y el OCR ajustado al píxel) y la censura se aplicaba doble.
         native_by_pn: dict[int, list[fitz.Rect]] = {}
+        # Lock POR PÁGINA (no durante todo el documento): la búsqueda de un
+        # término en un PDF grande tardaba lo suyo y, con el lock retenido de
+        # principio a fin, los workers de render quedaban bloqueados — hacer
+        # scroll durante una búsqueda mostraba páginas en blanco. Entre página
+        # y página el lock se libera y el render intercala.
         with self._doc_lock:
-            for pn in range(len(self.doc)):
+            total = len(self.doc)
+        for pn in range(total):
+            with self._doc_lock:
+                if pn >= len(self.doc):   # el documento pudo cambiar entre páginas
+                    break
                 page = self.doc[pn]
                 for r in self._search_phrase(
                     page, term, case_sensitive, text_cache=text_cache, pn=pn,
@@ -553,11 +575,11 @@ class _RedactMixin:
                     r_screen = fitz.Rect(r) * page.rotation_matrix
                     matches.append((pn, r_screen, term))
                     native_by_pn.setdefault(pn, []).append(r_screen)
-                # Cortacircuitos: una palabra muy común generaría decenas de miles
-                # de coincidencias y congelaría la UI. Al alcanzar el tope, cortar.
-                if len(matches) >= cap:
-                    del matches[cap:]
-                    return matches
+            # Cortacircuitos: una palabra muy común generaría decenas de miles
+            # de coincidencias y congelaría la UI. Al alcanzar el tope, cortar.
+            if len(matches) >= cap:
+                del matches[cap:]
+                return matches
         if self._redact_incl_ocr is not None and self._redact_incl_ocr.value:
 
             def _dup_of_native(rect: fitz.Rect, pn: int) -> bool:
@@ -585,8 +607,12 @@ class _RedactMixin:
                 return False
 
             for pn, result in self._ocr_by_page.items():
+                # Compartir el dict por página del text_cache con el concatenado
+                # OCR (claves disjuntas de las nativas "text"/"words").
+                entry = text_cache.setdefault(pn, {}) if text_cache is not None else None
                 for rect, label in self._search_phrase_in_ocr(
                     result.detections, term, case_sensitive, whole_word=whole_word,
+                    cache_entry=entry,
                 ):
                     if _dup_of_native(rect, pn):
                         continue

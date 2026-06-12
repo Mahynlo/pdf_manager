@@ -99,6 +99,7 @@ class _RenderMixin:
             self._selected       = None
             self._page_words     = {}
             self._text_sel_sig   = {}
+            self._text_sel_active_pages = set()
             self._text_sel_start_pn = None
             self._text_sel_end_pn   = None
             self._text_sel_text  = ""
@@ -231,6 +232,7 @@ class _RenderMixin:
         self._selected             = None
         self._page_words           = {}
         self._text_sel_sig         = {}
+        self._text_sel_active_pages = set()
         self._text_sel_start_pn    = None
         self._text_sel_end_pn      = None
         self._text_sel_text        = ""

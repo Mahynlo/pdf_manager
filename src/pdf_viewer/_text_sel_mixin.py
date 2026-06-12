@@ -564,17 +564,19 @@ class _TextSelMixin:
 
         scale = self.zoom * BASE_SCALE
         
-        for i, layer in enumerate(self._text_sel_layers):
-            if layer is None:  # slot no construido (placeholder)
-                continue
-            if i < spn or i > epn:
-                self._text_sel_sig.pop(i, None)
-                if layer.controls or getattr(layer, "visible", False):
-                    layer.controls = []
-                    layer.visible = False
-                    if update_ui:
-                        try: layer.update()
-                        except Exception: pass
+        # Limpiar SOLO las páginas que tienen resaltado y quedaron fuera del
+        # rango — O(páginas con selección), no O(N páginas) por evento de drag
+        # (en un PDF de 800 páginas eran 800 iteraciones por movimiento).
+        for i in [p for p in self._text_sel_active_pages if p < spn or p > epn]:
+            self._text_sel_active_pages.discard(i)
+            self._text_sel_sig.pop(i, None)
+            layer = self._text_sel_layers[i] if i < len(self._text_sel_layers) else None
+            if layer is not None and (layer.controls or getattr(layer, "visible", False)):
+                layer.controls = []
+                layer.visible = False
+                if update_ui:
+                    try: layer.update()
+                    except Exception: pass
 
         full_text_parts = []
         self._text_sel_sel_rect = None
@@ -601,6 +603,7 @@ class _TextSelMixin:
             layer = self._text_sel_layers[i]
             if not selected:
                 self._text_sel_sig.pop(i, None)
+                self._text_sel_active_pages.discard(i)
                 if layer is not None and (layer.controls or getattr(layer, "visible", False)):
                     layer.controls = []
                     layer.visible = False
@@ -704,6 +707,8 @@ class _TextSelMixin:
                 layer.controls = boxes
                 layer.visible  = bool(boxes)
                 self._text_sel_sig[i] = sig
+                if boxes:
+                    self._text_sel_active_pages.add(i)
                 if update_ui:
                     try: layer.update()
                     except Exception: pass
@@ -750,8 +755,10 @@ class _TextSelMixin:
         return "".join(full_text_parts)
 
     def _clear_text_selection(self) -> None:
-        for layer in self._text_sel_layers:
-            if layer is None:  # slot no construido (placeholder)
+        # Sólo las páginas con resaltado activo (set) — no las N del documento.
+        for i in list(self._text_sel_active_pages):
+            layer = self._text_sel_layers[i] if i < len(self._text_sel_layers) else None
+            if layer is None:  # slot desinflado a placeholder
                 continue
             if layer.controls or getattr(layer, 'visible', False):
                 layer.controls = []
@@ -760,6 +767,7 @@ class _TextSelMixin:
                     layer.update()
                 except Exception:
                     pass
+        self._text_sel_active_pages.clear()
         self._text_sel_start_pn          = None
         self._text_sel_end_pn            = None
         self._text_sel_text              = ""
