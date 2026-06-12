@@ -98,6 +98,7 @@ class _RenderMixin:
             self._previewed      = set()
             self._selected       = None
             self._page_words     = {}
+            self._text_sel_sig   = {}
             self._text_sel_start_pn = None
             self._text_sel_end_pn   = None
             self._text_sel_text  = ""
@@ -229,6 +230,7 @@ class _RenderMixin:
         self._rendered             = set()
         self._selected             = None
         self._page_words           = {}
+        self._text_sel_sig         = {}
         self._text_sel_start_pn    = None
         self._text_sel_end_pn      = None
         self._text_sel_text        = ""
@@ -1399,7 +1401,9 @@ class _RenderMixin:
         # la página, cuyas coordenadas quedaron obsoletas.
         self._ocr_by_page.pop(pn, None)
         self._page_words.pop(pn, None)
+        self._page_word_bands.pop(pn, None)
         self._page_blocks_cache.pop(pn, None)
+        self._text_rects_cache.pop(pn, None)
         _rcache = getattr(self, "_render_cache", None)
         if _rcache is not None:
             _rcache.invalidate_page(pn)

@@ -154,6 +154,10 @@ class PDFViewerTab(
         self._page_words:         dict[int, list[tuple]] = {}
         self._page_word_bands:    dict[int, dict[int, list]] = {}
         self._page_blocks_cache:  dict[int, list] = {}
+        # Firma (si, ei, scale, es_inicio, es_fin) del último resaltado dibujado
+        # por página: permite saltar el rebuild del overlay durante el arrastre
+        # cuando el puntero no cambió de palabra (la mayoría de los eventos).
+        self._text_sel_sig:       dict[int, tuple] = {}
         self._text_sel_start_pn:  int | None = None
         self._text_sel_end_pn:    int | None = None
         self._text_sel_text:      str = ""
@@ -960,6 +964,7 @@ class PDFViewerTab(
         self._page_word_bands.clear()
         self._page_blocks_cache.clear()
         self._text_rects_cache.clear()
+        self._text_sel_sig.clear()
         self._is_suspended = True
 
     def close(self) -> None:

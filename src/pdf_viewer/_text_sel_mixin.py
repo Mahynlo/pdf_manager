@@ -14,7 +14,38 @@ from .renderer import BASE_SCALE
 
 # ── column-aware reading order ────────────────────────────────────────────────
 
-def _sort_words_column_aware(words: list[tuple], page_width: float, pos=None) -> list[tuple]:
+def _group_aware_order(
+    n: int, line_key, x0_of, groups: list[int] | None
+) -> list[int]:
+    """Orden final de lectura: renglón → x → índice de stream.
+
+    Con ``groups`` (id de PALABRA del stream por tupla), ordena por el x0
+    MÍNIMO del grupo dentro de su renglón y conserva el orden del stream dentro
+    del grupo. En capas de texto "buscables" (escaneo + texto invisible) las
+    cajas de palabras vecinas se SOLAPAN horizontalmente: ordenar char por char
+    por x0 entrelazaba sus letras ("COMISION PARA" → "COMISIOPNARA"). El x0
+    inicial de cada palabra sí es monótono en el renglón, y el stream del PDF
+    ya trae los chars de cada palabra en orden correcto.
+
+    Sin ``groups`` (cada tupla independiente), equivale al orden clásico por
+    (renglón, x0).
+    """
+    if groups is None:
+        return sorted(range(n), key=lambda i: (line_key(i), x0_of(i)))
+    gx0: dict[tuple, float] = {}
+    for i in range(n):
+        k = (line_key(i), groups[i])
+        x = x0_of(i)
+        if k not in gx0 or x < gx0[k]:
+            gx0[k] = x
+    return sorted(
+        range(n), key=lambda i: (line_key(i), gx0[(line_key(i), groups[i])], i)
+    )
+
+
+def _sort_words_column_aware(
+    words: list[tuple], page_width: float, pos=None, groups: list[int] | None = None
+) -> list[tuple]:
     """Sort words in column-aware reading order.
 
     Detects multi-column layouts by finding significant gaps in the horizontal
@@ -28,6 +59,8 @@ def _sort_words_column_aware(words: list[tuple], page_width: float, pos=None) ->
     pantalla pero es horizontal en el espacio SIN rotar; pasando ``pos`` =
     des-rotación, el orden de lectura (renglones por Y, columnas por X) vuelve a
     ser correcto. Por defecto (identidad) opera directamente sobre el rect.
+
+    ``groups``: id de palabra del stream por tupla — ver ``_group_aware_order``.
     """
     if pos is None:
         pos = lambda r: r
@@ -38,11 +71,14 @@ def _sort_words_column_aware(words: list[tuple], page_width: float, pos=None) ->
     # caso común sin rotar ``pos`` es identidad → casi gratis). Ordenamos índices
     # —el sort de Python es estable— y reproyectamos al final.
     prects = [pos(w[0]) for w in words]
+    n = len(words)
 
-    if len(words) < 4:
-        order = sorted(
-            range(len(words)),
-            key=lambda i: (round(prects[i].y0 / 5) * 5, prects[i].x0),
+    if n < 4:
+        order = _group_aware_order(
+            n,
+            lambda i: round(prects[i].y0 / 5) * 5,
+            lambda i: prects[i].x0,
+            groups,
         )
         return [words[i] for i in order]
 
@@ -59,9 +95,11 @@ def _sort_words_column_aware(words: list[tuple], page_width: float, pos=None) ->
 
     if not splits:
         # Single column: row-band sort
-        order = sorted(
-            range(len(words)),
-            key=lambda i: (round(prects[i].y0 / 5) * 5, prects[i].x0),
+        order = _group_aware_order(
+            n,
+            lambda i: round(prects[i].y0 / 5) * 5,
+            lambda i: prects[i].x0,
+            groups,
         )
     else:
         # Multi-column: find column index, then row-band, then x
@@ -71,13 +109,12 @@ def _sort_words_column_aware(words: list[tuple], page_width: float, pos=None) ->
                     return k
             return len(splits)
 
-        order = sorted(
-            range(len(words)),
-            key=lambda i: (
-                get_col_index((prects[i].x0 + prects[i].x1) / 2.0),
-                round(prects[i].y0 / 5) * 5,
-                prects[i].x0,
-            ),
+        cols = [get_col_index((r.x0 + r.x1) / 2.0) for r in prects]
+        order = _group_aware_order(
+            n,
+            lambda i: (cols[i], round(prects[i].y0 / 5) * 5),
+            lambda i: prects[i].x0,
+            groups,
         )
 
     return [words[i] for i in order]
@@ -131,7 +168,9 @@ def _assign_line_indices(words: list[tuple], pos=None) -> list[tuple]:
     return out
 
 
-def _sort_words_clustered(words: list[tuple], page_width: float, pos=None) -> list[tuple]:
+def _sort_words_clustered(
+    words: list[tuple], page_width: float, pos=None, groups: list[int] | None = None
+) -> list[tuple]:
     """Orden de lectura por CLUSTERING de renglones, robusto para OCR.
 
     En vez de bandear por ``round(y0/5)*5`` (frágil: dos palabras de un mismo
@@ -139,6 +178,8 @@ def _sort_words_clustered(words: list[tuple], page_width: float, pos=None) -> li
     inclinación, el renglón se invierte), agrupa por centro vertical con
     tolerancia adaptativa siguiendo la baseline. Devuelve tuplas de longitud 4
     ``(rect, char, word_start, line_idx)``.
+
+    ``groups``: id de palabra del stream por tupla — ver ``_group_aware_order``.
     """
     if pos is None:
         pos = lambda r: r
@@ -188,7 +229,9 @@ def _sort_words_clustered(words: list[tuple], page_width: float, pos=None) -> li
             mean += (cy[i] - mean) / cnt   # media móvil del renglón
         line_id[i] = lid
 
-    order = sorted(range(n), key=lambda i: (line_id[i], prects[i].x0))
+    order = _group_aware_order(
+        n, lambda i: line_id[i], lambda i: prects[i].x0, groups
+    )
     return [(*words[i][:3], line_id[i]) for i in order]
 
 
@@ -249,14 +292,20 @@ class _TextSelMixin:
     # ── word cache ────────────────────────────────────────────────────────────
 
     def _get_page_words(self, pn: int) -> list[tuple]:
-        """Return (fitz.Rect, char, word_start) list for every character on page *pn* (cached).
+        """Return (fitz.Rect, text, word_start) list for page *pn* (cached).
 
-        ``word_start`` marca el primer carácter de cada palabra OCR. Las cajas
-        OCR de palabras adyacentes se tocan/solapan (hueco ~0), así que el
-        heurístico de espacios por hueco no las separa; con esta marca la
-        reconstrucción de texto inserta el espacio entre palabras OCR. El texto
-        nativo no la usa (``False``): sus caracteres tienen huecos reales y los
-        espacios se infieren por hueco como siempre.
+        Texto nativo: una tupla POR CARÁCTER (rawdict) → selección fina.
+        ``word_start=True`` en el char que sigue a un espacio REAL del PDF
+        (frontera de palabra fiable aunque las cajas se toquen); para chars sin
+        marca los espacios se siguen infiriendo por hueco (fallback).
+
+        OCR: una tupla POR PALABRA detectada con ``word_start=True``. Las cajas
+        OCR son por palabra y de bordes ruidosos: trocearlas por carácter con
+        ancho uniforme era sintético (no ganaba precisión real) y multiplicaba
+        ×len(texto) las tuplas a ordenar/barrer/reconstruir en cada frame de
+        arrastre. Con tupla por palabra la selección OCR ajusta a palabra
+        completa y ``word_start`` hace que la reconstrucción inserte el espacio
+        entre palabras (sus cajas se tocan → el hueco no lo delata).
         """
         if pn in self._page_words:
             return self._page_words[pn]
@@ -275,31 +324,125 @@ class _TextSelMixin:
             # subsistema (overlay de selección, hit-test contra clics que ya están
             # en pantalla, orden de lectura) trabaje en un único espacio coherente.
             rot_mat = page.rotation_matrix
-            # Extract characters instead of words for finer selection
-            raw_dict = page.get_text("rawdict")
+            # Extract characters instead of words for finer selection.
+            # small_glyph_heights: las cajas por carácter se encogen a la altura
+            # real del glifo (≈fontsize) en vez de la métrica de línea de la
+            # fuente (ascendente→descendente), que en títulos/mayúsculas dejaba
+            # la franja de selección notablemente más alta que el texto visible
+            # (y que las cajas OCR, ajustadas al píxel). Es un toggle GLOBAL de
+            # PyMuPDF: se restaura siempre, y dentro de _doc_lock para no
+            # interferir con search_for/get_text concurrentes de otros mixins.
+            _tools = fitz.TOOLS
+            _old_sgh = _tools.set_small_glyph_heights()
+            _tools.set_small_glyph_heights(True)
+            try:
+                raw_dict = page.get_text("rawdict")
+            finally:
+                _tools.set_small_glyph_heights(_old_sgh)
 
         words: list[tuple] = []
+        gids:  list[int]   = []   # id de PALABRA del stream por tupla (orden)
+        gid = 0
         for block in raw_dict.get("blocks", []):
             for line in block.get("lines", []):
+                # Un espacio REAL del PDF marca el siguiente char con
+                # ``word_start=True`` (la misma marca que las palabras OCR).
+                # En PDFs "buscables" la capa de texto invisible se estira para
+                # calzar con la imagen y las cajas de chars se TOCAN entre
+                # palabras (hueco ≈ 0): el heurístico de espacios por hueco no
+                # disparaba y la copia salía "FORMATOUNICOPARA…". La marca
+                # explícita no depende de la geometría; el heurístico por hueco
+                # queda como fallback para PDFs sin chars de espacio.
+                #
+                # ``gid`` agrupa los chars de cada palabra del stream: el orden
+                # de lectura ordena por PALABRA (x0 inicial) y conserva el orden
+                # del stream dentro de ella — ver _group_aware_order.
+                gid += 1            # nueva línea → nuevo grupo
+                pending_space = False
                 for span in line.get("spans", []):
                     for char in span.get("chars", []):
                         c = char.get("c", "")
-                        if c.strip():  # ignore purely space chars, we reconstruct spaces via gaps
-                            words.append((fitz.Rect(char["bbox"]) * rot_mat, c, False))
+                        if not c.strip():
+                            pending_space = True
+                            continue
+                        if pending_space:
+                            gid += 1   # nueva palabra del stream
+                        words.append((fitz.Rect(char["bbox"]) * rot_mat, c, pending_space))
+                        gids.append(gid)
+                        pending_space = False
 
         if pn in self._ocr_by_page:
+            # Híbrido: descartar detecciones OCR que el texto NATIVO ya cubre.
+            # En páginas con capa nativa + imagen de fondo, el OCR re-detecta el
+            # mismo texto; sin este filtro la palabra entraba DUPLICADA en la
+            # copia y la franja de selección crecía a la unión de la caja nativa
+            # (métrica de fuente, más alta) con la caja OCR ajustada al píxel.
+            # El nativo gana: es exacto. Índice de bandas en Y para que el test
+            # de cobertura sea O(k) por detección.
+            native_bands: dict[int, list[fitz.Rect]] = {}
+            for r, *_ in words:
+                for bi in range(int(r.y0 // 10), int(r.y1 // 10) + 1):
+                    native_bands.setdefault(bi, []).append(r)
+
+            def _covered_by_native(rect: fitz.Rect) -> bool:
+                area = rect.get_area()
+                if area <= 0 or not native_bands:
+                    return False
+                seen: set[int] = set()   # un char puede vivir en varias bandas
+                covered = 0.0
+                for bi in range(int(rect.y0 // 10), int(rect.y1 // 10) + 1):
+                    for nr in native_bands.get(bi, ()):
+                        if id(nr) in seen:
+                            continue
+                        ix = min(rect.x1, nr.x1) - max(rect.x0, nr.x0)
+                        iy = min(rect.y1, nr.y1) - max(rect.y0, nr.y0)
+                        if ix > 0 and iy > 0:
+                            seen.add(id(nr))
+                            covered += ix * iy
+                            if covered >= area * 0.4:
+                                return True
+                return False
+
+            def _trim_native_to(rect: fitz.Rect) -> None:
+                """Recorta las cajas nativas cubiertas por *rect* a su rango Y.
+
+                En PDFs "buscables" (escaneo + capa de texto invisible) la caja
+                nativa usa la métrica de la fuente embebida, que NO corresponde
+                a la tinta del escaneo; la caja OCR sí abraza los píxeles. Al
+                descartar la detección duplicada heredamos su geometría vertical
+                para que la franja de selección (y el resaltado/subrayado que se
+                aplique) caigan sobre el texto visible. Los fitz.Rect del índice
+                son los MISMOS objetos de las tuplas → mutarlos basta.
+                """
+                for bi in range(int(rect.y0 // 10), int(rect.y1 // 10) + 1):
+                    for nr in native_bands.get(bi, ()):
+                        ix = min(rect.x1, nr.x1) - max(rect.x0, nr.x0)
+                        iy = min(rect.y1, nr.y1) - max(rect.y0, nr.y0)
+                        if ix <= 0 or iy <= 0:
+                            continue
+                        # Recortar SOLO chars que el det cubre de verdad (≥50%
+                        # de su alto). Las cajas OCR vienen dilatadas y rozan la
+                        # fila vecina: clampear por un roce de 1-2 pt colapsaba
+                        # esos chars a una astilla → renglones enteros con
+                        # franja invisible ("no termina de seleccionar").
+                        if iy < (nr.y1 - nr.y0) * 0.5:
+                            continue
+                        ny0 = max(nr.y0, rect.y0)
+                        ny1 = min(nr.y1, rect.y1)
+                        if ny1 > ny0:
+                            nr.y0 = ny0
+                            nr.y1 = ny1
+
             for det in self._ocr_by_page[pn].detections:
                 text = det.text.strip()
                 if det.bbox and text:
                     rect = fitz.Rect(det.bbox)
-                    x0, y0, x1, y1 = rect.x0, rect.y0, rect.x1, rect.y1
-                    char_w = (x1 - x0) / max(1, len(text))
-                    first = True   # marca el inicio de la palabra OCR
-                    for i, char in enumerate(text):
-                        if char.strip():
-                            char_rect = fitz.Rect(x0 + i * char_w, y0, x0 + (i + 1) * char_w, y1)
-                            words.append((char_rect, char, first))
-                            first = False
+                    if _covered_by_native(rect):
+                        _trim_native_to(rect)
+                        continue
+                    gid += 1
+                    words.append((rect, text, True))
+                    gids.append(gid)
 
         # Orden de lectura: en páginas rotadas (/Rotate 90/270) el texto se ve
         # vertical en pantalla pero es horizontal SIN rotar. Ordenamos en ese
@@ -317,14 +460,14 @@ class _TextSelMixin:
             # ancho de la página en el marco de lectura (sin rotar)
             sort_w = self.doc[pn].rect.height if rot in (90, 270) else page_width
             pos = lambda r: fitz.Rect(r) * derot_read
-            words = _sort_words_column_aware(words, sort_w, pos=pos)
+            words = _sort_words_column_aware(words, sort_w, pos=pos, groups=gids)
             words = _assign_line_indices(words, pos=pos)
         elif self._is_ocr_page(pn):
             # OCR: orden por clustering de renglones (robusto a jitter/sesgo).
             # Las cajas OCR ya están en espacio de PANTALLA → pos identidad.
-            words = _sort_words_clustered(words, page_width)
+            words = _sort_words_clustered(words, page_width, groups=gids)
         else:
-            words = _sort_words_column_aware(words, page_width)
+            words = _sort_words_column_aware(words, page_width, groups=gids)
             words = _assign_line_indices(words)
         self._page_words[pn] = words
 
@@ -398,10 +541,17 @@ class _TextSelMixin:
         end_pt: tuple | None,
         *,
         update_ui: bool = False,
+        compute_text: bool = True,
     ) -> str:
         """
         Highlight words between *start_pt* and *end_pt* across multiple pages.
         Returns the selected text string.
+
+        ``compute_text=False`` (arrastre en vivo) omite la reconstrucción del
+        string seleccionado —que nadie lee hasta soltar— y permite saltar el
+        rebuild del overlay de una página si el barrido no cambió de palabra
+        desde el último evento (firma ``_text_sel_sig``). Al soltar, el llamador
+        repite la llamada con ``compute_text=True`` (camino completo).
         """
         if start_pn is None or end_pn is None or start_pt is None or end_pt is None:
             return ""
@@ -418,6 +568,7 @@ class _TextSelMixin:
             if layer is None:  # slot no construido (placeholder)
                 continue
             if i < spn or i > epn:
+                self._text_sel_sig.pop(i, None)
                 if layer.controls or getattr(layer, "visible", False):
                     layer.controls = []
                     layer.visible = False
@@ -438,10 +589,18 @@ class _TextSelMixin:
 
             page_start_pt = spt if i == spn else (0, -9999)
             page_end_pt   = ept if i == epn else (9999, 9999)
-            
-            selected = self._words_in_sweep(words, page_start_pt, page_end_pt, pn=i)
+
+            # Índices del barrido (mismo cálculo que _words_in_sweep, pero los
+            # índices se conservan para la firma de short-circuit de abajo).
+            si = self._nearest_word_index(words, page_start_pt, i)
+            ei = self._nearest_word_index(words, page_end_pt, i)
+            if si > ei:
+                si, ei = ei, si
+            selected = [w for w in words[si : ei + 1] if w[1].strip()]
+
+            layer = self._text_sel_layers[i]
             if not selected:
-                layer = self._text_sel_layers[i]
+                self._text_sel_sig.pop(i, None)
                 if layer is not None and (layer.controls or getattr(layer, "visible", False)):
                     layer.controls = []
                     layer.visible = False
@@ -449,8 +608,18 @@ class _TextSelMixin:
                         try: layer.update()
                         except Exception: pass
                 continue
-                
+
             has_any_selection = True
+
+            # Arrastre en vivo: si esta página ya muestra exactamente este rango
+            # a esta escala (la mayoría de los eventos de mouse no cambian de
+            # palabra; las páginas intermedias de un barrido multipágina nunca
+            # cambian), no hay nada que redibujar ni reserializar.
+            sig = (si, ei, scale, i == spn, i == epn)
+            if (not compute_text
+                    and layer is not None and layer.controls
+                    and self._text_sel_sig.get(i) == sig):
+                continue
             # Agrupar por renglón en el marco donde el texto es horizontal
             # (sin rotar para texto nativo rotado; pantalla para OCR / sin
             # rotar). Cuando el marco de lectura es la pantalla (caso común:
@@ -471,23 +640,44 @@ class _TextSelMixin:
             boxes: list[ft.Control] = []
             sel_rect: fitz.Rect | None = None
             for band in sorted(line_bands):
-                urects = line_bands[band]
-                ux0 = min(r.x0 for r in urects)
-                ux1 = max(r.x1 for r in urects)
-                uy0 = min(r.y0 for r in urects)
-                uy1 = max(r.y1 for r in urects)
-                # un renglón → franja correcta en pantalla
-                sr = fitz.Rect(ux0, uy0, ux1, uy1)
-                if rotated_read:
-                    sr = sr * rot_i
-                boxes.append(ft.Container(
-                    left   = sr.x0 * scale,
-                    top    = sr.y0 * scale,
-                    width  = max(2.0, sr.width * scale),
-                    height = max(2.0, sr.height * scale),
-                    bgcolor="#5500AAFF",
-                ))
-                sel_rect = sr if sel_rect is None else sel_rect | sr
+                urects = sorted(line_bands[band], key=lambda r: r.x0)
+                line_h = max(r.y1 for r in urects) - min(r.y0 for r in urects)
+                # Partir el renglón en SEGMENTOS al cruzar un hueco horizontal
+                # grande (mismo umbral 2×alto que _line_merged_rects, así la
+                # previsualización coincide con el resaltado que se aplicará).
+                # Sin esto, en formularios/tablas la franja única min→max
+                # puenteaba los campos y pintaba el espacio vacío entre ellos.
+                max_gap = line_h * 2.0
+                seg_groups: list[list] = [[urects[0]]]
+                seg_x1 = urects[0].x1
+                for r in urects[1:]:
+                    if r.x0 - seg_x1 > max_gap:
+                        seg_groups.append([r])
+                        seg_x1 = r.x1
+                    else:
+                        seg_groups[-1].append(r)
+                        seg_x1 = max(seg_x1, r.x1)
+
+                for grp in seg_groups:
+                    # Extensión vertical POR SEGMENTO (no del renglón entero):
+                    # una caja OCR con jitter o más alta sólo engorda su propio
+                    # tramo, no la franja de toda la fila.
+                    sr = fitz.Rect(
+                        grp[0].x0,
+                        min(r.y0 for r in grp),
+                        max(r.x1 for r in grp),
+                        max(r.y1 for r in grp),
+                    )
+                    if rotated_read:
+                        sr = sr * rot_i
+                    boxes.append(ft.Container(
+                        left   = sr.x0 * scale,
+                        top    = sr.y0 * scale,
+                        width  = max(2.0, sr.width * scale),
+                        height = max(2.0, sr.height * scale),
+                        bgcolor="#5500AAFF",
+                    ))
+                    sel_rect = sr if sel_rect is None else sel_rect | sr
 
             if i == epn:
                 self._text_sel_sel_rect = sel_rect
@@ -510,13 +700,16 @@ class _TextSelMixin:
             # La página puede estar fuera de pantalla y sin construir (placeholder):
             # en ese caso no hay capa donde dibujar los recuadros, pero igual
             # acumulamos su texto abajo para que la copia incluya el rango completo.
-            layer = self._text_sel_layers[i]
             if layer is not None:
                 layer.controls = boxes
                 layer.visible  = bool(boxes)
+                self._text_sel_sig[i] = sig
                 if update_ui:
                     try: layer.update()
                     except Exception: pass
+
+            if not compute_text:
+                continue
 
             last_ur = None
             last_li = None
@@ -572,6 +765,7 @@ class _TextSelMixin:
         self._text_sel_text              = ""
         self._text_sel_handle_start_disp = None
         self._text_sel_handle_end_disp   = None
+        self._text_sel_sig.clear()
 
     # ── floating popup ────────────────────────────────────────────────────────
 
@@ -871,6 +1065,16 @@ class _TextSelMixin:
                 target_rect = fitz.Rect(x0, y0, x1, y1)
                 break
 
+        # OCR: el clic no cayó DENTRO de ningún bloque nativo. En páginas con
+        # detecciones OCR (escaneadas o híbridas) sintetizar el párrafo agrupando
+        # renglones contiguos alrededor del clic, usando los índices de renglón
+        # precomputados. Debe evaluarse ANTES del fallback por cercanía: en una
+        # página híbrida, un triple-tap sobre la región escaneada saltaba al
+        # bloque nativo más cercano en vez de seleccionar el texto OCR clicado.
+        if target_rect is None and self._is_ocr_page(pn):
+            self._select_ocr_paragraph_at(pn, pdf_pt)
+            return
+
         # Fallback: nearest text block by centre distance
         if target_rect is None:
             best_dist = float("inf")
@@ -884,13 +1088,6 @@ class _TextSelMixin:
                 if d < best_dist:
                     best_dist   = d
                     target_rect = fitz.Rect(x0, y0, x1, y1)
-
-        # OCR: no hay bloques nativos → sintetizar el párrafo agrupando renglones
-        # contiguos (separación vertical regular) alrededor del clic, usando los
-        # índices de renglón precomputados. Replica el triple-tap nativo.
-        if target_rect is None and self._is_ocr_page(pn):
-            self._select_ocr_paragraph_at(pn, pdf_pt)
-            return
 
         if target_rect is None:
             return

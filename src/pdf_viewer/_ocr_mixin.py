@@ -323,6 +323,13 @@ class _OCRMixin:
             if evict_pn is None:
                 break
             del self._ocr_by_page[evict_pn]
+            # Descartar también las cachés de texto derivadas de las detecciones
+            # eviccionadas (palabras de selección, índice de hover): si quedaran,
+            # la página seguiría seleccionable "a medias" hasta la siguiente poda
+            # de ventana, con cursor de texto sobre regiones ya inertes.
+            self._page_words.pop(evict_pn, None)
+            self._page_word_bands.pop(evict_pn, None)
+            self._text_rects_cache.pop(evict_pn, None)
             if evict_pn < len(self._ocr_overlays):
                 ov = self._ocr_overlays[evict_pn]
                 if ov is not None:  # slot no construido (placeholder)
@@ -395,7 +402,11 @@ class _OCRMixin:
         self._ocr_by_page[pn] = result
         self._evict_old_ocr_pages(keep_pn=pn)
         gc.collect()
+        # Las cachés de texto de la página quedaron obsoletas: las palabras deben
+        # incluir las detecciones nuevas y el índice de hover debe reindexarlas.
         self._page_words.pop(pn, None)
+        self._page_word_bands.pop(pn, None)
+        self._text_rects_cache.pop(pn, None)
         self._ocr_active_index = 0
         self._refresh_ocr_ui_for_page()
         if self._agent_instance is not None:
@@ -450,7 +461,9 @@ class _OCRMixin:
             _rcache.clear()
         self._ocr_by_page = {}
         self._page_words = {}
+        self._page_word_bands = {}
         self._page_blocks_cache = {}
+        self._text_rects_cache = {}
         if hasattr(self, "_clear_redact_state"):
             self._clear_redact_state()
 

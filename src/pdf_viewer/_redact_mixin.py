@@ -498,6 +498,12 @@ class _RedactMixin:
         # palabras comunes y es el comportamiento esperable al censurar términos.
         whole_word = True
         matches: list[tuple[int, fitz.Rect, str]] = []
+        # Coincidencias nativas por página (en pantalla) para deduplicar las de
+        # OCR: en PDFs híbridos/buscables la misma palabra existe en la capa
+        # nativa Y como detección OCR → sin este filtro se dibujaban DOS
+        # recuadros de censura por hit (el nativo, más alto por métrica de
+        # fuente, y el OCR ajustado al píxel) y la censura se aplicaba doble.
+        native_by_pn: dict[int, list[fitz.Rect]] = {}
         with self._doc_lock:
             for pn in range(len(self.doc)):
                 page = self.doc[pn]
@@ -517,16 +523,44 @@ class _RedactMixin:
                     # rotation_matrix es identidad si la página no está rotada.
                     r_screen = fitz.Rect(r) * page.rotation_matrix
                     matches.append((pn, r_screen, term))
+                    native_by_pn.setdefault(pn, []).append(r_screen)
                 # Cortacircuitos: una palabra muy común generaría decenas de miles
                 # de coincidencias y congelaría la UI. Al alcanzar el tope, cortar.
                 if len(matches) >= cap:
                     del matches[cap:]
                     return matches
         if self._redact_incl_ocr is not None and self._redact_incl_ocr.value:
+
+            def _dup_of_native(rect: fitz.Rect, pn: int) -> bool:
+                """True si *rect* (hit OCR) solapa ≥50% con un hit nativo de la
+                misma página → es la misma palabra detectada dos veces.
+
+                Al detectar el duplicado, el hit nativo ADOPTA la geometría del
+                OCR: en escaneos buscables la caja nativa usa la métrica de la
+                fuente invisible (más alta/ancha que la tinta) mientras la OCR
+                abraza los píxeles — sin esto el recuadro de censura por
+                búsqueda salía visiblemente más grande que uno manual. El rect
+                mutado es el MISMO objeto ya guardado en ``matches``. La caja
+                OCR sigue intersectando todos los chars nativos (solape ≥50%),
+                así que apply_redactions elimina igualmente el texto oculto.
+                """
+                for nr in native_by_pn.get(pn, ()):
+                    ix = min(rect.x1, nr.x1) - max(rect.x0, nr.x0)
+                    iy = min(rect.y1, nr.y1) - max(rect.y0, nr.y0)
+                    if ix > 0 and iy > 0:
+                        inter = ix * iy
+                        if inter >= 0.5 * min(rect.get_area(), nr.get_area()):
+                            nr.x0, nr.y0 = rect.x0, rect.y0
+                            nr.x1, nr.y1 = rect.x1, rect.y1
+                            return True
+                return False
+
             for pn, result in self._ocr_by_page.items():
                 for rect, label in self._search_phrase_in_ocr(
                     result.detections, term, case_sensitive, whole_word=whole_word,
                 ):
+                    if _dup_of_native(rect, pn):
+                        continue
                     matches.append((pn, rect, label))
                     if len(matches) >= cap:
                         del matches[cap:]

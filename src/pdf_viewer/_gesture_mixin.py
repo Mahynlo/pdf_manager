@@ -402,7 +402,8 @@ class _GestureMixin:
                 else:
                     self._text_sel_end_pdf = (pdf_x, pdf_y)
                 self._update_text_selection(
-                    self._text_sel_start_pn, self._text_sel_start_pdf, pn, self._text_sel_end_pdf, update_ui=True
+                    self._text_sel_start_pn, self._text_sel_start_pdf, pn, self._text_sel_end_pdf,
+                    update_ui=True, compute_text=False,
                 )
                 return
 
@@ -463,7 +464,8 @@ class _GestureMixin:
                     self._text_sel_end_pn = target_pn
                     self._text_sel_end_pdf = (pdf_x, pdf_y)
                     self._update_text_selection(
-                        self._text_sel_start_pn, self._text_sel_start_pdf, self._text_sel_end_pn, self._text_sel_end_pdf, update_ui=True
+                        self._text_sel_start_pn, self._text_sel_start_pdf, self._text_sel_end_pn, self._text_sel_end_pdf,
+                        update_ui=True, compute_text=False,
                     )
                 except Exception:
                     pass
@@ -480,7 +482,8 @@ class _GestureMixin:
                     self._text_sel_end_pn = target_pn
                     self._text_sel_end_pdf = (pdf_x, pdf_y)
                     self._update_text_selection(
-                        self._text_sel_start_pn, self._text_sel_start_pdf, self._text_sel_end_pn, self._text_sel_end_pdf, update_ui=True
+                        self._text_sel_start_pn, self._text_sel_start_pdf, self._text_sel_end_pn, self._text_sel_end_pdf,
+                        update_ui=True, compute_text=False,
                     )
                 except Exception:
                     pass
@@ -513,7 +516,8 @@ class _GestureMixin:
                     self._text_sel_end_pn = target_pn
                     self._text_sel_end_pdf = (pdf_x, pdf_y)
                 self._update_text_selection(
-                    self._text_sel_start_pn, self._text_sel_start_pdf, self._text_sel_end_pn, self._text_sel_end_pdf, update_ui=True
+                    self._text_sel_start_pn, self._text_sel_start_pdf, self._text_sel_end_pn, self._text_sel_end_pdf,
+                    update_ui=True, compute_text=False,
                 )
             except Exception:
                 pass
@@ -532,7 +536,8 @@ class _GestureMixin:
                 self._text_sel_end_pn = target_pn
                 self._text_sel_end_pdf = (pdf_x, pdf_y)
                 self._update_text_selection(
-                    self._text_sel_start_pn, self._text_sel_start_pdf, self._text_sel_end_pn, self._text_sel_end_pdf, update_ui=True
+                    self._text_sel_start_pn, self._text_sel_start_pdf, self._text_sel_end_pn, self._text_sel_end_pdf,
+                    update_ui=True, compute_text=False,
                 )
             except Exception:
                 pass
@@ -1143,17 +1148,22 @@ class _GestureMixin:
                         bands.setdefault(bi * 5, []).append(r)
             except Exception:
                 bands = {}
+            # Las detecciones OCR entran al MISMO índice de bandas: antes se
+            # escaneaban linealmente TODAS las detecciones en cada hover (y la
+            # herramienta CURSOR es la default), lo que se sentía en escaneos
+            # densos. _run_ocr / la evicción OCR invalidan cache[pn] para que el
+            # índice se reconstruya con (o sin) las detecciones vigentes.
+            ocr_result = self._ocr_by_page.get(pn)
+            if ocr_result is not None:
+                for det in ocr_result.detections:
+                    r = det.bbox
+                    for bi in range(int(r.y0 // 5), int(r.y1 // 5) + 1):
+                        bands.setdefault(bi * 5, []).append(fitz.Rect(r))
             cache[pn] = bands
         band_rects = bands.get(int(pdf_y // 5) * 5)
         if band_rects:
             for r in band_rects:
                 if r.contains(pt):
-                    return True
-        # OCR detections (already computed; bbox is in PDF space)
-        ocr_result = self._ocr_by_page.get(pn)
-        if ocr_result is not None:
-            for det in ocr_result.detections:
-                if det.bbox.contains(pt):
                     return True
         return False
 
