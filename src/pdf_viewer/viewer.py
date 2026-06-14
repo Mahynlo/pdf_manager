@@ -47,6 +47,7 @@ from ._text_sel_mixin import _TextSelMixin
 from ._ocr_mixin      import _OCRMixin
 from ._redact_mixin   import _RedactMixin
 from ._profiles_mixin import _ProfilesMixin
+from ._legends_mixin  import _LegendsMixin
 from ._agent_mixin    import _AgentMixin
 from ._print_mixin    import _PrintMixin
 
@@ -59,6 +60,7 @@ class PDFViewerTab(
     _OCRMixin,
     _RedactMixin,
     _ProfilesMixin,
+    _LegendsMixin,
     _AgentMixin,
     _PrintMixin,
 ):
@@ -89,6 +91,11 @@ class PDFViewerTab(
         self._tab       = None
         self._annot     = AnnotationManager(on_modified=self._update)
         self._tool_btns: dict[Tool, ft.IconButton] = {}
+        # Menú de leyendas (textos guardados) y texto pendiente de insertar: al
+        # elegir una leyenda se activa la herramienta de texto y el siguiente clic
+        # abre el editor relleno con este contenido.
+        self._legends_menu: ft.PopupMenuButton | None = None
+        self._pending_legend_text: str | None = None
 
         # Annotation selection state (page_num, xref)
         self._selected:         tuple[int, int] | None = None
@@ -499,6 +506,7 @@ class PDFViewerTab(
                 ft.Row(tool_btns, spacing=2, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                 _vdivider(),
                 color_menu,
+                self._make_legends_menu_btn(),
             ], spacing=2, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             padding=ft.padding.symmetric(horizontal=8, vertical=2),
             bgcolor=_ANNOT_BG,
