@@ -65,14 +65,18 @@ HIGHLIGHT_COLORS: list[tuple[str, tuple[float, float, float]]] = [
 # (etiqueta_es, nombre_interno_pymupdf). Cubrir negrita/cursiva con nombres
 # distintos es la forma fiable de variar el estilo sin TTF externos.
 FREETEXT_FONTS: list[tuple[str, str]] = [
-    ("Helvetica",           "helv"),
-    ("Helvetica negrita",   "hebo"),
-    ("Helvetica cursiva",   "heit"),
-    ("Times",               "tiro"),
-    ("Times negrita",       "tibo"),
-    ("Times cursiva",       "tiit"),
-    ("Courier (monoesp.)",  "cour"),
-    ("Courier negrita",     "cobo"),
+    ("Helvetica",                "helv"),
+    ("Helvetica negrita",        "hebo"),
+    ("Helvetica cursiva",        "heit"),
+    ("Helvetica negrita-curs.",  "hebi"),
+    ("Times",                    "tiro"),
+    ("Times negrita",            "tibo"),
+    ("Times cursiva",            "tiit"),
+    ("Times negrita-curs.",      "tibi"),
+    ("Courier (monoesp.)",       "cour"),
+    ("Courier negrita",          "cobo"),
+    ("Courier cursiva",          "coit"),
+    ("Courier negrita-curs.",    "cobi"),
 ]
 
 # Alineación del párrafo (valor entero que espera add_freetext_annot).
