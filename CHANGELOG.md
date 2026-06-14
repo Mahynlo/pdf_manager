@@ -10,6 +10,9 @@
 
 ## [No publicado]
 
+### Added
+- **Anotación de texto (insertar texto en el PDF)**: nueva herramienta «Insertar texto» en la barra de anotaciones que crea anotaciones **FreeText** de PyMuPDF — texto real (no imagen), seleccionable y editable. Se crea **arrastrando** una caja o con un **clic** (caja por defecto), lo que abre un editor con: contenido multilínea, **fuente** (Helvetica/Times/Courier con variantes negrita/cursiva — fuentes base PDF, sin incrustar archivos, con soporte de acentos y ñ), **tamaño**, **alineación** y **color** del texto. Se integra con todo el sistema de anotaciones existente: **deshacer/rehacer**, **mover/redimensionar/escalar/rotar**, **recolorear** (el color se aplica al texto) y **eliminar**. Para editar un texto ya creado: **doble clic** sobre él con el cursor, o el botón «Editar texto» (lápiz) del menú de selección. Funciona también en páginas rotadas.
+
 ## [0.1.20] - 2026-06-10
 
 ### Added

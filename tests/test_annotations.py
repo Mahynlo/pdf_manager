@@ -285,3 +285,112 @@ class TestCatmullRom:
         pts = [(0.0, 0.0), (5.0, 5.0), (10.0, 0.0)]
         result = _catmull_rom(pts, steps=5)
         assert len(result) > len(pts)
+
+
+# ─────────────────────────────────────────────────────────────── FreeText (texto)
+
+
+class TestTextAnnotation:
+    """commit_text / edit_text / props tracking for FreeText annotations."""
+
+    def _freetexts(self, page):
+        return [a for a in page.annots() if _atype(a) == "FreeText"]
+
+    # Nota: una fitz.Annot deja de ser válida si su fitz.Page se libera
+    # (el Annot guarda un enlace débil a la página). Por eso cada test
+    # mantiene viva la variable `page` mientras lee anotaciones — igual que
+    # el código de producción, que siempre opera dentro de `with _doc_lock:
+    # page = doc[pn]; for a in page.annots()`.
+
+    def test_commit_text_creates_freetext(self, mgr, sample_doc):
+        page = sample_doc[0]
+        xref = mgr.commit_text(
+            sample_doc, 0, fitz.Rect(50, 50, 300, 110), "Hola áéí Ñ",
+            fontname="tibo", fontsize=18, color=(0.1, 0.1, 0.8), align=1,
+        )
+        assert xref is not None
+        annots = self._freetexts(page)
+        assert len(annots) == 1
+        assert annots[0].info.get("content") == "Hola áéí Ñ"
+        assert mgr._history[-1] == (0, xref)
+
+    def test_commit_empty_text_is_discarded(self, mgr, sample_doc):
+        page = sample_doc[0]
+        assert mgr.commit_text(sample_doc, 0, fitz.Rect(50, 50, 300, 110), "   ") is None
+        assert self._freetexts(page) == []
+
+    def test_commit_text_enforces_min_box(self, mgr, sample_doc):
+        page = sample_doc[0]
+        xref = mgr.commit_text(sample_doc, 0, fitz.Rect(50, 50, 52, 52), "x")
+        annot = _find_annot_by_xref(page, xref)
+        assert annot.rect.width >= 40 and annot.rect.height >= 20
+
+    def test_props_tracked(self, mgr, sample_doc):
+        xref = mgr.commit_text(
+            sample_doc, 0, fitz.Rect(50, 50, 300, 110), "abc",
+            fontname="cour", fontsize=24, color=(0, 0, 0), align=2,
+        )
+        props = mgr.get_text_props(xref)
+        assert props["fontname"] == "cour"
+        assert props["fontsize"] == 24.0
+        assert props["align"] == 2
+
+    def test_edit_text_updates_content_and_props(self, mgr, sample_doc):
+        page = sample_doc[0]
+        xref = mgr.commit_text(sample_doc, 0, fitz.Rect(50, 50, 300, 110), "viejo")
+        new_xref = mgr.edit_text(
+            sample_doc, 0, xref, "nuevo", fontname="tiro", fontsize=20, color=(1, 0, 0),
+        )
+        assert new_xref is not None
+        annot = _find_annot_by_xref(page, new_xref)
+        assert annot.info.get("content") == "nuevo"
+        assert mgr.get_text_props(new_xref)["fontsize"] == 20.0
+        # old props dropped
+        assert mgr.get_text_props(xref) is None
+
+    def test_move_resize_preserve_text(self, mgr, sample_doc):
+        page = sample_doc[0]
+        xref = mgr.commit_text(sample_doc, 0, fitz.Rect(50, 50, 300, 110), "persiste")
+        mgr.move_annot(sample_doc, 0, xref, 20, 30)
+        annot = self._freetexts(page)[0]
+        assert annot.info.get("content") == "persiste"
+        mgr.resize_annot(sample_doc, 0, annot.xref, fitz.Rect(60, 60, 400, 200))
+        annot = self._freetexts(page)[0]
+        assert annot.info.get("content") == "persiste"
+
+    def test_recolor_changes_text_color(self, mgr, sample_doc):
+        xref = mgr.commit_text(sample_doc, 0, fitz.Rect(50, 50, 300, 110), "color")
+        assert mgr.change_annot_color(sample_doc, 0, xref, (1, 0, 0)) is True
+        assert mgr.get_text_props(xref)["color"] == (1, 0, 0)
+
+    def test_undo_redo_restores_text(self, mgr, sample_doc):
+        page = sample_doc[0]
+        mgr.commit_text(
+            sample_doc, 0, fitz.Rect(50, 50, 300, 110), "deshacer",
+            fontname="hebo", fontsize=16,
+        )
+        assert mgr.undo_last(sample_doc) == 0
+        assert self._freetexts(page) == []
+        assert mgr.redo_last(sample_doc) == 0
+        restored = self._freetexts(page)
+        assert len(restored) == 1
+        assert restored[0].info.get("content") == "deshacer"
+
+    def test_delete_drops_props(self, mgr, sample_doc):
+        xref = mgr.commit_text(sample_doc, 0, fitz.Rect(50, 50, 300, 110), "borrar")
+        assert mgr.delete_annot(sample_doc, 0, xref) is True
+        assert mgr.get_text_props(xref) is None
+
+    def test_take_text_rect_default_box_on_click(self, mgr):
+        mgr.set_tool(Tool.TEXT)
+        mgr.begin(100.0, 200.0)  # click without drag
+        rect = mgr.take_text_rect()
+        assert rect is not None
+        assert rect.width > 0 and rect.height > 0
+
+    def test_take_text_rect_uses_drag(self, mgr):
+        mgr.set_tool(Tool.TEXT)
+        mgr.begin(100.0, 100.0)
+        mgr.move(260.0, 180.0)
+        rect = mgr.take_text_rect()
+        assert rect.x0 == 100.0 and rect.x1 == 260.0

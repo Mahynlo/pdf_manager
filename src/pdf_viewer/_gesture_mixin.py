@@ -8,7 +8,7 @@ import time
 import flet as ft
 import fitz
 
-from .annotations import Tool, STROKE_COLOR
+from .annotations import Tool, STROKE_COLOR, _atype
 from .renderer import BASE_SCALE, display_to_pdf
 from ._viewer_defs import _PAGE_GAP, _rgb_to_hex
 
@@ -121,6 +121,23 @@ class _GestureMixin:
         self._pending_tap_page = pn
 
     def _on_tap(self, e, pn: int) -> None:
+        # Herramienta de texto: un clic (sin arrastre) crea una caja por defecto
+        # en el punto y abre el editor. Si hubo arrastre, _on_pan_start ya anuló
+        # _pending_tap y el editor se abre desde _on_pan_end (una sola vía).
+        if self._annot.tool == Tool.TEXT:
+            if self._pending_tap is None or self._pending_tap_page != pn:
+                self._pending_tap      = None
+                self._pending_tap_page = None
+                return
+            x, y = self._pending_tap
+            self._pending_tap      = None
+            self._pending_tap_page = None
+            pdf_x, pdf_y = display_to_pdf(x, y, self.zoom)
+            rect = fitz.Rect(pdf_x, pdf_y, pdf_x + 200, pdf_y + 40)
+            self.current_page = pn
+            self._open_text_editor(pn, rect)
+            return
+
         # Legacy SELECT tool (still usable programmatically).
         if self._annot.tool == Tool.SELECT:
             if (self._pending_tap is not None
@@ -160,7 +177,8 @@ class _GestureMixin:
                 return
 
             if self._tap_count == 2:
-                # Double-tap → word select (or keep annotation if tapped on one)
+                # Double-tap → word select (or keep annotation if tapped on one).
+                # Sobre una anotación de texto, el doble clic la abre para editar.
                 with self._doc_lock:
                     page  = self.doc[pn]
                     annot = self._annot.get_annot_at(page, pdf_x, pdf_y)
@@ -168,6 +186,8 @@ class _GestureMixin:
                     self._hide_text_sel_bar()
                     self.current_page = pn
                     self._select_annot(pn, annot)
+                    if _atype(annot) == "FreeText":
+                        self._open_text_editor(pn, fitz.Rect(annot.rect) * page.rotation_matrix, xref=annot.xref)
                 else:
                     self._deselect_annot()
                     self._select_word_at(pn, (pdf_x, pdf_y))
@@ -823,6 +843,16 @@ class _GestureMixin:
                 self._clear_ink_canvas_preview(pn)
             self._ink_points = []
             self._ink_page   = None
+            return
+
+        if self._annot.tool == Tool.TEXT:
+            # La caja se previsualiza en el canvas; al soltar se abre el editor
+            # en vez de crear la anotación directamente (el texto se escribe ahí).
+            self._clear_ink_canvas_preview(pn)
+            rect = self._annot.take_text_rect()
+            if rect is not None:
+                self.current_page = pn
+                self._open_text_editor(pn, rect)
             return
 
         if self._annot.tool in (Tool.LINE, Tool.ARROW, Tool.RECT, Tool.CIRCLE):

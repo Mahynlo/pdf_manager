@@ -75,6 +75,7 @@ _TOOL_DEFS: list[tuple[Tool, str, str, ft.MouseCursor]] = [
     (Tool.LINE,      ft.Icons.SHOW_CHART,           "Línea",                          ft.MouseCursor.PRECISE),
     (Tool.ARROW,     ft.Icons.ARROW_FORWARD,        "Flecha",                         ft.MouseCursor.PRECISE),
     (Tool.INK,       ft.Icons.BRUSH,                "Dibujo a mano alzada",           ft.MouseCursor.PRECISE),
+    (Tool.TEXT,      ft.Icons.TITLE,                "Insertar texto",                 ft.MouseCursor.TEXT),
 ]
 
 

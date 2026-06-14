@@ -471,7 +471,7 @@ class PDFViewerTab(
         # ── annotation toolbar ────────────────────────────────────────────────
         tool_btns: list[ft.Control] = []
         for i, (tool, icon, tooltip, cursor) in enumerate(_TOOL_DEFS):
-            if i in (1, 4, 8):  # Add visual groupings (Cursor | Markup | Shapes | Ink)
+            if i in (1, 4, 8, 9):  # Grupos: Cursor | Markup | Formas | Tinta | Texto
                 tool_btns.append(_vdivider())
             btn = ft.IconButton(
                 icon, tooltip=tooltip,

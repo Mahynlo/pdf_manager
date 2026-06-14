@@ -5,7 +5,11 @@ import flet as ft
 import flet.canvas as cv
 import fitz
 
-from .annotations import HIGHLIGHT_COLORS, Tool, _atype
+from .annotations import (
+    HIGHLIGHT_COLORS, Tool, _atype,
+    FREETEXT_FONTS, FREETEXT_ALIGN, FREETEXT_SIZES,
+    DEFAULT_TEXT_FONT, DEFAULT_TEXT_SIZE, DEFAULT_TEXT_COLOR, DEFAULT_TEXT_ALIGN,
+)
 from .renderer import BASE_SCALE
 from ._viewer_defs import _SELECTED_BG, _rgb_to_hex
 
@@ -137,6 +141,7 @@ class _AnnotMixin:
         # Markup annotations (highlight/underline/strikeout) cannot be
         # moved or resized — hide corner handles and size/thickness buttons.
         is_markup  = atype in ("Highlight", "Underline", "StrikeOut", "Squiggly")
+        is_text    = atype == "FreeText"
         no_recolor = atype in ("Squiggly",)
         for name in ("tl", "tr", "bl", "br", "tm", "bm", "lm", "rm"):
             h[name].visible = not is_markup
@@ -144,6 +149,9 @@ class _AnnotMixin:
             h[name].visible = not is_markup
         for name in ("color_sep", "color_btn"):
             h[name].visible = not no_recolor
+        # Botón "editar texto": sólo para anotaciones de texto (FreeText).
+        for name in ("edit_sep", "edit_btn"):
+            h[name].visible = is_text
 
     def _update_sel_handles(
         self, pn: int, W: float, H: float,
@@ -476,6 +484,144 @@ class _AnnotMixin:
         )
         dlg.actions = [ft.TextButton("Cancelar", on_click=cancel)]
         self.page_ref.open(dlg)
+
+    # ── text (FreeText) annotation editor ─────────────────────────────────────
+
+    def _open_text_editor(self, pn: int, rect: fitz.Rect | None, xref: int | None = None) -> None:
+        """Abre el diálogo para insertar (``xref`` None) o editar un texto.
+
+        ``rect`` es la caja en espacio de PANTALLA donde crear el texto (se
+        ignora al editar, que conserva la caja de la anotación).
+        """
+        is_edit = xref is not None
+        props   = (self._annot.get_text_props(xref) or {}) if is_edit else {}
+        cur_text  = props.get("text", "")
+        cur_font  = props.get("fontname", DEFAULT_TEXT_FONT)
+        cur_size  = int(props.get("fontsize", DEFAULT_TEXT_SIZE))
+        cur_align = int(props.get("align", DEFAULT_TEXT_ALIGN))
+        state = {"color": tuple(props.get("color", DEFAULT_TEXT_COLOR))}
+
+        txt = ft.TextField(
+            value=cur_text, multiline=True, min_lines=3, max_lines=10,
+            label="Texto", autofocus=True, text_size=14,
+        )
+        font_dd = ft.Dropdown(
+            label="Fuente", value=cur_font, width=210,
+            options=[ft.dropdown.Option(key=fn, text=lbl) for lbl, fn in FREETEXT_FONTS],
+        )
+        size_val = str(cur_size if cur_size in FREETEXT_SIZES else DEFAULT_TEXT_SIZE)
+        size_dd = ft.Dropdown(
+            label="Tamaño", value=size_val, width=110,
+            options=[ft.dropdown.Option(key=str(s), text=f"{s} pt") for s in FREETEXT_SIZES],
+        )
+        align_dd = ft.Dropdown(
+            label="Alineación", value=str(cur_align), width=150,
+            options=[ft.dropdown.Option(key=str(v), text=lbl) for lbl, v in FREETEXT_ALIGN],
+        )
+        swatch = ft.Container(
+            width=24, height=24, border_radius=4,
+            bgcolor=_rgb_to_hex(*state["color"]),
+            border=ft.border.all(1, "outlineVariant"),
+        )
+
+        def set_color(rgb: tuple[float, float, float]) -> None:
+            state["color"] = tuple(rgb)
+            swatch.bgcolor = _rgb_to_hex(*rgb)
+            try:
+                swatch.update()
+            except Exception:
+                pass
+
+        color_menu = ft.PopupMenuButton(
+            content=ft.Row(
+                [swatch, ft.Text("Color", size=13), ft.Icon(ft.Icons.ARROW_DROP_DOWN, size=18)],
+                spacing=6, tight=True,
+            ),
+            items=[
+                ft.PopupMenuItem(
+                    content=ft.Row(
+                        [
+                            ft.Container(bgcolor=_rgb_to_hex(r, g, b), width=20, height=20, border_radius=4),
+                            ft.Text(name, size=13),
+                        ],
+                        spacing=10,
+                    ),
+                    on_click=lambda e, c=rgb: set_color(c),
+                )
+                for name, rgb in HIGHLIGHT_COLORS
+                for r, g, b in [rgb]
+            ],
+        )
+
+        def save(ev=None) -> None:
+            text = (txt.value or "").strip()
+            if not text:
+                self._show_snack("Escribe algún texto")
+                return
+            fn = font_dd.value or DEFAULT_TEXT_FONT
+            sz = int(size_dd.value or DEFAULT_TEXT_SIZE)
+            al = int(align_dd.value or DEFAULT_TEXT_ALIGN)
+            col = state["color"]
+            self.page_ref.close(dlg)
+            with self._doc_lock:
+                if is_edit:
+                    new_xref = self._annot.edit_text(
+                        self.doc, pn, xref, text,
+                        fontname=fn, fontsize=sz, color=col, align=al,
+                    )
+                else:
+                    new_xref = self._annot.commit_text(
+                        self.doc, pn, rect, text,
+                        fontname=fn, fontsize=sz, color=col, align=al,
+                    )
+            if not new_xref:
+                self._show_snack("No se pudo guardar el texto")
+                return
+            # Volver al cursor y seleccionar la anotación para editar/mover al instante.
+            self._select_tool(Tool.CURSOR, ft.MouseCursor.BASIC)
+            self._refresh_page(pn)
+            with self._doc_lock:
+                for a in self.doc[pn].annots():
+                    if a.xref == new_xref:
+                        self.current_page = pn
+                        self._select_annot(pn, a)
+                        break
+
+        def cancel(ev=None) -> None:
+            self.page_ref.close(dlg)
+
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Editar texto" if is_edit else "Insertar texto"),
+            content=ft.Container(
+                width=440,
+                content=ft.Column(
+                    [
+                        txt,
+                        ft.Row([font_dd, size_dd], spacing=10),
+                        ft.Row([align_dd, color_menu], spacing=16,
+                               vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    ],
+                    tight=True, spacing=14,
+                ),
+            ),
+            actions=[
+                ft.TextButton("Cancelar", on_click=cancel),
+                ft.FilledButton("Guardar" if is_edit else "Insertar", on_click=save),
+            ],
+        )
+        self.page_ref.open(dlg)
+
+    def _edit_selected_text(self, e=None) -> None:
+        """Abre el editor para la anotación de texto seleccionada."""
+        if self._selected is None:
+            return
+        pn, xref = self._selected
+        if getattr(self, "_selected_atype", "") != "FreeText":
+            return
+        self._hide_annot_popup()
+        rect = self._selected_visual_rect or self._selected_rect
+        self._open_text_editor(pn, rect, xref=xref)
 
     # ── text-selection action dialog (OCR click fallback) ─────────────────────
 

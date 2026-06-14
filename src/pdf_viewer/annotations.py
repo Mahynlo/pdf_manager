@@ -18,6 +18,7 @@ class Tool(Enum):
     LINE      = "line"
     ARROW     = "arrow"
     INK       = "ink"
+    TEXT      = "text"
 
 
 OVERLAY_COLOR: dict[Tool, str] = {
@@ -30,6 +31,7 @@ OVERLAY_COLOR: dict[Tool, str] = {
     Tool.LINE:      "#40AA2200",
     Tool.ARROW:     "#40AA2200",
     Tool.INK:       "#40003388",
+    Tool.TEXT:      "#40555555",
 }
 
 STROKE_COLOR: dict[Tool, tuple[float, float, float]] = {
@@ -56,6 +58,38 @@ HIGHLIGHT_COLORS: list[tuple[str, tuple[float, float, float]]] = [
     ("Gris",     (0.5, 0.5,  0.5)),
     ("Negro",    (0.0, 0.0,  0.0)),
 ]
+
+# Fuentes para la anotación de texto (FreeText). Son las fuentes base PDF
+# (Base-14): no requieren incrustar archivos, se renderizan igual en cualquier
+# lector y soportan acentos/ñ (codificación WinAnsi). Cada entrada es
+# (etiqueta_es, nombre_interno_pymupdf). Cubrir negrita/cursiva con nombres
+# distintos es la forma fiable de variar el estilo sin TTF externos.
+FREETEXT_FONTS: list[tuple[str, str]] = [
+    ("Helvetica",           "helv"),
+    ("Helvetica negrita",   "hebo"),
+    ("Helvetica cursiva",   "heit"),
+    ("Times",               "tiro"),
+    ("Times negrita",       "tibo"),
+    ("Times cursiva",       "tiit"),
+    ("Courier (monoesp.)",  "cour"),
+    ("Courier negrita",     "cobo"),
+]
+
+# Alineación del párrafo (valor entero que espera add_freetext_annot).
+FREETEXT_ALIGN: list[tuple[str, int]] = [
+    ("Izquierda", 0),
+    ("Centro",    1),
+    ("Derecha",   2),
+]
+
+# Tamaños de fuente ofrecidos en el editor (pt).
+FREETEXT_SIZES: list[int] = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48]
+
+# Valores por defecto de una anotación de texto nueva.
+DEFAULT_TEXT_FONT  = "helv"
+DEFAULT_TEXT_SIZE  = 14
+DEFAULT_TEXT_COLOR = (0.0, 0.0, 0.0)
+DEFAULT_TEXT_ALIGN = 0
 
 
 # ── module-level helpers ───────────────────────────────────────────────────────
@@ -425,6 +459,11 @@ class AnnotationManager:
         self._visual_rects: dict[int, fitz.Rect] = {}
         # Rotation in degrees per xref.
         self._rotations: dict[int, float] = {}
+        # Propiedades de cada anotación de texto (FreeText) por xref:
+        # {"text", "fontname", "fontsize", "color", "align", "fill"}. Se usan
+        # para pre-rellenar el editor y para recrear la apariencia al editar
+        # (PyMuPDF no expone fontname/fontsize de un FreeText de forma fiable).
+        self._text_props: dict[int, dict] = {}
 
     # ── internal helpers ────────────────────────────────────────────────────────
 
@@ -607,6 +646,153 @@ class AnnotationManager:
         self._push_history(page_num, annot.xref)
         return True
 
+    # ── text (FreeText) annotation ───────────────────────────────────────────────
+
+    def take_text_rect(self) -> fitz.Rect | None:
+        """Devuelve la caja de arrastre pendiente (espacio de PANTALLA) para la
+        herramienta TEXT y resetea el estado de arrastre.
+
+        Si no hubo un arrastre real (sólo un clic), devuelve una caja por
+        defecto anclada en el punto inicial. El editor luego ajusta el tamaño;
+        ``commit_text`` garantiza una caja mínima usable.
+        """
+        rect  = self._last_rect
+        start = self._raw_start
+        self._start     = None
+        self._last_rect = None
+        self._raw_start = None
+        self._raw_end   = None
+        if rect is not None and (rect.width >= 8 or rect.height >= 8):
+            return fitz.Rect(rect)
+        if start is not None:
+            x, y = start
+            return fitz.Rect(x, y, x + 200, y + 40)
+        return None
+
+    @staticmethod
+    def _normalize_text_props(
+        text: str,
+        fontname: str | None,
+        fontsize: float | None,
+        color: tuple[float, float, float] | None,
+        align: int | None,
+        fill: tuple[float, float, float] | None,
+    ) -> dict:
+        return {
+            "text":     text,
+            "fontname": fontname or DEFAULT_TEXT_FONT,
+            "fontsize": float(fontsize or DEFAULT_TEXT_SIZE),
+            "color":    tuple(color) if color is not None else DEFAULT_TEXT_COLOR,
+            "align":    int(align) if align is not None else DEFAULT_TEXT_ALIGN,
+            "fill":     tuple(fill) if fill is not None else None,
+        }
+
+    def _make_freetext(self, page: fitz.Page, rect: fitz.Rect, props: dict) -> fitz.Annot:
+        """Crea un FreeText en *rect* (espacio SIN rotar) con *props* y construye
+        su apariencia. Centraliza el patrón usado por crear/editar/recrear."""
+        annot = page.add_freetext_annot(
+            rect, props["text"],
+            fontsize=props["fontsize"],
+            fontname=props["fontname"],
+            text_color=props["color"],
+            fill_color=props["fill"],
+            align=props["align"],
+        )
+        # update() reconstruye el appearance stream; sin esto el texto/color no
+        # siempre se reflejan al renderizar (mismo motivo que en los markup).
+        annot.update(
+            fontsize=props["fontsize"],
+            fontname=props["fontname"],
+            text_color=props["color"],
+            fill_color=props["fill"],
+        )
+        return annot
+
+    def commit_text(
+        self,
+        doc: fitz.Document,
+        page_num: int,
+        rect: fitz.Rect,
+        text: str,
+        fontname: str | None = None,
+        fontsize: float | None = None,
+        color: tuple[float, float, float] | None = None,
+        align: int | None = None,
+        fill: tuple[float, float, float] | None = None,
+    ) -> int | None:
+        """Crea una anotación de texto en *rect* (espacio de PANTALLA).
+
+        Devuelve el xref de la anotación creada, o None si no hay texto.
+        """
+        text = (text or "").strip()
+        if not text:
+            return None
+        page  = doc[page_num]
+        # rect llega en pantalla (rotado) → des-rotar al espacio de la página
+        # (identidad si rotation == 0), como hacen el resto de herramientas.
+        r = fitz.Rect(rect) * page.derotation_matrix
+        r.normalize()
+        # Caja mínima usable: si es muy pequeña el texto se recortaría.
+        if r.width < 40:
+            r.x1 = r.x0 + 40
+        if r.height < 20:
+            r.y1 = r.y0 + 20
+        props = self._normalize_text_props(text, fontname, fontsize, color, align, fill)
+        annot = self._make_freetext(page, r, props)
+        self._text_props[annot.xref] = props
+        self._push_history(page_num, annot.xref)
+        return annot.xref
+
+    def edit_text(
+        self,
+        doc: fitz.Document,
+        page_num: int,
+        xref: int,
+        text: str,
+        fontname: str | None = None,
+        fontsize: float | None = None,
+        color: tuple[float, float, float] | None = None,
+        align: int | None = None,
+        fill: tuple[float, float, float] | None = None,
+    ) -> int | None:
+        """Edita una anotación de texto existente (texto/fuente/tamaño/color/
+        alineación) conservando su caja y rotación.
+
+        Se borra y recrea para forzar el refresco del appearance stream
+        (``update`` no siempre lo refresca; mismo patrón que ``_line_replace``).
+        Devuelve el nuevo xref, o None en fallo.
+        """
+        text = (text or "").strip()
+        if not text:
+            return None
+        page  = doc[page_num]
+        annot = _find_annot_by_xref(page, xref)
+        if annot is None or _atype(annot) != "FreeText":
+            return None
+        rect     = fitz.Rect(annot.rect)            # ya en espacio sin rotar
+        rotation = self._rotations.get(xref, 0.0)
+        props    = self._normalize_text_props(text, fontname, fontsize, color, align, fill)
+
+        page.delete_annot(annot)
+        new_annot = self._make_freetext(page, rect, props)
+        if rotation:
+            _apply_rot(new_annot, rotation)
+
+        new_xref = new_annot.xref
+        self._remap_xref(page_num, xref, new_xref)
+        self._text_props.pop(xref, None)
+        self._rotations.pop(xref, None)
+        self._visual_rects.pop(xref, None)
+        self._text_props[new_xref] = props
+        if rotation:
+            self._rotations[new_xref] = rotation
+        return new_xref
+
+    def get_text_props(self, xref: int) -> dict | None:
+        """Devuelve una copia de las propiedades de texto de *xref*, o None."""
+        props = self._text_props.get(xref)
+        return dict(props) if props is not None else None
+
     # ── undo ─────────────────────────────────────────────────────────────────────
 
     def undo_last(self, doc: fitz.Document) -> int | None:
@@ -655,8 +841,7 @@ class AnnotationManager:
         self._history.append((page_num, annot.xref))
         return page_num
 
-    @staticmethod
-    def _snapshot_annot(annot: fitz.Annot) -> dict | None:
+    def _snapshot_annot(self, annot: fitz.Annot) -> dict | None:
         """Serialise an annotation's geometry and style into a plain dict."""
         try:
             atype = annot.type[1]
@@ -704,11 +889,21 @@ class AnnotationManager:
             data["strokes"] = (
                 [[tuple(p) for p in s] for s in strokes] if strokes else None
             )
+        elif atype == "FreeText":
+            # El texto/estilo no se leen de forma fiable del annot; se toman del
+            # registro propio (fallback al contenido embebido para el texto).
+            props = self._text_props.get(annot.xref)
+            if props is None:
+                try:
+                    content = annot.info.get("content", "")
+                except Exception:
+                    content = ""
+                props = self._normalize_text_props(content, None, None, None, None, None)
+            data["text_props"] = dict(props)
         # Square / Circle are fully described by rect.
         return data
 
-    @staticmethod
-    def _recreate_annot(page: fitz.Page, data: dict) -> fitz.Annot | None:
+    def _recreate_annot(self, page: fitz.Page, data: dict) -> fitz.Annot | None:
         """Rebuild an annotation from a :meth:`_snapshot_annot` dict."""
         atype = data.get("type")
         try:
@@ -748,6 +943,13 @@ class AnnotationManager:
                 if not strokes:
                     return None
                 annot = page.add_ink_annot(strokes)
+            elif atype == "FreeText":
+                props = data.get("text_props")
+                if not props or not (props.get("text") or "").strip():
+                    return None
+                annot = self._make_freetext(page, fitz.Rect(data["rect"]), props)
+                self._text_props[annot.xref] = dict(props)
+                return annot  # apariencia/estilo ya aplicados por _make_freetext
             else:
                 return None
         except Exception:
@@ -815,6 +1017,7 @@ class AnnotationManager:
         self._history = [(p, x) for p, x in self._history if x != xref]
         self._visual_rects.pop(xref, None)
         self._rotations.pop(xref, None)
+        self._text_props.pop(xref, None)
         return True
 
     def change_annot_color(
@@ -829,6 +1032,16 @@ class AnnotationManager:
         if annot is None:
             return False
         rotation = self._rotations.get(xref, 0.0)
+        # FreeText: "color" es el color del texto, no el trazo del borde.
+        if _atype(annot) == "FreeText":
+            _reset_ap(annot)
+            annot.update(text_color=color)
+            props = self._text_props.get(xref)
+            if props is not None:
+                props["color"] = tuple(color)
+            if rotation:
+                _apply_rot(annot, rotation)
+            return True
         _reset_ap(annot)
         annot.set_colors(stroke=color)
         annot.update()

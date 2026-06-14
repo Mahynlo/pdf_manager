@@ -383,6 +383,16 @@ class _RenderMixin:
             padding=ft.padding.all(5),
             shape=ft.RoundedRectangleBorder(radius=4),
         )
+        _mc_edit_sep  = ft.Container(width=1, height=22, bgcolor="outlineVariant", visible=False)
+        _mc_edit_btn  = ft.IconButton(
+            ft.Icons.EDIT_OUTLINED,
+            icon_color="#1565C0",
+            icon_size=18,
+            tooltip="Editar texto",
+            on_click=self._edit_selected_text,
+            style=_ctx_btn,
+            visible=False,
+        )
         _mc_color_sep  = ft.Container(width=1, height=22, bgcolor="outlineVariant")
         _mc_color_btn  = ft.IconButton(
             ft.Icons.PALETTE_OUTLINED,
@@ -447,6 +457,8 @@ class _RenderMixin:
                         on_click=self._delete_selected,
                         style=_ctx_btn,
                     ),
+                    _mc_edit_sep,
+                    _mc_edit_btn,
                     _mc_color_sep,
                     _mc_color_btn,
                     _mc_scale_sep,
@@ -509,6 +521,8 @@ class _RenderMixin:
             "rm":         sel_rm,
             "menu":       sel_menu,
             "rot_group":  sel_rot_group,
+            "edit_sep":   _mc_edit_sep,
+            "edit_btn":   _mc_edit_btn,
             "color_sep":  _mc_color_sep,
             "color_btn":  _mc_color_btn,
             "scale_sep":  _mc_scale_sep,
