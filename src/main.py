@@ -768,6 +768,8 @@ def main(page: ft.Page) -> None:
                 return
             if k == "Y":
                 v._redo(); return  # Ctrl+Y
+            if k == "D":
+                v._duplicate_selected(); return  # Ctrl+D: duplicar anotación
             if k == "A":
                 v._select_all_page_text(); return
             if k == "S":

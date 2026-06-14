@@ -143,10 +143,19 @@ class _AnnotMixin:
         is_markup  = atype in ("Highlight", "Underline", "StrikeOut", "Squiggly")
         is_text    = atype == "FreeText"
         no_recolor = atype in ("Squiggly",)
+        # Variante "caja de texto": FreeText con recuadro (border_width > 0). Sólo
+        # esta variante conserva escalar (±) y grosor; el texto plano no.
+        is_text_boxed = is_text and bool(
+            (self._annot.get_text_props(annot.xref) or {}).get("border_width", 0)
+        )
         for name in ("tl", "tr", "bl", "br", "tm", "bm", "lm", "rm"):
             h[name].visible = not is_markup
+        # En texto plano el tamaño se controla con la fuente desde el editor; los
+        # botones de escalar (±) y grosor sobran. En la caja de texto sí aplican
+        # (escalar = redimensionar la caja, grosor = grosor del recuadro).
+        show_scale_width = not (is_markup or (is_text and not is_text_boxed))
         for name in ("scale_sep", "scale_down", "scale_up", "width_sep", "width_down", "width_up"):
-            h[name].visible = not is_markup
+            h[name].visible = show_scale_width
         for name in ("color_sep", "color_btn"):
             h[name].visible = not no_recolor
         # Botón "editar texto": sólo para anotaciones de texto (FreeText).
@@ -389,6 +398,26 @@ class _AnnotMixin:
         else:
             self._show_snack("No se pudo eliminar la anotación")
 
+    def _duplicate_selected(self, e=None) -> None:
+        """Duplica la anotación seleccionada con un pequeño desplazamiento."""
+        if self._selected is None:
+            return
+        scale = self.zoom * BASE_SCALE
+        d = 14.0 / scale if scale else 14.0   # offset en puntos PDF (≈14 px pantalla)
+        pn, xref = self._selected
+        with self._doc_lock:
+            nx = self._annot.duplicate_annot(self.doc, pn, xref, d, d)
+        if not nx:
+            self._show_snack("No se pudo duplicar la anotación")
+            return
+        self._refresh_page(pn)
+        with self._doc_lock:
+            for a in self.doc[pn].annots():
+                if a.xref == nx:
+                    self.current_page = pn
+                    self._select_annot(pn, a)
+                    break
+
     def _scale_selected(self, factor: float) -> None:
         if self._selected is None:
             return
@@ -499,6 +528,7 @@ class _AnnotMixin:
         cur_font  = props.get("fontname", DEFAULT_TEXT_FONT)
         cur_size  = int(props.get("fontsize", DEFAULT_TEXT_SIZE))
         cur_align = int(props.get("align", DEFAULT_TEXT_ALIGN))
+        cur_bw    = float(props.get("border_width", 0.0) or 0.0)
         state = {"color": tuple(props.get("color", DEFAULT_TEXT_COLOR))}
 
         txt = ft.TextField(
@@ -517,6 +547,21 @@ class _AnnotMixin:
         align_dd = ft.Dropdown(
             label="Alineación", value=str(cur_align), width=150,
             options=[ft.dropdown.Option(key=str(v), text=lbl) for lbl, v in FREETEXT_ALIGN],
+        )
+
+        # Variante "caja de texto": dibuja un recuadro alrededor. Al activarlo en
+        # un texto nuevo, se centra por comodidad ("texto en medio"); el grosor del
+        # recuadro se ajusta luego con los botones ± de la barra de selección.
+        def _on_border_toggle(ev) -> None:
+            if border_sw.value and align_dd.value == "0":
+                align_dd.value = "1"
+                try:
+                    align_dd.update()
+                except Exception:
+                    pass
+
+        border_sw = ft.Switch(
+            label="Recuadro", value=cur_bw > 0, on_change=_on_border_toggle,
         )
         swatch = ft.Container(
             width=24, height=24, border_radius=4,
@@ -562,17 +607,19 @@ class _AnnotMixin:
             sz = int(size_dd.value or DEFAULT_TEXT_SIZE)
             al = int(align_dd.value or DEFAULT_TEXT_ALIGN)
             col = state["color"]
+            # Recuadro on: conservar el grosor previo si ya lo tenía; si no, 1.5.
+            bw = (cur_bw if cur_bw > 0 else 1.5) if border_sw.value else 0.0
             self.page_ref.close(dlg)
             with self._doc_lock:
                 if is_edit:
                     new_xref = self._annot.edit_text(
                         self.doc, pn, xref, text,
-                        fontname=fn, fontsize=sz, color=col, align=al,
+                        fontname=fn, fontsize=sz, color=col, align=al, border_width=bw,
                     )
                 else:
                     new_xref = self._annot.commit_text(
                         self.doc, pn, rect, text,
-                        fontname=fn, fontsize=sz, color=col, align=al,
+                        fontname=fn, fontsize=sz, color=col, align=al, border_width=bw,
                     )
             if not new_xref:
                 self._show_snack("No se pudo guardar el texto")
@@ -601,6 +648,7 @@ class _AnnotMixin:
                         ft.Row([font_dd, size_dd], spacing=10),
                         ft.Row([align_dd, color_menu], spacing=16,
                                vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                        border_sw,
                     ],
                     tight=True, spacing=14,
                 ),

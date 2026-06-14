@@ -40,6 +40,7 @@ _KEYBOARD_SHORTCUTS: list[tuple[str, list[tuple[str, list[list[str]]]]]] = [
         ("Rehacer",                    [["Ctrl", "Y"], ["Ctrl", "Shift", "Z"]]),
         ("Seleccionar todo el texto",  [["Ctrl", "A"]]),
         ("Copiar texto seleccionado",  [["Ctrl", "C"]]),
+        ("Duplicar anotación",         [["Ctrl", "D"]]),
         ("Eliminar selección",         [["Supr"]]),
         ("Cancelar selección",         [["Esc"]]),
     ]),

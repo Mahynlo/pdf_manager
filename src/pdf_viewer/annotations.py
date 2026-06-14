@@ -681,6 +681,7 @@ class AnnotationManager:
         color: tuple[float, float, float] | None,
         align: int | None,
         fill: tuple[float, float, float] | None,
+        border_width: float | None = None,
     ) -> dict:
         return {
             "text":     text,
@@ -689,6 +690,9 @@ class AnnotationManager:
             "color":    tuple(color) if color is not None else DEFAULT_TEXT_COLOR,
             "align":    int(align) if align is not None else DEFAULT_TEXT_ALIGN,
             "fill":     tuple(fill) if fill is not None else None,
+            # >0 → variante "caja de texto" con recuadro visible (el borde toma
+            # el color del texto). 0 → texto plano sin recuadro.
+            "border_width": float(border_width) if border_width else 0.0,
         }
 
     def _make_freetext(self, page: fitz.Page, rect: fitz.Rect, props: dict) -> fitz.Annot:
@@ -701,6 +705,7 @@ class AnnotationManager:
             text_color=props["color"],
             fill_color=props["fill"],
             align=props["align"],
+            border_width=props.get("border_width", 0.0) or 0.0,
         )
         # update() reconstruye el appearance stream; sin esto el texto/color no
         # siempre se reflejan al renderizar (mismo motivo que en los markup).
@@ -723,6 +728,7 @@ class AnnotationManager:
         color: tuple[float, float, float] | None = None,
         align: int | None = None,
         fill: tuple[float, float, float] | None = None,
+        border_width: float | None = None,
     ) -> int | None:
         """Crea una anotación de texto en *rect* (espacio de PANTALLA).
 
@@ -741,7 +747,7 @@ class AnnotationManager:
             r.x1 = r.x0 + 40
         if r.height < 20:
             r.y1 = r.y0 + 20
-        props = self._normalize_text_props(text, fontname, fontsize, color, align, fill)
+        props = self._normalize_text_props(text, fontname, fontsize, color, align, fill, border_width)
         annot = self._make_freetext(page, r, props)
         self._text_props[annot.xref] = props
         self._push_history(page_num, annot.xref)
@@ -758,9 +764,10 @@ class AnnotationManager:
         color: tuple[float, float, float] | None = None,
         align: int | None = None,
         fill: tuple[float, float, float] | None = None,
+        border_width: float | None = None,
     ) -> int | None:
         """Edita una anotación de texto existente (texto/fuente/tamaño/color/
-        alineación) conservando su caja y rotación.
+        alineación/recuadro) conservando su caja y rotación.
 
         Se borra y recrea para forzar el refresco del appearance stream
         (``update`` no siempre lo refresca; mismo patrón que ``_line_replace``).
@@ -775,7 +782,7 @@ class AnnotationManager:
             return None
         rect     = fitz.Rect(annot.rect)            # ya en espacio sin rotar
         rotation = self._rotations.get(xref, 0.0)
-        props    = self._normalize_text_props(text, fontname, fontsize, color, align, fill)
+        props    = self._normalize_text_props(text, fontname, fontsize, color, align, fill, border_width)
 
         page.delete_annot(annot)
         new_annot = self._make_freetext(page, rect, props)
@@ -978,6 +985,58 @@ class AnnotationManager:
                 pass
         annot.update()
         return annot
+
+    # ── duplicate ────────────────────────────────────────────────────────────────
+
+    def duplicate_annot(
+        self,
+        doc: fitz.Document,
+        page_num: int,
+        xref: int,
+        dx: float = 0.0,
+        dy: float = 0.0,
+    ) -> int | None:
+        """Crea una copia de la anotación *xref* desplazada por (dx, dy) PANTALLA.
+
+        Reutiliza el mismo serializado de undo/redo (``_snapshot_annot`` +
+        ``_translate_snapshot`` + ``_recreate_annot``). Conserva estilo, texto
+        (FreeText) y rotación (Square/Circle/FreeText). Devuelve el xref nuevo
+        o None en fallo.
+        """
+        page  = doc[page_num]
+        annot = _find_annot_by_xref(page, xref)
+        if annot is None:
+            return None
+        snap = self._snapshot_annot(annot)
+        if snap is None or not snap.get("rect"):
+            return None
+        # El delta llega en pantalla; la geometría del snapshot está sin rotar.
+        pdx, pdy = _to_page_delta(page, dx, dy)
+        self._translate_snapshot(snap, pdx, pdy)
+
+        new_annot = self._recreate_annot(page, snap)
+        if new_annot is None:
+            return None
+        new_xref = new_annot.xref
+
+        # Conservar rotación visual (apn_matrix) y rect visual; _recreate_annot no
+        # la reaplica porque el snapshot no la guarda para Square/Circle/FreeText.
+        rotation = self._rotations.get(xref, 0.0)
+        if rotation and _atype(new_annot) in ("Square", "Circle", "FreeText"):
+            try:
+                _apply_rot(new_annot, rotation)
+                self._rotations[new_xref] = float(rotation)
+            except Exception:
+                pass
+        cached = self._visual_rects.get(xref)
+        if cached is not None:
+            self._visual_rects[new_xref] = fitz.Rect(
+                cached.x0 + pdx, cached.y0 + pdy,
+                cached.x1 + pdx, cached.y1 + pdy,
+            )
+
+        self._push_history(page_num, new_xref)
+        return new_xref
 
     def undo(self, doc: fitz.Document, page_num: int | None = None) -> bool:
         """Compatibility wrapper used by viewer code."""
@@ -1550,6 +1609,38 @@ class AnnotationManager:
                 self._rotations[new_xref] = rotation
             self._visual_rects.pop(xref, None)
             self._rotations.pop(xref, None)
+            return new_xref
+
+        if at == "FreeText":
+            # Variante "caja de texto": el grosor controla el recuadro. Se recrea
+            # con _make_freetext (igual que edit_text) para refrescar la apariencia
+            # conservando texto/estilo. En texto plano (sin recuadro) es no-op.
+            props = self._text_props.get(xref)
+            if props is None:
+                return xref
+            cur_bw = float(props.get("border_width", 0.0) or 0.0)
+            if cur_bw <= 0:
+                return xref
+            new_bw   = max(0.5, min(20.0, cur_bw + delta))
+            rect     = fitz.Rect(annot.rect)
+            rotation = self._rotations.get(xref, 0.0)
+            new_props = dict(props)
+            new_props["border_width"] = new_bw
+            try:
+                page.delete_annot(annot)
+                new_annot = self._make_freetext(page, rect, new_props)
+                if rotation:
+                    _apply_rot(new_annot, rotation)
+            except Exception:
+                return None
+            new_xref = new_annot.xref
+            self._remap_xref(page_num, xref, new_xref)
+            self._text_props.pop(xref, None)
+            self._rotations.pop(xref, None)
+            self._visual_rects.pop(xref, None)
+            self._text_props[new_xref] = new_props
+            if rotation:
+                self._rotations[new_xref] = rotation
             return new_xref
 
         rotation = self._rotations.get(xref, 0.0)

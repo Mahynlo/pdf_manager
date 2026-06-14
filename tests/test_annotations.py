@@ -394,3 +394,150 @@ class TestTextAnnotation:
         mgr.move(260.0, 180.0)
         rect = mgr.take_text_rect()
         assert rect.x0 == 100.0 and rect.x1 == 260.0
+
+
+# ───────────────────────────────────────────────────────────────────── Duplicate
+
+
+class TestDuplicate:
+    """duplicate_annot: copia desplazada que reutiliza snapshot/recreate."""
+
+    def _make_rect(self, mgr, doc) -> int:
+        mgr.set_tool(Tool.RECT)
+        mgr.begin(50.0, 50.0)
+        mgr.move(150.0, 120.0)
+        mgr.commit(doc, 0)
+        return mgr._history[-1][1]
+
+    def test_duplicate_rect_offsets_and_tracks_history(self, mgr, sample_doc):
+        page = sample_doc[0]
+        xref = self._make_rect(mgr, sample_doc)
+        orig = fitz.Rect(_find_annot_by_xref(page, xref).rect)
+        new_xref = mgr.duplicate_annot(sample_doc, 0, xref, 12.0, 12.0)
+        assert new_xref is not None and new_xref != xref
+        assert mgr._history[-1] == (0, new_xref)
+        # La copia está desplazada respecto al original (página sin rotar). El
+        # recreate de un Square reajusta ~1pt por el borde (igual que undo/redo),
+        # así que la tolerancia es holgada.
+        copy = fitz.Rect(_find_annot_by_xref(page, new_xref).rect)
+        assert copy.x0 == pytest.approx(orig.x0 + 12.0, abs=2.0)
+        assert copy.y0 == pytest.approx(orig.y0 + 12.0, abs=2.0)
+        # Mismo tamaño (±borde).
+        assert copy.width == pytest.approx(orig.width, abs=3.0)
+
+    def test_duplicate_missing_xref_returns_none(self, mgr, sample_doc):
+        assert mgr.duplicate_annot(sample_doc, 0, 999999, 5, 5) is None
+
+    def test_duplicate_freetext_copies_props(self, mgr, sample_doc):
+        page = sample_doc[0]
+        xref = mgr.commit_text(
+            sample_doc, 0, fitz.Rect(50, 50, 300, 110), "copia",
+            fontname="tibo", fontsize=18, color=(0.2, 0.2, 0.7), align=1,
+        )
+        new_xref = mgr.duplicate_annot(sample_doc, 0, xref, 10.0, 10.0)
+        assert new_xref is not None
+        props = mgr.get_text_props(new_xref)
+        assert props is not None
+        assert props["fontname"] == "tibo"
+        assert props["fontsize"] == 18.0
+        assert props["align"] == 1
+        # El original sigue intacto.
+        assert mgr.get_text_props(xref)["text"] == "copia"
+        assert _find_annot_by_xref(page, new_xref).info.get("content") == "copia"
+
+    def test_duplicate_preserves_rotation(self, mgr, sample_doc):
+        xref = self._make_rect(mgr, sample_doc)
+        mgr.rotate_annot(sample_doc, 0, xref, 30.0)
+        rot_xref = mgr._history[-1][1] if mgr._history else xref
+        # rotate de Square conserva xref → sigue siendo xref
+        new_xref = mgr.duplicate_annot(sample_doc, 0, xref, 8.0, 8.0)
+        assert new_xref is not None
+        assert mgr.get_rotation(new_xref) == pytest.approx(30.0, abs=0.01)
+
+    def test_duplicate_line_recreates(self, mgr, sample_doc):
+        page = sample_doc[0]
+        mgr.set_tool(Tool.LINE)
+        mgr.begin(40.0, 40.0)
+        mgr.move(200.0, 160.0)
+        mgr.commit(sample_doc, 0)
+        xref = mgr._history[-1][1]
+        new_xref = mgr.duplicate_annot(sample_doc, 0, xref, 15.0, 15.0)
+        assert new_xref is not None and new_xref != xref
+        lines = [a for a in page.annots() if _atype(a) == "Line"]
+        assert len(lines) == 2
+
+
+# ─────────────────────────────────────────────────────────────── Text box variant
+
+
+class TestTextBox:
+    """Variante 'caja de texto': FreeText con recuadro (border_width > 0)."""
+
+    def test_commit_with_border_tracks_width(self, mgr, sample_doc):
+        page = sample_doc[0]
+        xref = mgr.commit_text(
+            sample_doc, 0, fitz.Rect(50, 50, 300, 110), "caja",
+            fontname="helv", fontsize=16, border_width=1.5,
+        )
+        assert mgr.get_text_props(xref)["border_width"] == 1.5
+        assert _find_annot_by_xref(page, xref).border["width"] == 1.5
+
+    def test_plain_text_has_zero_border(self, mgr, sample_doc):
+        xref = mgr.commit_text(sample_doc, 0, fitz.Rect(50, 50, 300, 110), "plano")
+        assert mgr.get_text_props(xref)["border_width"] == 0.0
+
+    def test_change_width_adjusts_border(self, mgr, sample_doc):
+        page = sample_doc[0]
+        xref = mgr.commit_text(
+            sample_doc, 0, fitz.Rect(50, 50, 300, 110), "caja", border_width=1.5,
+        )
+        new_xref = mgr.change_annot_width(sample_doc, 0, xref, +1.0)
+        assert new_xref is not None
+        assert mgr.get_text_props(new_xref)["border_width"] == 2.5
+        assert _find_annot_by_xref(page, new_xref).border["width"] == 2.5
+        # El texto se conserva tras recrear.
+        assert _find_annot_by_xref(page, new_xref).info.get("content") == "caja"
+
+    def test_change_width_clamps_minimum(self, mgr, sample_doc):
+        xref = mgr.commit_text(
+            sample_doc, 0, fitz.Rect(50, 50, 300, 110), "caja", border_width=1.0,
+        )
+        # Restar más allá del mínimo (0.5) no baja de ahí.
+        nx = mgr.change_annot_width(sample_doc, 0, xref, -5.0)
+        assert mgr.get_text_props(nx)["border_width"] == 0.5
+
+    def test_change_width_noop_on_plain_text(self, mgr, sample_doc):
+        xref = mgr.commit_text(sample_doc, 0, fitz.Rect(50, 50, 300, 110), "plano")
+        # Sin recuadro, el grosor no aplica: mismo xref y border_width sigue 0.
+        assert mgr.change_annot_width(sample_doc, 0, xref, +1.0) == xref
+        assert mgr.get_text_props(xref)["border_width"] == 0.0
+
+    def test_scale_preserves_border_and_text(self, mgr, sample_doc):
+        page = sample_doc[0]
+        xref = mgr.commit_text(
+            sample_doc, 0, fitz.Rect(50, 50, 300, 110), "caja", border_width=2.0,
+        )
+        res = mgr.scale_annot(sample_doc, 0, xref, 1.3)
+        nx = res[1] if res else xref
+        annot = _find_annot_by_xref(page, nx)
+        assert annot.info.get("content") == "caja"
+        assert annot.border["width"] == 2.0
+
+    def test_edit_can_toggle_border(self, mgr, sample_doc):
+        page = sample_doc[0]
+        xref = mgr.commit_text(sample_doc, 0, fitz.Rect(50, 50, 300, 110), "t")
+        assert mgr.get_text_props(xref)["border_width"] == 0.0
+        # Activar recuadro al editar.
+        nx = mgr.edit_text(sample_doc, 0, xref, "t", border_width=1.5)
+        assert mgr.get_text_props(nx)["border_width"] == 1.5
+        assert _find_annot_by_xref(page, nx).border["width"] == 1.5
+        # Quitarlo de nuevo.
+        nx2 = mgr.edit_text(sample_doc, 0, nx, "t", border_width=0.0)
+        assert mgr.get_text_props(nx2)["border_width"] == 0.0
+
+    def test_duplicate_keeps_border(self, mgr, sample_doc):
+        xref = mgr.commit_text(
+            sample_doc, 0, fitz.Rect(50, 50, 300, 110), "caja", border_width=2.0,
+        )
+        nx = mgr.duplicate_annot(sample_doc, 0, xref, 10.0, 10.0)
+        assert mgr.get_text_props(nx)["border_width"] == 2.0
