@@ -10,8 +10,13 @@ from __future__ import annotations
 
 import flet as ft
 
-from .annotations import Tool
+from .annotations import (
+    Tool, HIGHLIGHT_COLORS,
+    FREETEXT_FONTS, FREETEXT_ALIGN, FREETEXT_SIZES,
+    DEFAULT_TEXT_FONT, DEFAULT_TEXT_SIZE, DEFAULT_TEXT_COLOR, DEFAULT_TEXT_ALIGN,
+)
 from ._text_legends import get_legend_manager
+from ._viewer_defs import _rgb_to_hex
 
 _LEGEND_HDR = "#00796B"  # teal: color de acento de las leyendas
 _MENU_LIMIT = 5          # nº de leyendas (más usadas) en el menú rápido
@@ -81,7 +86,8 @@ class _LegendsMixin:
         lg = mgr.get(legend_id)
         if lg is None:
             return
-        self._pending_legend_text = lg.text
+        # Llevar texto + estilo guardado al editor (se puede modificar al colocar).
+        self._pending_legend = lg.style_props()
         # Registrar el uso para que el menú rápido priorice las más usadas.
         mgr.bump_usage(legend_id)
         self._rebuild_legends_menu()
@@ -266,9 +272,77 @@ class _LegendsMixin:
             label="Texto",
             value=existing.text if existing else "",
             hint_text="Texto que se insertará (se puede modificar al colocarlo)",
-            multiline=True, min_lines=4, max_lines=10,
+            multiline=True, min_lines=3, max_lines=8,
             border_color="outlineVariant",
             focused_border_color=_LEGEND_HDR,
+        )
+
+        # ── controles de estilo (misma config que el modal de texto) ───────────
+        cur_font  = existing.fontname if existing else DEFAULT_TEXT_FONT
+        cur_size  = int(existing.fontsize) if existing else DEFAULT_TEXT_SIZE
+        cur_align = existing.align if existing else DEFAULT_TEXT_ALIGN
+        cur_bw    = existing.border_width if existing else 0.0
+        style = {"color": tuple(existing.color) if existing else tuple(DEFAULT_TEXT_COLOR)}
+
+        font_dd = ft.Dropdown(
+            label="Fuente", value=cur_font, width=200,
+            options=[ft.dropdown.Option(key=fn, text=lbl) for lbl, fn in FREETEXT_FONTS],
+        )
+        size_dd = ft.Dropdown(
+            label="Tamaño",
+            value=str(cur_size if cur_size in FREETEXT_SIZES else DEFAULT_TEXT_SIZE),
+            width=110,
+            options=[ft.dropdown.Option(key=str(s), text=f"{s} pt") for s in FREETEXT_SIZES],
+        )
+        align_dd = ft.Dropdown(
+            label="Alineación", value=str(cur_align), width=150,
+            options=[ft.dropdown.Option(key=str(v), text=lbl) for lbl, v in FREETEXT_ALIGN],
+        )
+        swatch = ft.Container(
+            width=24, height=24, border_radius=4,
+            bgcolor=_rgb_to_hex(*style["color"]),
+            border=ft.border.all(1, "outlineVariant"),
+        )
+
+        def _set_color(rgb):
+            style["color"] = tuple(rgb)
+            swatch.bgcolor = _rgb_to_hex(*rgb)
+            try:
+                swatch.update()
+            except Exception:
+                pass
+
+        color_menu = ft.PopupMenuButton(
+            content=ft.Row(
+                [swatch, ft.Text("Color", size=13), ft.Icon(ft.Icons.ARROW_DROP_DOWN, size=18)],
+                spacing=6, tight=True,
+            ),
+            items=[
+                ft.PopupMenuItem(
+                    content=ft.Row(
+                        [
+                            ft.Container(bgcolor=_rgb_to_hex(r, g, b), width=20, height=20, border_radius=4),
+                            ft.Text(name, size=13),
+                        ],
+                        spacing=10,
+                    ),
+                    on_click=lambda e, c=rgb: _set_color(c),
+                )
+                for name, rgb in HIGHLIGHT_COLORS
+                for r, g, b in [rgb]
+            ],
+        )
+
+        def _on_border_toggle(ev):
+            if border_sw.value and align_dd.value == "0":
+                align_dd.value = "1"
+                try:
+                    align_dd.update()
+                except Exception:
+                    pass
+
+        border_sw = ft.Switch(
+            label="Recuadro", value=cur_bw > 0, on_change=_on_border_toggle,
         )
 
         def _go_back(e=None):
@@ -288,10 +362,21 @@ class _LegendsMixin:
                     pass
                 return
             text = text_field.value or ""
+            fn = font_dd.value or DEFAULT_TEXT_FONT
+            sz = int(size_dd.value or DEFAULT_TEXT_SIZE)
+            al = int(align_dd.value or DEFAULT_TEXT_ALIGN)
+            col = style["color"]
+            bw = (cur_bw if cur_bw > 0 else 1.5) if border_sw.value else 0.0
             if legend_id:
-                mgr.update(legend_id, name=name, text=text)
+                mgr.update(
+                    legend_id, name=name, text=text,
+                    fontname=fn, fontsize=sz, color=col, align=al, border_width=bw,
+                )
             else:
-                mgr.create(name, text)
+                mgr.create(
+                    name, text,
+                    fontname=fn, fontsize=sz, color=col, align=al, border_width=bw,
+                )
             try:
                 self.page_ref.close(legend_edit_dlg)
             except Exception:
@@ -307,7 +392,15 @@ class _LegendsMixin:
             ),
             content=ft.Container(
                 ft.Column(
-                    [name_field, text_field],
+                    [
+                        name_field,
+                        text_field,
+                        ft.Divider(height=1, color="outlineVariant"),
+                        ft.Row([font_dd, size_dd], spacing=10),
+                        ft.Row([align_dd, color_menu], spacing=16,
+                               vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                        border_sw,
+                    ],
                     spacing=12, tight=True,
                 ),
                 width=400,

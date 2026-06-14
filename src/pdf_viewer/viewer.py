@@ -91,11 +91,11 @@ class PDFViewerTab(
         self._tab       = None
         self._annot     = AnnotationManager(on_modified=self._update)
         self._tool_btns: dict[Tool, ft.IconButton] = {}
-        # Menú de leyendas (textos guardados) y texto pendiente de insertar: al
+        # Menú de leyendas (textos guardados) y leyenda pendiente de insertar: al
         # elegir una leyenda se activa la herramienta de texto y el siguiente clic
-        # abre el editor relleno con este contenido.
+        # abre el editor relleno con su config (texto + estilo).
         self._legends_menu: ft.PopupMenuButton | None = None
-        self._pending_legend_text: str | None = None
+        self._pending_legend: dict | None = None
 
         # Annotation selection state (page_num, xref)
         self._selected:         tuple[int, int] | None = None

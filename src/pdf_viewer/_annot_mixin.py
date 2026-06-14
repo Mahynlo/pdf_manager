@@ -36,7 +36,7 @@ class _AnnotMixin:
         # si se cambia a otra herramienta, descartarla para no rellenar un texto
         # futuro por sorpresa.
         if tool != Tool.TEXT:
-            self._pending_legend_text = None
+            self._pending_legend = None
         self._hide_annot_popup()
         self._annot.set_tool(tool)
         self._current_cursor = cursor
@@ -529,12 +529,13 @@ class _AnnotMixin:
         """
         is_edit = xref is not None
         props   = (self._annot.get_text_props(xref) or {}) if is_edit else {}
+        # Inserción de leyenda: usar su config guardada (texto + fuente/tamaño/
+        # color/alineación/recuadro) como valores iniciales del editor; se puede
+        # modificar antes de colocar. Se consume al abrir.
+        if not is_edit and getattr(self, "_pending_legend", None):
+            props = self._pending_legend
+            self._pending_legend = None
         cur_text  = props.get("text", "")
-        # Inserción de leyenda: si hay un texto pendiente (elegido en el menú de
-        # leyendas), pre-rellenar el editor con él y consumirlo.
-        if not is_edit and getattr(self, "_pending_legend_text", None):
-            cur_text = self._pending_legend_text
-            self._pending_legend_text = None
         cur_font  = props.get("fontname", DEFAULT_TEXT_FONT)
         cur_size  = int(props.get("fontsize", DEFAULT_TEXT_SIZE))
         cur_align = int(props.get("align", DEFAULT_TEXT_ALIGN))

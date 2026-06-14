@@ -69,13 +69,59 @@ def test_empty_name_defaults(tmp_path, monkeypatch):
 
 
 def test_roundtrip_dict():
-    lg = TextLegend(id="1", name="N", text="multi\nlínea", use_count=3, last_used=12.5)
+    lg = TextLegend(
+        id="1", name="N", text="multi\nlínea",
+        fontname="tibo", fontsize=18.0, color=(0.1, 0.2, 0.3), align=2,
+        border_width=2.5, use_count=3, last_used=12.5,
+    )
     assert TextLegend.from_dict(lg.to_dict()) == lg
 
 
 def test_legacy_dict_without_usage_defaults_zero():
     lg = TextLegend.from_dict({"id": "1", "name": "N", "text": "t"})
     assert lg.use_count == 0 and lg.last_used == 0.0
+
+
+def test_legacy_dict_without_style_uses_defaults():
+    # Una leyenda antigua (solo texto) debe cargar con el estilo por defecto.
+    lg = TextLegend.from_dict({"id": "1", "name": "N", "text": "t"})
+    assert lg.fontname == "helv"
+    assert lg.fontsize == 14.0
+    assert lg.color == (0.0, 0.0, 0.0)
+    assert lg.align == 0
+    assert lg.border_width == 0.0
+
+
+def test_create_persists_style(tmp_path, monkeypatch):
+    mgr = _mgr(tmp_path, monkeypatch)
+    lg = mgr.create(
+        "Conf", "Confidencial",
+        fontname="tibo", fontsize=20, color=(0.8, 0, 0), align=1, border_width=1.5,
+    )
+    got = LegendManager().get(lg.id)  # releído de disco
+    assert got.fontname == "tibo"
+    assert got.fontsize == 20.0
+    assert got.color == (0.8, 0.0, 0.0)
+    assert got.align == 1
+    assert got.border_width == 1.5
+
+
+def test_update_style(tmp_path, monkeypatch):
+    mgr = _mgr(tmp_path, monkeypatch)
+    lg = mgr.create("A", "a")
+    mgr.update(lg.id, align=2, border_width=3.0, fontname="cour")
+    got = mgr.get(lg.id)
+    assert got.align == 2 and got.border_width == 3.0 and got.fontname == "cour"
+
+
+def test_style_props_shape(tmp_path, monkeypatch):
+    mgr = _mgr(tmp_path, monkeypatch)
+    lg = mgr.create("A", "hola", fontname="heit", fontsize=16, align=2, border_width=1.0)
+    props = lg.style_props()
+    assert props == {
+        "text": "hola", "fontname": "heit", "fontsize": 16.0,
+        "color": (0.0, 0.0, 0.0), "align": 2, "border_width": 1.0,
+    }
 
 
 def test_bump_usage_increments_and_persists(tmp_path, monkeypatch):
