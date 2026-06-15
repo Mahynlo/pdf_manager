@@ -1445,13 +1445,19 @@ class _RenderMixin:
     def _on_save_result(self, e: ft.FilePickerResultEvent) -> None:
         if not e.path:
             return
+        # Garantizar la extensión .pdf: allowed_extensions no la fuerza en todas
+        # las plataformas, así que si el usuario escribe el nombre sin ella el
+        # archivo quedaría sin extensión.
+        path = e.path
+        if Path(path).suffix.lower() != ".pdf":
+            path += ".pdf"
         try:
             if not PDFSecurityManager.can_save_changes(self.doc):
                 self._show_snack("Este PDF no permite guardar cambios por sus permisos de seguridad")
                 return
             with self._doc_lock:
-                self.doc.save(e.path, garbage=4, deflate=True)
-            self._show_snack(f"Guardado: {Path(e.path).name}")
+                self.doc.save(path, garbage=4, deflate=True)
+            self._show_snack(f"Guardado: {Path(path).name}")
         except Exception as ex:
             self._show_snack(f"Error al guardar: {ex}")
 
