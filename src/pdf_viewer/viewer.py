@@ -177,6 +177,13 @@ class PDFViewerTab(
         self._text_sel_sel_rect                = None
         self._text_sel_popups:    list[ft.Container] = []
         self._scroll_px:          float = 0.0
+        # Estado de scroll para la navegación por rueda en single/double:
+        # extensión scrolleable de la página actual, alto del viewport, instante
+        # del último cambio de página (enfriamiento) y rueda acumulada.
+        self._scroll_max:          float = 0.0
+        self._last_viewport_h:     float = 600.0
+        self._single_nav_t:        float = 0.0
+        self._single_scroll_accum: float = 0.0
         # Handle drag state ("start" | "end" | None) and display positions
         self._sel_drag_handle:              str | None   = None
         self._text_sel_handle_start_disp:   tuple | None = None

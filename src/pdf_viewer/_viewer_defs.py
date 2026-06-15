@@ -64,6 +64,15 @@ _SCROLL_IDLE_DELAY = 0.1   # seconds to wait before rendering full-res after scr
                            # (bajado de 0.2: la página enfocada se afina a
                            # calidad completa antes tras detener el scroll)
 
+# ── Navegación por rueda en modo página única / doble (estilo Adobe) ───────────
+# La rueda avanza/retrocede de página cuando se llega al borde de la página
+# (o si cabe entera en pantalla). _SINGLE_NAV_COOLDOWN evita que un solo "fling"
+# salte varias páginas; _SINGLE_NAV_DELTA es el desplazamiento acumulado (px)
+# necesario para disparar el cambio (suaviza los micro-deltas del trackpad).
+_SINGLE_NAV_COOLDOWN = 0.35   # segundos mínimos entre cambios de página por rueda
+_SINGLE_NAV_DELTA    = 30.0   # px de rueda acumulados para disparar el cambio
+_SINGLE_EDGE_EPS     = 2.0    # tolerancia (px) para considerar "en el borde"
+
 # ── Tool button definitions ───────────────────────────────────────────────────
 _TOOL_DEFS: list[tuple[Tool, str, str, ft.MouseCursor]] = [
     (Tool.CURSOR,    ft.Icons.NEAR_ME,             "Seleccionar texto y anotaciones", ft.MouseCursor.BASIC),

@@ -64,6 +64,7 @@ from ._viewer_defs import (
     _CACHE_KEEP_PAGES, _TEXT_CACHE_KEEP_PAGES, _SLOT_TEARDOWN_MARGIN,
     _PREVIEW_MAX_ZOOM, _PREVIEW_QUALITY, _PREVIEW_MIN_ZOOM,
     _SCROLL_IDLE_DELAY, _SELECTED_BG,
+    _SINGLE_NAV_COOLDOWN, _SINGLE_NAV_DELTA, _SINGLE_EDGE_EPS,
 )
 
 
@@ -1107,6 +1108,30 @@ class _RenderMixin:
         for pn in range(start, end):
             self._render_page_slot(pn, preview=True)
 
+    def _prefetch_adjacent_pages(self, center: int) -> None:
+        """Pre-renderiza a calidad COMPLETA las páginas contiguas en modo
+        página única / doble.
+
+        Al navegar con la rueda, la página destino ya estará rasterizada y su
+        imagen visible (dentro de una fila oculta), de modo que el cambio sólo
+        alterna la visibilidad de la fila — sin el destello blanco de rasterizar
+        desde cero. ``_render_page_slot`` es idempotente: no hace nada para una
+        página ya renderizada o en curso. La ventana de evicción
+        (``_evict_outside_window``) conserva ±2 páginas, así que lo prefetcheado
+        sobrevive hasta alejarse. Render full (no preview) para evitar también el
+        swap preview→nítido al aterrizar.
+        """
+        total = len(self.doc)
+        mode  = getattr(self, "_display_mode", "continuous")
+        if mode == "double":
+            ps = (center // 2) * 2
+            targets = (ps - 2, ps - 1, ps + 2, ps + 3)
+        else:
+            targets = (center - 1, center + 1)
+        for pn in targets:
+            if 0 <= pn < total:
+                self._render_page_slot(pn)
+
     def _evict_distant(self, pixels: float, viewport_h: float) -> bool:
         """Oculta páginas alejadas del viewport. Retorna True si eviccionó alguna."""
         keep_top    = pixels - viewport_h * _EVICT_MARGIN
@@ -1171,7 +1196,18 @@ class _RenderMixin:
         self.next_btn.disabled = self.current_page == total - 1
 
     def _on_view_scroll(self, e: ft.OnScrollEvent) -> None:
+        # En single/double sólo registramos la posición/extensión del scroll para
+        # que la navegación por rueda (_single_wheel_nav) sepa cuándo la página
+        # actual llegó a su borde superior/inferior. El resto (cálculo de página
+        # por punto medio, render LOD, evicción) es exclusivo del modo continuo.
         if getattr(self, "_display_mode", "continuous") != "continuous":
+            px = getattr(e, "pixels", None)
+            if px is not None:
+                self._scroll_px  = float(px)
+                self._scroll_max = float(getattr(e, "max_scroll_extent", None) or 0.0)
+            vh = getattr(e, "viewport_dimension", None)
+            if vh:
+                self._last_viewport_h = float(vh)
             return
         pixels     = getattr(e, "pixels",            None)
         viewport_h = getattr(e, "viewport_dimension", None) or 600.0
@@ -1249,20 +1285,43 @@ class _RenderMixin:
         self._refresh_ocr_ui_for_page()
         display_mode = getattr(self, "_display_mode", "continuous")
         if display_mode in ("single", "double") and getattr(self, "_page_rows", None):
+            npages = len(self._page_heights)
             if display_mode == "single":
                 for i, row in enumerate(self._page_rows):
                     row.visible = (i == pn)
+                content_h = self._page_heights[pn] if pn < npages else 0.0
             else:
                 pair_start = (pn // 2) * 2
                 for i, row in enumerate(self._page_rows):
                     row.visible = (i == pair_start or i == pair_start + 1)
                 if pair_start + 1 < len(self._page_rows):
                     self._render_page_slot(pair_start + 1)
+                # Las dos páginas se apilan verticalmente en el Column de scroll.
+                content_h = self._page_heights[pair_start] if pair_start < npages else 0.0
+                if pair_start + 1 < npages:
+                    content_h += _PAGE_GAP + self._page_heights[pair_start + 1]
+            # La nueva página arranca en su borde superior. Pre-calcular su
+            # extensión scrolleable (alto del contenido − viewport) para que la
+            # navegación por rueda sepa de inmediato si cabe entero o hay que
+            # desplazarse dentro antes de saltar. Sin esto, una página alta
+            # heredaría el max de la anterior y saltaría de golpe.
+            self._scroll_px = 0.0
+            vh = getattr(self, "_last_viewport_h", 600.0) or 600.0
+            self._scroll_max = max(0.0, float(content_h) - vh)
+            self._single_scroll_accum = 0.0
+            try:
+                self.viewer_scroll.scroll_to(offset=0, duration=0)
+            except Exception:
+                pass
             try:
                 self.viewer_scroll.update()
             except Exception:
                 pass
             self.page_ref.update()
+            # Pre-renderizar las páginas adyacentes en segundo plano para que el
+            # siguiente salto de rueda muestre una imagen ya lista en vez de
+            # rasterizar desde cero (lo que causaba el ligero parpadeo blanco).
+            self._prefetch_adjacent_pages(pn)
             return
         try:
             self.viewer_scroll.scroll_to(offset=self._page_cum_offsets[pn], duration=250)
@@ -1343,15 +1402,65 @@ class _RenderMixin:
             getattr(self, "_ctrl_pressed", False)
             and (time.monotonic() - getattr(self, "_ctrl_time", 0.0)) < 1.0
         )
-        if not ctrl:
-            return
         delta = getattr(e, "scroll_delta_y", None)
         if delta is None:
             delta = getattr(e, "delta_y", 0)
-        if delta < 0:
-            self._zoom_in()
-        elif delta > 0:
-            self._zoom_out()
+        if ctrl:
+            if delta < 0:
+                self._zoom_in()
+            elif delta > 0:
+                self._zoom_out()
+            return
+        # Sin Ctrl: en página única / doble la rueda navega entre páginas
+        # (estilo Adobe). El modo continuo deja que el scroll nativo actúe.
+        if getattr(self, "_display_mode", "continuous") != "continuous" and delta:
+            self._single_wheel_nav(float(delta))
+
+    def _single_wheel_nav(self, delta: float) -> None:
+        """Navegación por rueda en modo página única / doble (estilo Adobe).
+
+        Si la página actual no cabe en el viewport, primero se deja desplazar
+        dentro de ella; sólo al alcanzar el borde (arriba/abajo) y seguir
+        girando se cambia de página. ``delta>0`` = rueda hacia abajo.
+        """
+        going_down = delta > 0
+        scroll_px  = getattr(self, "_scroll_px", 0.0)
+        scroll_max = getattr(self, "_scroll_max", 0.0)
+        at_top    = scroll_px <= _SINGLE_EDGE_EPS
+        at_bottom = scroll_px >= scroll_max - _SINGLE_EDGE_EPS
+
+        # En medio de una página alta: dejar que el scroll nativo se encargue.
+        if going_down and not at_bottom:
+            self._single_scroll_accum = 0.0
+            return
+        if not going_down and not at_top:
+            self._single_scroll_accum = 0.0
+            return
+
+        now = time.monotonic()
+        if now - getattr(self, "_single_nav_t", 0.0) < _SINGLE_NAV_COOLDOWN:
+            # Durante el enfriamiento se absorbe el resto del "fling" para no
+            # encadenar saltos de varias páginas de un solo gesto.
+            self._single_scroll_accum = 0.0
+            return
+
+        accum = getattr(self, "_single_scroll_accum", 0.0)
+        # Reiniciar el acumulador si cambia el sentido del giro.
+        if (accum > 0) != going_down:
+            accum = 0.0
+        accum += delta
+        if abs(accum) < _SINGLE_NAV_DELTA:
+            self._single_scroll_accum = accum
+            return
+
+        self._single_scroll_accum = 0.0
+        total = len(self.doc)
+        if going_down and self.current_page < total - 1:
+            self._single_nav_t = now
+            self._next()
+        elif not going_down and self.current_page > 0:
+            self._single_nav_t = now
+            self._prev()
 
     def _zoom_out(self, e=None) -> None:
         candidates = [z for z in ZOOM_LEVELS if z < self.zoom - 0.01]
