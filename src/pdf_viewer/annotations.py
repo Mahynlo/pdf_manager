@@ -1,6 +1,7 @@
 """Annotation tools and drag-gesture state machine."""
 
 import math
+import re
 from enum import Enum
 from typing import Callable
 
@@ -110,6 +111,84 @@ def _find_annot_by_xref(page: fitz.Page, xref: int) -> fitz.Annot | None:
         if annot.xref == xref:
             return annot
     return None
+
+
+# Reconstrucción de propiedades de texto desde un FreeText ya existente.
+# Necesaria cuando NO hay registro en memoria (documento recién abierto): sin
+# esto el editor abriría en blanco y la anotación parecería "no editable" tras
+# guardar/reabrir. PyMuPDF colapsa las variantes negrita/cursiva al nombre de
+# familia base en la cadena DA, por lo que sólo se recupera la familia.
+_DA_RGB_RE  = re.compile(r"([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s+rg")
+_DA_GRAY_RE = re.compile(r"(?<![0-9.])([0-9.]+)\s+g(?![A-Za-z])")
+_DA_TF_RE   = re.compile(r"/([A-Za-z0-9]+)\s+([0-9.]+)\s+Tf")
+_DA_FONT_TO_INTERNAL: dict[str, str] = {
+    "Helv": "helv",
+    "TiRo": "tiro",
+    "Cour": "cour",
+}
+
+
+def _read_freetext_props(annot: fitz.Annot) -> dict | None:
+    """Lee texto/estilo de un FreeText leyendo la anotación del PDF.
+
+    Devuelve un dict con la misma forma que ``_text_props`` (text, fontname,
+    fontsize, color, align, fill, border_width) o None si no es un FreeText.
+    """
+    if _atype(annot) != "FreeText":
+        return None
+    try:
+        text = annot.info.get("content", "") or ""
+    except Exception:
+        text = ""
+
+    color: tuple[float, float, float] | None = None
+    fontsize: float | None = None
+    fontname: str | None = None
+    align: int | None = None
+
+    try:
+        doc  = annot.parent.parent
+        xref = annot.xref
+        da   = doc.xref_get_key(xref, "DA")
+        da_str = da[1] if isinstance(da, (tuple, list)) and len(da) > 1 else ""
+    except Exception:
+        doc = None
+        da_str = ""
+
+    if da_str:
+        m = _DA_RGB_RE.search(da_str)
+        if m:
+            color = (float(m.group(1)), float(m.group(2)), float(m.group(3)))
+        else:
+            mg = _DA_GRAY_RE.search(da_str)
+            if mg:
+                g = float(mg.group(1))
+                color = (g, g, g)
+        mt = _DA_TF_RE.search(da_str)
+        if mt:
+            fontname = _DA_FONT_TO_INTERNAL.get(mt.group(1), DEFAULT_TEXT_FONT)
+            try:
+                fontsize = float(mt.group(2))
+            except ValueError:
+                pass
+
+    if doc is not None:
+        try:
+            q = doc.xref_get_key(annot.xref, "Q")
+            if isinstance(q, (tuple, list)) and len(q) > 1 and q[0] == "int":
+                align = int(q[1])
+        except Exception:
+            pass
+
+    border_width = 0.0
+    try:
+        border_width = (annot.border or {}).get("width", 0.0) or 0.0
+    except Exception:
+        pass
+
+    return AnnotationManager._normalize_text_props(
+        text, fontname, fontsize, color, align, None, border_width
+    )
 
 
 def _rdp_simplify(
@@ -804,6 +883,33 @@ class AnnotationManager:
         props = self._text_props.get(xref)
         return dict(props) if props is not None else None
 
+    def read_text_props(
+        self, doc: fitz.Document, page_num: int, xref: int
+    ) -> dict | None:
+        """Como :meth:`get_text_props` pero reconstruye las propiedades leyendo
+        la anotación del PDF cuando no hay registro en memoria (p. ej. un
+        documento recién abierto). El resultado se cachea para reusarlo.
+
+        Esto es lo que permite seguir editando una anotación de texto después
+        de guardar y reabrir el archivo: sin ello ``_text_props`` está vacío y
+        el editor abriría en blanco.
+        """
+        cached = self._text_props.get(xref)
+        if cached is not None:
+            return dict(cached)
+        try:
+            page = doc[page_num]
+        except Exception:
+            return None
+        annot = _find_annot_by_xref(page, xref)
+        if annot is None:
+            return None
+        props = _read_freetext_props(annot)
+        if props is None:
+            return None
+        self._text_props[xref] = props
+        return dict(props)
+
     # ── undo ─────────────────────────────────────────────────────────────────────
 
     def undo_last(self, doc: fitz.Document) -> int | None:
@@ -904,6 +1010,9 @@ class AnnotationManager:
             # El texto/estilo no se leen de forma fiable del annot; se toman del
             # registro propio (fallback al contenido embebido para el texto).
             props = self._text_props.get(annot.xref)
+            if props is None:
+                # Documento reabierto: reconstruir texto/estilo del PDF.
+                props = _read_freetext_props(annot)
             if props is None:
                 try:
                     content = annot.info.get("content", "")

@@ -381,6 +381,48 @@ class TestTextAnnotation:
         assert mgr.delete_annot(sample_doc, 0, xref) is True
         assert mgr.get_text_props(xref) is None
 
+    def test_read_text_props_reconstructs_after_reopen(self, mgr, sample_doc, tmp_path):
+        """Regresión: tras guardar y reabrir, el texto sigue siendo editable.
+
+        ``_text_props`` sólo vive en memoria; un manager nuevo (documento
+        reabierto) no lo tiene. ``read_text_props`` debe reconstruir
+        texto/fuente/tamaño/color/alineación/recuadro leyendo la anotación.
+        """
+        mgr.commit_text(
+            sample_doc, 0, fitz.Rect(50, 50, 300, 120), "Hola\nmundo",
+            fontname="tiro", fontsize=18, color=(0.2, 0.4, 0.9),
+            align=1, border_width=1.5,
+        )
+        out = tmp_path / "saved.pdf"
+        sample_doc.save(str(out), garbage=4, deflate=True)
+
+        # Manager + documento nuevos: nada en caché (simula reabrir el archivo).
+        fresh = AnnotationManager(on_modified=lambda *_a, **_kw: None)
+        reopened = fitz.open(str(out))
+        page  = reopened[0]
+        ft    = self._freetexts(page)[0]
+        assert fresh.get_text_props(ft.xref) is None  # caché vacía
+
+        props = fresh.read_text_props(reopened, 0, ft.xref)
+        assert props is not None
+        assert props["text"] == "Hola\nmundo"
+        assert props["fontname"] == "tiro"
+        assert props["fontsize"] == 18.0
+        assert props["color"] == pytest.approx((0.2, 0.4, 0.9), abs=1e-3)
+        assert props["align"] == 1
+        assert props["border_width"] == pytest.approx(1.5)
+
+        # Y ahora la edición funciona conservando el estilo reconstruido.
+        new_xref = fresh.edit_text(
+            reopened, 0, ft.xref, "Editado",
+            fontname=props["fontname"], fontsize=props["fontsize"],
+            color=props["color"], align=props["align"],
+            border_width=props["border_width"],
+        )
+        assert new_xref is not None
+        assert self._freetexts(reopened[0])[0].info.get("content") == "Editado"
+        reopened.close()
+
     def test_take_text_rect_default_box_on_click(self, mgr):
         mgr.set_tool(Tool.TEXT)
         mgr.begin(100.0, 200.0)  # click without drag

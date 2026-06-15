@@ -151,7 +151,7 @@ class _AnnotMixin:
         # Variante "caja de texto": FreeText con recuadro (border_width > 0). Sólo
         # esta variante conserva escalar (±) y grosor; el texto plano no.
         is_text_boxed = is_text and bool(
-            (self._annot.get_text_props(annot.xref) or {}).get("border_width", 0)
+            (self._annot.read_text_props(self.doc, pn, annot.xref) or {}).get("border_width", 0)
         )
         for name in ("tl", "tr", "bl", "br", "tm", "bm", "lm", "rm"):
             h[name].visible = not is_markup
@@ -528,7 +528,7 @@ class _AnnotMixin:
         ignora al editar, que conserva la caja de la anotación).
         """
         is_edit = xref is not None
-        props   = (self._annot.get_text_props(xref) or {}) if is_edit else {}
+        props   = (self._annot.read_text_props(self.doc, pn, xref) or {}) if is_edit else {}
         # Inserción de leyenda: usar su config guardada (texto + fuente/tamaño/
         # color/alineación/recuadro) como valores iniciales del editor; se puede
         # modificar antes de colocar. Se consume al abrir.
