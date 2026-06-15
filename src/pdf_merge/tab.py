@@ -20,7 +20,7 @@ from .engine import (
     MergePasswordRequiredError,
     MergePermissionDeniedError,
 )
-from .model import PDFEntry, parse_range
+from .model import PDFEntry
 from .thumbnails import ThumbnailCache
 from .widgets import EntryCard, LightboxDialog, PasswordDialog, PdfListPanel, PreviewGrid
 
@@ -71,6 +71,7 @@ class MergePDFTab:
             on_move=self._move_entry,
             on_remove=self._remove_entry,
             on_request_thumbs=self._render_thumbs_async,
+            on_restore_order=self._restore_order,
         )
         self._pdf_list = PdfListPanel(
             on_add=self._open_picker,
@@ -81,6 +82,7 @@ class MergePDFTab:
             self._thumbs,
             on_open=self._open_preview_dialog,
             on_request_thumbs=self._render_thumbs_async,
+            on_reorder=self._reorder_page,
         )
         self._lightbox = LightboxDialog(self.page_ref, self._large_thumbs)
         self._pwd      = PasswordDialog(
@@ -228,9 +230,18 @@ class MergePDFTab:
                     ft.Row(
                         [
                             ft.Icon(ft.Icons.PREVIEW, color="#2E7D32", size=20),
-                            ft.Text(
-                                "Paso 2: Vista previa del resultado",
-                                size=15, weight="bold", color="onSurface",
+                            ft.Column(
+                                [
+                                    ft.Text(
+                                        "Paso 2: Vista previa del resultado",
+                                        size=15, weight="bold", color="onSurface",
+                                    ),
+                                    ft.Text(
+                                        "Arrastra una página para reordenarla dentro de su PDF",
+                                        size=11, color="onSurfaceVariant", italic=True,
+                                    ),
+                                ],
+                                spacing=0,
                             ),
                             ft.Container(expand=True),
                             self._status_text,
@@ -409,28 +420,37 @@ class MergePDFTab:
     # ── page selection callbacks ──────────────────────────────────────────────
 
     def _toggle_page(self, entry_idx: int, page: int) -> None:
-        self._entries[entry_idx].selected[page] ^= True
+        self._entries[entry_idx].toggle(page)
         self._refresh_list()
         self._refresh_preview()
         self.page_ref.update()
 
     def _select_all_pages(self, entry_idx: int, value: bool) -> None:
-        entry = self._entries[entry_idx]
-        entry.selected = [value] * entry.total
+        self._entries[entry_idx].set_all(value)
         self._refresh_list()
         self._refresh_preview()
         self.page_ref.update()
 
     def _invert_pages(self, entry_idx: int) -> None:
-        entry = self._entries[entry_idx]
-        entry.selected = [not s for s in entry.selected]
+        self._entries[entry_idx].invert()
         self._refresh_list()
         self._refresh_preview()
         self.page_ref.update()
 
     def _apply_range(self, entry_idx: int, text: str) -> None:
-        entry = self._entries[entry_idx]
-        entry.selected = parse_range(text, entry.total)
+        self._entries[entry_idx].set_range(text)
+        self._refresh_list()
+        self._refresh_preview()
+        self.page_ref.update()
+
+    def _reorder_page(self, entry: PDFEntry, from_page: int, to_page: int) -> None:
+        """Mueve una página dentro de un mismo PDF (arrastrar y soltar)."""
+        entry.move_page(from_page, to_page)
+        self._refresh_preview()
+        self.page_ref.update()
+
+    def _restore_order(self, entry_idx: int) -> None:
+        self._entries[entry_idx].restore_order()
         self._refresh_list()
         self._refresh_preview()
         self.page_ref.update()

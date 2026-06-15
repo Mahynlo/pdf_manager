@@ -44,31 +44,6 @@ copyright = "Copyright (C) 2025 by Flet"
 [tool.flet.app]
 path = "src"
 
-# ── Optimización del empaquetado (Tier 1, sin cambios de funcionalidad) ──────
-# Compila el código de la app y de los paquetes a .pyc y elimina el .py fuente,
-# reduciendo el tamaño del bundle. Las extensiones nativas (.pyd/.dll) y los
-# datos de modelos (.onnx/.json) no se tocan.
-[tool.flet.compile]
-app = true
-packages = true
-
-# Globs de archivos a eliminar del site-packages empaquetado. Todo lo listado
-# aquí NO se usa en runtime de la app empaquetada:
-#   - flet_desktop: solo se importa en modo dev (`flet run`); en el build el
-#     Python corre embebido en el runner de Flutter (is_embedded()=True), así
-#     que la rama que lo carga queda fuera. ~95 MB.
-#   - flet_web: solo el servidor web de Flet lo usa; la app desktop no. ~12 MB.
-#   - *.pyi (type stubs) y suites de tests: irrelevantes en runtime.
-[tool.flet.cleanup]
-packages = true
-package_files = [
-  "**/flet_desktop/**",
-  "**/flet_web/**",
-  "**/*.pyi",
-  "**/tests/**",
-  "**/test/**",
-]
-
 [tool.uv]
 dev-dependencies = [
     "flet[all]==0.28.3",

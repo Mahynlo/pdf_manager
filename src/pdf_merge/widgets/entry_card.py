@@ -17,7 +17,7 @@ from typing import Callable
 
 import flet as ft
 
-from ..model import PDFEntry, selection_to_range
+from ..model import PDFEntry, accent_color_for, selection_to_range
 from ..thumbnails import ThumbnailCache
 
 _CHIPS_PREVIEW = 30
@@ -39,6 +39,7 @@ class EntryCard:
         on_move:           Callable[[int, int], None],
         on_remove:         Callable[[int], None],
         on_request_thumbs: Callable[[str, list[int], str | None], None],
+        on_restore_order:  Callable[[int], None],
     ):
         self._thumbs           = thumbs
         self._on_toggle_page   = on_toggle_page
@@ -49,6 +50,7 @@ class EntryCard:
         self._on_move          = on_move
         self._on_remove        = on_remove
         self._on_request_thumbs = on_request_thumbs
+        self._on_restore_order = on_restore_order
 
         # Caches reutilizables.
         self._cards: dict[str, dict] = {}            # path -> card refs
@@ -68,6 +70,7 @@ class EntryCard:
         # ── mutables que dependen del estado ────────────────────────────────
         card["up_btn"].disabled   = (idx == 0)
         card["down_btn"].disabled = (idx == total_entries - 1)
+        card["restore_btn"].disabled = not entry.is_reordered
         card["count_text"].value  = f"{entry.selected_count}/{entry.total} págs."
 
         new_range = selection_to_range(entry.selected)
@@ -202,6 +205,12 @@ class EntryCard:
             on_click=lambda e, p=path: self._on_move(self._idx_by_path[p], +1),
         )
         count_text = ft.Text("", size=11, color=ft.Colors.ON_SURFACE_VARIANT)
+        restore_btn = ft.TextButton(
+            "Restaurar", icon=ft.Icons.RESTART_ALT,
+            style=ft.ButtonStyle(text_style=ft.TextStyle(size=11)),
+            on_click=lambda e, p=path: self._on_restore_order(self._idx_by_path[p]),
+            tooltip="Restaurar el orden original de las páginas",
+        )
         range_field = ft.TextField(
             value=selection_to_range(entry.selected),
             hint_text="Ej: 1-5, 8, 10-15",
@@ -224,6 +233,13 @@ class EntryCard:
                     # header row
                     ft.Row(
                         [
+                            # Punto del color de acento del PDF (leyenda para la
+                            # franja que identifica sus páginas en la vista previa).
+                            ft.Container(
+                                width=10, height=10, border_radius=5,
+                                bgcolor=accent_color_for(path),
+                                tooltip="Color de este PDF en la vista previa",
+                            ),
                             ft.Icon(ft.Icons.PICTURE_AS_PDF, color=ft.Colors.ERROR, size=18),
                             ft.Text(
                                 entry.filename, size=13, weight=ft.FontWeight.W_500,
@@ -261,6 +277,7 @@ class EntryCard:
                                 on_click=lambda e, p=path: self._on_invert(self._idx_by_path[p]),
                                 tooltip="Invertir la selección de páginas",
                             ),
+                            restore_btn,
                             ft.Container(expand=True),
                             count_text,
                         ],
@@ -288,6 +305,7 @@ class EntryCard:
             "container": container,
             "up_btn": up_btn,
             "down_btn": down_btn,
+            "restore_btn": restore_btn,
             "count_text": count_text,
             "range_field": range_field,
             "chips_row": chips_row,
