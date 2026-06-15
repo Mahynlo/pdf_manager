@@ -38,6 +38,7 @@ from ._viewer_defs import (
     _TOOLBAR_BG, _ANNOT_BG, _DIVIDER_CLR, _VIEWER_BG,
     _OCR_PANEL_BG,
     _SELECTED_BG, _vdivider,
+    _AUTO_SINGLE_PAGE_THRESHOLD,
     AGENT_ENABLED,
 )
 from ._render_mixin   import _RenderMixin
@@ -183,7 +184,9 @@ class PDFViewerTab(
         self._scroll_max:          float = 0.0
         self._last_viewport_h:     float = 600.0
         self._single_nav_t:        float = 0.0
-        self._single_scroll_accum: float = 0.0
+        self._single_nav_timer           = None
+        self._single_nav_dir:      int   = 1
+        self._single_nav_px:       float = 0.0
         # Handle drag state ("start" | "end" | None) and display positions
         self._sel_drag_handle:              str | None   = None
         self._text_sel_handle_start_disp:   tuple | None = None
@@ -270,8 +273,12 @@ class PDFViewerTab(
         self._sidebar_tab_redact_btn:  ft.Container | None = None
         self._sidebar_tab_agent_btn:   ft.Container | None = None
 
-        # Display mode: "continuous" | "single" | "double"
-        self._display_mode         = "continuous"
+        # Display mode: "continuous" | "single" | "double".
+        # Los PDFs largos arrancan en "página única" (más ligero); el usuario
+        # puede cambiarlo con los botones de modo de vista.
+        self._display_mode = (
+            "single" if len(self.doc) > _AUTO_SINGLE_PAGE_THRESHOLD else "continuous"
+        )
         self._page_rows:     list  = []
         self._mode_btn_continuous: ft.IconButton | None = None
         self._mode_btn_single:     ft.IconButton | None = None
@@ -343,7 +350,6 @@ class PDFViewerTab(
 
         self._mode_btn_continuous = ft.IconButton(
             ft.Icons.VIEW_STREAM, tooltip="Scroll continuo",
-            icon_color="#1565C0", bgcolor=ft.Colors.with_opacity(0.20, ft.Colors.PRIMARY),
             on_click=lambda e: self._set_display_mode("continuous"),
         )
         self._mode_btn_single = ft.IconButton(
@@ -354,6 +360,16 @@ class PDFViewerTab(
             ft.Icons.BOOK, tooltip="Doble página",
             on_click=lambda e: self._set_display_mode("double"),
         )
+        # Resaltar el botón del modo activo (puede no ser "continuous": los PDFs
+        # largos arrancan en "página única").
+        _active_btn = {
+            "continuous": self._mode_btn_continuous,
+            "single":     self._mode_btn_single,
+            "double":     self._mode_btn_double,
+        }.get(self._display_mode)
+        if _active_btn is not None:
+            _active_btn.icon_color = "#1565C0"
+            _active_btn.bgcolor    = ft.Colors.with_opacity(0.20, ft.Colors.PRIMARY)
 
         zoom_menu = ft.PopupMenuButton(
             icon=ft.Icons.ARROW_DROP_DOWN,
@@ -996,7 +1012,7 @@ class PDFViewerTab(
         # tocan controles) y, sobre todo, cada threading.Timer referencia self,
         # manteniendo viva toda la instancia (listas de ~20 controles × N
         # páginas) hasta que disparen → memoria que no se libera.
-        for _attr in ("_scroll_idle_timer", "_zoom_timer", "_render_upd_timer", "_restore_scroll_timer"):
+        for _attr in ("_scroll_idle_timer", "_zoom_timer", "_render_upd_timer", "_restore_scroll_timer", "_single_nav_timer"):
             _t = getattr(self, _attr, None)
             if _t is not None:
                 try:

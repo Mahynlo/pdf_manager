@@ -64,7 +64,7 @@ from ._viewer_defs import (
     _CACHE_KEEP_PAGES, _TEXT_CACHE_KEEP_PAGES, _SLOT_TEARDOWN_MARGIN,
     _PREVIEW_MAX_ZOOM, _PREVIEW_QUALITY, _PREVIEW_MIN_ZOOM,
     _SCROLL_IDLE_DELAY, _SELECTED_BG,
-    _SINGLE_NAV_COOLDOWN, _SINGLE_NAV_DELTA, _SINGLE_EDGE_EPS,
+    _SINGLE_NAV_COOLDOWN, _SINGLE_EDGE_EPS, _SINGLE_NAV_CONFIRM,
 )
 
 
@@ -1308,7 +1308,7 @@ class _RenderMixin:
             self._scroll_px = 0.0
             vh = getattr(self, "_last_viewport_h", 600.0) or 600.0
             self._scroll_max = max(0.0, float(content_h) - vh)
-            self._single_scroll_accum = 0.0
+            self._cancel_single_nav_timer()
             try:
                 self.viewer_scroll.scroll_to(offset=0, duration=0)
             except Exception:
@@ -1420,41 +1420,60 @@ class _RenderMixin:
         """Navegación por rueda en modo página única / doble (estilo Adobe).
 
         Si la página actual no cabe en el viewport, primero se deja desplazar
-        dentro de ella; sólo al alcanzar el borde (arriba/abajo) y seguir
-        girando se cambia de página. ``delta>0`` = rueda hacia abajo.
+        dentro de ella; sólo al alcanzar el borde (arriba/abajo) se cambia de
+        página. ``delta>0`` = rueda hacia abajo.
+
+        El cambio de página se confirma tras ``_SINGLE_NAV_CONFIRM`` segundos:
+        si en ese lapso el scroll interno se movió (página alta cuyo
+        ``_scroll_max`` aún no estaba calibrado por un evento real de scroll), se
+        cancela. Así no hace falta adivinar la altura del viewport en frío.
         """
         going_down = delta > 0
         scroll_px  = getattr(self, "_scroll_px", 0.0)
         scroll_max = getattr(self, "_scroll_max", 0.0)
-        at_top    = scroll_px <= _SINGLE_EDGE_EPS
-        at_bottom = scroll_px >= scroll_max - _SINGLE_EDGE_EPS
-
-        # En medio de una página alta: dejar que el scroll nativo se encargue.
-        if going_down and not at_bottom:
-            self._single_scroll_accum = 0.0
+        # ¿Puede la página desplazarse en este sentido? Entonces es scroll
+        # interno: que lo maneje el scroll nativo, no navegamos.
+        if going_down and scroll_px < scroll_max - _SINGLE_EDGE_EPS:
+            self._cancel_single_nav_timer()
             return
-        if not going_down and not at_top:
-            self._single_scroll_accum = 0.0
+        if not going_down and scroll_px > _SINGLE_EDGE_EPS:
+            self._cancel_single_nav_timer()
             return
+        self._schedule_single_nav(going_down, scroll_px)
 
+    def _cancel_single_nav_timer(self) -> None:
+        t = getattr(self, "_single_nav_timer", None)
+        if t is not None:
+            try:
+                t.cancel()
+            except Exception:
+                pass
+            self._single_nav_timer = None
+
+    def _schedule_single_nav(self, going_down: bool, scroll_px: float) -> None:
+        if time.monotonic() - getattr(self, "_single_nav_t", 0.0) < _SINGLE_NAV_COOLDOWN:
+            return  # enfriamiento: absorbe el resto del "fling"
+        self._cancel_single_nav_timer()
+        self._single_nav_dir = 1 if going_down else -1
+        self._single_nav_px  = scroll_px
+        t = threading.Timer(_SINGLE_NAV_CONFIRM, self._fire_single_nav)
+        t.daemon = True
+        self._single_nav_timer = t
+        t.start()
+
+    def _fire_single_nav(self) -> None:
+        self._single_nav_timer = None
+        if getattr(self, "_is_closed", False):
+            return
+        # Si el scroll se movió desde que se programó, era desplazamiento interno
+        # de una página alta (ya calibrada): no cambiar de página.
+        if abs(getattr(self, "_scroll_px", 0.0) - getattr(self, "_single_nav_px", 0.0)) > _SINGLE_EDGE_EPS:
+            return
         now = time.monotonic()
         if now - getattr(self, "_single_nav_t", 0.0) < _SINGLE_NAV_COOLDOWN:
-            # Durante el enfriamiento se absorbe el resto del "fling" para no
-            # encadenar saltos de varias páginas de un solo gesto.
-            self._single_scroll_accum = 0.0
             return
-
-        accum = getattr(self, "_single_scroll_accum", 0.0)
-        # Reiniciar el acumulador si cambia el sentido del giro.
-        if (accum > 0) != going_down:
-            accum = 0.0
-        accum += delta
-        if abs(accum) < _SINGLE_NAV_DELTA:
-            self._single_scroll_accum = accum
-            return
-
-        self._single_scroll_accum = 0.0
-        total = len(self.doc)
+        total      = len(self.doc)
+        going_down = getattr(self, "_single_nav_dir", 1) > 0
         if going_down and self.current_page < total - 1:
             self._single_nav_t = now
             self._next()

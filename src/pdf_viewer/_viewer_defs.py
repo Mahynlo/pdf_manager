@@ -67,11 +67,19 @@ _SCROLL_IDLE_DELAY = 0.1   # seconds to wait before rendering full-res after scr
 # ── Navegación por rueda en modo página única / doble (estilo Adobe) ───────────
 # La rueda avanza/retrocede de página cuando se llega al borde de la página
 # (o si cabe entera en pantalla). _SINGLE_NAV_COOLDOWN evita que un solo "fling"
-# salte varias páginas; _SINGLE_NAV_DELTA es el desplazamiento acumulado (px)
-# necesario para disparar el cambio (suaviza los micro-deltas del trackpad).
+# salte varias páginas.
 _SINGLE_NAV_COOLDOWN = 0.35   # segundos mínimos entre cambios de página por rueda
-_SINGLE_NAV_DELTA    = 30.0   # px de rueda acumulados para disparar el cambio
 _SINGLE_EDGE_EPS     = 2.0    # tolerancia (px) para considerar "en el borde"
+# Al llegar al borde, la navegación se confirma tras este retardo: si entre
+# tanto el scroll interno de la página se movió (página alta que aún no había
+# calibrado su extensión scrolleable), se cancela. Distingue "seguir desplazando
+# dentro de la página" de "saltar de página" sin tener que adivinar el viewport.
+_SINGLE_NAV_CONFIRM  = 0.08   # segundos de espera para confirmar el cambio
+# Documentos con más de N páginas arrancan en modo "página única" en vez de
+# scroll continuo: en PDFs largos el continuo construye/recicla muchos más slots
+# y se siente más pesado, mientras que página única sólo mantiene vivas la página
+# actual y sus vecinas. El usuario puede cambiar de modo cuando quiera.
+_AUTO_SINGLE_PAGE_THRESHOLD = 50
 
 # ── Tool button definitions ───────────────────────────────────────────────────
 _TOOL_DEFS: list[tuple[Tool, str, str, ft.MouseCursor]] = [
