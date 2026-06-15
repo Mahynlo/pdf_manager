@@ -61,7 +61,7 @@ class MergePDFTab:
         self._progress_bar: ft.ProgressBar     | None = None
 
         # ── components ──────────────────────────────────────────────────────
-        entry_card = EntryCard(
+        self._entry_card = entry_card = EntryCard(
             self._thumbs,
             on_toggle_page=self._toggle_page,
             on_select_all=self._select_all_pages,
@@ -134,6 +134,8 @@ class MergePDFTab:
             entry.close()
         self._thumbs.clear()
         self._large_thumbs.clear()
+        self._entry_card.clear()
+        self._preview.clear()
         for picker in (self._pick_pdfs, self._save_picker):
             try:
                 self.page_ref.overlay.remove(picker)
@@ -398,6 +400,8 @@ class MergePDFTab:
         self._entries.clear()
         self._thumbs.clear()
         self._large_thumbs.clear()
+        self._entry_card.clear()
+        self._preview.clear()
         self._refresh_list()
         self._refresh_preview()
         self.page_ref.update()
@@ -449,6 +453,8 @@ class MergePDFTab:
     def _remove_entry(self, idx: int) -> None:
         entry = self._entries.pop(idx)
         self._thumbs.prune_path(entry.path)
+        self._entry_card.prune_path(entry.path)
+        self._preview.prune_path(entry.path)
         entry.close()
         self._refresh_list()
         self._refresh_preview()
