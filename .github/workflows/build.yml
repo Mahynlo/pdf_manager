@@ -17,7 +17,12 @@ on:
 jobs:
   build-windows:
     name: Build Windows App + Installer
-    runs-on: windows-latest
+    # IMPORTANTE: NO usar windows-latest. GitHub lo actualizó a Windows Server
+    # 2025 con Visual Studio 2026 (generador CMake "Visual Studio 18 2026"), que
+    # Flutter 3.29.2 (fijado por Flet 0.28.3) no reconoce → el build falla con
+    # "Unable to generate build files". windows-2022 trae VS 2022 (generador
+    # "Visual Studio 17 2022"), soportado por Flutter 3.29.2.
+    runs-on: windows-2022
     permissions:
       contents: write   # necesario para crear GitHub Releases
 
@@ -110,8 +115,8 @@ jobs:
         run: |
           $buildDir = "${{ steps.buildout.outputs.BUILD_DIR }}"
 
-          # windows-latest (Windows Server 2025) trae gcc via MSYS2 en C:\msys64
-          # pero NO en el PATH. Hay que usar el toolchain NATIVO (ucrt64/mingw64);
+          # El runner (windows-2022) trae gcc via MSYS2 en C:\msys64 pero NO en
+          # el PATH. Hay que usar el toolchain NATIVO (ucrt64/mingw64);
           # NO usar C:\msys64\usr\bin\gcc.exe -> genera binarios que dependen de
           # msys-2.0.dll (no autonomos). Se sondean rutas conocidas y, como ultimo
           # recurso, se instala mingw via choco.
