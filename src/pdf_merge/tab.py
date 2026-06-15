@@ -23,6 +23,7 @@ from .engine import (
 from .model import PDFEntry
 from .thumbnails import ThumbnailCache
 from .widgets import EntryCard, LightboxDialog, PasswordDialog, PdfListPanel, PreviewGrid
+from .widgets.preview_grid import PREVIEW_MAX_PAGES
 
 _THUMB_SCALE = 0.25   # selection chips / preview grid
 _LARGE_SCALE = 0.5    # lightbox dialog
@@ -153,7 +154,17 @@ class MergePDFTab:
     def _refresh_preview(self) -> None:
         total = self._preview.rebuild(self._entries)
         if self._status_text is not None:
-            self._status_text.value = f"{total} página(s)" if total > 0 else ""
+            if total <= 0:
+                self._status_text.value = ""
+                self._status_text.color = "onSurfaceVariant"
+            elif self._preview.overflow > 0:
+                self._status_text.value = (
+                    f"{total} páginas · vista previa limitada a {PREVIEW_MAX_PAGES}"
+                )
+                self._status_text.color = "#F57C00"
+            else:
+                self._status_text.value = f"{total} página(s)"
+                self._status_text.color = "onSurfaceVariant"
         self._update_merge_btn()
 
     def _render_thumbs_async(self, path: str, pages: list[int], password: str | None = None) -> None:

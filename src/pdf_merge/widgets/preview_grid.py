@@ -15,12 +15,28 @@ el cliente re-añada el widget de imagen y vuelva a decodificar el base64.
 """
 from __future__ import annotations
 
+import threading
 from typing import Callable
 
 import flet as ft
 
 from ..model import PDFEntry, accent_color_for
 from ..thumbnails import ThumbnailCache
+
+# Tope de celdas que la vista previa dibuja a la vez. La rejilla NO virtualiza
+# (a diferencia del visor), así que cada página seleccionada crea ~10 controles
+# y retiene su PNG; pasados unos cientos eso consume memoria y puede ralentizar
+# la UI. Limitamos la VISTA PREVIA (no la combinación, que incluye todas).
+PREVIEW_MAX_PAGES = 500
+
+# Carga perezosa de miniaturas: en vez de renderizar las (hasta) 500 de golpe,
+# solo se piden las de la ventana visible (± margen) y se van cargando al
+# desplazarse. El render se hace tras un breve reposo del scroll (no durante el
+# fling), igual que la subida de calidad del visor.
+_INITIAL_WINDOW = 60      # celdas a cargar al construir (cubre la parte de arriba)
+_WINDOW_MARGIN  = 18      # celdas extra por encima/debajo de lo visible (cargar)
+_TEARDOWN_MARGIN = 48     # más allá de la ventana de carga se LIBERA la imagen
+_SCROLL_DEBOUNCE = 0.15   # s de reposo antes de pedir la ventana tras desplazar
 
 
 class PreviewGrid:
@@ -37,6 +53,14 @@ class PreviewGrid:
         self._on_request_thumbs = on_request_thumbs
         self._on_reorder = on_reorder
         self.items: list[tuple[PDFEntry, int]] = []
+        # Nº de páginas seleccionadas que NO se dibujan por el tope (0 = todas
+        # mostradas). El tab lo usa para avisar en el estado.
+        self.overflow = 0
+
+        # Carga perezosa por scroll.
+        self._frac: tuple[float, float] | None = None   # (top, bottom) visible
+        self._last_window: tuple[int, int] | None = None
+        self._scroll_timer: threading.Timer | None = None
 
         # Celdas reutilizables cacheadas por (path, page).
         self._cells: dict[tuple[str, int], dict] = {}
@@ -60,36 +84,159 @@ class PreviewGrid:
             alignment=ft.alignment.center,
             visible=True,
         )
-        self.control = ft.Column([self._empty], scroll="auto", expand=True)
+        self.control = ft.Column(
+            [self._empty], scroll="auto", expand=True, on_scroll=self._on_scroll
+        )
 
     def rebuild(self, entries: list[PDFEntry]) -> int:
-        """Rebuild the grid; returns the total page count in the result."""
+        """Rebuild the grid; returns the total page count in the result.
+
+        Se dibujan como máximo `PREVIEW_MAX_PAGES` celdas; las que sobran se
+        cuentan en `self.overflow` y se anuncian con un aviso. El total devuelto
+        y la combinación siguen incluyendo TODAS las páginas seleccionadas.
+        """
         items: list[ft.Control] = []
         flat:  list[tuple[PDFEntry, int]] = []
         total = 0
+        shown = 0
+        shown_by_path: dict[str, list[int]] = {}
+        pw_by_path: dict[str, str | None] = {}
 
         for entry in entries:
             for pg in entry.selected_pages:
-                flat_idx = total   # 0-based index in result
                 total += 1
-                flat.append((entry, pg))
-                items.append(self._cell(entry, pg, total, flat_idx))
+                if shown < PREVIEW_MAX_PAGES:
+                    flat.append((entry, pg))
+                    items.append(self._cell(entry, pg, shown + 1, shown))
+                    shown_by_path.setdefault(entry.path, []).append(pg)
+                    pw_by_path[entry.path] = entry.password
+                    shown += 1
 
         self.items = flat
+        self.overflow = total - shown
+
         if not items:
             self.control.controls = [self._empty]
         else:
             self._wrap.controls = items
-            self.control.controls = [self._wrap]
+            controls: list[ft.Control] = [self._wrap]
+            if self.overflow > 0:
+                controls.insert(0, self._overflow_banner(total))
+            self.control.controls = controls
 
-        # Pide al worker async que renderice (en lote, una apertura por PDF) las
-        # páginas que falten en cache; al terminar refresca y aparecen.
-        if self._on_request_thumbs is not None:
-            for entry in entries:
-                pages = list(entry.selected_pages)
-                if pages:
-                    self._on_request_thumbs(entry.path, pages, entry.password)
+        # Carga perezosa + liberación: aplica la ventana visible sin pedir update
+        # (el tab llama a page.update() tras este rebuild).
+        self._last_window = None
+        self._apply_window(do_update=False)
         return total
+
+    # ── lazy thumbnail windowing (carga cercanas, libera lejanas) ─────────────
+
+    def _load_range(self, shown: int) -> tuple[int, int]:
+        """Rango [start, end) de celdas a cargar según el scroll actual."""
+        if self._frac is None:
+            return 0, min(shown, _INITIAL_WINDOW)
+        top, bot = self._frac
+        start = int(top * shown) - _WINDOW_MARGIN
+        end = int(bot * shown) + _WINDOW_MARGIN
+        return max(0, start), min(shown, end)
+
+    def _apply_window(self, do_update: bool) -> None:
+        """Pone la imagen en las celdas dentro de la ventana y la LIBERA en las
+        que quedaron lejos (placeholder), acotando la memoria a la vecindad."""
+        shown = len(self.items)
+        if shown == 0:
+            return
+        start, end = self._load_range(shown)
+        keep_lo = start - _TEARDOWN_MARGIN
+        keep_hi = end + _TEARDOWN_MARGIN
+
+        changed = False
+        for idx, (entry, pg) in enumerate(self.items):
+            cell = self._cells.get((entry.path, pg))
+            if cell is None:
+                continue
+            in_keep = keep_lo <= idx < keep_hi
+            if in_keep and not cell["has_img"]:
+                b64 = self._thumbs.peek(entry.path, pg)
+                if b64:
+                    cell["stack"].controls[0] = self._thumb_ctrl(b64)
+                    cell["has_img"] = True
+                    changed = True
+            elif not in_keep and cell["has_img"]:
+                # Libera el PNG/textura de las celdas lejanas.
+                cell["stack"].controls[0] = self._thumb_ctrl(None)
+                cell["has_img"] = False
+                changed = True
+
+        self._request_window(start, end)
+
+        if do_update and changed:
+            try:
+                self.control.update()
+            except Exception:
+                pass
+
+    def _request_window(self, start: int, end: int) -> None:
+        """Pide al worker renderizar (solo las no cacheadas) de items[start:end]."""
+        if self._on_request_thumbs is None or not self.items:
+            return
+        start = max(0, start)
+        end = min(len(self.items), end)
+        if start >= end or (start, end) == self._last_window:
+            return
+        self._last_window = (start, end)
+
+        by_path: dict[str, list[int]] = {}
+        pw_by_path: dict[str, str | None] = {}
+        for entry, pg in self.items[start:end]:
+            by_path.setdefault(entry.path, []).append(pg)
+            pw_by_path[entry.path] = entry.password
+        for path, pages in by_path.items():
+            self._on_request_thumbs(path, pages, pw_by_path[path])
+
+    def _on_scroll(self, e) -> None:
+        shown = len(self.items)
+        if shown == 0:
+            return
+        viewport = getattr(e, "viewport_dimension", 0) or 0
+        content = (getattr(e, "max_scroll_extent", 0) or 0) + viewport
+        if content <= 0:
+            return
+        pixels = getattr(e, "pixels", 0) or 0
+        self._frac = (pixels / content, (pixels + viewport) / content)
+        # Aplica tras un breve reposo: durante un fling no se rinde/libera cada
+        # posición intermedia, solo donde el scroll se detiene.
+        if self._scroll_timer is not None:
+            self._scroll_timer.cancel()
+        self._scroll_timer = threading.Timer(_SCROLL_DEBOUNCE, self._flush_window)
+        self._scroll_timer.daemon = True
+        self._scroll_timer.start()
+
+    def _flush_window(self) -> None:
+        self._apply_window(do_update=True)
+
+    def _overflow_banner(self, total: int) -> ft.Container:
+        return ft.Container(
+            content=ft.Row(
+                [
+                    ft.Icon(ft.Icons.WARNING_AMBER_ROUNDED, color="#F57C00", size=18),
+                    ft.Text(
+                        f"Vista previa limitada a {PREVIEW_MAX_PAGES} de {total} páginas "
+                        "para no consumir demasiados recursos. La combinación incluirá "
+                        "TODAS las páginas seleccionadas.",
+                        size=11, color="onSurfaceVariant", expand=True,
+                    ),
+                ],
+                spacing=8,
+                vertical_alignment="center",
+            ),
+            bgcolor=ft.Colors.with_opacity(0.12, ft.Colors.ORANGE),
+            border=ft.border.all(1, ft.Colors.with_opacity(0.4, ft.Colors.ORANGE)),
+            border_radius=8,
+            padding=ft.padding.symmetric(horizontal=12, vertical=8),
+            margin=ft.margin.only(bottom=8),
+        )
 
     def prune_path(self, path: str) -> None:
         for key in [k for k in self._cells if k[0] == path]:
@@ -97,6 +244,11 @@ class PreviewGrid:
 
     def clear(self) -> None:
         self._cells.clear()
+        if self._scroll_timer is not None:
+            self._scroll_timer.cancel()
+            self._scroll_timer = None
+        self._frac = None
+        self._last_window = None
 
     # ── drag & drop reorder ──────────────────────────────────────────────────
 
@@ -149,9 +301,11 @@ class PreviewGrid:
     def _cell(self, entry: PDFEntry, pg: int, seq: int, flat_idx: int) -> ft.DragTarget:
         key = (entry.path, pg)
         cell = self._cells.get(key)
-        thumb_b64 = self._thumbs.peek(entry.path, pg)
 
         if cell is None:
+            # La imagen NO se pone aquí: la gobierna `_apply_window` según la
+            # ventana visible (carga las cercanas, libera las lejanas). Se crea
+            # siempre con placeholder.
             accent = accent_color_for(entry.path)
             seq_text = ft.Text(
                 str(seq), size=8, color="white",
@@ -179,7 +333,7 @@ class PreviewGrid:
                 left=0, right=0, top=0, height=5, bgcolor=accent,
             )
             stack = ft.Stack(
-                [self._thumb_ctrl(thumb_b64), accent_bar, seq_badge, pg_badge]
+                [self._thumb_ctrl(None), accent_bar, seq_badge, pg_badge]
             )
             state = {"flat_idx": flat_idx}
             visual = ft.Container(
@@ -219,15 +373,12 @@ class PreviewGrid:
             )
             cell = {
                 "target": target, "stack": stack,
-                "seq_text": seq_text, "state": state, "has_img": bool(thumb_b64),
+                "seq_text": seq_text, "state": state, "has_img": False,
             }
             self._cells[key] = cell
         else:
             if cell["seq_text"].value != str(seq):
                 cell["seq_text"].value = str(seq)
             cell["state"]["flat_idx"] = flat_idx
-            if thumb_b64 and not cell["has_img"]:
-                cell["stack"].controls[0] = self._thumb_ctrl(thumb_b64)
-                cell["has_img"] = True
 
         return cell["target"]
