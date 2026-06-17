@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.23] - 2026-06-17
+
+### Added
+- **Navegación por rueda del ratón en los modos de página única y doble**: al estar en vista de una/dos páginas (no continua), la rueda del ratón cambia de página en lugar de hacer scroll dentro de ella, con **pre-renderizado de las páginas adyacentes** para que el cambio sea instantáneo (sin esperar al render). Incluye una **confirmación al cambiar de página** para evitar saltos accidentales durante el desplazamiento.
+- **Reordenamiento de páginas en la vista previa de Combinar PDFs**: se pueden **arrastrar las páginas** para reordenarlas en la previsualización, con opción de **restaurar el orden original**. El estado del orden vive en el modelo de `pdf_merge` y se refleja en la cuadrícula de previsualización.
+
+### Changed
+- **Vista previa de Combinar PDFs más fluida (carga perezosa de miniaturas)**: las miniaturas de la cuadrícula de previsualización se generan **de forma perezosa** (solo las visibles) y se **limita el número de páginas mostradas**, evitando congelamientos y consumo de memoria al previsualizar PDFs grandes.
+- **Optimización de `EntryCard` y `PreviewGrid`**: se reescribieron ambos widgets para **reducir el parpadeo** durante la selección y el reordenamiento de páginas, reutilizando controles en vez de recrearlos.
+- **Entorno de compilación actualizado a `windows-2022`**: el workflow de CI (`.github/workflows/build.yml`) pasa a `windows-2022` para mantener compatibilidad con **Flutter 3.29.2**.
+
+### Fixed
+- **Se garantiza la extensión `.pdf` al guardar desde el visor**: si el usuario escribe un nombre de archivo sin extensión (o con otra), al guardar se añade/normaliza automáticamente a `.pdf`.
+- **Reconstrucción de propiedades de texto de anotaciones FreeText tras reabrir el documento**: al volver a abrir un PDF, las anotaciones FreeText recuperan sus propiedades de texto (fuente, tamaño, color, alineación) reconstruyéndolas desde la apariencia almacenada, de modo que vuelven a ser editables con su estilo correcto. Cubierto con pruebas en `tests/test_annotations.py`.
+
 ## [0.1.21] - 2026-06-11
 
 ### Added
