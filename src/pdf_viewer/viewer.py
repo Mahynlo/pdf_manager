@@ -791,7 +791,7 @@ class PDFViewerTab(
                 self.viewer_scroll.update()
             except Exception:
                 pass
-            self._scroll_to_page(self.current_page)
+            self._scroll_to_page(self.current_page, instant=True)
         else:
             self._scroll_to_page(self.current_page)
 

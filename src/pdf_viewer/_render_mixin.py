@@ -1369,7 +1369,7 @@ class _RenderMixin:
 
     # ── navigation ────────────────────────────────────────────────────────────
 
-    def _scroll_to_page(self, pn: int) -> None:
+    def _scroll_to_page(self, pn: int, instant: bool = False) -> None:
         self.current_page = pn
         self._update_nav_state()
         self._render_page_slot(pn)
@@ -1403,12 +1403,15 @@ class _RenderMixin:
             vh = getattr(self, "_last_viewport_h", 600.0) or 600.0
             self._scroll_max = max(0.0, float(content_h) - vh)
             self._cancel_single_nav_timer()
+            # update() primero: oculta las filas en Flutter antes de mover el scroll.
+            # Si se envía scroll_to antes de update(), Flutter ve todas las filas
+            # visibles al saltar a offset=0 → parpadeo de "todo el documento".
             try:
-                self.viewer_scroll.scroll_to(offset=0, duration=0)
+                self.viewer_scroll.update()
             except Exception:
                 pass
             try:
-                self.viewer_scroll.update()
+                self.viewer_scroll.scroll_to(offset=0, duration=0)
             except Exception:
                 pass
             self.page_ref.update()
@@ -1418,7 +1421,10 @@ class _RenderMixin:
             self._prefetch_adjacent_pages(pn)
             return
         try:
-            self.viewer_scroll.scroll_to(offset=self._page_cum_offsets[pn], duration=250)
+            self.viewer_scroll.scroll_to(
+                offset=self._page_cum_offsets[pn],
+                duration=0 if instant else 250,
+            )
         except Exception:
             pass
         self.page_ref.update()
