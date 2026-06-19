@@ -265,7 +265,7 @@ class _RenderMixin:
             self._page_heights.append(float(h))
             cum += h + _PAGE_GAP
 
-        self._page_column.controls = rows
+        self.viewer_scroll.controls = rows
 
         # Apply display-mode visibility before first render.
         display_mode = getattr(self, "_display_mode", "continuous")
@@ -1213,14 +1213,14 @@ class _RenderMixin:
         self._refresh_page(self.current_page)
 
     def _update_scroll_column_width(self, max_page_w: int | None = None) -> None:
-        """Ajusta _page_column.width = max(viewport_w, max_page_w + 40).
+        """Ajusta viewer_scroll.width = max(viewport_w, max_page_w + 40).
 
         Cuando la página cabe (max_page_w < viewport_w) el Column es tan ancho
         como el viewport → horizontal_alignment=CENTER centra las páginas.
         Cuando la página desborda (zoom alto) el Column es más ancho que el
-        viewport → viewer_hscroll activa el scroll horizontal. La barra de
-        scroll vertical vive en viewer_scroll (acotado al viewport), así que
-        permanece visible siempre, independientemente del scroll horizontal.
+        viewport → viewer_hscroll (exterior) activa el scroll horizontal y su
+        barra nativa queda al fondo del viewport. La barra vertical se dibuja
+        aparte como overlay (_vbar) anclado al borde derecho del viewport.
         """
         if max_page_w is None:
             if not self._page_heights:
@@ -1248,7 +1248,7 @@ class _RenderMixin:
             except Exception:
                 pass
             # viewer_body.padding = 20 px × 2 lados = 40 px.
-            # Restamos 6 px extra de margen para que _page_column.width sea
+            # Restamos 6 px extra de margen para que viewer_scroll.width sea
             # SIEMPRE ligeramente menor que el viewport cuando la página cabe —
             # eso evita el scroll horizontal espurio.
             viewport_w = max(400, win_w - sidebar_w - 46)
@@ -1256,28 +1256,252 @@ class _RenderMixin:
             viewport_w = max_page_w + 400   # fallback: columna amplia
 
         page_overflows = max_page_w > viewport_w
+        self._page_overflows_h = page_overflows
 
         if page_overflows:
             # Página más ancha que el viewport → scroll horizontal intencional.
-            new_w          = max_page_w + 40
+            # La barra vertical NATIVA se dibuja en el borde derecho del Column
+            # (= fuera del viewport) → la ocultamos y usamos la barra vertical
+            # PERSONALIZADA (_vbar), anclada al borde derecho del viewport.
+            new_w            = max_page_w + 40
             new_hscroll_mode = ft.ScrollMode.AUTO
+            new_vscroll_mode = ft.ScrollMode.HIDDEN
         else:
             # Página cabe → columna = viewport (−4 px de margen anti-redondeo).
-            # Ocultar el scrollbar horizontal: no hay contenido extra lateral.
-            new_w          = viewport_w - 4
+            # El borde derecho del Column coincide con el viewport, así que la
+            # barra vertical NATIVA queda bien ubicada → la usamos y ocultamos
+            # la personalizada (evita ver dos barras superpuestas).
+            new_w            = viewport_w - 4
             new_hscroll_mode = ft.ScrollMode.HIDDEN
+            new_vscroll_mode = ft.ScrollMode.AUTO
 
         changed = (
-            self._page_column.width          != new_w
+            self.viewer_scroll.width         != new_w
             or self.viewer_hscroll.scroll    != new_hscroll_mode
+            or self.viewer_scroll.scroll     != new_vscroll_mode
         )
         if changed:
-            self._page_column.width       = new_w
+            self.viewer_scroll.width      = new_w
+            self.viewer_scroll.scroll     = new_vscroll_mode
             self.viewer_hscroll.scroll    = new_hscroll_mode
             try:
                 self.viewer_hscroll.update()
             except Exception:
                 pass
+            try:
+                self.viewer_scroll.update()
+            except Exception:
+                pass
+
+        # La barra vertical personalizada sólo se usa cuando la página desborda
+        # (si cabe, manda la nativa). Recalcular su geometría/visibilidad.
+        self._update_vbar_geometry()
+
+    # ── barra de scroll vertical personalizada ──────────────────────────────────
+    def _content_height(self) -> float:
+        """Alto total del contenido scrolleable (páginas visibles + gaps)."""
+        offs = getattr(self, "_page_cum_offsets", None)
+        hs   = getattr(self, "_page_heights", None)
+        if not offs or not hs:
+            return 0.0
+        return float(offs[-1] + hs[-1])
+
+    def _update_vbar_geometry(self) -> None:
+        """Recalcula visibilidad, alto de pista y tamaño/posición del thumb de la
+        barra vertical. Usa la última extensión real de scroll si la hay
+        (_vbar_max_extent / _vbar_viewport_h, fijadas en _on_view_scroll) y, en
+        su defecto, una estimación a partir del alto de las páginas."""
+        vbar = getattr(self, "_vbar", None)
+        if vbar is None:
+            return
+
+        # Sólo se usa cuando la página desborda horizontalmente; si cabe, la
+        # barra vertical nativa queda bien ubicada y se encarga ella.
+        if not getattr(self, "_page_overflows_h", False):
+            if vbar.visible:
+                vbar.visible = False
+                try:
+                    vbar.update()
+                except Exception:
+                    pass
+            return
+
+        content_h  = self._content_height()
+        viewport_h = getattr(self, "_vbar_viewport_h", 0.0) or \
+                     getattr(self, "_last_viewport_h", 0.0) or 0.0
+        max_extent = getattr(self, "_vbar_max_extent", None)
+        if max_extent is None:
+            max_extent = max(0.0, content_h - viewport_h)
+
+        # Sin desbordamiento vertical → ocultar la barra.
+        if max_extent <= 1.0 or viewport_h <= 0 or content_h <= 0:
+            if vbar.visible:
+                vbar.visible = False
+                try:
+                    vbar.update()
+                except Exception:
+                    pass
+            return
+
+        track_h = max(40.0, viewport_h - 12.0)
+        thumb_h = max(40.0, min(track_h, track_h * viewport_h / content_h))
+        travel  = max(1.0, track_h - thumb_h)
+        self._vbar_track_h = track_h
+        self._vbar_thumb_h = thumb_h
+        self._vbar_travel  = travel
+
+        offset = min(getattr(self, "_scroll_px", 0.0), max_extent)
+        thumb_top = (offset / max_extent) * travel if max_extent else 0.0
+        self._vbar_thumb_top = thumb_top
+
+        vbar.height             = track_h
+        self._vbar_thumb.height = thumb_h
+        self._vbar_thumb.top    = thumb_top
+        vbar.visible            = True
+        try:
+            vbar.update()
+        except Exception:
+            pass
+        # Flash breve al (re)aparecer (p. ej. al entrar en zoom alto) y luego
+        # auto-ocultar, igual que la barra nativa.
+        self._show_vbar()
+
+    # ── auto-ocultado (estilo barra nativa) ─────────────────────────────────────
+    _VBAR_HIDE_DELAY = 1.4  # segundos de inactividad antes de desvanecer
+
+    def _show_vbar(self) -> None:
+        """Muestra la barra (opacidad 1) y programa su auto-ocultado."""
+        vbar = getattr(self, "_vbar", None)
+        if vbar is None or not vbar.visible:
+            return
+        if vbar.opacity != 1.0:
+            vbar.opacity = 1.0
+            try:
+                vbar.update()
+            except Exception:
+                pass
+        self._schedule_vbar_hide()
+
+    def _schedule_vbar_hide(self) -> None:
+        t = getattr(self, "_vbar_hide_timer", None)
+        if t is not None:
+            t.cancel()
+        t = threading.Timer(self._VBAR_HIDE_DELAY, self._hide_vbar)
+        t.daemon = True
+        self._vbar_hide_timer = t
+        t.start()
+
+    def _hide_vbar(self) -> None:
+        """Desvanece la barra salvo que se esté arrastrando o el cursor esté encima."""
+        if getattr(self, "_is_closed", False):
+            return
+        if getattr(self, "_vbar_dragging", False) or getattr(self, "_vbar_hovering", False):
+            return
+        vbar = getattr(self, "_vbar", None)
+        if vbar is None or not vbar.visible or vbar.opacity == 0.0:
+            return
+        vbar.opacity = 0.0
+        try:
+            vbar.update()
+        except Exception:
+            pass
+
+    def _on_vbar_enter(self, e) -> None:
+        self._vbar_hovering = True
+        self._show_vbar()
+
+    def _on_vbar_exit(self, e) -> None:
+        self._vbar_hovering = False
+        self._schedule_vbar_hide()
+
+    def _set_vbar_thumb_top(self, top: float) -> None:
+        """Posiciona el thumb (sólo lo actualiza si se movió apreciablemente)."""
+        if abs(getattr(self, "_vbar_thumb_top", 0.0) - top) < 0.5:
+            return
+        self._vbar_thumb_top  = top
+        self._vbar_thumb.top  = top
+        try:
+            self._vbar_thumb.update()
+        except Exception:
+            pass
+
+    def _sync_vbar_thumb(self, px: float, max_extent: float) -> None:
+        """Reposiciona el thumb vertical según el scroll real (llamado desde
+        _on_view_scroll). No hace nada durante un arrastre del propio thumb."""
+        if getattr(self, "_vbar_dragging", False):
+            return
+        if getattr(self, "_vbar", None) is None or not self._vbar.visible:
+            return
+        travel = getattr(self, "_vbar_travel", 0.0)
+        if travel <= 0 or max_extent <= 0:
+            return
+        self._set_vbar_thumb_top(min(1.0, px / max_extent) * travel)
+
+    def _update_vbar_from_event(self, e) -> None:
+        """Actualiza la barra vertical desde un evento de scroll real. Si cambió
+        la geometría (alto del viewport o extensión scrolleable) recalcula tamaño;
+        si no, sólo reposiciona el thumb (barato)."""
+        try:
+            px = float(getattr(e, "pixels", None) or 0.0)
+        except (TypeError, ValueError):
+            px = 0.0
+        mx = getattr(e, "max_scroll_extent", None)
+        vh = getattr(e, "viewport_dimension", None)
+        geom_changed = False
+        if vh:
+            vh = float(vh)
+            if abs((getattr(self, "_vbar_viewport_h", 0.0) or 0.0) - vh) > 0.5:
+                self._vbar_viewport_h = vh
+                geom_changed = True
+        if mx is not None:
+            mx = float(mx)
+            if abs((getattr(self, "_vbar_max_extent", None) or -1.0) - mx) > 0.5:
+                self._vbar_max_extent = mx
+                geom_changed = True
+        # Durante un arrastre del thumb, nosotros mandamos la posición: sólo
+        # absorbemos las dimensiones, sin reposicionar (evita el bucle/jitter).
+        if getattr(self, "_vbar_dragging", False):
+            return
+        if geom_changed:
+            self._update_vbar_geometry()
+        else:
+            self._sync_vbar_thumb(px, getattr(self, "_vbar_max_extent", 0.0) or 0.0)
+        # Hay scroll → mostrar la barra y reprogramar el auto-ocultado.
+        self._show_vbar()
+
+    def _on_vbar_drag_start(self, e) -> None:
+        self._vbar_dragging = True
+        self._show_vbar()
+
+    def _on_vbar_drag_end(self, e) -> None:
+        self._vbar_dragging = False
+        self._schedule_vbar_hide()
+
+    def _on_vbar_drag(self, e) -> None:
+        """Arrastre del thumb → desplaza viewer_scroll verticalmente. Acumulamos
+        el delta sobre la posición del thumb (fuente de verdad propia) para no
+        depender del valor leído del control."""
+        travel     = getattr(self, "_vbar_travel", 0.0)
+        max_extent = getattr(self, "_vbar_max_extent", None)
+        if max_extent is None:
+            max_extent = max(0.0, self._content_height() -
+                             (getattr(self, "_last_viewport_h", 0.0) or 0.0))
+        if travel <= 0 or max_extent <= 0:
+            return
+        new_top = getattr(self, "_vbar_thumb_top", 0.0) + (e.delta_y or 0.0)
+        new_top = max(0.0, min(new_top, travel))
+        self._vbar_thumb_top = new_top
+        self._vbar_thumb.top = new_top
+        offset = (new_top / travel) * max_extent
+        self._scroll_px = offset
+        try:
+            self._vbar_thumb.update()
+        except Exception:
+            pass
+        try:
+            self.viewer_scroll.scroll_to(offset=offset, duration=0)
+        except Exception:
+            pass
 
     def _on_window_resized(self, e=None) -> None:
         """Callback for page.on_resized: recalculate scroll column width so the
@@ -1311,6 +1535,7 @@ class _RenderMixin:
             vh = getattr(e, "viewport_dimension", None)
             if vh:
                 self._last_viewport_h = float(vh)
+            self._update_vbar_from_event(e)
             return
         pixels     = getattr(e, "pixels",            None)
         viewport_h = getattr(e, "viewport_dimension", None) or 600.0
@@ -1324,6 +1549,7 @@ class _RenderMixin:
         self._last_viewport_h = float(viewport_h)
         self._scrolling = True
         self._schedule_scroll_idle()
+        self._update_vbar_from_event(e)
 
         px, vh = float(pixels), float(viewport_h)
 

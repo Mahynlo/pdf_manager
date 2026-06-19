@@ -634,44 +634,80 @@ class PDFViewerTab(
         )
 
         # ── scroll area ───────────────────────────────────────────────────────
-        # Anidamiento: scroll vertical EXTERIOR (acotado al viewport) → scroll
-        # horizontal INTERIOR → columna de páginas. De esta forma la barra de
-        # scroll vertical pertenece a viewer_scroll, que está acotado al ancho
-        # del viewport, y por tanto queda anclada al borde derecho de la vista
-        # y es visible SIEMPRE, aunque con zoom alto la página desborde
-        # lateralmente. (Antes el scroll vertical era el interior y su barra se
-        # iba con el desbordamiento horizontal: sólo se veía al desplazarse al
-        # extremo derecho de la hoja.)
+        # Anidamiento: scroll horizontal EXTERIOR (viewer_hscroll, acotado al
+        # viewport por expand=True) → scroll vertical INTERIOR (viewer_scroll,
+        # width dinámico) → páginas. Un scroll horizontal NO puede ir dentro de
+        # uno vertical (el eje transversal queda no-acotado y Flutter lanza
+        # "Horizontal viewport was given unbounded height"), por eso el
+        # horizontal va por fuera.
         #
-        # _page_column: Column con las páginas. width dinámico:
+        # viewer_scroll: Column de scroll vertical con width dinámico.
         #   · page_w < viewport_w → width = viewport → páginas centradas (CENTER).
         #   · page_w > viewport_w (zoom alto) → width = page_w+40 → viewer_hscroll
         #     activa el scroll horizontal.
-        self._page_column = ft.Column(
+        # Su barra vertical NATIVA se dibuja en el borde derecho del Column, que
+        # con zoom alto queda fuera del viewport → la ocultamos (scroll=HIDDEN,
+        # el contenido sigue desplazándose por rueda/programación) y dibujamos
+        # una barra vertical PERSONALIZADA (_vbar) anclada al borde derecho del
+        # viewport. La barra horizontal nativa (viewer_hscroll, exterior) sí
+        # queda bien anclada al fondo del viewport.
+        self.viewer_scroll = ft.Column(
             controls=[],
+            scroll=ft.ScrollMode.HIDDEN,
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            on_scroll=self._on_view_scroll,
             spacing=16,
         )
-        # viewer_hscroll: Row scrollable horizontal con la columna de páginas.
-        # Sin expand=True: vive dentro de viewer_scroll (Column con scroll
-        # vertical), que ya le acota el ancho al viewport.
+        # viewer_hscroll: Row scrollable horizontal (exterior, expand=True →
+        # acotado al viewport). Su barra horizontal nativa queda al fondo.
         self.viewer_hscroll = ft.Row(
-            [self._page_column],
+            [self.viewer_scroll],
             scroll=ft.ScrollMode.AUTO,
-            vertical_alignment=ft.CrossAxisAlignment.START,
-        )
-        # viewer_scroll: Column de scroll vertical, expand=True → acotado al
-        # viewport → su scrollbar vertical queda fija a la derecha de la vista.
-        self.viewer_scroll = ft.Column(
-            controls=[self.viewer_hscroll],
-            scroll=ft.ScrollMode.AUTO,
-            on_scroll=self._on_view_scroll,
             expand=True,
+            vertical_alignment=ft.CrossAxisAlignment.START,
         )
         self._rebuild_scroll_content(scroll_back=False)
 
+        # ── barra de scroll vertical personalizada ─────────────────────────────
+        # Overlay anclado al borde derecho del viewport (en un Stack sobre
+        # viewer_hscroll). El thumb arrastra viewer_scroll verticalmente; su
+        # posición/tamaño se sincroniza con el scroll real en _on_view_scroll.
+        # Aspecto discreto, como la barra nativa: thumb fino semitransparente,
+        # sin pista de fondo, y AUTO-OCULTADO — aparece al hacer scroll o al
+        # pasar el cursor y se desvanece tras un momento de inactividad (la
+        # opacidad del contenedor se anima entre 0 y 1).
+        self._vbar_thumb = ft.Container(
+            width=7, height=60, bgcolor="#73757575", border_radius=4,
+            left=3, top=0,
+        )
+        # GestureDetector sobre TODA la pista (no sólo el thumb) → fácil de
+        # agarrar y el arrastre funciona en cualquier punto de la barra.
+        self._vbar_gd = ft.GestureDetector(
+            content=ft.Stack([self._vbar_thumb], expand=True),
+            on_vertical_drag_start=self._on_vbar_drag_start,
+            on_vertical_drag_update=self._on_vbar_drag,
+            on_vertical_drag_end=self._on_vbar_drag_end,
+            on_enter=self._on_vbar_enter,
+            on_exit=self._on_vbar_exit,
+            mouse_cursor=ft.MouseCursor.GRAB,
+            expand=True,
+        )
+        self._vbar = ft.Container(
+            content=self._vbar_gd,
+            width=13,
+            right=3, top=6, height=0,
+            visible=False,
+            opacity=0.0,
+            animate_opacity=ft.Animation(180, ft.AnimationCurve.EASE_OUT),
+        )
+        # Geometría inicial (estimada; se refina con el primer scroll/resize).
+        self._update_vbar_geometry()
         viewer_body = ft.Container(
-            self.viewer_scroll,
+            ft.Stack(
+                [self.viewer_hscroll, self._vbar],
+                expand=True,
+                fit=ft.StackFit.EXPAND,
+            ),
             expand=True,
             bgcolor=_VIEWER_BG,
             padding=20,
@@ -1059,7 +1095,7 @@ class PDFViewerTab(
         # tocan controles) y, sobre todo, cada threading.Timer referencia self,
         # manteniendo viva toda la instancia (listas de ~20 controles × N
         # páginas) hasta que disparen → memoria que no se libera.
-        for _attr in ("_scroll_idle_timer", "_zoom_timer", "_render_upd_timer", "_restore_scroll_timer", "_single_nav_timer"):
+        for _attr in ("_scroll_idle_timer", "_zoom_timer", "_render_upd_timer", "_restore_scroll_timer", "_single_nav_timer", "_vbar_hide_timer"):
             _t = getattr(self, _attr, None)
             if _t is not None:
                 try:
