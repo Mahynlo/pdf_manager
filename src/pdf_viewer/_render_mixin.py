@@ -1367,7 +1367,22 @@ class _RenderMixin:
         self._show_vbar()
 
     # ── auto-ocultado (estilo barra nativa) ─────────────────────────────────────
-    _VBAR_HIDE_DELAY = 1.4  # segundos de inactividad antes de desvanecer
+    _VBAR_HIDE_DELAY    = 1.4         # segundos de inactividad antes de desvanecer
+    _VBAR_THUMB_IDLE    = "#73757575"  # gris sutil en reposo
+    _VBAR_THUMB_ACTIVE  = "#CC5F5F5F"  # más intenso al pasar el cursor / arrastrar
+
+    def _set_vbar_active(self, active: bool) -> None:
+        """Cambia el color del thumb a su estado intenso (hover/arrastre) o reposo."""
+        thumb = getattr(self, "_vbar_thumb", None)
+        if thumb is None:
+            return
+        color = self._VBAR_THUMB_ACTIVE if active else self._VBAR_THUMB_IDLE
+        if thumb.bgcolor != color:
+            thumb.bgcolor = color
+            try:
+                thumb.update()
+            except Exception:
+                pass
 
     def _show_vbar(self) -> None:
         """Muestra la barra (opacidad 1) y programa su auto-ocultado."""
@@ -1408,10 +1423,13 @@ class _RenderMixin:
 
     def _on_vbar_enter(self, e) -> None:
         self._vbar_hovering = True
+        self._set_vbar_active(True)
         self._show_vbar()
 
     def _on_vbar_exit(self, e) -> None:
         self._vbar_hovering = False
+        if not getattr(self, "_vbar_dragging", False):
+            self._set_vbar_active(False)
         self._schedule_vbar_hide()
 
     def _set_vbar_thumb_top(self, top: float) -> None:
@@ -1471,10 +1489,13 @@ class _RenderMixin:
 
     def _on_vbar_drag_start(self, e) -> None:
         self._vbar_dragging = True
+        self._set_vbar_active(True)
         self._show_vbar()
 
     def _on_vbar_drag_end(self, e) -> None:
         self._vbar_dragging = False
+        if not getattr(self, "_vbar_hovering", False):
+            self._set_vbar_active(False)
         self._schedule_vbar_hide()
 
     def _on_vbar_drag(self, e) -> None:

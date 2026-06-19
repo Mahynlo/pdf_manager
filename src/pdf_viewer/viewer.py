@@ -677,8 +677,9 @@ class PDFViewerTab(
         # pasar el cursor y se desvanece tras un momento de inactividad (la
         # opacidad del contenedor se anima entre 0 y 1).
         self._vbar_thumb = ft.Container(
-            width=7, height=60, bgcolor="#73757575", border_radius=4,
+            width=7, height=60, bgcolor=self._VBAR_THUMB_IDLE, border_radius=4,
             left=3, top=0,
+            animate=ft.Animation(120, ft.AnimationCurve.EASE_OUT),
         )
         # GestureDetector sobre TODA la pista (no sólo el thumb) → fácil de
         # agarrar y el arrastre funciona en cualquier punto de la barra.
