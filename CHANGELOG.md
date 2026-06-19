@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.24] - 2026-06-18
+
+### Added
+- **Visor responsivo al tamaño de la ventana**: al redimensionar la ventana de la aplicación, el visor recalcula automáticamente el ancho disponible — el scrollbar horizontal aparece cuando la página (al zoom actual) es más ancha que la ventana, y desaparece cuando cabe. El ajuste se aplica también al recuperar el foco sobre una pestaña que estuvo inactiva mientras la ventana fue redimensionada. Implementado suscribiendo `page_ref.on_resized` (`_on_window_resized`) al tomar el foco y desinscribiendo al perderlo o cerrar la pestaña.
+
+### Fixed
+- **`ValueError: document closed` al cambiar de modo de vista en documentos grandes**: race condition (TOCTOU) entre los hilos de timer/render y `close()` — `len(self.doc)` lanzaba excepción si el documento se cerraba entre la comprobación `_is_closed` y la llamada real. Se añadieron guardas `_is_closed` en la entrada de los métodos que corren en hilos de fondo y `try/except (ValueError, AttributeError)` en cada acceso a `len(self.doc)` en `_evict_outside_window`, `_update_nav_state`, `_prune_text_caches`, `_prune_render_cache`, `_prefetch_neighbors_preview` y `_prefetch_adjacent_pages`.
+- **Parpadeo al cambiar entre modo de vista continua y página única/doble**: el orden de `update()` y `scroll_to()` estaba invertido, de modo que Flutter mostraba todas las filas visibles en offset 0 antes de ocultar las no activas. Ahora `update()` (que oculta las filas) se envía antes que `scroll_to()`. Además, la transición usa `duration=0` (instantánea) al cambiar de modo para evitar la animación de 250 ms desde el inicio del documento hasta la página destino.
+- **Parpadeo al hacer zoom en modo de página única en documentos grandes**: `viewer_scroll.update()` enviaba ~2·N mutaciones de control para todos los placeholders de un PDF de N páginas, causando que Flutter renderizara estados intermedios visibles. Ahora se actualiza únicamente el slot visible de forma dirigida, y el flush completo de los placeholders ocultos se difiere 50 ms mediante un timer (`_flush_placeholder_dims`), eliminando el parpadeo perceptible.
+- **El panel lateral (OCR/censura) no actualizaba el ancho del visor al abrirse/cerrarse**: `_toggle_sidebar` no llamaba a `_update_scroll_column_width`, dejando la columna de scroll con el ancho anterior hasta el siguiente cambio de zoom o navegación.
+- **Variantes negrita/cursiva de anotaciones FreeText con acentos y ñ mal codificados**: las fuentes derivadas (ej. `Helvetica-Bold`) se creaban sin el diccionario `/Encoding WinAnsiEncoding`, haciendo que los caracteres especiales del español no se renderizaran correctamente en anotaciones FreeText con estilo negrita o cursiva. Ahora se parchea explícitamente el encoding al generar cada variante de fuente.
+
 ## [0.1.23] - 2026-06-17
 
 ### Added
