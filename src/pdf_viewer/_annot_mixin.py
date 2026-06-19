@@ -547,9 +547,22 @@ class _AnnotMixin:
             value=cur_text, multiline=True, min_lines=3, max_lines=10,
             label="Texto", autofocus=True, text_size=14,
         )
+        _ITALIC_FNS = {"heit", "tiit", "coit", "hebi", "tibi", "cobi"}
+        _BOLD_FNS   = {"hebo", "tibo", "cobo", "hebi", "tibi", "cobi"}
         font_dd = ft.Dropdown(
             label="Fuente", value=cur_font, width=210,
-            options=[ft.dropdown.Option(key=fn, text=lbl) for lbl, fn in FREETEXT_FONTS],
+            options=[
+                ft.dropdown.Option(
+                    key=fn, text=lbl,
+                    content=ft.Text(
+                        lbl,
+                        italic=fn in _ITALIC_FNS,
+                        weight=ft.FontWeight.BOLD if fn in _BOLD_FNS else ft.FontWeight.NORMAL,
+                        size=14,
+                    ),
+                )
+                for lbl, fn in FREETEXT_FONTS
+            ],
         )
         size_tf = ft.TextField(
             label="Tamaño", value=str(cur_size), width=90,

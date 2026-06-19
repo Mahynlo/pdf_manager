@@ -519,6 +519,81 @@ def _polygon_replace(
     return new_annot
 
 
+# ── FreeText bold/italic AP-stream patch ───────────────────────────────────────
+# PyMuPDF 1.27 colapsa TODAS las variantes Helvetica/Times/Courier al nombre de
+# familia base en el DA y en el AP stream (siempre escribe /Helv, /TiRo, /Cour).
+# El renderizador usa el AP stream, así que el texto siempre aparece en estilo
+# regular. La solución es parchear el AP stream después de cada update():
+#   1. Reemplazar el nombre de recurso base por uno específico de la variante.
+#   2. Añadir una entrada /Font en el Resources del AP apuntando al font correcto.
+_FT_FONT_INFO: dict[str, tuple[str, str]] = {
+    "heit": ("/Helvetica-Oblique",    "HeIt"),
+    "hebo": ("/Helvetica-Bold",        "HeBo"),
+    "hebi": ("/Helvetica-BoldOblique", "HeBi"),
+    "tiit": ("/Times-Italic",          "TiIt"),
+    "tibo": ("/Times-Bold",            "TiBo"),
+    "tibi": ("/Times-BoldItalic",      "TiBi"),
+    "coit": ("/Courier-Oblique",       "CoIt"),
+    "cobo": ("/Courier-Bold",          "CoBo"),
+    "cobi": ("/Courier-BoldOblique",   "CoBi"),
+}
+_FT_BASE_RES: dict[str, str] = {
+    "heit": "Helv", "hebo": "Helv", "hebi": "Helv",
+    "tiit": "TiRo", "tibo": "TiRo", "tibi": "TiRo",
+    "coit": "Cour", "cobo": "Cour", "cobi": "Cour",
+}
+
+def _fix_freetext_ap(doc: fitz.Document, annot: fitz.Annot, fontname: str) -> None:
+    """Parchea el AP stream de un FreeText para que use la variante real de fuente.
+
+    Sólo actúa sobre variantes cursiva/negrita (las fuentes base no necesitan
+    parche). Seguro de llamar varias veces: si el nombre ya fue sustituido, la
+    regex no encuentra coincidencia y sale sin hacer nada.
+    """
+    info = _FT_FONT_INFO.get(fontname)
+    if info is None:
+        return  # fuente base, el AP ya es correcto
+    base_font_pdf, res_name = info
+    base_res = _FT_BASE_RES[fontname]
+
+    # Localizar el xref del stream N del AP
+    xref = annot.xref
+    try:
+        ap_val = doc.xref_get_key(xref, "AP")
+        ap_str = ap_val[1] if isinstance(ap_val, tuple) else ""
+        m = re.search(r'/N\s+(\d+)\s+0\s+R', ap_str)
+        if not m:
+            return
+        n_xref = int(m.group(1))
+
+        # Leer objeto y stream ANTES de modificar
+        obj_def = doc.xref_object(n_xref)
+        stream  = doc.xref_stream(n_xref).decode("latin-1", errors="replace")
+    except Exception:
+        return
+
+    # Sustituir el nombre de recurso base en el stream de contenido
+    new_stream = re.sub(rf'/{re.escape(base_res)}\b', f'/{res_name}', stream)
+    if new_stream == stream:
+        return  # ya parcheado o no encontrado
+
+    try:
+        # Crear objeto font para la variante (Type1 Base-14, sin incrustar)
+        font_xref = doc.get_new_xref()
+        doc.update_object(
+            font_xref,
+            f"<</Type /Font /Subtype /Type1 /BaseFont {base_font_pdf}>>",
+        )
+
+        # Añadir la entrada al diccionario /Font del Resources del AP
+        new_entry = f"/{res_name} {font_xref} 0 R"
+        new_obj   = re.sub(r'(/Font\s*<<)', rf'\1 {new_entry}', obj_def)
+        doc.update_object(n_xref, new_obj)
+        doc.update_stream(n_xref, new_stream.encode("latin-1"))
+    except Exception:
+        pass
+
+
 class AnnotationManager:
     """Tracks tool selection and drag state; applies annotations to a document."""
 
@@ -790,12 +865,19 @@ class AnnotationManager:
         )
         # update() reconstruye el appearance stream; sin esto el texto/color no
         # siempre se reflejan al renderizar (mismo motivo que en los markup).
+        # fontname y fontsize son obligatorios aquí: sin ellos update()
+        # reconstruye el AP desde el DA string, que sólo guarda la familia base
+        # (PyMuPDF colapsa la variante cursiva/negrita al guardar el DA).
+        # Pasarlos explícitamente fuerza a MuPDF a usar la variante exacta.
         annot.update(
             fontsize=props["fontsize"],
             fontname=props["fontname"],
             text_color=props["color"],
             fill_color=props["fill"],
         )
+        # PyMuPDF 1.27 colapsa todas las variantes al nombre base en el AP stream.
+        # Parchear manualmente para que cursiva/negrita se vean en el visor.
+        _fix_freetext_ap(page.parent, annot, props["fontname"])
         return annot
 
     def commit_text(
@@ -1207,12 +1289,19 @@ class AnnotationManager:
             return False
         rotation = self._rotations.get(xref, 0.0)
         # FreeText: "color" es el color del texto, no el trazo del borde.
+        # fontname/fontsize son obligatorios para preservar la variante (cursiva…).
         if _atype(annot) == "FreeText":
             _reset_ap(annot)
-            annot.update(text_color=color)
-            props = self._text_props.get(xref)
-            if props is not None:
-                props["color"] = tuple(color)
+            tp = self._text_props.get(xref, {})
+            tp["color"] = tuple(color)
+            fn = tp.get("fontname", DEFAULT_TEXT_FONT)
+            annot.update(
+                fontname=fn,
+                fontsize=tp.get("fontsize", DEFAULT_TEXT_SIZE),
+                text_color=color,
+                fill_color=tp.get("fill"),
+            )
+            _fix_freetext_ap(annot.parent.parent, annot, fn)
             if rotation:
                 _apply_rot(annot, rotation)
             return True
@@ -1292,7 +1381,18 @@ class AnnotationManager:
         try:
             _reset_ap(annot)
             annot.set_rect(new_visual)
-            annot.update()
+            if at == "FreeText":
+                tp = self._text_props.get(xref, {})
+                fn = tp.get("fontname", DEFAULT_TEXT_FONT)
+                annot.update(
+                    fontname=fn,
+                    fontsize=tp.get("fontsize", DEFAULT_TEXT_SIZE),
+                    text_color=tp.get("color", DEFAULT_TEXT_COLOR),
+                    fill_color=tp.get("fill"),
+                )
+                _fix_freetext_ap(page.parent, annot, fn)
+            else:
+                annot.update()
             if rotation:
                 _apply_rot(annot, rotation)
         except Exception:
@@ -1387,7 +1487,18 @@ class AnnotationManager:
             rotation = self._rotations.get(xref, 0.0)
             _reset_ap(annot)
             annot.set_flags(new)
-            annot.update()
+            if _atype(annot) == "FreeText":
+                tp = self._text_props.get(xref, {})
+                fn = tp.get("fontname", DEFAULT_TEXT_FONT)
+                annot.update(
+                    fontname=fn,
+                    fontsize=tp.get("fontsize", DEFAULT_TEXT_SIZE),
+                    text_color=tp.get("color", DEFAULT_TEXT_COLOR),
+                    fill_color=tp.get("fill"),
+                )
+                _fix_freetext_ap(page.parent, annot, fn)
+            else:
+                annot.update()
             if rotation:
                 _apply_rot(annot, rotation)
         return True
@@ -1460,7 +1571,18 @@ class AnnotationManager:
         try:
             _reset_ap(annot)
             annot.set_rect(new_rect)
-            annot.update()
+            if at == "FreeText":
+                tp = self._text_props.get(xref, {})
+                fn = tp.get("fontname", DEFAULT_TEXT_FONT)
+                annot.update(
+                    fontname=fn,
+                    fontsize=tp.get("fontsize", DEFAULT_TEXT_SIZE),
+                    text_color=tp.get("color", DEFAULT_TEXT_COLOR),
+                    fill_color=tp.get("fill"),
+                )
+                _fix_freetext_ap(page.parent, annot, fn)
+            else:
+                annot.update()
             if rotation:
                 _apply_rot(annot, rotation)
         except Exception:
@@ -1630,7 +1752,18 @@ class AnnotationManager:
         try:
             _reset_ap(annot)
             annot.set_rect(new_rect)
-            annot.update()
+            if at == "FreeText":
+                tp = self._text_props.get(xref, {})
+                fn = tp.get("fontname", DEFAULT_TEXT_FONT)
+                annot.update(
+                    fontname=fn,
+                    fontsize=tp.get("fontsize", DEFAULT_TEXT_SIZE),
+                    text_color=tp.get("color", DEFAULT_TEXT_COLOR),
+                    fill_color=tp.get("fill"),
+                )
+                _fix_freetext_ap(page.parent, annot, fn)
+            else:
+                annot.update()
             if rotation:
                 _apply_rot(annot, rotation)
         except Exception:
