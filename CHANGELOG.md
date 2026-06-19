@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.25] - 2026-06-19
+
+### Added
+- **Barra de scroll vertical personalizada con auto-ocultado para zoom alto**: cuando el zoom hace que la página sea más ancha que el viewport, la barra de scroll vertical nativa quedaba dibujada en el borde derecho del contenido (fuera de pantalla), de modo que solo era accesible tras desplazarse horizontalmente hasta el final de la hoja. Ahora, al desbordar, se oculta la barra nativa y se muestra una **barra vertical personalizada (`_vbar`) anclada al borde derecho del viewport**, siempre visible y arrastrable desde cualquier punto. Imita a la nativa: thumb fino semitransparente, **auto-ocultado** tras inactividad (aparece al hacer scroll o al pasar el cursor y se desvanece con animación de opacidad) y **color más intenso** en hover/arrastre.
+
+### Changed
+- **Anclaje de las barras de scroll al viewport**: el scroll horizontal pasa a ser el contenedor exterior (`viewer_hscroll`, acotado al viewport por `expand=True`) y el vertical el interior, de modo que la **barra horizontal nativa queda anclada al fondo del viewport** (antes solo era accesible al final del documento). Se alterna automáticamente entre la barra vertical nativa (cuando la página cabe) y la personalizada (cuando desborda), sin mostrar nunca ambas a la vez.
+
+### Tests
+- **Regresión de barras de scroll** (`tests/test_scrollbar.py`, 15 casos): alternado nativa/personalizada según desbordamiento, geometría proporcional del thumb, arrastre (incluido clamp y guard de realimentación durante `scroll_to`), sincronización con el scroll real, auto-ocultado (con hover/arrastre que lo impiden) y estados de color.
+
 ## [0.1.24] - 2026-06-18
 
 ### Added
