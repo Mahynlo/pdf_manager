@@ -89,6 +89,8 @@ FREETEXT_ALIGN: list[tuple[str, int]] = [
 
 # Tamaños de fuente ofrecidos en el editor (pt).
 FREETEXT_SIZES: list[int] = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48]
+FREETEXT_SIZE_MIN: int = 1
+FREETEXT_SIZE_MAX: int = 144
 
 # Valores por defecto de una anotación de texto nueva.
 DEFAULT_TEXT_FONT  = "helv"

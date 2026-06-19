@@ -8,6 +8,7 @@ import fitz
 from .annotations import (
     HIGHLIGHT_COLORS, Tool, _atype,
     FREETEXT_FONTS, FREETEXT_ALIGN, FREETEXT_SIZES,
+    FREETEXT_SIZE_MIN, FREETEXT_SIZE_MAX,
     DEFAULT_TEXT_FONT, DEFAULT_TEXT_SIZE, DEFAULT_TEXT_COLOR, DEFAULT_TEXT_ALIGN,
 )
 from .renderer import BASE_SCALE
@@ -550,11 +551,42 @@ class _AnnotMixin:
             label="Fuente", value=cur_font, width=210,
             options=[ft.dropdown.Option(key=fn, text=lbl) for lbl, fn in FREETEXT_FONTS],
         )
-        size_val = str(cur_size if cur_size in FREETEXT_SIZES else DEFAULT_TEXT_SIZE)
-        size_dd = ft.Dropdown(
-            label="Tamaño", value=size_val, width=110,
-            options=[ft.dropdown.Option(key=str(s), text=f"{s} pt") for s in FREETEXT_SIZES],
+        size_tf = ft.TextField(
+            label="Tamaño", value=str(cur_size), width=90,
+            keyboard_type=ft.KeyboardType.NUMBER, suffix_text="pt",
         )
+
+        def _on_size_blur(ev=None) -> None:
+            try:
+                n = int(float(size_tf.value or DEFAULT_TEXT_SIZE))
+                size_tf.value = str(max(FREETEXT_SIZE_MIN, min(FREETEXT_SIZE_MAX, n)))
+            except (ValueError, TypeError):
+                size_tf.value = str(DEFAULT_TEXT_SIZE)
+            try:
+                size_tf.update()
+            except Exception:
+                pass
+
+        size_tf.on_blur   = _on_size_blur
+        size_tf.on_submit = _on_size_blur
+
+        def _pick_size(s: int) -> None:
+            size_tf.value = str(s)
+            try:
+                size_tf.update()
+            except Exception:
+                pass
+
+        size_presets = ft.PopupMenuButton(
+            tooltip="Tamaños predefinidos",
+            icon=ft.Icons.ARROW_DROP_DOWN,
+            items=[
+                ft.PopupMenuItem(text=f"{s} pt", on_click=lambda e, s=s: _pick_size(s))
+                for s in FREETEXT_SIZES
+            ],
+        )
+        size_row = ft.Row([size_tf, size_presets], spacing=0,
+                          vertical_alignment=ft.CrossAxisAlignment.END)
         align_dd = ft.Dropdown(
             label="Alineación", value=str(cur_align), width=150,
             options=[ft.dropdown.Option(key=str(v), text=lbl) for lbl, v in FREETEXT_ALIGN],
@@ -615,7 +647,11 @@ class _AnnotMixin:
                 self._show_snack("Escribe algún texto")
                 return
             fn = font_dd.value or DEFAULT_TEXT_FONT
-            sz = int(size_dd.value or DEFAULT_TEXT_SIZE)
+            try:
+                sz = max(FREETEXT_SIZE_MIN, min(FREETEXT_SIZE_MAX,
+                         int(float(size_tf.value or DEFAULT_TEXT_SIZE))))
+            except (ValueError, TypeError):
+                sz = DEFAULT_TEXT_SIZE
             al = int(align_dd.value or DEFAULT_TEXT_ALIGN)
             col = state["color"]
             # Recuadro on: conservar el grosor previo si ya lo tenía; si no, 1.5.
@@ -656,7 +692,7 @@ class _AnnotMixin:
                 content=ft.Column(
                     [
                         txt,
-                        ft.Row([font_dd, size_dd], spacing=10),
+                        ft.Row([font_dd, size_row], spacing=10),
                         ft.Row([align_dd, color_menu], spacing=16,
                                vertical_alignment=ft.CrossAxisAlignment.CENTER),
                         border_sw,
