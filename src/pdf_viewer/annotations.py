@@ -578,11 +578,14 @@ def _fix_freetext_ap(doc: fitz.Document, annot: fitz.Annot, fontname: str) -> No
         return  # ya parcheado o no encontrado
 
     try:
-        # Crear objeto font para la variante (Type1 Base-14, sin incrustar)
+        # Crear objeto font para la variante (Type1 Base-14, sin incrustar).
+        # WinAnsiEncoding es obligatorio: sin él el PDF usa StandardEncoding donde
+        # los bytes 0xC0-0xFF no corresponden a las letras acentuadas esperadas.
         font_xref = doc.get_new_xref()
         doc.update_object(
             font_xref,
-            f"<</Type /Font /Subtype /Type1 /BaseFont {base_font_pdf}>>",
+            f"<</Type /Font /Subtype /Type1 /BaseFont {base_font_pdf}"
+            f" /Encoding /WinAnsiEncoding>>",
         )
 
         # Añadir la entrada al diccionario /Font del Resources del AP
