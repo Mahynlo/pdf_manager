@@ -219,6 +219,8 @@ class _OCRMixin:
                 self._sidebar_btn.update()
             except Exception:
                 pass
+        if hasattr(self, "_update_scroll_column_width"):
+            self._update_scroll_column_width()
 
     # ── inference indicator helpers ───────────────────────────────────────────
 

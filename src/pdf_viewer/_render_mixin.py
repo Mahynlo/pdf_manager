@@ -90,6 +90,12 @@ class _RenderMixin:
                 for pn in range(total)
             ]
 
+        # Ancho del Column: máximo entre el viewport disponible (para que las
+        # páginas queden centradas cuando caben) y el ancho de la página al zoom
+        # actual + margen (para activar el scroll horizontal cuando no caben).
+        if page_dims:
+            self._update_scroll_column_width(max(w for w, _ in page_dims))
+
         # ── Fast-resize path ──────────────────────────────────────────────────
         # When the page count is unchanged (zoom / rotate), reuse all existing
         # Flet controls and only update their dimensions + clear stale images.
@@ -1188,6 +1194,72 @@ class _RenderMixin:
 
     def _update(self) -> None:
         self._refresh_page(self.current_page)
+
+    def _update_scroll_column_width(self, max_page_w: int | None = None) -> None:
+        """Ajusta viewer_scroll.width = max(viewport_w, max_page_w + 40).
+
+        Cuando la página cabe (max_page_w < viewport_w) el Column es tan ancho
+        como el viewport → horizontal_alignment=CENTER centra las páginas.
+        Cuando la página desborda (zoom alto) el Column es más ancho que el
+        viewport → viewer_hscroll activa el scroll horizontal.
+        """
+        if max_page_w is None:
+            if not self._page_heights:
+                return
+            with self._doc_lock:
+                try:
+                    max_page_w = max(
+                        int(self.doc[pn].rect.width * BASE_SCALE * self.zoom)
+                        for pn in range(len(self.doc))
+                    )
+                except Exception:
+                    return
+
+        # page_ref se pasa en __init__ → window.width disponible desde el inicio.
+        try:
+            win_w = int(self.page_ref.window.width or 0) or None
+        except Exception:
+            win_w = None
+
+        if win_w is not None:
+            sidebar_w = 0
+            try:
+                if self._sidebar_visible and self._right_sidebar is not None:
+                    sidebar_w = int(self._right_sidebar.width or 360)
+            except Exception:
+                pass
+            # viewer_body.padding = 20 px × 2 lados = 40 px.
+            # Restamos 6 px extra de margen para que viewer_scroll.width sea
+            # SIEMPRE ligeramente menor que viewer_hscroll cuando la página
+            # cabe — eso evita el scroll horizontal espurio y mantiene el
+            # scrollbar vertical dentro del viewport visible.
+            viewport_w = max(400, win_w - sidebar_w - 46)
+        else:
+            viewport_w = max_page_w + 400   # fallback: columna amplia
+
+        page_overflows = max_page_w > viewport_w
+
+        if page_overflows:
+            # Página más ancha que el viewport → scroll horizontal intencional.
+            new_w          = max_page_w + 40
+            new_hscroll_mode = ft.ScrollMode.AUTO
+        else:
+            # Página cabe → columna = viewport (−4 px de margen anti-redondeo).
+            # Ocultar el scrollbar horizontal: no hay contenido extra lateral.
+            new_w          = viewport_w - 4
+            new_hscroll_mode = ft.ScrollMode.HIDDEN
+
+        changed = (
+            self.viewer_scroll.width         != new_w
+            or self.viewer_hscroll.scroll    != new_hscroll_mode
+        )
+        if changed:
+            self.viewer_scroll.width      = new_w
+            self.viewer_hscroll.scroll    = new_hscroll_mode
+            try:
+                self.viewer_hscroll.update()
+            except Exception:
+                pass
 
     def _update_nav_state(self) -> None:
         total = len(self.doc)

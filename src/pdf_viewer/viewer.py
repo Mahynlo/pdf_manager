@@ -634,18 +634,33 @@ class PDFViewerTab(
         )
 
         # ── scroll area ───────────────────────────────────────────────────────
+        # viewer_scroll: Column de scroll vertical con width dinámico.
+        # width = max(viewport_w, page_w + 40):
+        #   · cuando page_w < viewport_w → Column llena el viewport → las páginas
+        #     se centran dentro del Column vía horizontal_alignment=CENTER.
+        #   · cuando page_w > viewport_w (zoom alto) → Column desborda el Row →
+        #     viewer_hscroll activa el scroll horizontal.
+        # NO usar expand=True: Expanded en un ListView (scroll Row) lanza error
+        # en Flutter porque el main axis es no-acotado.
         self.viewer_scroll = ft.Column(
             controls=[],
             scroll=ft.ScrollMode.AUTO,
-            expand=True,
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             on_scroll=self._on_view_scroll,
             spacing=16,
         )
+        # viewer_hscroll: Row scrollable horizontal. Cuando viewer_scroll es más
+        # ancho que el viewport el usuario puede desplazarse lateralmente.
+        self.viewer_hscroll = ft.Row(
+            [self.viewer_scroll],
+            scroll=ft.ScrollMode.AUTO,
+            expand=True,
+            vertical_alignment=ft.CrossAxisAlignment.START,
+        )
         self._rebuild_scroll_content(scroll_back=False)
 
         viewer_body = ft.Container(
-            self.viewer_scroll,
+            self.viewer_hscroll,
             expand=True,
             bgcolor=_VIEWER_BG,
             padding=20,
@@ -916,6 +931,10 @@ class PDFViewerTab(
             # fast-resize path: hides stale images, shows loading overlays,
             # and triggers lazy re-render of the first visible pages.
             self._rebuild_scroll_content(scroll_back=False)
+        else:
+            # Recalcular el ancho del Column por si la ventana fue redimensionada
+            # mientras este tab estaba inactivo.
+            self._update_scroll_column_width()
         # Restaurar la posición de scroll donde estaba el usuario. Cambiar de
         # pestaña alterna content.visible (False/True), y Flutter reinicia el
         # offset del Column de scroll al re-mostrarlo → volver a un PDF perdía la
