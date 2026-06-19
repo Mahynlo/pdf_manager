@@ -265,7 +265,7 @@ class _RenderMixin:
             self._page_heights.append(float(h))
             cum += h + _PAGE_GAP
 
-        self.viewer_scroll.controls = rows
+        self._page_column.controls = rows
 
         # Apply display-mode visibility before first render.
         display_mode = getattr(self, "_display_mode", "continuous")
@@ -1213,12 +1213,14 @@ class _RenderMixin:
         self._refresh_page(self.current_page)
 
     def _update_scroll_column_width(self, max_page_w: int | None = None) -> None:
-        """Ajusta viewer_scroll.width = max(viewport_w, max_page_w + 40).
+        """Ajusta _page_column.width = max(viewport_w, max_page_w + 40).
 
         Cuando la página cabe (max_page_w < viewport_w) el Column es tan ancho
         como el viewport → horizontal_alignment=CENTER centra las páginas.
         Cuando la página desborda (zoom alto) el Column es más ancho que el
-        viewport → viewer_hscroll activa el scroll horizontal.
+        viewport → viewer_hscroll activa el scroll horizontal. La barra de
+        scroll vertical vive en viewer_scroll (acotado al viewport), así que
+        permanece visible siempre, independientemente del scroll horizontal.
         """
         if max_page_w is None:
             if not self._page_heights:
@@ -1246,10 +1248,9 @@ class _RenderMixin:
             except Exception:
                 pass
             # viewer_body.padding = 20 px × 2 lados = 40 px.
-            # Restamos 6 px extra de margen para que viewer_scroll.width sea
-            # SIEMPRE ligeramente menor que viewer_hscroll cuando la página
-            # cabe — eso evita el scroll horizontal espurio y mantiene el
-            # scrollbar vertical dentro del viewport visible.
+            # Restamos 6 px extra de margen para que _page_column.width sea
+            # SIEMPRE ligeramente menor que el viewport cuando la página cabe —
+            # eso evita el scroll horizontal espurio.
             viewport_w = max(400, win_w - sidebar_w - 46)
         else:
             viewport_w = max_page_w + 400   # fallback: columna amplia
@@ -1267,11 +1268,11 @@ class _RenderMixin:
             new_hscroll_mode = ft.ScrollMode.HIDDEN
 
         changed = (
-            self.viewer_scroll.width         != new_w
+            self._page_column.width          != new_w
             or self.viewer_hscroll.scroll    != new_hscroll_mode
         )
         if changed:
-            self.viewer_scroll.width      = new_w
+            self._page_column.width       = new_w
             self.viewer_hscroll.scroll    = new_hscroll_mode
             try:
                 self.viewer_hscroll.update()

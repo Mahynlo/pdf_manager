@@ -634,33 +634,44 @@ class PDFViewerTab(
         )
 
         # ── scroll area ───────────────────────────────────────────────────────
-        # viewer_scroll: Column de scroll vertical con width dinámico.
-        # width = max(viewport_w, page_w + 40):
-        #   · cuando page_w < viewport_w → Column llena el viewport → las páginas
-        #     se centran dentro del Column vía horizontal_alignment=CENTER.
-        #   · cuando page_w > viewport_w (zoom alto) → Column desborda el Row →
-        #     viewer_hscroll activa el scroll horizontal.
-        # NO usar expand=True: Expanded en un ListView (scroll Row) lanza error
-        # en Flutter porque el main axis es no-acotado.
-        self.viewer_scroll = ft.Column(
+        # Anidamiento: scroll vertical EXTERIOR (acotado al viewport) → scroll
+        # horizontal INTERIOR → columna de páginas. De esta forma la barra de
+        # scroll vertical pertenece a viewer_scroll, que está acotado al ancho
+        # del viewport, y por tanto queda anclada al borde derecho de la vista
+        # y es visible SIEMPRE, aunque con zoom alto la página desborde
+        # lateralmente. (Antes el scroll vertical era el interior y su barra se
+        # iba con el desbordamiento horizontal: sólo se veía al desplazarse al
+        # extremo derecho de la hoja.)
+        #
+        # _page_column: Column con las páginas. width dinámico:
+        #   · page_w < viewport_w → width = viewport → páginas centradas (CENTER).
+        #   · page_w > viewport_w (zoom alto) → width = page_w+40 → viewer_hscroll
+        #     activa el scroll horizontal.
+        self._page_column = ft.Column(
             controls=[],
-            scroll=ft.ScrollMode.AUTO,
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            on_scroll=self._on_view_scroll,
             spacing=16,
         )
-        # viewer_hscroll: Row scrollable horizontal. Cuando viewer_scroll es más
-        # ancho que el viewport el usuario puede desplazarse lateralmente.
+        # viewer_hscroll: Row scrollable horizontal con la columna de páginas.
+        # Sin expand=True: vive dentro de viewer_scroll (Column con scroll
+        # vertical), que ya le acota el ancho al viewport.
         self.viewer_hscroll = ft.Row(
-            [self.viewer_scroll],
+            [self._page_column],
             scroll=ft.ScrollMode.AUTO,
-            expand=True,
             vertical_alignment=ft.CrossAxisAlignment.START,
+        )
+        # viewer_scroll: Column de scroll vertical, expand=True → acotado al
+        # viewport → su scrollbar vertical queda fija a la derecha de la vista.
+        self.viewer_scroll = ft.Column(
+            controls=[self.viewer_hscroll],
+            scroll=ft.ScrollMode.AUTO,
+            on_scroll=self._on_view_scroll,
+            expand=True,
         )
         self._rebuild_scroll_content(scroll_back=False)
 
         viewer_body = ft.Container(
-            self.viewer_hscroll,
+            self.viewer_scroll,
             expand=True,
             bgcolor=_VIEWER_BG,
             padding=20,
