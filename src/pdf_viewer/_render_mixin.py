@@ -866,7 +866,10 @@ class _RenderMixin:
         ``_point_has_text``), así que podar sólo añade una re-extracción si el
         usuario vuelve a una página lejana.
         """
-        total = len(self.doc)
+        try:
+            total = len(self.doc)
+        except (ValueError, AttributeError):
+            return
         radius = max(0, (_TEXT_CACHE_KEEP_PAGES - 1) // 2)
         start = max(0, center_page - radius)
         end = min(total, center_page + radius + 1)
@@ -896,7 +899,10 @@ class _RenderMixin:
         cache = getattr(self, "_render_cache", None)
         if cache is None:
             return
-        total = len(self.doc)
+        try:
+            total = len(self.doc)
+        except (ValueError, AttributeError):
+            return
         radius = max(0, (_CACHE_KEEP_PAGES - 1) // 2)
         start = max(0, center_page - radius)
         end = min(total, center_page + radius + 1)
@@ -907,7 +913,12 @@ class _RenderMixin:
             pass
 
     def _evict_outside_window(self, center_page: int) -> bool:
-        total = len(self.doc)
+        if getattr(self, "_is_closed", False):
+            return False
+        try:
+            total = len(self.doc)
+        except (ValueError, AttributeError):
+            return False
         radius = max(0, (_CACHE_KEEP_PAGES - 1) // 2)
         start = max(0, center_page - radius)
         end = min(total, center_page + radius + 1)
@@ -1107,7 +1118,10 @@ class _RenderMixin:
             return
         if getattr(self, "_display_mode", "continuous") != "continuous":
             return
-        total = len(self.doc)
+        try:
+            total = len(self.doc)
+        except (ValueError, AttributeError):
+            return
         radius = max(0, (_CACHE_KEEP_PAGES - 1) // 2)
         start = max(0, center - radius)
         end = min(total, center + radius + 1)
@@ -1127,7 +1141,10 @@ class _RenderMixin:
         sobrevive hasta alejarse. Render full (no preview) para evitar también el
         swap preview→nítido al aterrizar.
         """
-        total = len(self.doc)
+        try:
+            total = len(self.doc)
+        except (ValueError, AttributeError):
+            return
         mode  = getattr(self, "_display_mode", "continuous")
         if mode == "double":
             ps = (center // 2) * 2
@@ -1262,7 +1279,12 @@ class _RenderMixin:
                 pass
 
     def _update_nav_state(self) -> None:
-        total = len(self.doc)
+        if getattr(self, "_is_closed", False):
+            return
+        try:
+            total = len(self.doc)
+        except (ValueError, AttributeError):
+            return
         self.page_input.value  = str(self.current_page + 1)
         self.prev_btn.disabled = self.current_page == 0
         self.next_btn.disabled = self.current_page == total - 1
@@ -1402,7 +1424,10 @@ class _RenderMixin:
         self.page_ref.update()
 
     def _prev(self, e=None) -> None:
-        total = len(self.doc)
+        try:
+            total = len(self.doc)
+        except (ValueError, AttributeError):
+            return
         if self.current_page > 0:
             display_mode = getattr(self, "_display_mode", "continuous")
             if display_mode == "double":
@@ -1412,7 +1437,10 @@ class _RenderMixin:
                 self._scroll_to_page(self.current_page - 1)
 
     def _next(self, e=None) -> None:
-        total = len(self.doc)
+        try:
+            total = len(self.doc)
+        except (ValueError, AttributeError):
+            return
         if self.current_page < total - 1:
             display_mode = getattr(self, "_display_mode", "continuous")
             if display_mode == "double":
@@ -1424,7 +1452,8 @@ class _RenderMixin:
     def _go_to_page(self, e) -> None:
         try:
             n = int(self.page_input.value) - 1
-            if 0 <= n < len(self.doc):
+            doc_len = len(self.doc)
+            if 0 <= n < doc_len:
                 self._scroll_to_page(n)
                 return
         except ValueError:
@@ -1544,7 +1573,10 @@ class _RenderMixin:
         now = time.monotonic()
         if now - getattr(self, "_single_nav_t", 0.0) < _SINGLE_NAV_COOLDOWN:
             return
-        total      = len(self.doc)
+        try:
+            total = len(self.doc)
+        except (ValueError, AttributeError):
+            return
         going_down = getattr(self, "_single_nav_dir", 1) > 0
         if going_down and self.current_page < total - 1:
             self._single_nav_t = now
