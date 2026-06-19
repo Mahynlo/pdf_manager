@@ -1278,6 +1278,14 @@ class _RenderMixin:
             except Exception:
                 pass
 
+    def _on_window_resized(self, e=None) -> None:
+        """Callback for page.on_resized: recalculate scroll column width so the
+        horizontal scrollbar appears/disappears correctly and centering stays
+        accurate when the user resizes the app window."""
+        if getattr(self, "_is_closed", False) or getattr(self, "_is_suspended", False):
+            return
+        self._update_scroll_column_width()
+
     def _update_nav_state(self) -> None:
         if getattr(self, "_is_closed", False):
             return

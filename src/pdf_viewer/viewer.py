@@ -941,6 +941,11 @@ class PDFViewerTab(
         # hoja y saltaba al inicio. _scroll_px se mantiene a través del blur/
         # suspend, así que basta con reposicionar al recuperar el foco.
         self._restore_scroll_position()
+        # Suscribirse a cambios de tamaño de ventana mientras este tab está activo.
+        try:
+            self.page_ref.on_resized = self._on_window_resized
+        except Exception:
+            pass
 
     def _restore_scroll_position(self) -> None:
         """Reposiciona el scroll a `_scroll_px` tras recuperar el foco.
@@ -981,6 +986,12 @@ class PDFViewerTab(
 
     def on_blur(self) -> None:
         """Called by DocumentManagerUI when another tab becomes active."""
+        # Desuscribirse de los eventos de resize de ventana.
+        try:
+            if self.page_ref.on_resized is self._on_window_resized:
+                self.page_ref.on_resized = None
+        except Exception:
+            pass
         # Shrink inmediato: libera RAM sin esperar el timer.
         try:
             self._render_cache.shrink(self._BLUR_SHRINK_KEEP)
@@ -1026,6 +1037,12 @@ class PDFViewerTab(
             return
         self._is_closed = True
         self._cancel_suspend_timer()
+        # Limpiar la suscripción de resize si este tab la tenía activa.
+        try:
+            if self.page_ref.on_resized is self._on_window_resized:
+                self.page_ref.on_resized = None
+        except Exception:
+            pass
         # Cancelar timers pendientes de render/scroll/zoom. Si no, pueden
         # dispararse tras cerrar el doc (sus callbacks hacen len(self.doc) /
         # tocan controles) y, sobre todo, cada threading.Timer referencia self,
