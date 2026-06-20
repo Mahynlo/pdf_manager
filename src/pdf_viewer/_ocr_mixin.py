@@ -16,7 +16,8 @@ _CHIP_FG   = "#2E7D32"
 _METRIC_BG = "surfaceVariant"
 
 _MAX_OCR_PAGES_CACHED = 8  # max pages kept in memory; oldest are evicted first
-_OCR_MODEL_RELEASE_DELAY = 3.0  # seconds to unload OCR model after idle
+_OCR_MODEL_RELEASE_DELAY = 3.0   # seconds to unload OCR model after idle
+_ORIENT_MODEL_RELEASE_DELAY = 8.0  # seconds to unload orientation model after idle
 
 
 def _chip(label: str, value: str, icon: str | None = None) -> ft.Container:
@@ -359,6 +360,27 @@ class _OCRMixin:
             self._ocr_processor.release_predictor()
         gc.collect()
 
+    def _schedule_orientation_model_release(self) -> None:
+        t = getattr(self, "_orient_model_timer", None)
+        if t is not None:
+            t.cancel()
+        self._orient_model_timer = threading.Timer(
+            _ORIENT_MODEL_RELEASE_DELAY, self._release_orientation_model
+        )
+        self._orient_model_timer.daemon = True
+        self._orient_model_timer.start()
+
+    def _cancel_orientation_model_release(self) -> None:
+        t = getattr(self, "_orient_model_timer", None)
+        if t is not None:
+            t.cancel()
+            self._orient_model_timer = None
+
+    def _release_orientation_model(self) -> None:
+        if getattr(self, "_ocr_processor", None) is not None:
+            self._ocr_processor.release_orientation_predictor()
+        gc.collect()
+
     # ── copy all text ─────────────────────────────────────────────────────────
 
     def _ocr_copy_all(self, e=None) -> None:
@@ -422,76 +444,290 @@ class _OCRMixin:
         self.page_ref.update()
         self._schedule_ocr_model_release()
 
+    # ── banner de progreso de orientación ────────────────────────────────────
+
+    def _orientation_banner_show(self, text: str, *, deterministic: bool = False) -> None:
+        """Muestra el banner de progreso de orientación."""
+        bar = getattr(self, "_orientation_status_bar", None)
+        txt = getattr(self, "_orientation_bar_text", None)
+        pb  = getattr(self, "_orientation_progress_bar", None)
+        if bar is None:
+            return
+        if txt is not None:
+            txt.value = text
+        if pb is not None:
+            pb.value = 0.0 if deterministic else None
+        bar.visible = True
+        try:
+            bar.update()
+        except Exception:
+            pass
+
+    def _orientation_banner_update(self, text: str, progress: float) -> None:
+        """Actualiza el texto y el porcentaje del banner (0.0 – 1.0)."""
+        txt = getattr(self, "_orientation_bar_text", None)
+        pb  = getattr(self, "_orientation_progress_bar", None)
+        bar = getattr(self, "_orientation_status_bar", None)
+        if txt is not None:
+            txt.value = text
+        if pb is not None:
+            pb.value = progress
+        if bar is not None:
+            try:
+                bar.update()
+            except Exception:
+                pass
+
+    def _orientation_banner_hide(self) -> None:
+        """Oculta el banner de progreso."""
+        bar = getattr(self, "_orientation_status_bar", None)
+        if bar is None:
+            return
+        bar.visible = False
+        try:
+            bar.update()
+        except Exception:
+            pass
+
     # ── auto-corrección de orientación (escaneos sin /Rotate) ─────────────────
 
     def _fix_orientation(self, e=None) -> None:
-        """Detecta y corrige la orientación de un escaneo cuyo contenido está
-        girado pero sin entrada ``/Rotate`` (la página se ve de lado).
+        """Detecta y corrige la orientación página por página (hilo de fondo).
 
-        Detecta sobre la página actual con los modelos OCR ya incluidos y, como
-        los escaneos suelen compartir orientación, aplica el mismo giro a TODAS
-        las páginas vía ``page.set_rotation`` — lo que hace que se muestren
-        derechas y que el resto de funciones (OCR, censura, anotaciones) trabajen
-        con coordenadas correctas. No se guarda hasta que el usuario guarde."""
-        self._cancel_ocr_model_release()
+        Evalúa cada página individualmente con los modelos OCR ya incluidos:
+        las páginas ya correctas no se tocan, las rotadas se corrigen con su
+        ángulo propio. Esto maneja documentos con orientaciones mixtas (p. ej.
+        portada en retrato + páginas escaneadas en paisaje). No se guarda hasta
+        que el usuario guarde explícitamente.
+        """
+        if getattr(self, "_orientation_fix_running", False):
+            self._show_snack("Corrección de orientación ya en curso…")
+            return
+        self._orientation_fix_running = True
         self._ensure_ocr_processor()
-        pn = self.current_page
-        self._show_snack("Detectando orientación…")
-        try:
-            self.page_ref.update()
-        except Exception:
-            pass
-
-        try:
-            # Igual que en _run_ocr: rasterizar bajo lock, inferir (4 pasadas
-            # del modelo) sin él.
-            with self._doc_lock:
-                probe = self._ocr_processor.render_orientation_probe(self.doc, pn)
-            angle = self._ocr_processor.score_orientation(probe)
-        except Exception as ex:
-            self._show_snack(f"No se pudo detectar la orientación: {ex}")
-            self._schedule_ocr_model_release()
-            return
-
-        if angle == 0:
-            self._show_snack("La orientación ya parece correcta")
-            self._schedule_ocr_model_release()
-            return
-
         with self._doc_lock:
             n = len(self.doc)
-            for p in range(n):
-                page = self.doc[p]
-                page.set_rotation((page.rotation + angle) % 360)
+        if n == 0:
+            self._orientation_fix_running = False
+            return
 
-        # Las coordenadas cacheadas (imágenes, OCR, texto, censura) quedaron
-        # obsoletas tras cambiar la rotación.
-        _rcache = getattr(self, "_render_cache", None)
-        if _rcache is not None:
-            _rcache.clear()
-        self._ocr_by_page = {}
-        self._page_words = {}
-        self._page_word_bands = {}
-        self._page_blocks_cache = {}
-        self._text_rects_cache = {}
-        if hasattr(self, "_clear_redact_state"):
-            self._clear_redact_state()
-
-        saved = self.current_page
-        self._rebuild_scroll_content(scroll_back=False)
-        try:
-            self.viewer_scroll.scroll_to(
-                offset=self._page_cum_offsets[saved], duration=0,
-            )
-        except Exception:
-            pass
-        self._refresh_ocr_ui_for_page()
-        self.page_ref.update()
-        self._show_snack(
-            f"Orientación corregida (+{angle}°) en {n} página(s). "
-            f"Guarda el PDF para conservarlo."
+        self._orientation_banner_show(
+            f"Analizando orientación de {n} página(s)…", deterministic=True
         )
-        self._schedule_ocr_model_release()
+
+        def _worker() -> None:
+            from .ocr import OCRProcessor
+            # corrections: lista de (índice_página, ángulo_a_sumar)
+            corrections: list[tuple[int, int]] = []
+            update_every = max(1, n // 10)
+            try:
+                for p in range(n):
+                    try:
+                        with self._doc_lock:
+                            probe = self._ocr_processor.render_orientation_probe(
+                                self.doc, p
+                            )
+                        # Paso 1: método rápido sin modelo (fiable para 90°/270°).
+                        fast_angle = OCRProcessor.score_orientation_fast(probe)
+
+                        if fast_angle in (90, 270):
+                            # Rotación lateral: señal de varianza muy fiable.
+                            angle = fast_angle
+                        else:
+                            # Para 0°/180° usamos el clasificador entrenado.
+                            self._cancel_orientation_model_release()
+                            angle = self._ocr_processor.score_orientation_classifier(probe)
+
+                        if angle != 0:
+                            corrections.append((p, angle))
+                    except Exception:
+                        continue
+                    if (p + 1) % update_every == 0 or p == n - 1:
+                        self._orientation_banner_update(
+                            f"Analizando página {p + 1} / {n}…",
+                            (p + 1) / n,
+                        )
+
+                if not corrections:
+                    self._orientation_banner_hide()
+                    self._show_snack("La orientación de todas las páginas parece correcta.")
+                    try:
+                        self.page_ref.update()
+                    except Exception:
+                        pass
+                    return
+
+                with self._doc_lock:
+                    for p, angle in corrections:
+                        page = self.doc[p]
+                        page.set_rotation((page.rotation + angle) % 360)
+
+                _rcache = getattr(self, "_render_cache", None)
+                if _rcache is not None:
+                    _rcache.clear()
+                self._ocr_by_page = {}
+                self._page_words = {}
+                self._page_word_bands = {}
+                self._page_blocks_cache = {}
+                self._text_rects_cache = {}
+                if hasattr(self, "_clear_redact_state"):
+                    self._clear_redact_state()
+
+                saved = self.current_page
+                self._rebuild_scroll_content(scroll_back=False)
+                try:
+                    self.viewer_scroll.scroll_to(
+                        offset=self._page_cum_offsets[saved], duration=0,
+                    )
+                except Exception:
+                    pass
+                self._orientation_banner_hide()
+                self._refresh_ocr_ui_for_page()
+                self.page_ref.update()
+                self._show_snack(
+                    f"{len(corrections)} de {n} página(s) corregida(s). "
+                    f"Guarda el PDF para conservarlo."
+                )
+                self.page_ref.update()
+            except Exception as ex:
+                self._orientation_banner_hide()
+                self._show_snack(f"Error al corregir orientación: {ex}")
+                try:
+                    self.page_ref.update()
+                except Exception:
+                    pass
+            finally:
+                self._orientation_fix_running = False
+                self._schedule_orientation_model_release()
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _auto_detect_orientation(self) -> None:
+        """Detecta y corrige automáticamente la orientación al abrir escaneos.
+
+        Corre en segundo plano. Sondea hasta 5 páginas representativas y evalúa
+        cada una individualmente:
+
+        - Si todas las páginas sondeadas necesitan el MISMO giro → documento con
+          orientación uniforme: aplica ese ángulo a TODAS las páginas.
+        - Si las páginas sondeadas necesitan giros distintos → orientaciones
+          mixtas: corrige solo las páginas sondeadas y sugiere usar
+          'Corregir orientación' para revisar el resto.
+
+        No actúa si el documento ya tiene /Rotate establecido en alguna página
+        (se asume corrección previa) ni en documentos de texto nativo.
+        """
+        def _worker() -> None:
+            from .ocr import OCRProcessor
+            try:
+                self._ensure_ocr_processor()
+                with self._doc_lock:
+                    if getattr(self, "doc", None) is None:
+                        return
+                    doc_kind = self._ocr_processor.get_doc_kind(self.doc)
+                    if doc_kind == "native":
+                        return
+                    n = len(self.doc)
+                    if n == 0:
+                        return
+                    # Si alguna página ya tiene /Rotate ≠ 0, el doc fue corregido
+                    # previamente; respetar y no modificar.
+                    if any(self.doc[p].rotation != 0 for p in range(n)):
+                        return
+                    step = max(1, n // 5)
+                    probe_pages = list(range(0, n, step))[:5]
+                    self._orientation_banner_show("Detectando orientación del documento…")
+                    images = self._ocr_processor.render_orientation_probes(
+                        self.doc, probe_pages
+                    )
+
+                if not images:
+                    self._orientation_banner_hide()
+                    return
+
+                # Detección individual por página sondeada.
+                # · 90°/270°: método rápido de varianza (sin modelo, muy fiable).
+                # · 0°/180°: clasificador MobileNetV3 entrenado (fiable).
+                page_angles: list[tuple[int, int]] = []  # (page_num, angle)
+                for i, img in enumerate(images):
+                    self._orientation_banner_update(
+                        f"Analizando página {probe_pages[i] + 1}…",
+                        (i + 1) / len(images),
+                    )
+                    fast_angle = OCRProcessor.score_orientation_fast(img)
+                    if fast_angle in (90, 270):
+                        angle = fast_angle
+                    else:
+                        self._cancel_orientation_model_release()
+                        angle = self._ocr_processor.score_orientation_classifier(img)
+                    page_angles.append((probe_pages[i], angle))
+
+                corrections = [(p, a) for p, a in page_angles if a != 0]
+                if not corrections:
+                    self._orientation_banner_hide()
+                    return
+
+                # ¿Todas las páginas que necesitan corrección piden el mismo ángulo?
+                unique_angles = {a for _, a in corrections}
+                uniform = len(unique_angles) == 1 and len(corrections) == len(page_angles)
+
+                with self._doc_lock:
+                    if getattr(self, "doc", None) is None:
+                        self._orientation_banner_hide()
+                        return
+                    n = len(self.doc)
+                    if uniform:
+                        # Rotación uniforme → aplicar a todo el documento
+                        global_angle = next(iter(unique_angles))
+                        for p in range(n):
+                            page = self.doc[p]
+                            page.set_rotation((page.rotation + global_angle) % 360)
+                    else:
+                        # Orientaciones mixtas → corregir solo las páginas sondeadas
+                        for p, angle in corrections:
+                            page = self.doc[p]
+                            page.set_rotation((page.rotation + angle) % 360)
+
+                _rcache = getattr(self, "_render_cache", None)
+                if _rcache is not None:
+                    _rcache.clear()
+                self._ocr_by_page = {}
+                self._page_words = {}
+                self._page_word_bands = {}
+                self._page_blocks_cache = {}
+                self._text_rects_cache = {}
+                if hasattr(self, "_clear_redact_state"):
+                    self._clear_redact_state()
+
+                saved = self.current_page
+                self._rebuild_scroll_content(scroll_back=False)
+                try:
+                    self.viewer_scroll.scroll_to(
+                        offset=self._page_cum_offsets[saved], duration=0,
+                    )
+                except Exception:
+                    pass
+                self._orientation_banner_hide()
+                if uniform:
+                    global_angle = next(iter(unique_angles))
+                    msg = (
+                        f"Orientación corregida automáticamente (+{global_angle}°). "
+                        f"Guarda el PDF para conservarlo."
+                    )
+                else:
+                    corrected_nums = ", ".join(str(p + 1) for p, _ in corrections)
+                    msg = (
+                        f"Orientación mixta detectada: páginas {corrected_nums} corregidas. "
+                        f"Usa 'Corregir orientación' para revisar todas."
+                    )
+                self._show_snack(msg)
+                self.page_ref.update()
+            except Exception:
+                self._orientation_banner_hide()
+            finally:
+                self._schedule_orientation_model_release()
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     # ── OCR UI refresh ────────────────────────────────────────────────────────
 

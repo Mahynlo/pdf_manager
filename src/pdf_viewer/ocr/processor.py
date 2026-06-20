@@ -75,19 +75,21 @@ class OCRProcessor:
         self.workspace_root = Path(workspace_root)
         self.model_root = self.workspace_root / "modelos"
         self._predictor: Any | None = None
+        self._orientation_predictor: Any | None = None
         # Keyed by doc.name (file path) so different documents don't share state.
         self._doc_kind_cache: dict[str, str] = {}
+
+    def _set_onnxtr_cache(self) -> None:
+        os.environ["DISABLE_MODEL_SOURCE_CHECK"] = "True"
+        bundled = Path(__file__).resolve().parents[2] / "assets" / "onnxtr_cache"
+        if bundled.exists():
+            os.environ["ONNXTR_CACHE_DIR"] = str(bundled)
 
     @property
     def predictor(self):
         if self._predictor is None:
             from onnxtr.models import ocr_predictor
-            os.environ["DISABLE_MODEL_SOURCE_CHECK"] = "True"
-            # Use bundled models (src/onnxtr_cache/) so the compiled app works offline.
-            # Falls back to the default ~/.cache/onnxtr/ if the bundled folder is missing.
-            bundled = Path(__file__).resolve().parents[2] / "assets" / "onnxtr_cache"
-            if bundled.exists():
-                os.environ["ONNXTR_CACHE_DIR"] = str(bundled)
+            self._set_onnxtr_cache()
             self._predictor = ocr_predictor(
                 det_arch="db_mobilenet_v3_large",
                 reco_arch="crnn_mobilenet_v3_small",
@@ -95,6 +97,22 @@ class OCRProcessor:
                 load_in_8_bit=False,
             )
         return self._predictor
+
+    @property
+    def orientation_predictor(self):
+        """Clasificador de orientación de página (MobileNetV3-small, ~5 MB).
+
+        Clasifica una imagen de página completa en 0°, 90°, 180° o 270°.
+        Se carga de forma perezosa independientemente del modelo OCR principal,
+        por lo que puede usarse sin cargar detección+reconocimiento.
+        """
+        if self._orientation_predictor is None:
+            from onnxtr.models import page_orientation_predictor
+            self._set_onnxtr_cache()
+            # No pasar pretrained=True: en v0.8.x se filtra incorrectamente
+            # hasta Resize.__init__ y rompe la construcción del predictor.
+            self._orientation_predictor = page_orientation_predictor()
+        return self._orientation_predictor
 
     def release_predictor(self) -> None:
         """Free OCR model memory after idle periods."""
@@ -106,6 +124,104 @@ class OCRProcessor:
         if callable(close):
             close()
         del predictor
+
+    def release_orientation_predictor(self) -> None:
+        """Libera el modelo de orientación de la memoria."""
+        predictor = self._orientation_predictor
+        if predictor is None:
+            return
+        self._orientation_predictor = None
+        close = getattr(predictor, "close", None)
+        if callable(close):
+            close()
+        del predictor
+
+    @staticmethod
+    def detect_orientation_native(page: "fitz.Page") -> int:
+        """Detecta si una página nativa está invertida (180°) usando posiciones de bloque.
+
+        ``page.get_text()`` devuelve coordenadas en el espacio PRE-rotación de la
+        página — ignora completamente el /Rotate almacenado. Por eso, ``dir`` y
+        los origins de caracteres siempre aparecen como si la página estuviera a
+        0°, aunque tenga /Rotate 180.
+
+        Estrategia correcta:
+          1. Obtener la posición Y del centro de cada bloque de texto (pre-rotación,
+             y-abajo, rango [0, H]).
+          2. Aplicar manualmente el /Rotate para calcular dónde APARECE cada bloque
+             en pantalla:
+               - /Rotate 0:   display_y = y_bloque
+               - /Rotate 180: display_y = H - y_bloque
+          3. Si ≥ 65 % de los bloques caen en la mitad inferior de la pantalla
+             → la página está invertida → corrección 180°.
+
+        Casos cubiertos:
+          - /Rotate 180 con contenido normal: bloques en y≈100 → display_y≈742 (abajo) ✓
+          - /Rotate 0 con contenido invertido (via cm): bloques en y≈742 → display_y≈742 ✓
+          - /Rotate 0 normal: bloques en y≈100 → display_y≈100 (arriba) → 0 ✓
+        """
+        rotation = page.rotation
+        H = page.rect.height
+
+        try:
+            blocks = page.get_text("blocks")
+        except Exception:
+            return 0
+
+        ys: list[float] = []
+        for block in blocks:
+            if block[6] != 0:          # bloque no texto
+                continue
+            text = block[4]
+            if not text.strip():
+                continue
+            cy = (block[1] + block[3]) / 2        # centro Y pre-rotación (y-down)
+            display_y = (H - cy) if rotation == 180 else cy
+            ys.append(display_y)
+
+        if not ys:
+            return 0
+
+        bottom = sum(1 for y in ys if y > H / 2)
+        if bottom / len(ys) >= 0.65:
+            return 180
+
+        return 0
+
+    def score_orientation_classifier(self, img: np.ndarray) -> int:
+        """Detecta la orientación usando el clasificador MobileNetV3 de OnnxTR.
+
+        La API de page_orientation_predictor (v0.8.x) devuelve una lista de
+        3 sub-listas: [class_indices, angles, confidences], una entrada por
+        imagen de entrada.
+
+            pred([img])  →  [[class_idx], [angle_deg], [confidence]]
+
+        Ejemplos reales (texto upright a cada ángulo):
+            0°  → [[0], [   0], [0.98]]
+            90° → [[1], [ -90], [0.99]]   (rot 90° CCW en imagen)
+           180° → [[2], [ 180], [0.99]]
+           270° → [[3], [  90], [1.00]]   (rot 90° CW en imagen)
+
+        El campo `angle` ya es el valor correcto para pasar a
+        ``page.set_rotation((page.rotation + angle) % 360)``  — salvo el
+        signo para −90, pero en Python ``(rot + (−90)) % 360 == rot + 270``.
+
+        Devuelve 0, 90, 180 o 270 (grados a SUMAR); devuelve 0 si la
+        confianza es baja o el modelo falla.
+        """
+        try:
+            result = self.orientation_predictor([img])
+            # result = [class_list, angle_list, conf_list]
+            if not result or len(result) < 3:
+                return 0
+            angle = int(result[1][0])   # ángulo de corrección (puede ser negativo)
+            conf  = float(result[2][0]) # confianza 0–1
+            if conf >= 0.50:
+                return int(angle % 360)  # normalizar a 0–359
+        except Exception:
+            pass
+        return 0
 
     @staticmethod
     def _geometry_to_pixel_rect(geometry: Any, width: int, height: int) -> fitz.Rect | None:
@@ -165,11 +281,7 @@ class OCRProcessor:
         return words, elapsed
 
     def render_orientation_probe(self, doc: fitz.Document, page_num: int) -> np.ndarray:
-        """Rasteriza la página para sondear su orientación (fase BAJO lock).
-
-        Separa el único acceso al documento de ``score_orientation`` (la
-        inferencia ×4, lenta), para que el llamador no retenga su lock de
-        documento mientras corre el modelo."""
+        """Rasteriza la página para sondear su orientación (fase BAJO lock)."""
         page = doc[page_num]
         longest = max(page.rect.width, page.rect.height)
         scale = min(1.5, 1400.0 / max(1.0, longest))
@@ -178,9 +290,168 @@ class OCRProcessor:
         del pix
         return base
 
+    def probe_orientation(
+        self, doc: fitz.Document, page_num: int
+    ) -> tuple[np.ndarray, int | None]:
+        """Renderiza la sonda y detecta orientación nativa en una sola pasada.
+
+        Retorna ``(imagen, angulo_nativo_o_None)``.
+        Si la página tiene texto extraíble, devuelve el ángulo de corrección
+        calculado directamente de los vectores de dirección (exacto, sin modelo).
+        Si la página es solo imagen (escaneo), devuelve ``None`` para que el
+        llamador use el clasificador.
+        """
+        page = doc[page_num]
+        longest = max(page.rect.width, page.rect.height)
+        scale = min(1.5, 1400.0 / max(1.0, longest))
+        pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+        img = self._pixmap_to_ndarray(pix)
+        del pix
+        native_angle: int | None = None
+        if not self.page_needs_ocr(page):
+            native_angle = self.detect_orientation_native(page)
+        return img, native_angle
+
     def detect_orientation(self, doc: fitz.Document, page_num: int) -> int:
         """Conveniencia: sondeo + puntuación en un paso (sin lock que liberar)."""
         return self.score_orientation(self.render_orientation_probe(doc, page_num))
+
+    @staticmethod
+    def score_orientation_fast(img: np.ndarray) -> int:
+        """Detección de orientación rápida sin modelo OCR (< 15 ms).
+
+        Señales usadas:
+
+        1. **Varianza de perfiles** (h_var vs v_var): detecta 90°/270° vs 0°/180°.
+           Alta fiabilidad para páginas con texto claramente horizontal o vertical.
+
+        2. **Posición del primer borde de texto** (``_first_text_row``): dentro del
+           par 90°/270° determina la dirección correcta. Para 0°/180° mide
+           ``pos_asym = s0 - s180``; valor muy positivo → candidato a 180°.
+
+        3. **Sesgo de línea base** (``_baseline_bias``): en texto latino derecho (0°)
+           el pico de densidad queda en la mitad INFERIOR de cada banda de texto
+           (línea base cerca del fondo de las letras). En 180° ese pico sube a la
+           mitad SUPERIOR. Solo se usa en la zona central de la imagen para evitar
+           artefactos de bordes de escaneado.
+
+        Ambas señales (2 y 3) deben coincidir para declarar 180°, lo que reduce
+        drásticamente los falsos positivos en documentos escaneados ruidosos.
+        """
+        # ── Preprocesado ──────────────────────────────────────────────────────
+        if img.ndim == 3:
+            gray = np.dot(img[..., :3].astype(np.float32), [0.299, 0.587, 0.114])
+        else:
+            gray = img.astype(np.float32)
+
+        mean_val = float(gray.mean())
+        if mean_val < 10 or mean_val > 245:
+            return 0  # página en blanco o completamente oscura
+
+        # Binarización robusta para escáneos: usa el percentil 90 como estimación
+        # del fondo. A diferencia de la media, el percentil 90 corresponde al fondo
+        # real incluso en páginas con fondo grisáceo o amarillento. Los píxeles de
+        # tinta deben ser al menos 38% más oscuros que el fondo estimado.
+        background = float(np.percentile(gray, 90))
+        ink_thresh = max(50.0, background * 0.62)
+        binary = (gray < ink_thresh).astype(np.float32)
+        ink_frac = float(binary.mean())
+        # Si hay demasiado poco contenido oscuro (página casi en blanco) o demasiado
+        # (fondo oscuro, no tinta puntual de texto), la señal no es fiable.
+        if ink_frac < 0.004 or ink_frac > 0.30:
+            return 0
+
+        # ── Auxiliares ────────────────────────────────────────────────────────
+
+        def _first_text_row(b: np.ndarray) -> float:
+            """Posición relativa (0–1) de la primera fila con densidad de tinta
+            significativa. Umbral al 40% del máximo para ignorar ruido de escaneado."""
+            h_proj = b.sum(axis=1)
+            ksz = max(1, len(h_proj) // 30)
+            smooth = np.convolve(h_proj, np.ones(ksz) / ksz, mode='same')
+            thr = float(smooth.max()) * 0.40
+            for i, v in enumerate(smooth):
+                if v > thr:
+                    return i / max(1, len(smooth))
+            return 0.5
+
+        def _baseline_bias(b: np.ndarray) -> float:
+            """Posición media relativa del pico de densidad dentro de cada
+            banda de texto (0 = tope, 1 = fondo).
+
+            Operando sobre la zona CENTRAL de la imagen (excluyendo el 12% superior
+            e inferior) se evitan los artefactos de borde de escaneado (sombras
+            oscuras en los márgenes) que distorsionan el análisis.
+
+            En texto latino 0°: el pico (baseline) queda en la mitad INFERIOR
+            de cada banda → resultado > 0.55.
+            En texto 180°: el pico pasa a la mitad SUPERIOR → resultado < 0.42.
+            """
+            H_full = b.shape[0]
+            margin = max(4, H_full // 8)  # excluir ~12% en cada extremo
+            b = b[margin: H_full - margin]
+            H = b.shape[0]
+            if H < 20:
+                return float("nan")
+
+            h = b.sum(axis=1)
+            ksz = max(3, H // 50)
+            smooth = np.convolve(h, np.ones(ksz) / ksz, mode='same')
+            thr = float(smooth.max()) * 0.22
+
+            positions: list[float] = []
+            i = 0
+            while i < H:
+                if smooth[i] > thr:
+                    j = i + 1
+                    while j < H and smooth[j] > thr:
+                        j += 1
+                    band_h = j - i
+                    if 5 <= band_h <= H // 3:
+                        band = h[i:j]
+                        argmax_rel = float(np.argmax(band)) / max(1, band_h - 1)
+                        positions.append(argmax_rel)
+                    i = j
+                else:
+                    i += 1
+
+            if len(positions) < 2:
+                return float("nan")
+            return float(np.mean(positions))
+
+        # ── Señal 1: varianza de perfiles ─────────────────────────────────────
+        h_var = float(np.var(binary.sum(axis=1)))
+        v_var = float(np.var(binary.sum(axis=0)))
+        _RATIO = 1.8
+
+        if v_var > h_var * _RATIO:
+            # Texto en columnas verticales → 90° o 270°.
+            s270 = _first_text_row(np.rot90(binary, k=1))
+            s90  = _first_text_row(np.rot90(binary, k=3))
+            return 270 if s270 < s90 else 90
+
+        if h_var > v_var * _RATIO:
+            # Texto horizontal → 0° o 180°.
+            # Ambas señales deben coincidir para declarar 180°.
+            #
+            # pos_asym = s0 - s180:
+            #   · 0°:   s0 pequeño, s180 grande → pos_asym muy NEGATIVO (−0.6 típico)
+            #   · 180°: s0 grande, s180 pequeño → pos_asym muy POSITIVO (+0.6 típico)
+            #
+            # bias (sesgo de línea base en zona central):
+            #   · 0°:   pico cerca del fondo de cada banda → bias > 0.55
+            #   · 180°: pico cerca del tope de cada banda  → bias < 0.42
+            s0       = _first_text_row(binary)
+            s180     = _first_text_row(np.rot90(binary, k=2))
+            bias     = _baseline_bias(binary)
+            pos_asym = s0 - s180
+
+            if pos_asym > 0.35 and not np.isnan(bias) and bias < 0.42:
+                return 180
+
+            return 0
+
+        return 0  # señal ambigua
 
     def score_orientation(self, base: np.ndarray) -> int:
         """Detecta cuántos grados (0/90/180/270) hay que SUMAR a la rotación
@@ -196,23 +467,100 @@ class OCRProcessor:
         # np.rot90(k) gira la imagen en sentido ANTIHORARIO; /Rotate gira en
         # sentido HORARIO. Para reproducir con page.set_rotation el mismo efecto
         # que np.rot90(base, k) hay que sumar ((4-k)%4)*90 grados horarios.
+        _MIN_CONF  = 0.40   # umbral de confianza por palabra (filtra ruido)
+        _MIN_LEN   = 2      # mínimo de caracteres (una sola letra = casi siempre falso positivo)
+        _MIN_WORDS = 3      # mínimo de palabras reales para tener señal fiable
+
         candidates = ((0, 0), (1, 270), (2, 180), (3, 90))
         best_angle, best_score, second = 0, -1.0, 0.0
+        best_count = 0
         for k, angle in candidates:
             img = np.rot90(base, k=k).copy() if k else base
             words, _ = self._run_predictor(img)
-            score = sum(s for _, _, s in words) if words else 0.0
+            # Filtrar ruido: exigir longitud mínima y confianza mínima.
+            # Ponderar por longitud: "Document" contribuye más que "hi".
+            real = [(r, t, s) for r, t, s in words if len(t) >= _MIN_LEN and s >= _MIN_CONF]
+            score = sum(s * (len(t) - 1) for _, t, s in real)
             if score > best_score:
                 second = best_score
-                best_score, best_angle = score, angle
+                best_score, best_angle, best_count = score, angle, len(real)
             elif score > second:
                 second = score
         del base
 
-        # Sin señal clara (página sin texto o empate) → no proponer cambio.
-        if best_score <= 0.0 or best_score < second * 1.15:
+        # Sin señal (página casi en blanco o sin texto legible en ninguna orientación)
+        if best_count < _MIN_WORDS or best_score <= 0.0:
+            return 0
+        # Margen adaptativo: con muchas palabras claras basta un 10 % de ventaja;
+        # con poca señal exigimos 20 % para no confundir páginas mixtas o imágenes.
+        margin = 1.10 if best_count >= 8 else 1.20
+        if best_score < second * margin:
             return 0
         return best_angle
+
+    def render_orientation_probes(
+        self, doc: fitz.Document, page_nums: list[int]
+    ) -> list[np.ndarray]:
+        """Rasteriza varias páginas para el sondeo multi-página (fase BAJO lock)."""
+        images: list[np.ndarray] = []
+        for pn in page_nums:
+            page = doc[pn]
+            longest = max(page.rect.width, page.rect.height)
+            scale = min(1.5, 1400.0 / max(1.0, longest))
+            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+            images.append(self._pixmap_to_ndarray(pix))
+            del pix
+        return images
+
+    def probe_pages_for_orientation(
+        self, doc: fitz.Document, page_nums: list[int]
+    ) -> list[tuple[np.ndarray, int | None]]:
+        """Rasteriza y detecta orientación nativa para varias páginas (BAJO lock).
+
+        Por cada página retorna ``(imagen, angulo_nativo_o_None)``:
+        - Si la página tiene texto extraíble: ``native_angle`` es el ángulo de
+          corrección calculado de los vectores de dirección (exacto, sin modelo).
+        - Si la página es un escaneo: ``native_angle`` es ``None`` → el llamador
+          debe usar el clasificador.
+        """
+        results: list[tuple[np.ndarray, int | None]] = []
+        for pn in page_nums:
+            page = doc[pn]
+            longest = max(page.rect.width, page.rect.height)
+            scale = min(1.5, 1400.0 / max(1.0, longest))
+            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+            img = self._pixmap_to_ndarray(pix)
+            del pix
+            native_angle: int | None = None
+            if not self.page_needs_ocr(page):
+                native_angle = self.detect_orientation_native(page)
+            results.append((img, native_angle))
+        return results
+
+    def score_orientation_multi(self, images: list[np.ndarray]) -> int:
+        """Vota la orientación entre varias imágenes de página para mayor robustez.
+
+        Devuelve el ángulo que aparece en ≥ 50 % de las páginas sondeadas,
+        o 0 si no hay consenso suficiente (incluye páginas que devuelven 0
+        porque ya están derechas o sin señal).
+        """
+        if not images:
+            return 0
+        from collections import Counter
+        votes: Counter[int] = Counter()
+        for img in images:
+            votes[self.score_orientation(img)] += 1
+
+        total = sum(votes.values())
+        non_zero = {a: c for a, c in votes.items() if a != 0}
+        if not non_zero:
+            return 0
+
+        best_angle, best_count = max(non_zero.items(), key=lambda x: x[1])
+        # Exigir que al menos la mitad de las páginas sondeadas coincidan
+        if best_count / total >= 0.5:
+            return best_angle
+        return 0
 
     def get_doc_kind(self, doc: fitz.Document) -> str:
         """Clasificar el documento como 'nativo', 'escaneado' o 'híbrido' según el contenido de sus páginas.

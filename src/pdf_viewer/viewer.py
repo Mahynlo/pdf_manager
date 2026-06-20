@@ -203,6 +203,12 @@ class PDFViewerTab(
         self._ocr_active_index = 0
         self._ocr_toggle_btn:  ft.IconButton | None = None
         self._ocr_panel_open   = False
+        self._orientation_fix_running = False
+        self._orient_model_timer: threading.Timer | None = None
+        # Orientation-progress banner (built in _build, shared with _ocr_mixin)
+        self._orientation_status_bar:  ft.Container   | None = None
+        self._orientation_bar_text:    ft.Text        | None = None
+        self._orientation_progress_bar: ft.ProgressBar | None = None
 
         # OCR panel UI refs (set by _build_ocr_sidebar_panel)
         self._ocr_info:         ft.Text       | None = None
@@ -423,6 +429,11 @@ class PDFViewerTab(
                     text="Rotar 90° a la izquierda",
                     icon=ft.Icons.ROTATE_LEFT,
                     on_click=self._rotate_ccw,
+                ),
+                ft.PopupMenuItem(
+                    text="Voltear 180°",
+                    icon=ft.Icons.FLIP,
+                    on_click=self._rotate_180,
                 ),
                 ft.PopupMenuItem(
                     text="Corregir orientación del escaneo",
@@ -716,8 +727,40 @@ class PDFViewerTab(
         self._viewer_body = viewer_body
         main_content = ft.Row([viewer_body, self._right_sidebar], expand=True, spacing=0)
 
+        # ── orientation-progress banner ───────────────────────────────────────
+        self._orientation_bar_text = ft.Text(
+            "Detectando orientación…",
+            size=11,
+            color="#2E7D32",
+            weight=ft.FontWeight.W_500,
+        )
+        self._orientation_progress_bar = ft.ProgressBar(
+            value=None,       # indeterminate until overridden
+            color="#43A047",
+            bgcolor=ft.Colors.with_opacity(0.20, "#43A047"),
+            height=3,
+            expand=True,
+        )
+        self._orientation_status_bar = ft.Container(
+            content=ft.Row(
+                [
+                    ft.ProgressRing(
+                        width=13, height=13, stroke_width=2, color="#2E7D32",
+                    ),
+                    self._orientation_bar_text,
+                    ft.Container(width=8),
+                    self._orientation_progress_bar,
+                ],
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.padding.symmetric(horizontal=12, vertical=5),
+            bgcolor=ft.Colors.with_opacity(0.08, "#2E7D32"),
+            visible=False,
+        )
+
         self.view = ft.Column(
-            [nav_toolbar, annot_toolbar, main_content],
+            [nav_toolbar, self._orientation_status_bar, annot_toolbar, main_content],
             expand=True,
             spacing=0,
         )
@@ -1108,8 +1151,11 @@ class PDFViewerTab(
         self._render_cache.clear()
         if hasattr(self, "_cancel_ocr_model_release"):
             self._cancel_ocr_model_release()
+        if hasattr(self, "_cancel_orientation_model_release"):
+            self._cancel_orientation_model_release()
         if getattr(self, "_ocr_processor", None) is not None:
             self._ocr_processor.release_predictor()
+            self._ocr_processor.release_orientation_predictor()
         if getattr(self, "_agent_instance", None) is not None:
             try:
                 self._agent_instance.close()

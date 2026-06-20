@@ -1929,6 +1929,10 @@ class _RenderMixin:
         """Rotar la página actual 90° en sentido antihorario."""
         self._rotate(delta=-90)
 
+    def _rotate_180(self, e=None) -> None:
+        """Voltear la página actual 180°."""
+        self._rotate(delta=180)
+
     def _save(self, e=None) -> None:
         self._save_picker.save_file(
             dialog_title="Guardar PDF con anotaciones",
