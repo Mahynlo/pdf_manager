@@ -982,7 +982,8 @@ class PDFViewerTab(
 
     def _move_page_down(self, e=None) -> None:
         pn = self.current_page
-        if pn >= len(self.doc) - 1:
+        n = len(self.doc)
+        if pn >= n - 1:
             return
         for idx in (pn, pn + 1):
             img = self._page_images[idx] if idx < len(self._page_images) else None
@@ -996,8 +997,13 @@ class PDFViewerTab(
                           self._page_word_bands, self._page_blocks_cache,
                           self._text_rects_cache):
                 cache.pop(idx, None)
+        # PyMuPDF move_page(pno, to) inserta ANTES de la página `to`, por lo que
+        # move_page(pn, pn+1) no hace nada (ya está antes de pn+1). Para bajar
+        # una posición hay que insertar antes de pn+2; si pn es la penúltima
+        # página, pn+2 == n está fuera de rango → usar -1 (mover al final).
+        to = (pn + 2) if (pn + 2 < n) else -1
         with self._doc_lock:
-            self.doc.move_page(pn, pn + 1)
+            self.doc.move_page(pn, to)
         self._annot._history = [
             (pg + 1 if pg == pn else pg - 1 if pg == pn + 1 else pg, xr)
             for pg, xr in self._annot._history
