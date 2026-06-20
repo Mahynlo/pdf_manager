@@ -1051,6 +1051,9 @@ class _RedactMixin:
                    f"{', '.join(str(p+1) for p in failed_apply)})")
         else:
             msg = f"Censura aplicada en {len(affected_pages)} página(s)"
+        if affected_pages:
+            self._is_modified = True
+            self._has_content_changes = True
         self._refresh_ocr_ui_for_page()
         self._show_snack(msg)
         self.page_ref.update()

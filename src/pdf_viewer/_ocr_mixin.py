@@ -565,6 +565,7 @@ class _OCRMixin:
                     for p, angle in corrections:
                         page = self.doc[p]
                         page.set_rotation((page.rotation + angle) % 360)
+                self._is_modified = True
 
                 _rcache = getattr(self, "_render_cache", None)
                 if _rcache is not None:
@@ -691,6 +692,7 @@ class _OCRMixin:
                         for p, angle in corrections:
                             page = self.doc[p]
                             page.set_rotation((page.rotation + angle) % 360)
+                self._is_modified = True
 
                 _rcache = getattr(self, "_render_cache", None)
                 if _rcache is not None:

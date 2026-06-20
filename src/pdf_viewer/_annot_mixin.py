@@ -399,6 +399,7 @@ class _AnnotMixin:
         with self._doc_lock:
             deleted = self._annot.delete_annot(self.doc, pn, xref)
         if deleted:
+            self._is_modified = True
             self._deselect_annot()   # oculta overlay + action bar, limpia self._selected
             self._refresh_page(pn)
         else:
@@ -416,6 +417,7 @@ class _AnnotMixin:
         if not nx:
             self._show_snack("No se pudo duplicar la anotación")
             return
+        self._is_modified = True
         self._refresh_page(pn)
         with self._doc_lock:
             for a in self.doc[pn].annots():
@@ -448,6 +450,7 @@ class _AnnotMixin:
                 scaled_visual = fitz.Rect(cx - hw, cy - hh, cx + hw, cy + hh)
             else:
                 scaled_visual = new_rect
+            self._is_modified = True
             self._refresh_selected_overlay(pn, annot_rect=scaled_visual)
             self._rerender_page_image(pn)
         else:
@@ -470,6 +473,7 @@ class _AnnotMixin:
         if new_xref is not None:
             if new_xref != xref:
                 self._selected = (pn, new_xref)
+            self._is_modified = True
             self._rerender_page_image(pn)
         else:
             self._show_snack("No se pudo cambiar el grosor")
@@ -494,6 +498,7 @@ class _AnnotMixin:
             if not ok:
                 self._show_snack("No se pudo cambiar el color")
                 return
+            self._is_modified = True
             self._rerender_page_image(pn)
             self._refresh_selected_overlay(pn)
 
@@ -685,6 +690,7 @@ class _AnnotMixin:
                 self._show_snack("No se pudo guardar el texto")
                 return
             # Volver al cursor y seleccionar la anotación para editar/mover al instante.
+            self._is_modified = True
             self._select_tool(Tool.CURSOR, ft.MouseCursor.BASIC)
             self._refresh_page(pn)
             with self._doc_lock:
@@ -751,6 +757,7 @@ class _AnnotMixin:
             with self._doc_lock:
                 changed = self._annot.apply_text_tool(self.doc, pn, tool)
             if changed:
+                self._is_modified = True
                 self._refresh_page(pn)
 
         dlg.content = ft.Column([ft.Text(preview, size=13, selectable=True)], tight=True)

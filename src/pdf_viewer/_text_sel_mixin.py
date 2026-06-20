@@ -884,6 +884,7 @@ class _TextSelMixin:
                 if self._annot.apply_text_tool(
                     self.doc, i, tool, rects=quads, rects_are_final=True
                 ):
+                    self._is_modified = True
                     self._refresh_page(i)
 
     def _text_sel_send_to_redact(self, e=None) -> None:

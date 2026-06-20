@@ -89,6 +89,10 @@ class PDFViewerTab(
         self._viewer_body:    ft.Container | None = None
         self._night_mode_btn: ft.IconButton | None = None
 
+        self._is_modified:             bool = False
+        self._has_content_changes:     bool = False
+        self._pending_close_after_save: bool = False
+
         self._tab       = None
         self._annot     = AnnotationManager(on_modified=self._update)
         self._tool_btns: dict[Tool, ft.IconButton] = {}
@@ -326,6 +330,7 @@ class PDFViewerTab(
 
         self._save_picker = ft.FilePicker(on_result=self._on_save_result)
         page_ref.overlay.append(self._save_picker)
+        self._doc_initial_state = self._compute_doc_state()
 
         self._build()
 
@@ -478,7 +483,7 @@ class PDFViewerTab(
                 ft.PopupMenuItem(
                     text="Cerrar pestaña",
                     icon=ft.Icons.CLOSE,
-                    on_click=lambda e: self.on_close(self),
+                    on_click=lambda e: self._request_close(),
                 ),
             ],
         )
@@ -915,8 +920,88 @@ class PDFViewerTab(
         self.page_ref.update()
         self._render_page_slot(self.current_page)
         self._schedule_scroll_idle()
+        self._is_modified = True
         if snack:
             self._show_snack(snack)
+
+    def _compute_doc_state(self) -> dict:
+        """Snapshot ligero del estado del documento: páginas, rotaciones y anotaciones."""
+        with self._doc_lock:
+            n = len(self.doc)
+            return {
+                "page_count": n,
+                "pages": {
+                    i: {
+                        "rotation": self.doc[i].rotation,
+                        "annots": [(a.xref, tuple(a.rect)) for a in self.doc[i].annots()],
+                    }
+                    for i in range(n)
+                },
+            }
+
+    def _doc_has_real_changes(self) -> bool:
+        """Compara el estado actual con el baseline (apertura o último guardado)."""
+        if self._has_content_changes:
+            return True
+        try:
+            init = getattr(self, "_doc_initial_state", None)
+            if init is None:
+                return self._is_modified
+            with self._doc_lock:
+                n = len(self.doc)
+                if n != init["page_count"]:
+                    return True
+                for i in range(n):
+                    p = self.doc[i]
+                    pi = init["pages"].get(i, {})
+                    if p.rotation != pi.get("rotation", 0):
+                        return True
+                    current_annots = [(a.xref, tuple(a.rect)) for a in p.annots()]
+                    if current_annots != pi.get("annots", []):
+                        return True
+            return False
+        except Exception:
+            return True
+
+    def _request_close(self, e=None) -> None:
+        if not self._is_modified or not self._doc_has_real_changes():
+            self.on_close(self)
+            return
+
+        def _discard_and_close(ev=None):
+            try:
+                self.page_ref.close(dlg)
+            except Exception:
+                pass
+            self.on_close(self)
+
+        def _save_then_close(ev=None):
+            try:
+                self.page_ref.close(dlg)
+            except Exception:
+                pass
+            self._pending_close_after_save = True
+            self._save()
+
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Cambios sin guardar"),
+            content=ft.Text(
+                "Este documento tiene cambios sin guardar.\n¿Qué deseas hacer?",
+                size=13,
+            ),
+            actions=[
+                ft.TextButton("Cancelar", on_click=lambda e: self.page_ref.close(dlg)),
+                ft.TextButton(
+                    "Cerrar sin guardar",
+                    style=ft.ButtonStyle(color=ft.Colors.ERROR),
+                    on_click=_discard_and_close,
+                ),
+                ft.FilledButton("Guardar y cerrar", on_click=_save_then_close),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page_ref.open(dlg)
 
     def _insert_blank_page(self, e=None) -> None:
         pn = self.current_page
@@ -1064,7 +1149,7 @@ class PDFViewerTab(
                                 overflow=ft.TextOverflow.ELLIPSIS),
                         ft.IconButton(
                             ft.Icons.CLOSE, icon_size=14,
-                            on_click=lambda e: self.on_close(self),
+                            on_click=lambda e: self._request_close(),
                             tooltip="Cerrar pestaña",
                             style=ft.ButtonStyle(padding=ft.padding.all(0)),
                         ),
@@ -1082,7 +1167,7 @@ class PDFViewerTab(
             "icon":      ft.Icons.PICTURE_AS_PDF,
             "content":   self.view,
             "closeable": True,
-            "close_cb":  lambda: self.on_close(self),
+            "close_cb":  self._request_close,
             "viewer":    self,
         }
 

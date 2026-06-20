@@ -1911,6 +1911,7 @@ class _RenderMixin:
         with self._doc_lock:
             p = self.doc[pn]
             p.set_rotation((p.rotation + delta) % 360)
+        self._is_modified = True
 
         # Girar visualmente la imagen vieja mientras llega el nuevo render.
         # ft.Rotate es un Transform puramente compositor (sin coste de layout):
@@ -1967,6 +1968,7 @@ class _RenderMixin:
             for i in range(n):
                 p = self.doc[i]
                 p.set_rotation((p.rotation + 180) % 360)
+        self._is_modified = True
 
         # Para 180° las dimensiones del slot no cambian (W×H igual), así que
         # aplicar ft.Rotate(π) sobre las imágenes construidas evita el flash en
@@ -2021,8 +2023,15 @@ class _RenderMixin:
                 return
             with self._doc_lock:
                 self.doc.save(path, garbage=4, deflate=True)
+            self._is_modified = False
+            self._has_content_changes = False
+            self._doc_initial_state = self._compute_doc_state()
             self._show_snack(f"Guardado: {Path(path).name}")
+            if self._pending_close_after_save:
+                self._pending_close_after_save = False
+                self.on_close(self)
         except Exception as ex:
+            self._pending_close_after_save = False
             self._show_snack(f"Error al guardar: {ex}")
 
     # ── undo ──────────────────────────────────────────────────────────────────
@@ -2031,6 +2040,7 @@ class _RenderMixin:
         with self._doc_lock:
             pn = self._annot.undo_last(self.doc)
         if pn is not None:
+            self._is_modified = True
             self._refresh_page(pn)
         else:
             self._show_snack("Nada que deshacer")
@@ -2039,6 +2049,7 @@ class _RenderMixin:
         with self._doc_lock:
             pn = self._annot.redo_last(self.doc)
         if pn is not None:
+            self._is_modified = True
             self._refresh_page(pn)
         else:
             self._show_snack("Nada que rehacer")

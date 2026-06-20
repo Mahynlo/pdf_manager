@@ -740,6 +740,8 @@ class _GestureMixin:
                         self._refresh_selected_overlay(pn, annot_rect=final_rect)
                         # Background re-render (no full page flash).
                         if wrote_doc or was_hidden:
+                            if wrote_doc:
+                                self._is_modified = True
                             self._rerender_page_image(pn)
                 except Exception:
                     # Best-effort: if we hid the annot but crashed, unhide it
@@ -829,6 +831,7 @@ class _GestureMixin:
                 self._update_committed_ink_canvas(pn)
                 # Auto-switch to cursor and select the new ink annotation so
                 # the user can immediately move / style it.
+                self._is_modified = True
                 self._select_tool(Tool.CURSOR, ft.MouseCursor.BASIC)
                 if self._annot._history:
                     last_pn, last_xref = self._annot._history[-1]
@@ -883,6 +886,7 @@ class _GestureMixin:
                                 break
 
         if modified:
+            self._is_modified = True
             # Shapes: auto-switch to cursor and select the new annotation so the
             # user can immediately move / resize without manually switching tool.
             if tool in (Tool.RECT, Tool.CIRCLE, Tool.LINE, Tool.ARROW):
