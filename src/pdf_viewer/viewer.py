@@ -416,15 +416,16 @@ class PDFViewerTab(
             on_click=self._delete_page,
             disabled=len(self.doc) <= 1,
         )
+        self._save_in_place_btn = ft.PopupMenuItem(
+            text="Guardar cambios",
+            icon=ft.Icons.SAVE,
+            on_click=self._save_in_place,
+        )
         more_menu = ft.PopupMenuButton(
             icon=ft.Icons.MORE_VERT,
             tooltip="Más opciones",
             items=[
-                ft.PopupMenuItem(
-                    text="Guardar cambios",
-                    icon=ft.Icons.SAVE,
-                    on_click=self._save_in_place,
-                ),
+                self._save_in_place_btn,
                 ft.PopupMenuItem(
                     text="Guardar PDF como…",
                     icon=ft.Icons.SAVE_ALT,
@@ -980,20 +981,38 @@ class PDFViewerTab(
                 pass
             self.on_close(self)
 
+        has_redaction = self._has_content_changes
+
         def _save_then_close(ev=None):
             try:
                 self.page_ref.close(dlg)
             except Exception:
                 pass
-            self._save_in_place(_close_after=True)
+            if has_redaction:
+                self._pending_close_after_save = True
+                self._save()
+            else:
+                self._save_in_place(_close_after=True)
+
+        save_label = "Guardar como… y cerrar" if has_redaction else "Guardar y cerrar"
+        save_hint = (
+            ft.Text(
+                "⚠ Este documento tiene censura aplicada.\n"
+                "Solo se puede guardar como copia para preservar el original.",
+                size=12,
+                color=ft.Colors.ORANGE_700,
+            )
+            if has_redaction else
+            ft.Text(
+                "Este documento tiene cambios sin guardar.\n¿Qué deseas hacer?",
+                size=13,
+            )
+        )
 
         dlg = ft.AlertDialog(
             modal=True,
             title=ft.Text("Cambios sin guardar"),
-            content=ft.Text(
-                "Este documento tiene cambios sin guardar.\n¿Qué deseas hacer?",
-                size=13,
-            ),
+            content=save_hint,
             actions=[
                 ft.TextButton("Cancelar", on_click=lambda e: self.page_ref.close(dlg)),
                 ft.TextButton(
@@ -1001,7 +1020,7 @@ class PDFViewerTab(
                     style=ft.ButtonStyle(color=ft.Colors.ERROR),
                     on_click=_discard_and_close,
                 ),
-                ft.FilledButton("Guardar y cerrar", on_click=_save_then_close),
+                ft.FilledButton(save_label, on_click=_save_then_close),
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )

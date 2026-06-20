@@ -1054,6 +1054,8 @@ class _RedactMixin:
         if affected_pages:
             self._is_modified = True
             self._has_content_changes = True
+            self._save_in_place_btn.disabled = True
+            self._save_in_place_btn.update()
         self._refresh_ocr_ui_for_page()
         self._show_snack(msg)
         self.page_ref.update()

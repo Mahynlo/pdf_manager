@@ -2021,6 +2021,13 @@ class _RenderMixin:
             )
             return
 
+        if self._has_content_changes:
+            self._show_snack(
+                "Este documento tiene censura aplicada. "
+                "Usa 'Guardar PDF como…' para crear una copia y conservar el original."
+            )
+            return
+
         original = Path(self.path)
         try:
             with self._doc_lock:
