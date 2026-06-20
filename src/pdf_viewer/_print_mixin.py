@@ -54,8 +54,17 @@ import flet as ft
 _SYSTEM = platform.system()  # "Windows" | "Darwin" | "Linux"
 
 _PRINT_THUMB_SCALE = 0.45  # A4 → ~268×379 px, nítido al mostrarse tipo visor
-_PRINT_THUMB_W     = 190    # ancho de la "hoja" en la columna scrollable
-_PRINT_THUMB_H     = 269    # alto (proporción A4 ~0.707)
+_PRINT_THUMB_MAX_W = 190    # dimensión máxima para el lado largo del thumbnail
+_PRINT_THUMB_MAX_H = 269    # límite alto para páginas muy apaisadas
+
+
+def _thumb_size(pw: float, ph: float) -> tuple[int, int]:
+    """Devuelve (tw, th) proporcional al aspect ratio real de la página,
+    acotado por _PRINT_THUMB_MAX_W × _PRINT_THUMB_MAX_H."""
+    if pw <= 0 or ph <= 0:
+        return _PRINT_THUMB_MAX_W, _PRINT_THUMB_MAX_H
+    scale = min(_PRINT_THUMB_MAX_W / pw, _PRINT_THUMB_MAX_H / ph)
+    return max(1, int(pw * scale)), max(1, int(ph * scale))
 
 
 def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -389,16 +398,25 @@ class _PrintMixin:
             return
 
         cache = getattr(self, '_print_thumb_cache', {})
+        lock  = getattr(self, '_doc_lock', None)
         items: list[ft.Control] = []
         for order, pn in enumerate(pages):
+            # Dimensiones proporcionales al tamaño real de la página.
+            try:
+                if lock:
+                    with lock:
+                        r = self.doc[pn].rect
+                else:
+                    r = self.doc[pn].rect
+                tw, th = _thumb_size(r.width, r.height)
+            except Exception:
+                tw, th = _PRINT_THUMB_MAX_W, _PRINT_THUMB_MAX_H
+
             b64 = cache.get(pn)
             if b64:
-                # CONTAIN sobre fondo blanco "papel": la página se ve COMPLETA y
-                # con su proporción real (antes COVER recortaba el contenido y
-                # deformaba las páginas apaisadas).
                 inner: ft.Control = ft.Image(
                     src_base64=b64,
-                    width=_PRINT_THUMB_W, height=_PRINT_THUMB_H,
+                    width=tw, height=th,
                     fit=ft.ImageFit.CONTAIN,
                 )
             else:
@@ -406,7 +424,7 @@ class _PrintMixin:
 
             paper = ft.Container(
                 content=inner,
-                width=_PRINT_THUMB_W, height=_PRINT_THUMB_H,
+                width=tw, height=th,
                 bgcolor="#FFFFFF",
                 alignment=ft.alignment.center,
                 border=ft.border.all(1, "outlineVariant"),
