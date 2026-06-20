@@ -138,55 +138,57 @@ class OCRProcessor:
 
     @staticmethod
     def detect_orientation_native(page: "fitz.Page") -> int:
-        """Detecta si una página nativa está invertida (180°) usando posiciones de bloque.
+        """Detecta la orientación de una página nativa usando vectores de dirección.
 
-        ``page.get_text()`` devuelve coordenadas en el espacio PRE-rotación de la
-        página — ignora completamente el /Rotate almacenado. Por eso, ``dir`` y
-        los origins de caracteres siempre aparecen como si la página estuviera a
-        0°, aunque tenga /Rotate 180.
+        Estrategia: para cada línea de texto extrae su vector ``dir`` (espacio de
+        contenido/pre-rotación) y lo lleva al espacio de pantalla multiplicando por
+        ``page.rotation_matrix``.  Si la dirección dominante no es (1, 0) (texto
+        fluyendo de izquierda a derecha), devuelve el ángulo de corrección necesario.
 
-        Estrategia correcta:
-          1. Obtener la posición Y del centro de cada bloque de texto (pre-rotación,
-             y-abajo, rango [0, H]).
-          2. Aplicar manualmente el /Rotate para calcular dónde APARECE cada bloque
-             en pantalla:
-               - /Rotate 0:   display_y = y_bloque
-               - /Rotate 180: display_y = H - y_bloque
-          3. Si ≥ 65 % de los bloques caen en la mitad inferior de la pantalla
-             → la página está invertida → corrección 180°.
+        Ponderación: cada línea contribuye proporcionalmente a su número de
+        caracteres, de modo que los titulares cortos no distorsionen páginas
+        con mucho cuerpo de texto.
 
-        Casos cubiertos:
-          - /Rotate 180 con contenido normal: bloques en y≈100 → display_y≈742 (abajo) ✓
-          - /Rotate 0 con contenido invertido (via cm): bloques en y≈742 → display_y≈742 ✓
-          - /Rotate 0 normal: bloques en y≈100 → display_y≈100 (arriba) → 0 ✓
+        Cubre los cuatro casos:
+          - display_dir ≈ ( 1,  0): sin corrección (0°)
+          - display_dir ≈ (-1,  0): corrección 180°  (texto invertido)
+          - display_dir ≈ ( 0, -1): corrección  90°  (texto sube en pantalla)
+          - display_dir ≈ ( 0, +1): corrección 270°  (texto baja en pantalla)
+
+        Ventaja sobre el enfoque de posición Y anterior: funciona aunque el texto
+        ocupe toda la página (sin depender de un umbral de posición), y detecta
+        también rotaciones de 90°/270°.
         """
-        rotation = page.rotation
-        H = page.rect.height
-
         try:
-            blocks = page.get_text("blocks")
+            d = page.get_text("dict", flags=0)
         except Exception:
             return 0
 
-        ys: list[float] = []
-        for block in blocks:
-            if block[6] != 0:          # bloque no texto
-                continue
-            text = block[4]
-            if not text.strip():
-                continue
-            cy = (block[1] + block[3]) / 2        # centro Y pre-rotación (y-down)
-            display_y = (H - cy) if rotation == 180 else cy
-            ys.append(display_y)
+        rm = page.rotation_matrix
+        # Parte lineal (solo rotación, sin traslación): p1 - p0 cancela e,f.
+        # Mismo patrón que _screen_delta_to_page() en annotations.py.
+        origin = fitz.Point(0.0, 0.0) * rm
+        wx, wy = 0.0, 0.0
 
-        if not ys:
+        for block in d.get("blocks", []):
+            if block.get("type") != 0:          # solo bloques de texto
+                continue
+            for line in block.get("lines", []):
+                dir_vec = line.get("dir", (1.0, 0.0))
+                n_chars = sum(len(s.get("text", "")) for s in line.get("spans", []))
+                if n_chars == 0:
+                    continue
+                # Solo la parte rotacional de la matriz (sin traslación)
+                p = fitz.Point(dir_vec[0], dir_vec[1]) * rm
+                wx += (p.x - origin.x) * n_chars
+                wy += (p.y - origin.y) * n_chars
+
+        if wx == 0.0 and wy == 0.0:
             return 0
 
-        bottom = sum(1 for y in ys if y > H / 2)
-        if bottom / len(ys) >= 0.65:
-            return 180
-
-        return 0
+        if abs(wx) >= abs(wy):
+            return 0 if wx >= 0 else 180
+        return 90 if wy < 0 else 270
 
     def score_orientation_classifier(self, img: np.ndarray) -> int:
         """Detecta la orientación usando el clasificador MobileNetV3 de OnnxTR.

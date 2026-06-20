@@ -524,19 +524,23 @@ class _OCRMixin:
                 for p in range(n):
                     try:
                         with self._doc_lock:
-                            probe = self._ocr_processor.render_orientation_probe(
+                            probe, native_angle = self._ocr_processor.probe_orientation(
                                 self.doc, p
                             )
-                        # Paso 1: método rápido sin modelo (fiable para 90°/270°).
-                        fast_angle = OCRProcessor.score_orientation_fast(probe)
-
-                        if fast_angle in (90, 270):
-                            # Rotación lateral: señal de varianza muy fiable.
-                            angle = fast_angle
+                        if native_angle is not None:
+                            # Página nativa: los vectores de dirección de texto son
+                            # la fuente de verdad — no necesitamos heurísticas de
+                            # imagen que pueden producir falsos 90°/270°.
+                            angle = native_angle
                         else:
-                            # Para 0°/180° usamos el clasificador entrenado.
-                            self._cancel_orientation_model_release()
-                            angle = self._ocr_processor.score_orientation_classifier(probe)
+                            # Página escaneada: imagen primero para 90°/270°
+                            # (varianza fiable), clasificador para 0°/180°.
+                            fast_angle = OCRProcessor.score_orientation_fast(probe)
+                            if fast_angle in (90, 270):
+                                angle = fast_angle
+                            else:
+                                self._cancel_orientation_model_release()
+                                angle = self._ocr_processor.score_orientation_classifier(probe)
 
                         if angle != 0:
                             corrections.append((p, angle))
