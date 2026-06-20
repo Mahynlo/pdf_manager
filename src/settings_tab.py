@@ -32,8 +32,13 @@ _KEYBOARD_SHORTCUTS: list[tuple[str, list[tuple[str, list[list[str]]]]]] = [
         ("Alejar",              [["Ctrl", "−"]]),
         ("Zoom 100 %",          [["Ctrl", "0"]]),
         ("Zoom con la rueda",   [["Ctrl", "Rueda"]]),
-        ("Ajustar a la página", [["Ctrl", "F"]]),
+        ("Ajustar a la página", [["Ctrl", "H"]]),
         ("Ajustar al ancho",    [["Ctrl", "W"]]),
+    ]),
+    ("Búsqueda", [
+        ("Buscar texto",              [["Ctrl", "F"]]),
+        ("Siguiente coincidencia",    [["↓"]]),
+        ("Coincidencia anterior",     [["↑"]]),
     ]),
     ("Edición y texto", [
         ("Deshacer",                   [["Ctrl", "Z"]]),

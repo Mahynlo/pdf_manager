@@ -407,7 +407,7 @@ class PDFViewerTab(
             tooltip="Nivel de zoom",
             items=[
                 ft.PopupMenuItem(text="Ajustar al ancho  (Ctrl+W)", on_click=self._fit_width),
-                ft.PopupMenuItem(text="Ajustar a la página",         on_click=self._fit_page),
+                ft.PopupMenuItem(text="Ajustar a la página (Ctrl+H)", on_click=self._fit_page),
                 ft.PopupMenuItem(),
                 *[
                     ft.PopupMenuItem(text=f"{int(z * 100)}%",

@@ -779,6 +779,8 @@ def main(page: ft.Page) -> None:
                 v._print_pdf(); return
             if k == "F":
                 v._open_search(); return  # Ctrl+F: buscar texto
+            if k == "H":
+                v._fit_page(); return    # Ctrl+H: ajustar a la página
             if k == "W":
                 v._fit_width(); return  # Ctrl+W: ajustar al ancho
             if k == "C":
