@@ -48,6 +48,7 @@ evento de arrastre.
 from __future__ import annotations
 
 import bisect
+import math
 import threading
 import time
 from pathlib import Path
@@ -1012,6 +1013,10 @@ class _RenderMixin:
                     img.width  = w
                     img.height = h
                     self._previewed.discard(pn)
+                    # Limpiar el Rotate de transición que _rotate() pudo haber
+                    # puesto para evitar el flash en blanco durante la espera.
+                    if img.rotate is not None:
+                        img.rotate = None
                 img.visible = True
                 # Fondo blanco (no None/transparente): durante el instante en
                 # que Flutter decodifica la imagen recién asignada, el slot se ve
@@ -1904,11 +1909,17 @@ class _RenderMixin:
             p = self.doc[pn]
             p.set_rotation((p.rotation + delta) % 360)
 
-        # Limpiar imagen vieja ANTES de rebuild: si queda visible con fit=CONTAIN,
-        # Flutter muestra la página en orientación incorrecta mientras llega el
-        # nuevo render (fuente del parpadeo / imagen torcida transitoria).
+        # Girar visualmente la imagen vieja mientras llega el nuevo render.
+        # ft.Rotate es un Transform puramente compositor (sin coste de layout):
+        # _rebuild_scroll_content ve has_old=True y mantiene la imagen visible,
+        # evitando el flash en blanco. El worker limpia img.rotate al terminar.
         img = self._page_images[pn] if pn < len(self._page_images) else None
-        if img is not None:
+        if img is not None and (img.src or img.src_base64):
+            img.rotate = ft.Rotate(
+                angle=math.radians(delta), alignment=ft.alignment.center
+            )
+            img.fit = ft.ImageFit.CONTAIN
+        elif img is not None:
             img.src = img.src_base64 = None
             img.visible = False
 
@@ -1954,10 +1965,15 @@ class _RenderMixin:
                 p = self.doc[i]
                 p.set_rotation((p.rotation + 180) % 360)
 
-        # Limpiar todas las imágenes antes de rebuild para evitar mostrar
-        # orientaciones incorrectas durante la transición.
+        # Para 180° las dimensiones del slot no cambian (W×H igual), así que
+        # aplicar ft.Rotate(π) sobre las imágenes construidas evita el flash en
+        # blanco: el fast-resize path ve has_old=True y mantiene todo visible.
+        rot_angle = math.radians(180)
         for img in self._page_images:
-            if img is not None:
+            if img is not None and (img.src or img.src_base64):
+                img.rotate = ft.Rotate(angle=rot_angle, alignment=ft.alignment.center)
+                img.fit = ft.ImageFit.CONTAIN
+            elif img is not None:
                 img.src = img.src_base64 = None
                 img.visible = False
 
