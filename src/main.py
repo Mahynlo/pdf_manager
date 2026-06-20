@@ -335,7 +335,7 @@ def main(page: ft.Page) -> None:
     page.theme_mode            = ft.ThemeMode.LIGHT
     page.padding               = 0
     page.window.icon           = "icon.png"
-    page.window.prevent_close  = True
+    page.window.prevent_close  = False  # se activa reactivamente al modificar un doc
     page.add(ft.Container(
         content=ft.Column(
             [ft.ProgressRing(width=44, height=44, stroke_width=3, color="#1E2A38")],
@@ -565,6 +565,7 @@ def main(page: ft.Page) -> None:
         finally:
             _opening_now.discard(path)
 
+        viewer.on_modified_changed = lambda _val: _update_prevent_close()
         open_tabs.append(viewer)
         rf.push(path)
         home.refresh_recent()
@@ -658,6 +659,7 @@ def main(page: ft.Page) -> None:
         idx = open_tabs.index(viewer)
         viewer.close()
         open_tabs.remove(viewer)
+        _update_prevent_close()
         fc = _fixed_count()
         if open_tabs:
             _rebuild_tabs(fc + min(idx, len(open_tabs) - 1))
@@ -893,6 +895,22 @@ def main(page: ft.Page) -> None:
 
     # ── Limpieza al cerrar la ventana ────────────────────────────────────────
 
+    def _update_prevent_close() -> None:
+        """Activa prevent_close solo si hay documentos con cambios sin guardar.
+
+        Con prevent_close=False la ventana se cierra sin round-trip a Python,
+        lo que elimina el retardo perceptible al cerrar cuando no hay nada
+        que proteger.  Se llama reactivamente desde el setter de _is_modified
+        en cada PDFViewerTab, y tambien al cerrar o guardar cualquier tab.
+        """
+        has_unsaved = any(getattr(v, "_is_modified", False) for v in open_tabs)
+        if page.window.prevent_close != has_unsaved:
+            page.window.prevent_close = has_unsaved
+            try:
+                page.update()
+            except Exception:
+                pass
+
     def _do_close_app() -> None:
         """Cierra el socket IPC y destruye la ventana."""
         # Señalar a todos los workers de render que aborten antes de destruir,
@@ -931,10 +949,10 @@ def main(page: ft.Page) -> None:
                 pass
 
         def _force_close(ev=None):
-            try:
-                page.close(dlg)
-            except Exception:
-                pass
+            # No cerramos el dialogo explicitamente antes de destroy():
+            # window.destroy() cierra la ventana entera incluyendo el dialogo,
+            # y page.close(dlg) seria un round-trip extra innecesario que
+            # mantiene la ventana visible mas tiempo del necesario.
             _do_close_app()
 
         dlg = ft.AlertDialog(

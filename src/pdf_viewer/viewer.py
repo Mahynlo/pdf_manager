@@ -91,7 +91,8 @@ class PDFViewerTab(
         self._viewer_body:    ft.Container | None = None
         self._night_mode_btn: ft.IconButton | None = None
 
-        self._is_modified:             bool = False
+        self._modified:                bool = False   # backing store para _is_modified
+        self.on_modified_changed             = None    # Callable[[bool], None] | None
         self._has_content_changes:     bool = False
         self._pending_close_after_save: bool = False
 
@@ -960,6 +961,29 @@ class PDFViewerTab(
         self._is_modified = True
         if snack:
             self._show_snack(snack)
+
+    # -- _is_modified property ------------------------------------------------
+    # Property en lugar de atributo simple para que main.py pueda actualizar
+    # page.window.prevent_close de forma reactiva: solo se activa cuando hay
+    # documentos con cambios reales, por lo que el cierre de la app es
+    # instantaneo cuando no hay nada que proteger (evita el round-trip Flutter
+    # -> Python -> Flutter del mecanismo prevent_close).
+
+    @property
+    def _is_modified(self) -> bool:
+        return self._modified
+
+    @_is_modified.setter
+    def _is_modified(self, value: bool) -> None:
+        changed = self._modified != value
+        self._modified = value
+        if changed:
+            cb = self.on_modified_changed
+            if cb is not None:
+                try:
+                    cb(value)
+                except Exception:
+                    pass
 
     def _compute_doc_state(self) -> dict:
         """Snapshot ligero del estado del documento: páginas, rotaciones y anotaciones."""
