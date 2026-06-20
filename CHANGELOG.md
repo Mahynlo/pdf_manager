@@ -1,6 +1,25 @@
 # Changelog
 
-## [0.1.26] - 2026-06-20
+## [0.1.26-Parte_2] - 2026-06-20
+
+### Added
+- **Búsqueda de texto completo (Ctrl+F)**: nuevo panel lateral «Buscar» que permite buscar texto en todo el documento con resaltado visual de coincidencias. La búsqueda es de **palabras completas** («util» no encuentra «utilidad») y admite frases de varias palabras («utilidad mayor»). Las cajas de resaltado se ajustan al glifo exacto mediante `search_for`, igual que la censura, lo que da recuadros precisos incluso en documentos escaneados con OCR. Incluye navegación anterior/siguiente, contador de coincidencias, lista de páginas con resultados y botón para enviar el término directamente al panel de censura.
+- **Búsqueda en modo página única y doble**: al navegar a una coincidencia en vistas no continuas, el visor cambia a la página correcta usando `_scroll_to_page()` en lugar del offset de scroll continuo.
+- **Overlays de búsqueda integrados en el ciclo de vida de slots**: los recuadros de búsqueda se reaplican automáticamente cuando un slot materializa (`_reapply_search_page`) y se limpian al desinflar, igual que los overlays de OCR y censura. La lista `_search_overlays` sigue el mismo patrón de virtualización lazy que el resto de overlays por página.
+
+### Changed
+- **Censura ignora mayúsculas/minúsculas por defecto**: el botón «Aa» del panel de censura arranca desactivado; ya no es necesario desactivarlo manualmente para buscar sin distinguir mayúsculas.
+- **Atajo Ctrl+F abre el panel de búsqueda**: el atajo que antes ajustaba la página al ancho de la ventana («Ajustar a la página») fue reasignado a abrir el buscador. La acción de ajustar sigue disponible en el menú de zoom.
+
+### Fixed
+- **Cierre de pestaña más rápido**: `viewer.close()` ahora quita los dos file pickers del overlay en un solo `page.update()` en lugar de dos llamadas consecutivas, eliminando un round-trip innecesario a Flutter (~100-200 ms por pestaña cerrada).
+- **Cierre de la aplicación más rápido**: `_do_close_app()` incrementa `_render_gen` en todos los tabs abiertos antes de llamar a `window.destroy()`, señalando a los workers de render que aborten para que el proceso Python termine más rápido tras cerrar la ventana.
+
+### Tests
+- **`tests/test_search.py`** (25 casos): cubre `_search_worker` (resultados correctos, cancelación por token), navegación circular, construcción de overlays, limpieza de estado y transferencia del término a censura.
+- **`tests/test_lazy_slots.py`**: se añade `_search_overlays` a la tupla `_PAGE_LISTS` para garantizar que el nuevo overlay sigue el mismo invariante de virtualización que los demás.
+
+## [0.1.26-Parte_1] - 2026-06-20
 
 ### Added
 - **Voltear 180° (página actual y todas las páginas)**: dos nuevas opciones en el menú de página — «Voltear 180° (esta página)» y «Voltear 180° (todas las páginas)» — que complementan los botones de 90° existentes. Útiles como corrección manual rápida cuando el documento completo está invertido.
