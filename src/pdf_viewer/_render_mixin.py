@@ -1933,6 +1933,29 @@ class _RenderMixin:
         """Voltear la página actual 180°."""
         self._rotate(delta=180)
 
+    def _rotate_180_all(self, e=None) -> None:
+        """Voltear todas las páginas del documento 180°."""
+        with self._doc_lock:
+            n = len(self.doc)
+            for i in range(n):
+                p = self.doc[i]
+                p.set_rotation((p.rotation + 180) % 360)
+        self._ocr_by_page.clear()
+        self._page_words.clear()
+        self._page_word_bands.clear()
+        self._page_blocks_cache.clear()
+        self._text_rects_cache.clear()
+        _rcache = getattr(self, "_render_cache", None)
+        if _rcache is not None:
+            _rcache.clear()
+        saved = self.current_page
+        self._rebuild_scroll_content(scroll_back=False)
+        try:
+            self.viewer_scroll.scroll_to(offset=self._page_cum_offsets[saved], duration=0)
+        except Exception:
+            pass
+        self.page_ref.update()
+
     def _save(self, e=None) -> None:
         self._save_picker.save_file(
             dialog_title="Guardar PDF con anotaciones",

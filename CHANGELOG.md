@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.26] - 2026-06-20
+
+### Added
+- **Voltear 180° (página actual y todas las páginas)**: dos nuevas opciones en el menú de página — «Voltear 180° (esta página)» y «Voltear 180° (todas las páginas)» — que complementan los botones de 90° existentes. Útiles como corrección manual rápida cuando el documento completo está invertido.
+- **Corrección de orientación para PDFs con texto nativo**: el botón «Corregir orientación del escaneo» ahora también corrige documentos PDF digitales (no solo escaneos) cuyo contenido aparece invertido. La detección usa posiciones de bloques de texto proyectadas al espacio de pantalla (aplicando `/Rotate` manualmente), sin necesidad de modelo OCR: si ≥ 65 % de los bloques de texto caen en la mitad inferior de la pantalla la página se marca como invertida y se aplica una corrección de 180°. Cubre tanto páginas con `/Rotate 180` y contenido normal como páginas con contenido almacenado invertido en el stream.
+
+### Changed
+- **La detección automática de orientación ya no se ejecuta al abrir un PDF**: para evitar correcciones no solicitadas, `_auto_detect_orientation` dejó de llamarse en el constructor del visor. La corrección de orientación solo ocurre cuando el usuario presiona explícitamente «Corregir orientación del escaneo».
+- **Eliminada la restricción que impedía corregir documentos con `/Rotate` previo**: el antiguo guard `any(page.rotation != 0)` hacía que `_auto_detect_orientation` y `_fix_orientation` saltaran el documento completo si alguna página ya tenía una rotación no nula, impidiendo corregir PDFs que venían con `/Rotate 180` incorrecto de fábrica.
+
 ## [0.1.25] - 2026-06-19
 
 ### Added

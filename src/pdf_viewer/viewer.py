@@ -431,9 +431,14 @@ class PDFViewerTab(
                     on_click=self._rotate_ccw,
                 ),
                 ft.PopupMenuItem(
-                    text="Voltear 180°",
+                    text="Voltear 180° (esta página)",
                     icon=ft.Icons.FLIP,
                     on_click=self._rotate_180,
+                ),
+                ft.PopupMenuItem(
+                    text="Voltear 180° (todas las páginas)",
+                    icon=ft.Icons.FLIP_TO_BACK,
+                    on_click=self._rotate_180_all,
                 ),
                 ft.PopupMenuItem(
                     text="Corregir orientación del escaneo",
