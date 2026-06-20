@@ -1903,12 +1903,15 @@ class _RenderMixin:
         with self._doc_lock:
             p = self.doc[pn]
             p.set_rotation((p.rotation + delta) % 360)
-        # La rotación cambia tanto el render como las coordenadas de la página.
-        # _rebuild_scroll_content (ruta rápida, mismo nº de páginas) reutiliza los
-        # controles y NO limpia la caché de render: hay que invalidar la página o
-        # se vuelve a mostrar el PNG cacheado SIN rotar (la hoja gira pero el
-        # contenido no). También se descartan las cachés de texto/OCR/censura de
-        # la página, cuyas coordenadas quedaron obsoletas.
+
+        # Limpiar imagen vieja ANTES de rebuild: si queda visible con fit=CONTAIN,
+        # Flutter muestra la página en orientación incorrecta mientras llega el
+        # nuevo render (fuente del parpadeo / imagen torcida transitoria).
+        img = self._page_images[pn] if pn < len(self._page_images) else None
+        if img is not None:
+            img.src = img.src_base64 = None
+            img.visible = False
+
         self._ocr_by_page.pop(pn, None)
         self._page_words.pop(pn, None)
         self._page_word_bands.pop(pn, None)
@@ -1917,13 +1920,23 @@ class _RenderMixin:
         _rcache = getattr(self, "_render_cache", None)
         if _rcache is not None:
             _rcache.invalidate_page(pn)
+
         saved = pn
         self._rebuild_scroll_content(scroll_back=False)
+
+        # scroll_to primero, luego update: Flutter aplica el nuevo layout y
+        # posiciona antes de que el render asíncrono llegue.
         try:
             self.viewer_scroll.scroll_to(offset=self._page_cum_offsets[saved], duration=0)
         except Exception:
             pass
         self.page_ref.update()
+
+        # Forzar render inmediato de la página rotada y de las vecinas visibles.
+        # _rebuild_scroll_content solo re-renderiza las primeras _PRELOAD páginas,
+        # lo que deja sin actualizar cualquier página fuera de ese rango inicial.
+        self._render_page_slot(pn)
+        self._schedule_scroll_idle()
 
     def _rotate_ccw(self, e=None) -> None:
         """Rotar la página actual 90° en sentido antihorario."""
@@ -1940,6 +1953,14 @@ class _RenderMixin:
             for i in range(n):
                 p = self.doc[i]
                 p.set_rotation((p.rotation + 180) % 360)
+
+        # Limpiar todas las imágenes antes de rebuild para evitar mostrar
+        # orientaciones incorrectas durante la transición.
+        for img in self._page_images:
+            if img is not None:
+                img.src = img.src_base64 = None
+                img.visible = False
+
         self._ocr_by_page.clear()
         self._page_words.clear()
         self._page_word_bands.clear()
@@ -1948,6 +1969,7 @@ class _RenderMixin:
         _rcache = getattr(self, "_render_cache", None)
         if _rcache is not None:
             _rcache.clear()
+
         saved = self.current_page
         self._rebuild_scroll_content(scroll_back=False)
         try:
@@ -1955,6 +1977,8 @@ class _RenderMixin:
         except Exception:
             pass
         self.page_ref.update()
+        self._render_page_slot(saved)
+        self._schedule_scroll_idle()
 
     def _save(self, e=None) -> None:
         self._save_picker.save_file(
