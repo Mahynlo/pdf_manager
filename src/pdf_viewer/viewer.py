@@ -405,6 +405,12 @@ class PDFViewerTab(
         )
 
         # ── menú de desbordamiento (acciones poco frecuentes) ────────────────
+        self._delete_page_menu_item = ft.PopupMenuItem(
+            text="Eliminar página actual",
+            icon=ft.Icons.DELETE_OUTLINE,
+            on_click=self._delete_page,
+            disabled=len(self.doc) <= 1,
+        )
         more_menu = ft.PopupMenuButton(
             icon=ft.Icons.MORE_VERT,
             tooltip="Más opciones",
@@ -456,11 +462,7 @@ class PDFViewerTab(
                     icon=ft.Icons.COPY_ALL_OUTLINED,
                     on_click=self._duplicate_page,
                 ),
-                ft.PopupMenuItem(
-                    text="Eliminar página actual",
-                    icon=ft.Icons.DELETE_OUTLINE,
-                    on_click=self._delete_page,
-                ),
+                self._delete_page_menu_item,
                 ft.PopupMenuItem(),
                 ft.PopupMenuItem(
                     text="Mover página arriba",
@@ -930,7 +932,16 @@ class PDFViewerTab(
     def _duplicate_page(self, e=None) -> None:
         pn = self.current_page
         with self._doc_lock:
-            self.doc.copy_page(pn, pn + 1)
+            # copy_page inserta una REFERENCIA al mismo objeto PDF (mismo xref
+            # de página y mismos xrefs de anotaciones en ambas copias). Eso
+            # hace que mover/borrar una anotación en la copia afecte también al
+            # original y viceversa. insert_pdf genera copias profundas con
+            # nuevos xrefs, por lo que ambas páginas son completamente
+            # independientes desde el momento de la duplicación.
+            tmp = fitz.open()
+            tmp.insert_pdf(self.doc, from_page=pn, to_page=pn)
+            self.doc.insert_pdf(tmp, from_page=0, to_page=0, start_at=pn + 1)
+            tmp.close()
         self._annot._history = [
             (pg if pg <= pn else pg + 1, xr) for pg, xr in self._annot._history
         ]
@@ -941,14 +952,42 @@ class PDFViewerTab(
             self._show_snack("No se puede eliminar la única página")
             return
         pn = self.current_page
-        with self._doc_lock:
-            self.doc.delete_page(pn)
-        self._annot._history = [
-            (pg if pg < pn else pg - 1, xr)
-            for pg, xr in self._annot._history
-            if pg != pn
-        ]
-        self._after_page_op(pn, "Página eliminada")
+
+        def _do_delete(e):
+            try:
+                self.page_ref.close(dlg)
+            except Exception:
+                pass
+            with self._doc_lock:
+                self.doc.delete_page(pn)
+            self._annot._history = [
+                (pg if pg < pn else pg - 1, xr)
+                for pg, xr in self._annot._history
+                if pg != pn
+            ]
+            self._after_page_op(pn, "Página eliminada")
+
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Eliminar página"),
+            content=ft.Text(
+                f"¿Eliminar la página {pn + 1}?\nEsta acción no se puede deshacer.",
+                size=13,
+            ),
+            actions=[
+                ft.TextButton(
+                    "Cancelar",
+                    on_click=lambda e: self.page_ref.close(dlg),
+                ),
+                ft.FilledButton(
+                    "Eliminar",
+                    style=ft.ButtonStyle(bgcolor="#D32F2F"),
+                    on_click=_do_delete,
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page_ref.open(dlg)
 
     def _move_page_up(self, e=None) -> None:
         pn = self.current_page

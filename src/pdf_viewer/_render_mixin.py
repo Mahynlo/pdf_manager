@@ -1547,6 +1547,9 @@ class _RenderMixin:
         self.page_input.value  = str(self.current_page + 1)
         self.prev_btn.disabled = self.current_page == 0
         self.next_btn.disabled = self.current_page == total - 1
+        item = getattr(self, "_delete_page_menu_item", None)
+        if item is not None:
+            item.disabled = total <= 1
 
     def _on_view_scroll(self, e: ft.OnScrollEvent) -> None:
         # En single/double sólo registramos la posición/extensión del scroll para
