@@ -254,7 +254,7 @@ class PDFViewerTab(
         self._redact_terms:      list[str] = []
         self._redact_term_matches: dict[str, list] = {}
         self._redact_preview        = True
-        self._redact_case_sensitive = True
+        self._redact_case_sensitive = False
         self._redact_box_color      = "#000000"
 
         # Redaction panel UI refs (set by _build_redact_sidebar_panel)

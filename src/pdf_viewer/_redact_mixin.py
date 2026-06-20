@@ -98,9 +98,9 @@ class _RedactMixin:
             focused_border_color=_REDACT_HDR,
         )
         self._redact_case_btn = ft.IconButton(
-            ft.Icons.FONT_DOWNLOAD_OUTLINED, icon_size=18,
-            tooltip="Distinguir mayúsculas (activo = sí)",
-            icon_color=_REDACT_HDR, bgcolor=ft.Colors.with_opacity(0.15, "#E65100"),
+            ft.Icons.FONT_DOWNLOAD_OFF_OUTLINED, icon_size=18,
+            tooltip="Ignorar mayúsculas (activo = no)",
+            icon_color=None, bgcolor=None,
             on_click=self._toggle_case_sensitive,
             style=ft.ButtonStyle(padding=ft.padding.all(4)),
         )
