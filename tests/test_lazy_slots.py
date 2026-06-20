@@ -45,9 +45,9 @@ class _Viewer(_RenderMixin, _TextSelMixin, _OCRMixin, _GestureMixin):
 
 _PAGE_LISTS = (
     "_page_images", "_drag_overlays", "_sel_overlays", "_sel_handles",
-    "_ocr_overlays", "_text_sel_layers", "_redact_overlays", "_loading_overlays",
-    "_ink_canvases", "_text_sel_popups", "_annot_popups", "_page_slots",
-    "_page_gestures",
+    "_ocr_overlays", "_text_sel_layers", "_redact_overlays", "_search_overlays",
+    "_loading_overlays", "_ink_canvases", "_text_sel_popups", "_annot_popups",
+    "_page_slots", "_page_gestures",
 )
 
 
@@ -86,6 +86,7 @@ def _make_viewer(total: int, page_h: float = 842.0) -> _Viewer:
     v._redact_preview = False
     v._ocr_by_page = {}
     v._redact_matches = []
+    v._search_results = {}
 
     # Listas pesadas en None (sin construir) + placeholders/rows/geometría.
     for name in _PAGE_LISTS:

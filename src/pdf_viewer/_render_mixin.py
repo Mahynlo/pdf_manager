@@ -172,8 +172,15 @@ class _RenderMixin:
                 self._ocr_overlays[pn].controls      = []
                 self._text_sel_layers[pn].controls   = []
                 self._redact_overlays[pn].controls   = []
+                if pn < len(self._search_overlays) and self._search_overlays[pn] is not None:
+                    self._search_overlays[pn].controls = []
                 if getattr(self, "_ocr_show_boxes", False) and pn in self._ocr_by_page:
                     self._render_ocr_boxes(pn=pn)
+                if getattr(self, "_search_results", {}).get(pn):
+                    try:
+                        self._render_search_overlay(pn)
+                    except Exception:
+                        pass
 
             display_mode = getattr(self, "_display_mode", "continuous")
             if display_mode == "single":
@@ -226,6 +233,7 @@ class _RenderMixin:
         self._ocr_overlays     = [None] * total
         self._text_sel_layers  = [None] * total
         self._redact_overlays  = [None] * total
+        self._search_overlays  = [None] * total
         self._loading_overlays = [None] * total
         self._ink_canvases     = [None] * total
         self._page_slots       = [None] * total
@@ -543,6 +551,7 @@ class _RenderMixin:
         ocr_ov      = ft.Stack([], visible=False)
         text_sel_ov = ft.Stack([], visible=False)
         redact_ov   = ft.Stack([], visible=False)
+        search_ov   = ft.Stack([], visible=False)
 
         _btn_style = ft.ButtonStyle(
             padding=ft.padding.symmetric(horizontal=6, vertical=3),
@@ -688,6 +697,7 @@ class _RenderMixin:
         self._ocr_overlays[pn]     = ocr_ov
         self._text_sel_layers[pn]  = text_sel_ov
         self._redact_overlays[pn]  = redact_ov
+        self._search_overlays[pn]  = search_ov
         self._loading_overlays[pn] = loading_ov
         self._ink_canvases[pn]     = ink_canvas
         self._text_sel_popups[pn]  = popup_ov
@@ -699,7 +709,7 @@ class _RenderMixin:
                 # detrás de la imagen. Así, en la ventana en que Flutter aún
                 # decodifica el archivo recién renderizado, se ve blanco y no
                 # el gris del fondo del visor → sin flash gris al aparecer.
-                [loading_ov, img, text_sel_ov, drag_ov, ink_canvas, sel_ov, ocr_ov, redact_ov, popup_ov, annot_popup_ov],
+                [loading_ov, img, search_ov, text_sel_ov, drag_ov, ink_canvas, sel_ov, ocr_ov, redact_ov, popup_ov, annot_popup_ov],
                 clip_behavior=ft.ClipBehavior.NONE,
             ),
             width=w, height=h,
@@ -746,6 +756,11 @@ class _RenderMixin:
         except Exception:
             pass
         try:
+            if getattr(self, "_search_results", {}).get(pn):
+                self._reapply_search_page(pn)
+        except Exception:
+            pass
+        try:
             sel = getattr(self, "_selected", None)
             if sel is not None and sel[0] == pn:
                 self._refresh_selected_overlay(pn)
@@ -780,9 +795,9 @@ class _RenderMixin:
         for lst in (
             self._page_images, self._drag_overlays, self._sel_overlays,
             self._sel_handles, self._ocr_overlays, self._text_sel_layers,
-            self._redact_overlays, self._loading_overlays, self._ink_canvases,
-            self._text_sel_popups, self._annot_popups, self._page_slots,
-            self._page_gestures,
+            self._redact_overlays, self._search_overlays, self._loading_overlays,
+            self._ink_canvases, self._text_sel_popups, self._annot_popups,
+            self._page_slots, self._page_gestures,
         ):
             lst[pn] = None
 

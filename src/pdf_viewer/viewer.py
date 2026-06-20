@@ -51,6 +51,7 @@ from ._profiles_mixin import _ProfilesMixin
 from ._legends_mixin  import _LegendsMixin
 from ._agent_mixin    import _AgentMixin
 from ._print_mixin    import _PrintMixin
+from ._search_mixin   import _SearchMixin
 
 
 class PDFViewerTab(
@@ -64,6 +65,7 @@ class PDFViewerTab(
     _LegendsMixin,
     _AgentMixin,
     _PrintMixin,
+    _SearchMixin,
 ):
     """Manages state and UI for a single open PDF document."""
 
@@ -229,6 +231,22 @@ class PDFViewerTab(
         self._annot_popups:    list[ft.Container] = []
         self._annot_popup_pn:  int | None = None
 
+        # Search state
+        self._search_query:            str                   = ""
+        self._search_results:          dict[int, list]       = {}
+        self._search_matches_flat:     list[tuple[int, int]] = []
+        self._search_match_idx:        int                   = -1
+        self._search_gen:              int                   = 0
+        self._search_overlays:         list                  = []
+        self._search_case_sensitive:   bool                  = False
+
+        # Search panel UI refs (set by _build_search_sidebar_panel)
+        self._search_field:         ft.TextField  | None = None
+        self._search_count_label:   ft.Text       | None = None
+        self._search_results_list:  ft.ListView   | None = None
+        self._search_case_btn:      ft.IconButton | None = None
+        self._search_toolbar_btn:   ft.IconButton | None = None
+
         # Redaction state
         self._redact_panel_open     = False
         self._redact_overlays:   list[ft.Stack] = []
@@ -272,16 +290,18 @@ class PDFViewerTab(
         self._sidebar_btn:    ft.IconButton | None = None
         self._right_sidebar:  ft.Container | None = None
 
-        # Sidebar mode: "toc" | "ocr" | "redact" | "agent"
-        self._sidebar_mode             = "ocr"
-        self._sidebar_toc_view:        ft.Container | None = None
-        self._sidebar_ocr_view:        ft.Container | None = None
-        self._sidebar_redact_view:     ft.Container | None = None
-        self._sidebar_agent_view:      ft.Container | None = None
-        self._sidebar_tab_toc_btn:     ft.Container | None = None
-        self._sidebar_tab_ocr_btn:     ft.Container | None = None
-        self._sidebar_tab_redact_btn:  ft.Container | None = None
-        self._sidebar_tab_agent_btn:   ft.Container | None = None
+        # Sidebar mode: "toc" | "ocr" | "redact" | "agent" | "search"
+        self._sidebar_mode              = "ocr"
+        self._sidebar_toc_view:         ft.Container | None = None
+        self._sidebar_ocr_view:         ft.Container | None = None
+        self._sidebar_redact_view:      ft.Container | None = None
+        self._sidebar_agent_view:       ft.Container | None = None
+        self._sidebar_search_view:      ft.Container | None = None
+        self._sidebar_tab_toc_btn:      ft.Container | None = None
+        self._sidebar_tab_ocr_btn:      ft.Container | None = None
+        self._sidebar_tab_redact_btn:   ft.Container | None = None
+        self._sidebar_tab_agent_btn:    ft.Container | None = None
+        self._sidebar_tab_search_btn:   ft.Container | None = None
 
         # Display mode: "continuous" | "single" | "double".
         # Los PDFs largos arrancan en "página única" (más ligero); el usuario
@@ -386,8 +406,8 @@ class PDFViewerTab(
             icon=ft.Icons.ARROW_DROP_DOWN,
             tooltip="Nivel de zoom",
             items=[
-                ft.PopupMenuItem(text="Ajustar al ancho   (Ctrl+W)",  on_click=self._fit_width),
-                ft.PopupMenuItem(text="Ajustar a la página (Ctrl+F)", on_click=self._fit_page),
+                ft.PopupMenuItem(text="Ajustar al ancho  (Ctrl+W)", on_click=self._fit_width),
+                ft.PopupMenuItem(text="Ajustar a la página",         on_click=self._fit_page),
                 ft.PopupMenuItem(),
                 *[
                     ft.PopupMenuItem(text=f"{int(z * 100)}%",
@@ -513,6 +533,7 @@ class PDFViewerTab(
                     ft.IconButton(ft.Icons.DOCUMENT_SCANNER, tooltip="Ejecutar OCR en la página actual", on_click=self._run_ocr),
                     self._make_ocr_toggle_btn(),
                     self._make_agent_toolbar_btn(),
+                    self._make_search_toolbar_btn(),
                     _vdivider(),
                     self._make_night_mode_btn(),
                     # ── separador flexible · solo el panel queda al extremo ───
@@ -570,13 +591,15 @@ class PDFViewerTab(
         ocr_panel    = self._build_ocr_sidebar_panel()
         redact_panel = self._build_redact_sidebar_panel()
         agent_panel  = self._build_agent_sidebar_panel()
+        search_panel = self._build_search_sidebar_panel()
 
-        # ── sidebar mode tab bar (4 tabs) ─────────────────────────────────────
+        # ── sidebar mode tab bar (5 tabs) ─────────────────────────────────────
         _TAB_DEFS = [
             ("toc",    ft.Icons.LIST_ALT_OUTLINED,     "Índice",    "#1565C0", ft.Colors.with_opacity(0.15, "#1565C0")),
             ("ocr",    ft.Icons.TEXT_SNIPPET_OUTLINED, "OCR",       "#2E7D32", ft.Colors.with_opacity(0.15, "#2E7D32")),
             ("redact", ft.Icons.EDIT_OFF_OUTLINED,     "Censura",   "#E65100", ft.Colors.with_opacity(0.15, "#E65100")),
             ("agent",  ft.Icons.SMART_TOY_OUTLINED,    "Agente IA", "#5C35C9", ft.Colors.with_opacity(0.15, "#5C35C9")),
+            ("search", ft.Icons.SEARCH_OUTLINED,       "Buscar",    "#01579B", ft.Colors.with_opacity(0.15, "#01579B")),
         ]
 
         def _make_tab_btn(mode: str, icon: str, label: str,
@@ -610,6 +633,7 @@ class PDFViewerTab(
         self._sidebar_tab_ocr_btn    = _make_tab_btn(*_TAB_DEFS[1])
         self._sidebar_tab_redact_btn = _make_tab_btn(*_TAB_DEFS[2])
         self._sidebar_tab_agent_btn  = _make_tab_btn(*_TAB_DEFS[3])
+        self._sidebar_tab_search_btn = _make_tab_btn(*_TAB_DEFS[4])
         # Agente oculto mientras está en pulido: sin pestaña no hay forma de
         # abrir su panel (el código del agente queda intacto, ver AGENT_ENABLED).
         self._sidebar_tab_agent_btn.visible = AGENT_ENABLED
@@ -619,7 +643,8 @@ class PDFViewerTab(
                 [self._sidebar_tab_toc_btn,
                  self._sidebar_tab_ocr_btn,
                  self._sidebar_tab_redact_btn,
-                 self._sidebar_tab_agent_btn],
+                 self._sidebar_tab_agent_btn,
+                 self._sidebar_tab_search_btn],
                 spacing=0,
             ),
             bgcolor=_OCR_PANEL_BG,
@@ -647,6 +672,11 @@ class PDFViewerTab(
             expand=(self._sidebar_mode == "agent"),
             visible=(self._sidebar_mode == "agent"),
         )
+        self._sidebar_search_view = ft.Container(
+            content=search_panel,
+            expand=(self._sidebar_mode == "search"),
+            visible=(self._sidebar_mode == "search"),
+        )
 
         self._right_sidebar = ft.Container(
             content=ft.Column(
@@ -654,7 +684,8 @@ class PDFViewerTab(
                  self._sidebar_toc_view,
                  self._sidebar_ocr_view,
                  self._sidebar_redact_view,
-                 self._sidebar_agent_view],
+                 self._sidebar_agent_view,
+                 self._sidebar_search_view],
                 spacing=0, expand=True,
             ),
             width=360,
@@ -1384,7 +1415,7 @@ class PDFViewerTab(
     # ── sidebar mode switching ────────────────────────────────────────────────
 
     def _switch_sidebar_mode(self, mode: str) -> None:
-        """Switch sidebar between 'ocr', 'redact' and 'agent' views."""
+        """Switch sidebar between 'toc', 'ocr', 'redact', 'agent' and 'search' views."""
         self._sidebar_mode = mode
 
         _TAB_META = {
@@ -1392,6 +1423,7 @@ class PDFViewerTab(
             "ocr":    ("#2E7D32", ft.Colors.with_opacity(0.15, "#2E7D32"), "_sidebar_tab_ocr_btn",    "_sidebar_ocr_view"),
             "redact": ("#E65100", ft.Colors.with_opacity(0.15, "#E65100"), "_sidebar_tab_redact_btn", "_sidebar_redact_view"),
             "agent":  ("#5C35C9", ft.Colors.with_opacity(0.15, "#5C35C9"), "_sidebar_tab_agent_btn",  "_sidebar_agent_view"),
+            "search": ("#01579B", ft.Colors.with_opacity(0.15, "#01579B"), "_sidebar_tab_search_btn", "_sidebar_search_view"),
         }
 
         for m, (active_color, active_bg, tab_attr, view_attr) in _TAB_META.items():
@@ -1428,6 +1460,16 @@ class PDFViewerTab(
             except Exception:
                 pass
 
+        # Toolbar search button highlight
+        if self._search_toolbar_btn is not None:
+            is_search = (mode == "search")
+            self._search_toolbar_btn.icon_color = "#01579B" if is_search else None
+            self._search_toolbar_btn.bgcolor    = ft.Colors.with_opacity(0.15, "#01579B") if is_search else None
+            try:
+                self._search_toolbar_btn.update()
+            except Exception:
+                pass
+
         # Ensure sidebar is visible
         if not self._sidebar_visible:
             self._toggle_sidebar()
@@ -1450,6 +1492,19 @@ class PDFViewerTab(
             visible=AGENT_ENABLED,   # oculto mientras el agente está en pulido
         )
         return self._agent_toolbar_btn
+
+    # ── search toolbar button ─────────────────────────────────────────────────
+
+    def _make_search_toolbar_btn(self) -> ft.IconButton:
+        _is_search = (self._sidebar_mode == "search")
+        self._search_toolbar_btn = ft.IconButton(
+            ft.Icons.SEARCH,
+            tooltip="Buscar texto (Ctrl+F)",
+            icon_color="#01579B" if _is_search else None,
+            bgcolor=ft.Colors.with_opacity(0.15, "#01579B") if _is_search else None,
+            on_click=self._open_search,
+        )
+        return self._search_toolbar_btn
 
     # ── night mode ────────────────────────────────────────────────────────────
 
