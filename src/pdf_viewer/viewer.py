@@ -893,6 +893,29 @@ class PDFViewerTab(
 
     # ── page management ───────────────────────────────────────────────────────
 
+    def _after_page_op(self, target_page: int, snack: str = "") -> None:
+        """Actualiza UI tras cualquier operación de inserción/borrado/movimiento.
+
+        Centraliza el patrón repetido: actualizar el contador de páginas,
+        reconstruir el scroll, navegar a la página resultante y disparar el
+        render de las páginas visibles.
+        """
+        self.current_page = max(0, min(target_page, len(self.doc) - 1))
+        self.total_label.value = f"/ {len(self.doc)}"
+        self._rebuild_scroll_content(scroll_back=False)
+        self._update_nav_state()
+        try:
+            self.viewer_scroll.scroll_to(
+                offset=self._page_cum_offsets[self.current_page], duration=0,
+            )
+        except Exception:
+            pass
+        self.page_ref.update()
+        self._render_page_slot(self.current_page)
+        self._schedule_scroll_idle()
+        if snack:
+            self._show_snack(snack)
+
     def _insert_blank_page(self, e=None) -> None:
         pn = self.current_page
         with self._doc_lock:
@@ -902,10 +925,7 @@ class PDFViewerTab(
         self._annot._history = [
             (pg if pg <= pn else pg + 1, xr) for pg, xr in self._annot._history
         ]
-        self.total_label.value = f"/ {len(self.doc)}"
-        self._rebuild_scroll_content(scroll_back=False)
-        self.page_ref.update()
-        self._show_snack("Página en blanco insertada")
+        self._after_page_op(pn + 1, "Página en blanco insertada")
 
     def _duplicate_page(self, e=None) -> None:
         pn = self.current_page
@@ -914,10 +934,7 @@ class PDFViewerTab(
         self._annot._history = [
             (pg if pg <= pn else pg + 1, xr) for pg, xr in self._annot._history
         ]
-        self.total_label.value = f"/ {len(self.doc)}"
-        self._rebuild_scroll_content(scroll_back=False)
-        self.page_ref.update()
-        self._show_snack("Página duplicada")
+        self._after_page_op(pn + 1, "Página duplicada")
 
     def _delete_page(self, e=None) -> None:
         if len(self.doc) <= 1:
@@ -931,41 +948,64 @@ class PDFViewerTab(
             for pg, xr in self._annot._history
             if pg != pn
         ]
-        self.current_page = min(pn, len(self.doc) - 1)
-        self.total_label.value = f"/ {len(self.doc)}"
-        self._rebuild_scroll_content(scroll_back=False)
-        self.page_ref.update()
-        self._show_snack("Página eliminada")
+        self._after_page_op(pn, "Página eliminada")
 
     def _move_page_up(self, e=None) -> None:
         pn = self.current_page
         if pn == 0:
             return
+        # Invalidar caché de render de las dos páginas que intercambian posición
+        # ANTES del rebuild: así el rebuild no les asigna imagen stale.
+        for idx in (pn - 1, pn):
+            img = self._page_images[idx] if idx < len(self._page_images) else None
+            if img is not None:
+                img.src = img.src_base64 = None
+                img.visible = False
+            _rc = getattr(self, "_render_cache", None)
+            if _rc is not None:
+                _rc.invalidate_page(idx)
+            for cache in (self._ocr_by_page, self._page_words,
+                          self._page_word_bands, self._page_blocks_cache,
+                          self._text_rects_cache):
+                cache.pop(idx, None)
         with self._doc_lock:
             self.doc.move_page(pn, pn - 1)
         self._annot._history = [
             (pg - 1 if pg == pn else pg + 1 if pg == pn - 1 else pg, xr)
             for pg, xr in self._annot._history
         ]
-        self.current_page = pn - 1
-        self.total_label.value = f"/ {len(self.doc)}"
-        self._rebuild_scroll_content(scroll_back=False)
-        self.page_ref.update()
+        self._after_page_op(pn - 1)
+        # Forzar render de ambas páginas intercambiadas
+        self._render_page_slot(pn - 1)
+        if pn < len(self.doc):
+            self._render_page_slot(pn)
 
     def _move_page_down(self, e=None) -> None:
         pn = self.current_page
         if pn >= len(self.doc) - 1:
             return
+        for idx in (pn, pn + 1):
+            img = self._page_images[idx] if idx < len(self._page_images) else None
+            if img is not None:
+                img.src = img.src_base64 = None
+                img.visible = False
+            _rc = getattr(self, "_render_cache", None)
+            if _rc is not None:
+                _rc.invalidate_page(idx)
+            for cache in (self._ocr_by_page, self._page_words,
+                          self._page_word_bands, self._page_blocks_cache,
+                          self._text_rects_cache):
+                cache.pop(idx, None)
         with self._doc_lock:
             self.doc.move_page(pn, pn + 1)
         self._annot._history = [
             (pg + 1 if pg == pn else pg - 1 if pg == pn + 1 else pg, xr)
             for pg, xr in self._annot._history
         ]
-        self.current_page = pn + 1
-        self.total_label.value = f"/ {len(self.doc)}"
-        self._rebuild_scroll_content(scroll_back=False)
-        self.page_ref.update()
+        self._after_page_op(pn + 1)
+        self._render_page_slot(pn + 1)
+        if pn < len(self.doc):
+            self._render_page_slot(pn)
 
     # ── tab / lifecycle ───────────────────────────────────────────────────────
 
