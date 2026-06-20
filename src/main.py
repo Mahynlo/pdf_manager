@@ -893,6 +893,14 @@ def main(page: ft.Page) -> None:
 
     def _do_close_app() -> None:
         """Cierra el socket IPC y destruye la ventana."""
+        # Señalar a todos los workers de render que aborten antes de destruir,
+        # para que el proceso Python no quede activo haciendo trabajo innecesario
+        # tras el cierre de la ventana Flutter.
+        for _v in open_tabs:
+            try:
+                _v._render_gen += 1
+            except Exception:
+                pass
         try:
             server_sock.close()
         except Exception:

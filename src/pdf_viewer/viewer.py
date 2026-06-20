@@ -1401,16 +1401,25 @@ class PDFViewerTab(
                 self.doc.close()
         except ValueError:
             pass
-        try:
-            self.page_ref.overlay.remove(self._save_picker)
-            self.page_ref.update()
-        except ValueError:
-            pass
-        try:
-            self.page_ref.overlay.remove(self._print_save_picker)
-            self.page_ref.update()
-        except (ValueError, AttributeError):
-            pass
+        # Quitar ambos pickers en un solo page.update() para evitar dos
+        # round-trips a Flutter (cada page.update() serializa todo el árbol).
+        _removed = False
+        for _picker in (
+            getattr(self, "_save_picker", None),
+            getattr(self, "_print_save_picker", None),
+        ):
+            if _picker is None:
+                continue
+            try:
+                self.page_ref.overlay.remove(_picker)
+                _removed = True
+            except (ValueError, AttributeError):
+                pass
+        if _removed:
+            try:
+                self.page_ref.update()
+            except Exception:
+                pass
 
     # ── sidebar mode switching ────────────────────────────────────────────────
 
