@@ -331,10 +331,11 @@ def main(page: ft.Page) -> None:
     # Somos la instancia principal.
     # Configurar ventana y mostrar spinner ANTES de cualquier import pesado
     # para que el usuario vea contenido en ~0.5 s en lugar de blanco.
-    page.title       = "Extraer PDFs"
-    page.theme_mode  = ft.ThemeMode.LIGHT
-    page.padding     = 0
-    page.window.icon = "icon.png"
+    page.title                 = "Extraer PDFs"
+    page.theme_mode            = ft.ThemeMode.LIGHT
+    page.padding               = 0
+    page.window.icon           = "icon.png"
+    page.window.prevent_close  = True
     page.add(ft.Container(
         content=ft.Column(
             [ft.ProgressRing(width=44, height=44, stroke_width=3, color="#1E2A38")],
@@ -890,13 +891,61 @@ def main(page: ft.Page) -> None:
 
     # ── Limpieza al cerrar la ventana ────────────────────────────────────────
 
+    def _do_close_app() -> None:
+        """Cierra el socket IPC y destruye la ventana."""
+        try:
+            server_sock.close()
+        except Exception:
+            pass
+        page.window.destroy()
+
     def _on_window_event(e: ft.WindowEvent) -> None:
-        if e.type == ft.WindowEventType.CLOSE:
-            _dbg_log("CLOSE | window closed by user")
+        if e.type != ft.WindowEventType.CLOSE:
+            return
+        _dbg_log("CLOSE | window close requested by user")
+
+        unsaved = [
+            v for v in open_tabs
+            if getattr(v, "_is_modified", False) and v._doc_has_real_changes()
+        ]
+        if not unsaved:
+            _do_close_app()
+            return
+
+        names = "\n".join(f"  • {v.filename}" for v in unsaved)
+
+        def _cancel(ev=None):
             try:
-                server_sock.close()
+                page.close(dlg)
             except Exception:
                 pass
+
+        def _force_close(ev=None):
+            try:
+                page.close(dlg)
+            except Exception:
+                pass
+            _do_close_app()
+
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Archivos sin guardar"),
+            content=ft.Text(
+                f"Los siguientes documentos tienen cambios sin guardar:\n\n{names}\n\n"
+                "Si cierras ahora perderás esos cambios.",
+                size=13,
+            ),
+            actions=[
+                ft.TextButton("Cancelar", on_click=_cancel),
+                ft.FilledButton(
+                    "Cerrar sin guardar",
+                    style=ft.ButtonStyle(bgcolor=ft.Colors.ERROR),
+                    on_click=_force_close,
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        page.open(dlg)
 
     page.window.on_event = _on_window_event
 
