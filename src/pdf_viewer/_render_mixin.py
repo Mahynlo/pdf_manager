@@ -2008,6 +2008,38 @@ class _RenderMixin:
             allowed_extensions=["pdf"],
         )
 
+    def _save_in_place(self, e=None, _close_after: bool = False) -> None:
+        """Sobreescribe el archivo PDF original con los cambios actuales.
+
+        Usa tobytes() para serializar en memoria y write_bytes() para escribir
+        directamente sobre el original, evitando problemas de bloqueo de archivos
+        en Windows que surgirían con un fichero temporal + os.replace().
+        """
+        if not PDFSecurityManager.can_save_changes(self.doc):
+            self._show_snack(
+                "Este PDF no permite guardar cambios por sus permisos de seguridad"
+            )
+            return
+
+        original = Path(self.path)
+        try:
+            with self._doc_lock:
+                data = self.doc.tobytes(garbage=4, deflate=True)
+            original.write_bytes(data)
+            self._is_modified = False
+            self._has_content_changes = False
+            self._doc_initial_state = self._compute_doc_state()
+            self._show_snack(f"Guardado: {original.name}")
+            if _close_after:
+                self.on_close(self)
+        except PermissionError:
+            self._show_snack(
+                "Sin permiso para sobrescribir el archivo. "
+                "Usa 'Guardar PDF como…' para guardarlo en otra ubicación."
+            )
+        except Exception as ex:
+            self._show_snack(f"Error al guardar: {ex}")
+
     def _on_save_result(self, e: ft.FilePickerResultEvent) -> None:
         if not e.path:
             return

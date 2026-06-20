@@ -421,7 +421,12 @@ class PDFViewerTab(
             tooltip="Más opciones",
             items=[
                 ft.PopupMenuItem(
-                    text="Guardar PDF",
+                    text="Guardar cambios",
+                    icon=ft.Icons.SAVE,
+                    on_click=self._save_in_place,
+                ),
+                ft.PopupMenuItem(
+                    text="Guardar PDF como…",
                     icon=ft.Icons.SAVE_ALT,
                     on_click=self._save,
                 ),
@@ -980,8 +985,7 @@ class PDFViewerTab(
                 self.page_ref.close(dlg)
             except Exception:
                 pass
-            self._pending_close_after_save = True
-            self._save()
+            self._save_in_place(_close_after=True)
 
         dlg = ft.AlertDialog(
             modal=True,
