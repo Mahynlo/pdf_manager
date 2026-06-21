@@ -63,22 +63,21 @@ class TestPageRenderCache:
         assert cache.get(3, 1.0) is not None
         assert cache.get(4, 1.0) is not None
 
-    def test_eviction_by_byte_budget(self):
-        """When in-memory PNG bytes exceed _MAX_BYTES, the LRU entries go."""
+    def test_eviction_count_applies_to_in_memory_entries(self):
+        """Count-based eviction works for entries that store in-memory bytes."""
         cache = PageRenderCache()
-        cache._MAX_BYTES = 250
-        cache.put(0, 1.0, (None, 10, 10, b"a" * 100))   # 100 bytes
-        cache.put(1, 1.0, (None, 10, 10, b"b" * 100))   # 200 bytes total
-        cache.put(2, 1.0, (None, 10, 10, b"c" * 100))   # 300 → evict 0
+        cache._MAX_ENTRIES = 2
+        cache.put(0, 1.0, (None, 10, 10, b"a" * 100))
+        cache.put(1, 1.0, (None, 10, 10, b"b" * 100))
+        cache.put(2, 1.0, (None, 10, 10, b"c" * 100))   # forces eviction of 0
         assert cache.get(0, 1.0) is None
         assert cache.get(1, 1.0) is not None
         assert cache.get(2, 1.0) is not None
 
-    def test_file_path_entries_do_not_count_against_byte_budget(self, tmp_path):
-        """JPEG-on-disk entries have png_bytes=None and consume zero RAM budget."""
+    def test_file_path_entries_survive_under_count_limit(self, tmp_path):
+        """Disk entries with png_bytes=None stay until count limit is reached."""
         cache = PageRenderCache()
-        cache._MAX_BYTES = 50    # tiny budget
-        cache._MAX_ENTRIES = 10  # generous count
+        cache._MAX_ENTRIES = 10
 
         f1 = tmp_path / "p1.jpg"
         f2 = tmp_path / "p2.jpg"
@@ -88,7 +87,7 @@ class TestPageRenderCache:
         cache.put(0, 1.5, (str(f1), 100, 100, None))
         cache.put(1, 1.5, (str(f2), 100, 100, None))
 
-        # Neither entry holds png_bytes, so byte-budget eviction doesn't kick in
+        # Both disk entries survive since count limit isn't reached
         assert cache.get(0, 1.5) is not None
         assert cache.get(1, 1.5) is not None
 
@@ -112,11 +111,11 @@ class TestPageRenderCache:
         assert cache.get(0, 1.0) is None
         assert cache.get(1, 1.0) is None
 
-    def test_clear_resets_byte_accounting(self):
+    def test_clear_leaves_internal_dict_empty(self):
         cache = PageRenderCache()
         cache.put(0, 1.0, (None, 10, 10, b"x" * 1000))
         cache.clear()
-        assert cache._bytes_used == 0
+        assert len(cache._d) == 0
 
     def test_shrink_keeps_n_most_recent(self):
         """on_blur calls shrink(5) — verify LRU semantics."""
@@ -161,18 +160,16 @@ class TestPageRenderCache:
         cache.clear()
         assert not f.exists()
 
-    def test_put_replacement_updates_byte_accounting(self):
-        """Putting an entry under an existing key should not double-count bytes."""
+    def test_put_replacement_updates_value_not_count(self):
+        """Putting an entry under an existing key replaces it; count stays at 1."""
         cache = PageRenderCache()
         cache.put(0, 1.0, (None, 10, 10, b"a" * 100))
-        before = cache._bytes_used
         cache.put(0, 1.0, (None, 10, 10, b"b" * 200))   # same key, bigger payload
-        # Byte count should reflect ONLY the new payload (200), not 100+200=300
-        assert cache._bytes_used == 200
-        # Verify the value was replaced
+        # Only one entry in the cache
+        assert len(cache._d) == 1
+        # Value was replaced
         _, _, _, png = cache.get(0, 1.0)
         assert png == b"b" * 200
-        assert before == 100  # sanity
 
     def test_zoom_key_rounded_to_2_decimals(self):
         """1.001 and 1.004 round to the same key (1.0); 1.005 rounds to 1.01."""

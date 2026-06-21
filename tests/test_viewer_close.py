@@ -51,7 +51,7 @@ def _make_viewer(doc: fitz.Document, path: str = "") -> _Viewer:
 
     # Captura de snacks y llamadas a on_close
     v._snack_msgs: list[str] = []
-    v._show_snack = lambda msg: v._snack_msgs.append(msg)
+    v._show_snack = lambda msg, **kw: v._snack_msgs.append(msg)
     v._close_calls: list[bool] = []
     v.on_close = lambda self_: v._close_calls.append(True)
 

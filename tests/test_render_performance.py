@@ -125,17 +125,13 @@ class TestRenderCacheHitPerformance:
 
 
 class TestRenderCacheMemoryBounds:
-    def test_byte_budget_bounds_memory_under_heavy_load(self):
-        """Cientos de páginas grandes cacheadas → la RAM nunca supera _MAX_BYTES."""
+    def test_count_budget_bounds_memory_under_heavy_load(self):
+        """Cientos de páginas grandes cacheadas → el nº de entradas nunca supera _MAX_ENTRIES."""
         cache = PageRenderCache()
-        cache._MAX_BYTES = 4 * 1024
-        cache._MAX_ENTRIES = 10_000  # holgado: que mande el presupuesto de bytes
+        cache._MAX_ENTRIES = 16
         for i in range(1000):
             cache.put(i, 1.0, (None, 50, 50, b"x" * 256))
-        assert cache._bytes_used <= cache._MAX_BYTES
-        # Y la contabilidad coincide con lo realmente almacenado.
-        real = sum(len(v[3]) for v in cache._d.values() if v[3] is not None)
-        assert cache._bytes_used == real
+        assert len(cache._d) <= 16
 
     def test_entry_count_bounds_memory_under_heavy_load(self):
         cache = PageRenderCache()
