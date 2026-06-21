@@ -74,7 +74,7 @@ class _RenderMixin:
 
     # ── per-page control factory ──────────────────────────────────────────────
 
-    def _rebuild_scroll_content(self, scroll_back: bool = True) -> None:
+    def _rebuild_scroll_content(self, scroll_back: bool = True, _defer_update: bool = False) -> None:
         """(Re)build all page slot controls. Called on init and after zoom/rotate."""
         self._render_gen    += 1
         self._rendering      = set()
@@ -142,27 +142,46 @@ class _RenderMixin:
                 ink     = self._ink_canvases[pn]
                 load_ov = self._loading_overlays[pn]
 
-                # Si la página ya estaba renderizada, mantenerla visible como
-                # preview escalada (fit=CONTAIN) mientras llega el nuevo render.
-                # El worker restaura fit=NONE al terminar.
-                has_old = bool(img.src or img.src_base64)
-                if has_old:
-                    img.fit = ft.ImageFit.CONTAIN
-                    img.visible = True
-                    slot.bgcolor = _PAGE_BG
-                else:
-                    img.visible = False
-                    slot.bgcolor = _PAGE_BG
-                img.width  = w
-                img.height = h
                 slot.width  = w
                 slot.height = h
                 ink.width  = w
                 ink.height = h
-
                 load_ov.width   = w
                 load_ov.height  = h
-                load_ov.visible = not has_old
+
+                # Comprobar la caché antes de mostrar la imagen anterior escalada.
+                # Si el nuevo zoom ya está renderizado (p. ej. el usuario alterna
+                # entre dos niveles), aplicarlo ahora → cambio instantáneo sin
+                # ninguna transición visual.
+                _cache = getattr(self, "_render_cache", None)
+                _hit   = _cache.get(pn, self.zoom) if _cache is not None else None
+                if _hit is not None and _hit[0] is not None:
+                    img.src    = _hit[0]
+                    img.width  = _hit[1]
+                    img.height = _hit[2]
+                    img.fit    = ft.ImageFit.CONTAIN
+                    img.visible = True
+                    slot.bgcolor = _PAGE_BG
+                    load_ov.visible = False
+                    self._rendered.add(pn)
+                else:
+                    # Si la página ya estaba renderizada, mantenerla visible como
+                    # preview escalada (fit=CONTAIN) mientras llega el nuevo render.
+                    # Como la página tiene la misma relación de aspecto que el slot,
+                    # CONTAIN la escala para llenar exactamente el contenedor → sin
+                    # bordes en blanco ni imagen estirada; solo levemente borrosa
+                    # hasta que el worker entregue la versión al nuevo zoom.
+                    has_old = bool(img.src or img.src_base64)
+                    if has_old:
+                        img.fit = ft.ImageFit.CONTAIN
+                        img.visible = True
+                        slot.bgcolor = _PAGE_BG
+                    else:
+                        img.visible = False
+                        slot.bgcolor = _PAGE_BG
+                    img.width  = w
+                    img.height = h
+                    load_ov.visible = not has_old
 
                 self._drag_overlays[pn].visible   = False
                 self._sel_overlays[pn].visible    = False
@@ -199,29 +218,16 @@ class _RenderMixin:
                 for row in self._page_rows:
                     row.visible = True
 
-            # En modo página única / doble la imagen al zoom anterior ocupa
-            # todo el viewport → su preview escalado (fit=CONTAIN) es más
-            # visible y molesto que un breve overlay de carga. Ocultamos la
-            # imagen vieja aquí para que el worker entregue directamente la
-            # versión nítida al nuevo zoom sin el estado intermedio estirado.
-            if display_mode in ("single", "double"):
-                _ps = (
-                    (self.current_page // 2) * 2
-                    if display_mode == "double"
-                    else self.current_page
-                )
-                for _p in range(_ps, min(_ps + 2, total)):
-                    _img = self._page_images[_p] if _p < len(self._page_images) else None
-                    _lov = self._loading_overlays[_p] if _p < len(self._loading_overlays) else None
-                    if _img is not None and _img.visible:
-                        _img.visible = False
-                        if _lov is not None:
-                            _lov.visible = True
-
-            try:
-                self.viewer_scroll.update()
-            except Exception:
-                pass
+            # En modo página única/doble durante el zoom (_defer_update=True),
+            # no enviamos el update parcial de viewer_scroll aquí: lo enviamos
+            # junto con el page_ref.update() en _apply_zoom para que el
+            # redimensionado y la nueva imagen lleguen a Flutter en un único
+            # frame — sin el flash "sube-baja" que produce el two-batch update.
+            if not _defer_update:
+                try:
+                    self.viewer_scroll.update()
+                except Exception:
+                    pass
 
             if display_mode in ("single", "double"):
                 pair_start = (self.current_page // 2) * 2 if display_mode == "double" else self.current_page
@@ -1859,28 +1865,35 @@ class _RenderMixin:
             return
         self.zoom_label.value = f"{int(round(self.zoom * 100))}%"
         saved = self.current_page
-        # Preserve fractional position within the current page so zooming
-        # keeps the same content centred in the viewport.
-        frac = 0.0
-        if saved < len(self._page_cum_offsets) and saved < len(self._page_heights):
-            page_h = self._page_heights[saved]
-            if page_h > 0:
-                within = self._scroll_px - self._page_cum_offsets[saved]
-                frac = max(0.0, min(1.0, within / page_h))
+        display_mode = getattr(self, "_display_mode", "continuous")
+        single_or_double = display_mode in ("single", "double")
 
-        # _rebuild_scroll_content (ruta rápida) ya hace viewer_scroll.update()
-        # con las nuevas dimensiones; aquí sólo reposicionamos el scroll y
-        # consolidamos en UN solo page_ref.update() — antes eran dos, cada uno
-        # re-serializaba todo el árbol de la página en cada paso de zoom.
-        self._rebuild_scroll_content(scroll_back=False)
-        try:
+        # Preserve fractional position within the current page so zooming
+        # keeps the same content centred in the viewport (solo modo continuo).
+        # En página única/doble la página siempre ocupa el viewport entero y el
+        # scroll es 0 — no hay posición fraccional que preservar.
+        frac = 0.0
+        if not single_or_double:
             if saved < len(self._page_cum_offsets) and saved < len(self._page_heights):
-                target = self._page_cum_offsets[saved] + frac * self._page_heights[saved]
-            else:
-                target = self._page_cum_offsets[saved] if saved < len(self._page_cum_offsets) else 0.0
-            self.viewer_scroll.scroll_to(offset=target, duration=0)
-        except Exception:
-            pass
+                page_h = self._page_heights[saved]
+                if page_h > 0:
+                    within = self._scroll_px - self._page_cum_offsets[saved]
+                    frac = max(0.0, min(1.0, within / page_h))
+
+        # En modo único/doble diferimos viewer_scroll.update() para consolidarlo
+        # con page_ref.update() en un único frame → sin el "sube-baja" que
+        # producía el two-batch: resize primero, scroll después.
+        self._rebuild_scroll_content(scroll_back=False, _defer_update=single_or_double)
+
+        if not single_or_double:
+            try:
+                if saved < len(self._page_cum_offsets) and saved < len(self._page_heights):
+                    target = self._page_cum_offsets[saved] + frac * self._page_heights[saved]
+                else:
+                    target = self._page_cum_offsets[saved] if saved < len(self._page_cum_offsets) else 0.0
+                self.viewer_scroll.scroll_to(offset=target, duration=0)
+            except Exception:
+                pass
         self.page_ref.update()
 
     def _on_page_scroll(self, e, pn: int) -> None:
