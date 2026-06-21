@@ -74,10 +74,14 @@ def _apply_sanitize(raw: bytes, page_count: int) -> fitz.Document | None:
         with fitz.open("pdf", raw) as _tmp:
             clean = _tmp.tobytes(garbage=4, deflate=True, clean=True)
         result = fitz.open("pdf", clean)
-        if len(result) != page_count:
+        try:
+            if len(result) != page_count:
+                result.close()
+                return None
+            return result
+        except Exception:
             result.close()
             return None
-        return result
     except Exception:
         return None
 

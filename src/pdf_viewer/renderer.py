@@ -153,12 +153,26 @@ def render_page(
         # A disco (no base64 en memoria) → transporte ligero hacia Flutter.
         fd, temp_path = tempfile.mkstemp(suffix=".png")
         os.close(fd)
-        pix.save(temp_path, output="png")
+        try:
+            pix.save(temp_path, output="png")
+        except Exception:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+            raise
     else:
         fd, temp_path = tempfile.mkstemp(suffix=".jpg")
         os.close(fd)
         jpg_q = 90 if zoom <= 2.0 else (82 if zoom <= 3.0 else 80)
-        pix.save(temp_path, output="jpeg", jpg_quality=jpg_q)
+        try:
+            pix.save(temp_path, output="jpeg", jpg_quality=jpg_q)
+        except Exception:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+            raise
     result: CacheEntry = (temp_path, pix.width, pix.height, None)
 
     del pix  # libera el bitmap (~54 MB a zoom=4) antes de que el GC actúe
