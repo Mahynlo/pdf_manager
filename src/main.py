@@ -369,6 +369,7 @@ def main(page: ft.Page) -> None:
     merge_tab     = None       # MergePDFTab | None
     security_tab  = None       # PDFSecurityTab | None
     settings_tab  = None       # SettingsTab | None
+    help_tab      = None       # HelpTab | None
     pending_password_paths: list[str] = []
     _opening_now:  set  = set()  # paths being opened; prevents double-open
 
@@ -425,6 +426,8 @@ def main(page: ft.Page) -> None:
             n += 1
         if settings_tab is not None:
             n += 1
+        if help_tab is not None:
+            n += 1
         return n
 
     def _merge_tab_idx() -> int:
@@ -441,6 +444,15 @@ def main(page: ft.Page) -> None:
             + (1 if security_tab is not None else 0)
         )
 
+    def _help_tab_idx() -> int:
+        return (
+            1
+            + (1 if extractor_tab is not None else 0)
+            + (1 if merge_tab is not None else 0)
+            + (1 if security_tab is not None else 0)
+            + (1 if settings_tab is not None else 0)
+        )
+
     def _rebuild_tabs(selected_index: int | None = None) -> None:
         if selected_index is None:
             selected_index = doc_mgr.selected_index
@@ -454,6 +466,8 @@ def main(page: ft.Page) -> None:
             infos.append(security_tab.get_tab_info())
         if settings_tab is not None:
             infos.append(settings_tab.get_tab_info())
+        if help_tab is not None:
+            infos.append(help_tab.get_tab_info())
         for v in open_tabs:
             infos.append(v.get_tab_info())
 
@@ -653,6 +667,22 @@ def main(page: ft.Page) -> None:
         settings_tab = None
         _rebuild_tabs(0)
 
+    # ── Pestaña ayuda ─────────────────────────────────────────────────────────
+
+    def _open_help() -> None:
+        nonlocal help_tab
+        if help_tab is not None:
+            _rebuild_tabs(_help_tab_idx())
+            return
+        from help_tab import HelpTab  # lazy
+        help_tab = HelpTab(page, _close_help_tab)
+        _rebuild_tabs(_help_tab_idx())
+
+    def _close_help_tab(tab) -> None:
+        nonlocal help_tab
+        help_tab = None
+        _rebuild_tabs(0)
+
     # ── Cerrar pestaña visor ──────────────────────────────────────────────────
 
     def _close_viewer_tab(viewer) -> None:
@@ -848,6 +878,10 @@ def main(page: ft.Page) -> None:
                 text="Configuración", icon=ft.Icons.SETTINGS_OUTLINED,
                 on_click=lambda e: _open_settings(),
             ),
+            ft.PopupMenuItem(
+                text="Ayuda", icon=ft.Icons.HELP_OUTLINE,
+                on_click=lambda e: _open_help(),
+            ),
         ],
     )
     app_brand = ft.Container(
@@ -902,14 +936,19 @@ def main(page: ft.Page) -> None:
         lo que elimina el retardo perceptible al cerrar cuando no hay nada
         que proteger.  Se llama reactivamente desde el setter de _is_modified
         en cada PDFViewerTab, y tambien al cerrar o guardar cualquier tab.
+        También refresca las etiquetas de pestañas para mostrar/ocultar el
+        indicador ● de cambios sin guardar.
         """
         has_unsaved = any(getattr(v, "_is_modified", False) for v in open_tabs)
         if page.window.prevent_close != has_unsaved:
             page.window.prevent_close = has_unsaved
-            try:
-                page.update()
-            except Exception:
-                pass
+        # Refrescar solo el texto de las etiquetas de pestañas (indicador ●).
+        # Se usa refresh_viewer_labels() en lugar de _rebuild_tabs() para no
+        # interrumpir el render en curso con un page.update() extra completo.
+        try:
+            doc_mgr.refresh_viewer_labels()
+        except Exception:
+            pass
 
     def _do_close_app() -> None:
         """Cierra el socket IPC y destruye la ventana."""

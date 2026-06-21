@@ -187,6 +187,13 @@ class DocumentManagerUI:
                 entry = existing.pop(cid)
                 entry.label    = info["label"]
                 entry.close_cb = info.get("close_cb")
+                # Propagar la etiqueta actualizada al ft.Text del botón ya construido.
+                if entry.btn is not None:
+                    row: ft.Row = entry.btn.content
+                    for ctrl in row.controls:
+                        if isinstance(ctrl, ft.Text):
+                            ctrl.value = entry.label
+                            break
             else:
                 # Brand-new tab.
                 entry = _TabEntry(
@@ -341,6 +348,30 @@ class DocumentManagerUI:
         for ctrl in row.controls:
             if isinstance(ctrl, ft.Text):
                 ctrl.color = _TEXT_ACT if active else _TEXT_INACT
+
+    def refresh_viewer_labels(self) -> None:
+        """Actualiza solo el texto de las pestañas con visor PDF (indicador ●).
+
+        Más ligero que rebuild(): no mueve controles del stack, no invoca
+        on_blur/on_focus ni restaura scroll — solo muta ft.Text.value y
+        llama a page.update() una vez si algo cambió.
+        """
+        changed = False
+        for entry in self._entries:
+            if entry.viewer is None or entry.btn is None:
+                continue
+            new_label = entry.viewer.get_tab_info()["label"]
+            if entry.label == new_label:
+                continue
+            entry.label = new_label
+            row: ft.Row = entry.btn.content
+            for ctrl in row.controls:
+                if isinstance(ctrl, ft.Text):
+                    ctrl.value = new_label
+                    changed = True
+                    break
+        if changed:
+            self._page.update()
 
     def _refresh_overflow(self) -> None:
         self._overflow_btn.items = [

@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.1.27-Parte_1] - 2026-06-20
+
+### Added
+- **Pestaña de ayuda («Ayuda»)**: nueva pestaña cerrable accesible desde el menú ☰ → «Ayuda». Contiene cuatro secciones: *Primeros pasos* (abrir, navegar, zoom, guardar), *Herramientas disponibles* (anotaciones, extracción, combinar, seguridad, agente IA, búsqueda, censura), *Guardado de cambios* (Ctrl+S, Guardar como, advertencia al cerrar) y *Preguntas frecuentes* (PDFs protegidos, dónde se guardan las anotaciones, OCR sin conexión, agente IA, múltiples pestañas, desinstalación). Implementada en `src/help_tab.py` como `HelpTab`, siguiendo el mismo patrón que `settings_tab.py`.
+- **Indicador de cambios sin guardar (●)**: cuando un PDF tiene anotaciones o ediciones no guardadas, la etiqueta de su pestaña muestra un punto `●` delante del nombre del archivo (ej. `● informe.pdf`). El punto desaparece automáticamente al guardar con Ctrl+S o «Guardar como». Implementado en `PDFViewerTab.get_tab_info()` y actualizado de forma ligera mediante `DocumentManagerUI.refresh_viewer_labels()` (sin reconstruir el árbol de controles completo).
+- **Snackbar de confirmación al guardar**: tras guardar correctamente (Ctrl+S o Guardar como), aparece un snackbar verde con icono ✓ y el mensaje de confirmación. Los errores siguen usando el snackbar estándar sin color.
+- **Sanitización de PDFs al abrir (`_sanitize_doc`)**: al cargar un PDF, el visor detecta y corrige automáticamente flujos con compresión raw-deflate no estándar (habituales en PDFs creados con Word, escáneres Dahua, Canon y similares) reescribiéndolos como zlib/deflate estándar. Esto evita los errores `zlib error: incorrect header check`, `FT_New_Memory_Face` y `jpeg: premature end of data` que causaban páginas en blanco tras anotar y guardar. La sanitización es **transparente**: el archivo en disco no cambia hasta que el usuario guarda explícitamente; solo la copia en memoria queda normalizada.
+  - PDFs ≤ 30 MB → sanitización síncrona al abrir (imperceptible para el usuario).
+  - PDFs de 30–300 MB → sanitización en hilo de fondo (`_start_bg_sanitize`); el visor es usable inmediatamente y `self.doc` se reemplaza bajo `_doc_lock` cuando termina.
+  - PDFs > 300 MB → sanitización omitida (el coste de reescribir supera el beneficio en documentos tan grandes).
+  - PDFs con firmas digitales (`doc.get_sigflags() >= 1`) → sanitización omitida para no invalidar las firmas.
+  - Si la sanitización falla por cualquier motivo, se usa el documento original sin cambios.
+- **Guardado con documento temporal (temp-doc)**: el proceso de guardado (Ctrl+S y Guardar como) usa ahora una copia temporal en memoria para la fase de recolección de basura (`garbage=4, deflate=True, clean=True`), en lugar de aplicarla directamente sobre `self.doc`. Esto evita que los efectos secundarios de `tobytes(garbage≥1)` (modificación de xrefs y streams en el documento en memoria) corrompan el estado interno del visor y provoquen páginas en blanco en renders posteriores.
+
+### Changed
+- **`DocumentManagerUI.rebuild()` propaga la etiqueta al `ft.Text` ya construido**: al actualizar la etiqueta de una pestaña existente (por ejemplo, al añadir o quitar el `●`), ahora se actualiza también el control `ft.Text` dentro del `ft.Container` del botón de pestaña ya montado, no solo el campo interno `entry.label`.
+- **`_update_prevent_close()` usa `refresh_viewer_labels()` en lugar de `_rebuild_tabs()`**: la actualización del indicador `●` se hace mediante la nueva llamada ligera, evitando el `page.update()` extra que `_rebuild_tabs()` genera y que interrumpía el ciclo de reemplazo de imagen del render (causa del parpadeo/página en blanco que se observaba antes).
+
+### Fixed
+- **Páginas en blanco tras anotar y guardar en PDFs no estándar**: los PDFs creados con Microsoft Word, hardware Dahua y otros generadores usan raw-deflate sin encabezado zlib. MuPDF los renderiza correctamente la primera vez (caché interna), pero al invalidar la caché tras una anotación el re-render fallaba silenciosamente. La sanitización al abrir convierte todos los streams al formato estándar, eliminando el problema de raíz.
+- **Páginas en blanco tras guardar en el mismo archivo (Ctrl+S) con PDFs no estándar**: `tobytes(garbage=4)` llamado directamente sobre `self.doc` modificaba la estructura interna del documento en memoria, dejándolo en estado inconsistente para renders posteriores. El enfoque de documento temporal aísla estos efectos secundarios.
+
 ## [0.1.26-Parte_2] - 2026-06-20
 
 ### Added

@@ -1642,8 +1642,64 @@ class _RenderMixin:
             except Exception:
                 pass
 
-    def _show_snack(self, msg: str) -> None:
-        self.page_ref.snack_bar = ft.SnackBar(ft.Text(msg), open=True)
+    def _start_bg_sanitize(self, raw: bytes) -> None:
+        """Sanitiza un PDF grande en un hilo de fondo y swapea self.doc al terminar.
+
+        Se llama desde __init__ cuando el PDF supera el límite síncrono (30 MB).
+        El usuario puede ver y anotar el documento mientras tanto; al terminar
+        la sanitización se reemplazan los streams en memoria y se re-renderizan
+        las páginas visibles sin interrumpir la sesión.
+        """
+        from pdf_viewer.viewer import _apply_sanitize  # import local, evita circular
+
+        page_count = len(self.doc)
+
+        def _worker() -> None:
+            sanitized = _apply_sanitize(raw, page_count)
+            if sanitized is None:
+                return
+
+            async def _swap() -> None:
+                with self._doc_lock:
+                    old = self.doc
+                    self.doc = sanitized
+                    try:
+                        old.close()
+                    except Exception:
+                        pass
+                # Forzar re-render de las páginas visibles con el doc limpio.
+                self._schedule_scroll_idle()
+
+            try:
+                self.page_ref.run_task(_swap)
+            except Exception:
+                pass
+
+        import threading
+        threading.Thread(
+            target=_worker,
+            daemon=True,
+            name="pdf-sanitize-bg",
+        ).start()
+
+    def _show_snack(self, msg: str, *, success: bool = False) -> None:
+        if success:
+            content = ft.Row(
+                [
+                    ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE, color=ft.Colors.WHITE, size=18),
+                    ft.Text(msg, color=ft.Colors.WHITE),
+                ],
+                spacing=8,
+                tight=True,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            )
+            self.page_ref.snack_bar = ft.SnackBar(
+                content,
+                bgcolor=ft.Colors.GREEN_700,
+                open=True,
+            )
+        else:
+            self.page_ref.snack_bar = ft.SnackBar(ft.Text(msg), open=True)
         self.page_ref.update()
 
     # ── navigation ────────────────────────────────────────────────────────────
@@ -2045,13 +2101,23 @@ class _RenderMixin:
 
         original = Path(self.path)
         try:
+            # El doc ya fue sanitizado al abrirse (_sanitize_doc en viewer.py),
+            # así que todos sus streams están en compresión zlib estándar.
+            # Usamos tobytes(garbage=0) sin opciones agresivas para no alterar
+            # el estado interno del doc (garbage≥1 reestructura el xref y puede
+            # dejar referencias internas inconsistentes, causando página en blanco
+            # en el siguiente render). La copia del archivo final se genera en un
+            # documento temporal efímero para que self.doc quede completamente
+            # intacto y futuras renderizaciones sigan funcionando.
             with self._doc_lock:
-                data = self.doc.tobytes(garbage=4, deflate=True)
+                raw = self.doc.tobytes(garbage=0, deflate=False, clean=False)
+            with fitz.open("pdf", raw) as _tmp:
+                data = _tmp.tobytes(garbage=4, deflate=True, clean=True)
             original.write_bytes(data)
             self._is_modified = False
             self._has_content_changes = False
             self._doc_initial_state = self._compute_doc_state()
-            self._show_snack(f"Guardado: {original.name}")
+            self._show_snack(f"Guardado: {original.name}", success=True)
             if _close_after:
                 self.on_close(self)
         except PermissionError:
@@ -2076,11 +2142,13 @@ class _RenderMixin:
                 self._show_snack("Este PDF no permite guardar cambios por sus permisos de seguridad")
                 return
             with self._doc_lock:
-                self.doc.save(path, garbage=4, deflate=True)
+                raw = self.doc.tobytes(garbage=0, deflate=False, clean=False)
+            with fitz.open("pdf", raw) as _tmp:
+                _tmp.save(path, garbage=4, deflate=True, clean=True)
             self._is_modified = False
             self._has_content_changes = False
             self._doc_initial_state = self._compute_doc_state()
-            self._show_snack(f"Guardado: {Path(path).name}")
+            self._show_snack(f"Guardado: {Path(path).name}", success=True)
             if self._pending_close_after_save:
                 self._pending_close_after_save = False
                 self.on_close(self)

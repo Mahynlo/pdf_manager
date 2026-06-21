@@ -54,6 +54,78 @@ from ._print_mixin    import _PrintMixin
 from ._search_mixin   import _SearchMixin
 
 
+# PDFs hasta este tamaño se sanitizan sincrónicamente al abrir (< 0.5 s típico).
+_SANITIZE_SYNC_LIMIT = 30 * 1024 * 1024   # 30 MB
+# PDFs más grandes hasta este límite se sanitizan en un hilo de fondo.
+_SANITIZE_BG_LIMIT   = 300 * 1024 * 1024  # 300 MB
+
+
+def _doc_has_signatures(doc: fitz.Document) -> bool:
+    """Devuelve True si el PDF contiene campos de firma digital."""
+    try:
+        return doc.get_sigflags() >= 1
+    except Exception:
+        return False
+
+
+def _apply_sanitize(raw: bytes, page_count: int) -> fitz.Document | None:
+    """Lógica pura de sanitización: abre raw, aplica limpieza, valida páginas."""
+    try:
+        with fitz.open("pdf", raw) as _tmp:
+            clean = _tmp.tobytes(garbage=4, deflate=True, clean=True)
+        result = fitz.open("pdf", clean)
+        if len(result) != page_count:
+            result.close()
+            return None
+        return result
+    except Exception:
+        return None
+
+
+def _sanitize_doc(doc: fitz.Document) -> tuple[fitz.Document, bytes | None]:
+    """Convierte streams no estándar a compresión zlib válida.
+
+    Cubre los casos más comunes de PDFs problemáticos:
+    - raw-deflate sin encabezado zlib (Word, Dahua, Canon, escáneres)
+    - fuentes embebidas con compresión no estándar (Calibri, Aptos, CJK)
+    - imágenes con filtros encadenados que fallan en el segundo decode
+
+    Retorna (doc_sanitizado, None) si se hizo sincrónicamente.
+    Retorna (doc_original, raw_bytes) si el PDF es grande (>30 MB) y la
+    sanitización debe hacerse en background — el llamador es responsable
+    de iniciar ese hilo y swapear self.doc cuando termine.
+    Retorna (doc_original, None) en cualquier caso de error o si el PDF
+    tiene firmas digitales (sanitizar las invalidaría).
+    """
+    page_count = len(doc)
+
+    # PDFs con firma digital: no sanitizar para no invalidar las firmas.
+    if _doc_has_signatures(doc):
+        return doc, None
+
+    try:
+        raw = doc.tobytes(garbage=0, deflate=False, clean=False)
+    except Exception:
+        return doc, None
+
+    size = len(raw)
+
+    if size > _SANITIZE_BG_LIMIT:
+        # Demasiado grande incluso para background — omitir.
+        return doc, None
+
+    if size > _SANITIZE_SYNC_LIMIT:
+        # Grande: devolver raw para que el llamador sanitice en background.
+        return doc, raw
+
+    # Pequeño: sanitizar ahora mismo.
+    sanitized = _apply_sanitize(raw, page_count)
+    if sanitized is not None:
+        doc.close()
+        return sanitized, None
+    return doc, None
+
+
 class PDFViewerTab(
     _RenderMixin,
     _GestureMixin,
@@ -81,6 +153,14 @@ class PDFViewerTab(
         self.on_close = on_close
         self.filename = Path(path).name
         self.doc      = doc if doc is not None else fitz.open(path)
+
+        # Sanitizar streams no estándar antes de cualquier render.
+        # Para PDFs pequeños se hace aquí sincrónicamente.
+        # Para PDFs grandes (>30 MB) se lanza un hilo de fondo que swapea
+        # self.doc cuando termina; el usuario puede ver el documento mientras tanto.
+        self.doc, _pending_raw = _sanitize_doc(self.doc)
+        if _pending_raw is not None:
+            self._start_bg_sanitize(_pending_raw)
 
         self.current_page    = 0
         self.zoom            = 1.0
@@ -1240,8 +1320,9 @@ class PDFViewerTab(
         return self._tab
 
     def get_tab_info(self) -> dict:
+        label = ("● " + self.filename) if self._is_modified else self.filename
         return {
-            "label":     self.filename,
+            "label":     label,
             "icon":      ft.Icons.PICTURE_AS_PDF,
             "content":   self.view,
             "closeable": True,
