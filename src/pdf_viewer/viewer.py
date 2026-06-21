@@ -248,6 +248,10 @@ class PDFViewerTab(
         self._pending_rerender: set[int] = set()
         self._render_gen     = 0
         self._last_evict_px  = -9999.0
+        # Caché de rect.width/height por página (tuplas float). Evita adquirir
+        # _doc_lock para leer N rects en cada cambio de zoom. Se invalida al
+        # rotar (set_rotation cambia rect) o al añadir/eliminar páginas.
+        self._page_rect_cache: list[tuple[float, float]] | None = None
 
         # Text selection state
         self._page_words:         dict[int, list[tuple]] = {}

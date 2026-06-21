@@ -83,13 +83,26 @@ class _RenderMixin:
         self._render_tokens     = {}
         self._last_evict_px  = -9999.0
 
+        # Leer sólo el total bajo lock; los rects vienen de la caché si existe
+        # y tiene el mismo número de páginas (caso habitual: cambio de zoom).
+        # Esto evita bloquear _doc_lock durante N lecturas de rect mientras los
+        # workers de render esperan para rasterizar — crítico en PDFs de 100+ páginas.
         with self._doc_lock:
             total = len(self.doc)
-            page_dims = [
-                (int(self.doc[pn].rect.width  * BASE_SCALE * self.zoom),
-                 int(self.doc[pn].rect.height * BASE_SCALE * self.zoom))
-                for pn in range(total)
-            ]
+
+        _rect_cache = getattr(self, "_page_rect_cache", None)
+        if not isinstance(_rect_cache, list) or len(_rect_cache) != total:
+            with self._doc_lock:
+                _rect_cache = [
+                    (self.doc[pn].rect.width, self.doc[pn].rect.height)
+                    for pn in range(total)
+                ]
+            self._page_rect_cache = _rect_cache
+
+        page_dims = [
+            (int(w * BASE_SCALE * self.zoom), int(h * BASE_SCALE * self.zoom))
+            for w, h in _rect_cache
+        ]
 
         # Ancho del Column: máximo entre el viewport disponible (para que las
         # páginas queden centradas cuando caben) y el ancho de la página al zoom
@@ -382,10 +395,15 @@ class _RenderMixin:
         if self._is_built(pn) or not (0 <= pn < len(self._page_rows)):
             return
 
-        with self._doc_lock:
-            r = self.doc[pn].rect
-            w = int(r.width  * BASE_SCALE * self.zoom)
-            h = int(r.height * BASE_SCALE * self.zoom)
+        _rc = getattr(self, "_page_rect_cache", None)
+        if isinstance(_rc, list) and pn < len(_rc):
+            w = int(_rc[pn][0] * BASE_SCALE * self.zoom)
+            h = int(_rc[pn][1] * BASE_SCALE * self.zoom)
+        else:
+            with self._doc_lock:
+                r = self.doc[pn].rect
+                w = int(r.width  * BASE_SCALE * self.zoom)
+                h = int(r.height * BASE_SCALE * self.zoom)
 
         img = ft.Image(
                 width=w, height=h, fit=ft.ImageFit.CONTAIN, gapless_playback=True,
@@ -1035,7 +1053,8 @@ class _RenderMixin:
                     # render_page toma _doc_lock sólo para rasterizar; el encode
                     # y el IO a disco corren fuera → no serializa el documento.
                     path, w, h, _ = render_page(
-                        self.doc, pn, zoom, cache, doc_lock=self._doc_lock
+                        self.doc, pn, zoom, cache, doc_lock=self._doc_lock,
+                        preview=preview,
                     )
                 if gen != self._render_gen or pn >= len(self._page_images):
                     return
@@ -2072,6 +2091,8 @@ class _RenderMixin:
         _rcache = getattr(self, "_render_cache", None)
         if _rcache is not None:
             _rcache.invalidate_page(pn)
+        # set_rotation cambia page.rect → invalidar caché de dimensiones.
+        self._page_rect_cache = None
 
         saved = pn
         self._rebuild_scroll_content(scroll_back=False)
@@ -2129,6 +2150,8 @@ class _RenderMixin:
         _rcache = getattr(self, "_render_cache", None)
         if _rcache is not None:
             _rcache.clear()
+        # set_rotation en todas las páginas cambia todos los rects.
+        self._page_rect_cache = None
 
         saved = self.current_page
         self._rebuild_scroll_content(scroll_back=False)

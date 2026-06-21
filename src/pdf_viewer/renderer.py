@@ -119,12 +119,17 @@ def render_page(
     zoom: float,
     cache: PageRenderCache | None = None,
     doc_lock: "threading.Lock | None" = None,
+    *,
+    preview: bool = False,
 ) -> CacheEntry:
     """Render a PDF page to a temp file.
 
     Returns (file_path, width, height, None):
-      - zoom ≤ 1.0: PNG en disco (sin pérdida, texto nítido)
-      - zoom > 1.0: JPEG en disco (pixmaps grandes: calidad alta sin exceso)
+      - preview=False, zoom ≤ 1.0: PNG en disco (sin pérdida, texto nítido)
+      - preview=False, zoom > 1.0: JPEG en disco (calidad alta sin exceso)
+      - preview=True: JPEG q65 siempre — las imágenes preview son temporales
+        (≤100 ms antes del upgrade a calidad completa) y no necesitan lossless;
+        JPEG q65 es ~3-5x más pequeño → menos IO a disco → preview aparece antes.
 
     Concurrencia: si se pasa ``doc_lock`` se toma SÓLO durante la rasterización
     (``fitz`` no es thread-safe). La codificación y el IO a disco — la parte
@@ -148,7 +153,7 @@ def render_page(
 
     # ── Codificación + IO fuera del doc_lock ──────────────────────────────────
     # pix es una copia independiente del bitmap, no toca el documento.
-    if zoom <= 1.0:
+    if zoom <= 1.0 and not preview:
         # PNG sin pérdida: mantiene la nitidez del texto al zoom habitual.
         # A disco (no base64 en memoria) → transporte ligero hacia Flutter.
         fd, temp_path = tempfile.mkstemp(suffix=".png")
@@ -164,7 +169,11 @@ def render_page(
     else:
         fd, temp_path = tempfile.mkstemp(suffix=".jpg")
         os.close(fd)
-        jpg_q = 90 if zoom <= 2.0 else (82 if zoom <= 3.0 else 80)
+        if preview:
+            # Tier LOD: calidad reducida — es temporal, se reemplaza en ≤100 ms.
+            jpg_q = 65
+        else:
+            jpg_q = 90 if zoom <= 2.0 else (82 if zoom <= 3.0 else 80)
         try:
             pix.save(temp_path, output="jpeg", jpg_quality=jpg_q)
         except Exception:
