@@ -1109,6 +1109,7 @@ class _RenderMixin:
         if t is not None:
             t.cancel()
         self._render_upd_timer = threading.Timer(0.03, self._do_render_update)
+        self._render_upd_timer.daemon = True
         self._render_upd_timer.start()
 
     def _do_render_update(self) -> None:

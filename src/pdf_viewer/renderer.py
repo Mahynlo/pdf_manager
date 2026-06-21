@@ -28,23 +28,15 @@ CacheEntry = tuple
 class PageRenderCache:
     """Thread-safe LRU cache for rendered page images (per document instance).
 
-    Tiene dos límites: cantidad de entradas y bytes totales en memoria. La
-    eviction sucede cuando se supera cualquiera de los dos. Esto evita que
-    múltiples documentos abiertos acumulen cientos de MB de PNGs cacheados.
+    Límite por número de entradas. Las páginas se guardan como archivos
+    temporales en disco (PNG/JPEG); la eviction borra el archivo.  El cap
+    evita que múltiples documentos abiertos acumulen demasiados archivos temp.
     """
-    _MAX_ENTRIES = 25                  # antes 40: menos huella con varios PDFs abiertos
-    _MAX_BYTES   = 8 * 1024 * 1024     # 8 MB de PNGs por tab (hard cap)
+    _MAX_ENTRIES = 25   # antes 40: menos huella con varios PDFs abiertos
 
     def __init__(self) -> None:
         self._d: OrderedDict[tuple[int, float], CacheEntry] = OrderedDict()
         self._lock = threading.Lock()
-        self._bytes_used = 0
-
-    @staticmethod
-    def _entry_bytes(entry: CacheEntry) -> int:
-        # entry = (path, w, h, png_bytes)
-        png = entry[3]
-        return len(png) if png is not None else 0
 
     def get(self, pn: int, zoom: float) -> CacheEntry | None:
         key = (pn, round(zoom, 2))
@@ -56,7 +48,6 @@ class PageRenderCache:
 
     def _evict_one_locked(self) -> None:
         _, popped = self._d.popitem(last=False)
-        self._bytes_used -= self._entry_bytes(popped)
         if popped[0] is not None:  # file path → borrar archivo temporal
             try:
                 os.remove(popped[0])
@@ -67,14 +58,17 @@ class PageRenderCache:
         key = (pn, round(zoom, 2))
         with self._lock:
             if key in self._d:
-                # Reemplazo: descontar el viejo antes de sobrescribir.
-                self._bytes_used -= self._entry_bytes(self._d[key])
+                old = self._d[key]
+                if old[0] and old[0] != data[0]:
+                    try:
+                        os.remove(old[0])
+                    except Exception:
+                        pass
             self._d[key] = data
             self._d.move_to_end(key)
-            self._bytes_used += self._entry_bytes(data)
-            while len(self._d) > self._MAX_ENTRIES or self._bytes_used > self._MAX_BYTES:
+            while len(self._d) > self._MAX_ENTRIES:
                 if len(self._d) <= 1:
-                    break  # nunca eviccionar la única entrada
+                    break
                 self._evict_one_locked()
 
     def invalidate_page(self, pn: int) -> None:
@@ -82,7 +76,6 @@ class PageRenderCache:
             keys_to_delete = [k for k in self._d if k[0] == pn]
             for k in keys_to_delete:
                 data = self._d.pop(k)
-                self._bytes_used -= self._entry_bytes(data)
                 if data[0] is not None:
                     try:
                         os.remove(data[0])
@@ -97,7 +90,6 @@ class PageRenderCache:
             keys_to_delete = [k for k in self._d if k[0] not in pages]
             for k in keys_to_delete:
                 data = self._d.pop(k)
-                self._bytes_used -= self._entry_bytes(data)
                 if data[0] is not None:
                     try:
                         os.remove(data[0])
@@ -113,7 +105,6 @@ class PageRenderCache:
                     except Exception:
                         pass
             self._d.clear()
-            self._bytes_used = 0
 
     def shrink(self, max_entries: int) -> None:
         """Evict entries until len(cache) <= max_entries. Llamado en on_blur."""
@@ -166,7 +157,7 @@ def render_page(
     else:
         fd, temp_path = tempfile.mkstemp(suffix=".jpg")
         os.close(fd)
-        jpg_q = 90 if zoom <= 2.0 else 82
+        jpg_q = 90 if zoom <= 2.0 else (82 if zoom <= 3.0 else 80)
         pix.save(temp_path, output="jpeg", jpg_quality=jpg_q)
     result: CacheEntry = (temp_path, pix.width, pix.height, None)
 
