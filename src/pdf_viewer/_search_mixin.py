@@ -20,6 +20,17 @@ from .renderer import BASE_SCALE
 _PUNCT = ".,;:!?\"'()[]{}/" + "-"
 
 
+def _ocr_overlaps_native(ocr_rect: fitz.Rect, native_rect: fitz.Rect) -> bool:
+    """True si el hit OCR solapa >= 40% con un hit nativo (misma zona detectada dos veces)."""
+    ix = min(ocr_rect.x1, native_rect.x1) - max(ocr_rect.x0, native_rect.x0)
+    iy = min(ocr_rect.y1, native_rect.y1) - max(ocr_rect.y0, native_rect.y0)
+    if ix <= 0 or iy <= 0:
+        return False
+    inter = ix * iy
+    smaller = min(ocr_rect.get_area(), native_rect.get_area())
+    return smaller > 0 and inter / smaller >= 0.4
+
+
 class _SearchMixin:
 
     def _build_search_sidebar_panel(self):
@@ -249,6 +260,12 @@ class _SearchMixin:
         if not q_parts:
             return
 
+        # _ocr_by_page puede no existir en el visor (dict) o ser el lambda
+        # catch-all de stubs de test — en ambos casos quedar como dict vacío.
+        _raw_ocr    = getattr(self, "_ocr_by_page", None)
+        ocr_by_page = _raw_ocr if isinstance(_raw_ocr, dict) else {}
+        search_in_ocr = getattr(self, "_search_phrase_in_ocr", None)
+
         for pn in range(n):
             if self._search_gen != gen:
                 return
@@ -257,6 +274,25 @@ class _SearchMixin:
                     quads = self._match_words(self.doc[pn], q_parts, case_sensitive)
             except Exception:
                 quads = []
+
+            # Buscar también en los resultados OCR de esta página (si los hay).
+            # _search_phrase_in_ocr vive en _RedactMixin y opera sobre datos ya
+            # extraídos — no necesita el doc_lock.
+            if search_in_ocr is not None:
+                ocr_result = ocr_by_page.get(pn)
+                if ocr_result is not None and ocr_result.detections:
+                    try:
+                        for rect, _ in search_in_ocr(
+                            ocr_result.detections, query, case_sensitive,
+                            whole_word=False,
+                        ):
+                            # Deduplicar: si solapa con un hit nativo, descartarlo.
+                            if not any(
+                                _ocr_overlaps_native(rect, q.rect) for q in quads
+                            ):
+                                quads.append(rect.quad)
+                    except Exception:
+                        pass
 
             if quads:
                 results[pn] = list(quads)
