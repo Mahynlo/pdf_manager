@@ -194,6 +194,25 @@ class _RenderMixin:
                 for row in self._page_rows:
                     row.visible = True
 
+            # En modo página única / doble la imagen al zoom anterior ocupa
+            # todo el viewport → su preview escalado (fit=CONTAIN) es más
+            # visible y molesto que un breve overlay de carga. Ocultamos la
+            # imagen vieja aquí para que el worker entregue directamente la
+            # versión nítida al nuevo zoom sin el estado intermedio estirado.
+            if display_mode in ("single", "double"):
+                _ps = (
+                    (self.current_page // 2) * 2
+                    if display_mode == "double"
+                    else self.current_page
+                )
+                for _p in range(_ps, min(_ps + 2, total)):
+                    _img = self._page_images[_p] if _p < len(self._page_images) else None
+                    _lov = self._loading_overlays[_p] if _p < len(self._loading_overlays) else None
+                    if _img is not None and _img.visible:
+                        _img.visible = False
+                        if _lov is not None:
+                            _lov.visible = True
+
             try:
                 self.viewer_scroll.update()
             except Exception:
