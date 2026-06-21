@@ -1017,6 +1017,7 @@ class _RenderMixin:
                     return
                 img.src = path
                 img.src_base64 = None
+                had_rotation = False
                 if preview:
                     self._previewed.add(pn)
                 else:
@@ -1029,9 +1030,16 @@ class _RenderMixin:
                     img.height = h
                     self._previewed.discard(pn)
                     # Limpiar el Rotate de transición que _rotate() pudo haber
-                    # puesto para evitar el flash en blanco durante la espera.
+                    # puesto. Ponemos opacity=0 instantáneamente para que el frame
+                    # que gapless_playback muestra con la imagen vieja sin rotar
+                    # quede invisible. La imagen se vuelve a mostrar con fade-in
+                    # 70 ms después (cuando Flutter ya decodificó el nuevo src).
                     if img.rotate is not None:
+                        had_rotation = True
+                        img.animate_rotation = None
                         img.rotate = None
+                        img.animate_opacity = None
+                        img.opacity = 0.0
                 img.visible = True
                 # Fondo blanco (no None/transparente): durante el instante en
                 # que Flutter decodifica la imagen recién asignada, el slot se ve
@@ -1047,6 +1055,21 @@ class _RenderMixin:
                 # update parche el contenedor de la página y no re-serialice
                 # toda la columna (menos CPU/GPU por update durante el scroll).
                 self._schedule_render_update(pn)
+                if had_rotation:
+                    # Fade-in diferido: espera a que el primer flush lleve
+                    # opacity=0 a Flutter y el nuevo src esté decodificado.
+                    _img_ref  = img
+                    _pn_ref   = pn
+                    _self_ref = self
+                    def _fadein():
+                        if getattr(_self_ref, "_is_closed", False):
+                            return
+                        _img_ref.animate_opacity = ft.Animation(
+                            80, ft.AnimationCurve.EASE_OUT
+                        )
+                        _img_ref.opacity = 1.0
+                        _self_ref._schedule_render_update(_pn_ref)
+                    threading.Timer(0.07, _fadein).start()
                 # Notify mixins that the page image is now up-to-date.
                 try:
                     self._on_page_rendered(pn)
@@ -1987,9 +2010,12 @@ class _RenderMixin:
         # Girar visualmente la imagen vieja mientras llega el nuevo render.
         # ft.Rotate es un Transform puramente compositor (sin coste de layout):
         # _rebuild_scroll_content ve has_old=True y mantiene la imagen visible,
-        # evitando el flash en blanco. El worker limpia img.rotate al terminar.
+        # evitando el flash en blanco. animate_rotation hace la transición suave;
+        # el worker desactiva la animación antes de limpiar img.rotate para que
+        # la imagen nueva entre sin giro inverso.
         img = self._page_images[pn] if pn < len(self._page_images) else None
         if img is not None and (img.src or img.src_base64):
+            img.animate_rotation = ft.Animation(200, ft.AnimationCurve.EASE_OUT)
             img.rotate = ft.Rotate(
                 angle=math.radians(delta), alignment=ft.alignment.center
             )
@@ -2045,8 +2071,10 @@ class _RenderMixin:
         # aplicar ft.Rotate(π) sobre las imágenes construidas evita el flash en
         # blanco: el fast-resize path ve has_old=True y mantiene todo visible.
         rot_angle = math.radians(180)
+        anim = ft.Animation(200, ft.AnimationCurve.EASE_OUT)
         for img in self._page_images:
             if img is not None and (img.src or img.src_base64):
+                img.animate_rotation = anim
                 img.rotate = ft.Rotate(angle=rot_angle, alignment=ft.alignment.center)
                 img.fit = ft.ImageFit.CONTAIN
             elif img is not None:
