@@ -176,6 +176,11 @@ class _RenderMixin:
                     self._search_overlays[pn].controls = []
                 if getattr(self, "_ocr_show_boxes", False) and pn in self._ocr_by_page:
                     self._render_ocr_boxes(pn=pn)
+                if getattr(self, "_redact_preview", False) and getattr(self, "_redact_matches", None):
+                    try:
+                        self._reapply_redact_page(pn)
+                    except Exception:
+                        pass
                 if getattr(self, "_search_results", {}).get(pn):
                     try:
                         self._render_search_overlay(pn)
