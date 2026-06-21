@@ -44,6 +44,13 @@ copyright = "Copyright (C) 2025 by Flet"
 [tool.flet.app]
 path = "src"
 
+[tool.flet.splash]
+# Splash nativo (Flutter-level): cubre el periodo entre el lanzamiento del exe
+# y la primera conexión de Python. Muestra el logo sobre fondo blanco antes de
+# que el código Python pueda renderizar cualquier control.
+color = "#FFFFFF"
+image = "PM.png"
+
 [tool.uv]
 dev-dependencies = [
     "flet[all]==0.28.3",

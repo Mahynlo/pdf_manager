@@ -1069,7 +1069,9 @@ class _RenderMixin:
                         )
                         _img_ref.opacity = 1.0
                         _self_ref._schedule_render_update(_pn_ref)
-                    threading.Timer(0.07, _fadein).start()
+                    _ft = threading.Timer(0.07, _fadein)
+                    _ft.daemon = True
+                    _ft.start()
                 # Notify mixins that the page image is now up-to-date.
                 try:
                     self._on_page_rendered(pn)

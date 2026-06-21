@@ -329,8 +329,12 @@ def main(page: ft.Page) -> None:
         return
 
     # Somos la instancia principal.
-    # Configurar ventana y mostrar spinner ANTES de cualquier import pesado
-    # para que el usuario vea contenido en ~0.5 s en lugar de blanco.
+    # Configurar ventana y mostrar pantalla de carga ANTES de cualquier import
+    # pesado para que el usuario vea el logo en ~0.5 s en lugar de blanco.
+    # El splash nativo (pyproject.toml [tool.flet.splash]) cubre el periodo
+    # anterior (Flutter-level, antes de que Python conecte); este spinner cubre
+    # el periodo de importación de módulos, visible tanto en flet run como en
+    # el build final.
     page.title                 = "Extraer PDFs"
     page.theme_mode            = ft.ThemeMode.LIGHT
     page.padding               = 0
@@ -338,14 +342,25 @@ def main(page: ft.Page) -> None:
     page.window.prevent_close  = False  # se activa reactivamente al modificar un doc
     page.add(ft.Container(
         content=ft.Column(
-            [ft.ProgressRing(width=44, height=44, stroke_width=3, color="#1E2A38")],
+            [
+                ft.Image(
+                    src="PM.png",
+                    width=130,
+                    height=130,
+                    fit=ft.ImageFit.CONTAIN,
+                ),
+                ft.Container(height=18),
+                ft.ProgressRing(width=36, height=36, stroke_width=3, color="#CC0000"),
+            ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            alignment=ft.MainAxisAlignment.CENTER,
+            spacing=0,
         ),
         expand=True,
         alignment=ft.alignment.center,
         bgcolor=ft.Colors.WHITE,
     ))
-    page.update()   # ← spinner visible en ~0.5 s desde que abre la ventana
+    page.update()   # ← logo + spinner visible en ~0.5 s desde que abre la ventana
 
     # Importar módulos de la app DESPUÉS del spinner para no bloquear la UI.
     # Las instancias secundarias salen antes de llegar aquí.
@@ -952,14 +967,29 @@ def main(page: ft.Page) -> None:
 
     def _do_close_app() -> None:
         """Cierra el socket IPC y destruye la ventana."""
-        # Señalar a todos los workers de render que aborten antes de destruir,
-        # para que el proceso Python no quede activo haciendo trabajo innecesario
-        # tras el cierre de la ventana Flutter.
+        # threading.Timer es un hilo no-daemon: Python espera a que todos
+        # terminen antes de salir. Los viewers tienen timers con delays de
+        # hasta 20 s (_suspend_timer) y 1.4 s (_vbar_hide_timer) que, si
+        # están activos al cerrar, bloquean el proceso y muestran el cursor
+        # de carga. Los cancelamos aquí antes de destroy() para salir limpio.
+        _VIEWER_TIMERS = (
+            "_scroll_idle_timer", "_zoom_timer", "_render_upd_timer",
+            "_restore_scroll_timer", "_single_nav_timer", "_vbar_hide_timer",
+            "_suspend_timer", "_ocr_model_timer", "_orient_model_timer",
+        )
         for _v in open_tabs:
             try:
                 _v._render_gen += 1
+                _v._is_closed = True  # evita que callbacks tardíos toquen la UI
             except Exception:
                 pass
+            for _attr in _VIEWER_TIMERS:
+                _t = getattr(_v, _attr, None)
+                if _t is not None:
+                    try:
+                        _t.cancel()
+                    except Exception:
+                        pass
         try:
             server_sock.close()
         except Exception:
