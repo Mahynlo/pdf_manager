@@ -1,6 +1,6 @@
 [project]
 name = "extraer-pdfs"
-version = "0.1.26"
+version = "0.1.27"
 description = "Manejor de PDFs"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -39,7 +39,7 @@ product = "extraer-pdfs"
 company = "Flet"
 
 # copyright text to display in about app dialogs
-copyright = "Copyright (C) 2025 by Flet"
+copyright = "Copyright (C) 2026 by Flet"
 
 [tool.flet.app]
 path = "src"
