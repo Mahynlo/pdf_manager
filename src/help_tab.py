@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Callable
 
 import flet as ft
@@ -65,7 +66,112 @@ def _faq_row(question: str, answer: str) -> ft.Container:
     )
 
 
-def _build_view() -> ft.Control:
+def _build_docs_tab(page_ref: ft.Page) -> ft.Control:
+    """Construye la tab de documentación con lista de MD y visor."""
+    docs_dir = Path(__file__).resolve().parents[1] / "docs" / "ayuda"
+    if not docs_dir.exists():
+        docs_dir = Path.cwd() / "docs" / "ayuda"
+    
+    md_files_cache: dict[str, str] = {}
+    selected_file: dict[str, str] = {"current": ""}
+    
+    # Cargar todos los MD disponibles
+    def load_md_files() -> list[str]:
+        md_files_cache.clear()
+        files = []
+        if docs_dir.exists():
+            for f in sorted(docs_dir.glob("*.md")):
+                try:
+                    content = f.read_text(encoding="utf-8")
+                    md_files_cache[f.name] = content
+                    files.append(f.name)
+                except Exception:
+                    pass
+        return files
+    
+    md_files = load_md_files()
+    
+    # Controles UI
+    md_content = ft.Markdown(value="", selectable=True)
+    doc_title = ft.Text("Selecciona un documento", size=16, weight="bold")
+    doc_list = ft.Column(spacing=8, scroll="auto", expand=True)
+    
+    # Store button references to update styling
+    button_refs: dict[str, ft.Container] = {}
+    
+    def update_button_styles():
+        """Actualiza el estilo de los botones para resaltar el seleccionado."""
+        for fname, btn in button_refs.items():
+            if fname == selected_file["current"]:
+                btn.bgcolor = "primary"
+                btn.content.color = "onPrimary"
+            else:
+                btn.bgcolor = "surface"
+                btn.content.color = "onSurface"
+        page_ref.update()
+    
+    def on_doc_selected(fname: str) -> None:
+        content = md_files_cache.get(fname, "")
+        md_content.value = content
+        doc_title.value = fname
+        selected_file["current"] = fname
+        update_button_styles()
+    
+    # Crear botones para cada documento
+    if md_files:
+        for fname in md_files:
+            btn_text = ft.Text(fname, size=12, weight="w500")
+            btn = ft.Container(
+                content=btn_text,
+                padding=12,
+                border_radius=8,
+                bgcolor="surface",
+                border=ft.border.all(1, "outlineVariant"),
+                on_click=lambda e, f=fname: on_doc_selected(f),
+            )
+            button_refs[fname] = btn
+            doc_list.controls.append(btn)
+        
+        # Cargar el primer documento por defecto
+        if md_files:
+            on_doc_selected(md_files[0])
+    else:
+        doc_list.controls.append(
+            ft.Text("📁 No hay documentos en docs/ayuda/", size=12, color="onSurfaceVariant")
+        )
+    
+    # Panel izquierdo - Lista de documentos
+    left_panel = ft.Container(
+        content=ft.Column([
+            ft.Text("📄 Documentos", size=14, weight="bold"),
+            ft.Divider(height=1, color="outlineVariant"),
+            doc_list,
+        ], spacing=8),
+        width=280,
+        bgcolor="surfaceVariant",
+        padding=16,
+        border_radius=8,
+    )
+    
+    # Panel derecho - Visor de contenido
+    right_panel = ft.Container(
+        content=ft.Column([
+            doc_title,
+            ft.Divider(height=1, color="outlineVariant"),
+            ft.Container(
+                content=ft.Column([md_content], scroll="auto", expand=True),
+                padding=16,
+                expand=True,
+            ),
+        ], spacing=8, expand=True),
+        expand=True,
+        padding=0,
+    )
+    
+    return ft.Row([left_panel, right_panel], spacing=16, expand=True)
+
+
+def _build_view(page_ref: ft.Page) -> ft.Control:
     header = ft.Container(
         content=ft.Row(
             [
@@ -244,11 +350,26 @@ def _build_view() -> ft.Control:
         expand=True,
     )
 
+    # Crear tabs internas: Información y Documentación
+    tabs_content = ft.Tabs(
+        selected_index=0,
+        tabs=[
+            ft.Tab(
+                text="Información",
+                icon=ft.Icons.INFO_OUTLINED,
+                content=ft.Column([header, ft.Divider(height=1, color="outlineVariant"), body], spacing=0),
+            ),
+            ft.Tab(
+                text="Documentación",
+                icon=ft.Icons.DESCRIPTION,
+                content=_build_docs_tab(page_ref),
+            ),
+        ],
+        expand=True,
+    )
+
     return ft.Card(
-        content=ft.Column(
-            [header, ft.Divider(height=1, color="outlineVariant"), body],
-            spacing=0,
-        ),
+        content=tabs_content,
         elevation=2,
         margin=10,
         expand=True,
@@ -261,7 +382,7 @@ class HelpTab:
     def __init__(self, page_ref: ft.Page, on_close: Callable[["HelpTab"], None]):
         self._page    = page_ref
         self.on_close = on_close
-        self.view     = _build_view()
+        self.view     = _build_view(page_ref)
 
     def get_tab_info(self) -> dict:
         return {
