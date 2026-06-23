@@ -68,10 +68,30 @@ def _faq_row(question: str, answer: str) -> ft.Container:
 
 def _build_docs_tab(page_ref: ft.Page) -> ft.Control:
     """Construye la tab de documentación con lista de MD y visor."""
-    docs_dir = Path(__file__).resolve().parents[1] / "src" / "assets" / "ayuda"
-    if not docs_dir.exists():
-        docs_dir = Path.cwd() / "src" / "assets" / "ayuda"
     
+    # --- NUEVA LÓGICA DE BÚSQUEDA DE RUTAS ---
+    current_dir = Path(__file__).resolve().parent
+    docs_dir = None
+    
+    # Escala hacia arriba buscando la carpeta correcta
+    for parent in [current_dir] + list(current_dir.parents):
+        # Escenario 1: Producción (dentro de data/app/)
+        candidate = parent / "assets" / "ayuda"
+        if candidate.exists():
+            docs_dir = candidate
+            break
+            
+        # Escenario 2: Desarrollo local
+        candidate_src = parent / "src" / "assets" / "ayuda"
+        if candidate_src.exists():
+            docs_dir = candidate_src
+            break
+
+    # Fallback de emergencia
+    if not docs_dir or not docs_dir.exists():
+        docs_dir = Path.cwd() / "src" / "assets" / "ayuda"
+    # -----------------------------------------
+
     md_files_cache: dict[str, str] = {}
     selected_file: dict[str, str] = {"current": ""}
     
