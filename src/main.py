@@ -999,30 +999,55 @@ def main(page: ft.Page) -> None:
     def _on_window_event(e: ft.WindowEvent) -> None:
         if e.type != ft.WindowEventType.CLOSE:
             return
-        _dbg_log("CLOSE | window close requested by user")
+        
+        import threading
+        import time
+        import os
 
+        # Chequeo instantáneo
         unsaved = [
             v for v in open_tabs
-            if getattr(v, "_is_modified", False) and v._doc_has_real_changes()
+            if getattr(v, "_is_modified", False)
         ]
+        
+        def _execute_clean_exit():
+            """Secuencia coordinada para evitar el colapso de la ventana y el deadlock."""
+            # 1. Quitamos el seguro contra cierres
+            page.window.prevent_close = False
+            
+            # 2. Le decimos a Flet que destruya la ventana limpiamente
+            try:
+                page.update()
+                page.window.destroy()
+            except Exception:
+                pass
+                
+            # 3. Matamos Python desde un hilo secundario tras un breve retraso (100ms).
+            # Esto le da tiempo al websocket de entregar el comando "destroy" a la UI.
+            def _kill():
+                time.sleep(0.1)
+                os._exit(0)
+                
+            threading.Thread(target=_kill, daemon=True).start()
+
         if not unsaved:
-            _do_close_app()
+            _execute_clean_exit()
             return
 
         names = "\n".join(f"  • {v.filename}" for v in unsaved)
 
         def _cancel(ev=None):
+            page.close(dlg)
+
+        def _force_close(ev=None):
+            # Cerramos el diálogo primero para que no haya errores de UI
             try:
                 page.close(dlg)
             except Exception:
                 pass
-
-        def _force_close(ev=None):
-            # No cerramos el dialogo explicitamente antes de destroy():
-            # window.destroy() cierra la ventana entera incluyendo el dialogo,
-            # y page.close(dlg) seria un round-trip extra innecesario que
-            # mantiene la ventana visible mas tiempo del necesario.
-            _do_close_app()
+            
+            # Ejecutamos nuestra secuencia limpia de salida
+            _execute_clean_exit()
 
         dlg = ft.AlertDialog(
             modal=True,

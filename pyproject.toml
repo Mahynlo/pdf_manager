@@ -9,16 +9,16 @@ authors = [
 ]
 dependencies = [
   "flet[all]==0.28.3",
-  "langchain>=0.3.28",
-  "langchain-community>=0.3.31",
-  "langchain-google-genai>=2.1.12",
-  "langchain-openai>=0.3.35",
+  #"langchain>=0.3.28",
+  #"langchain-community>=0.3.31",
+  #"langchain-google-genai>=2.1.12",
+  #"langchain-openai>=0.3.35",
   "onnxruntime>=1.20.1",
   "onnxtr[cpu,cpu-headless]>=0.5.1",
   "opencv-python-headless>=4.13.0.92",
   "pydantic>=2.12.5",
   "pymupdf>=1.26.5",
-  "pymupdf4llm>=0.0.27",
+  #"pymupdf4llm>=0.0.27",
   "python-dotenv>=1.2.1",
   # NOTA: pywin32 se eliminó del empaquetado (~17 MB). No se importa en ningún
   # sitio: el único uso de Win32 (GetCommandLineW en main._win32_cmdline_args)
@@ -39,7 +39,7 @@ product = "extraer-pdfs"
 company = "Flet"
 
 # copyright text to display in about app dialogs
-copyright = "Copyright (C) 2026 by Flet"
+copyright = "Copyright (C) 2026 by MHNL"
 
 [tool.flet.app]
 path = "src"

@@ -258,13 +258,6 @@ def _build_view(page_ref: ft.Page) -> ft.Control:
             "Abre desde el menú ☰ → «Seguridad».",
         ),
         _info_row(
-            ft.Icons.AUTO_AWESOME_OUTLINED,
-            "Agente IA",
-            "Chatea con el documento: haz preguntas, pide resúmenes o solicita "
-            "análisis. Disponible dentro del visor → botón «Agente IA». "
-            "Requiere una clave de API de Google Gemini u OpenAI.",
-        ),
-        _info_row(
             ft.Icons.SEARCH,
             "Buscar en el documento",
             "Presiona Ctrl+F dentro del visor para buscar texto. "
@@ -321,11 +314,6 @@ def _build_view(page_ref: ft.Page) -> ft.Control:
             "¿La OCR funciona sin conexión a internet?",
             "Sí. La OCR usa un modelo local (OnnxTR) que se ejecuta en tu equipo. "
             "No se envían datos a ningún servidor externo.",
-        ),
-        _faq_row(
-            "¿El agente IA requiere internet?",
-            "Sí. El agente IA se conecta a Google Gemini o a la API de OpenAI. "
-            "Necesitas configurar una clave de API en el panel del agente antes de usarlo.",
         ),
         _faq_row(
             "¿Puedo abrir varios PDFs a la vez?",
