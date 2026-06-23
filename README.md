@@ -2,6 +2,8 @@
 
 Una aplicación de escritorio completa para gestionar, visualizar y manipular archivos PDF con capacidades avanzadas de seguridad, OCR y anotaciones.
 
+![alt text](/docs/gifs/gif_de_mustra.gif)
+
 ![Inicio de la aplicación](src/assets/app_imagenes/home_page.png)
 
 
