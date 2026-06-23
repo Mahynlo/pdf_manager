@@ -68,9 +68,9 @@ def _faq_row(question: str, answer: str) -> ft.Container:
 
 def _build_docs_tab(page_ref: ft.Page) -> ft.Control:
     """Construye la tab de documentación con lista de MD y visor."""
-    docs_dir = Path(__file__).resolve().parents[1] / "docs" / "ayuda"
+    docs_dir = Path(__file__).resolve().parents[1] / "src" / "assets" / "ayuda"
     if not docs_dir.exists():
-        docs_dir = Path.cwd() / "docs" / "ayuda"
+        docs_dir = Path.cwd() / "src" / "assets" / "ayuda"
     
     md_files_cache: dict[str, str] = {}
     selected_file: dict[str, str] = {"current": ""}
