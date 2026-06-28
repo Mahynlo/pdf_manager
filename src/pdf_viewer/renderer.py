@@ -9,7 +9,11 @@ from collections import OrderedDict
 import fitz
 
 BASE_SCALE = 1.5
-ZOOM_LEVELS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
+
+# Niveles de zoom intermedios agregados para transiciones más fluidas
+ZOOM_LEVELS = [
+    0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 3.5, 4.0
+]
 
 # Global semaphore: cap concurrent page renders across all open tabs.
 # Subido de 4 → 6: durante un cambio de zoom las 5-6 páginas visibles arrancan

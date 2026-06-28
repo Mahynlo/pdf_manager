@@ -344,13 +344,25 @@ def main(page: ft.Page) -> None:
         content=ft.Column(
             [
                 ft.Image(
-                    src="PM.png",
+                    src="icon.png",
                     width=130,
                     height=130,
                     fit=ft.ImageFit.CONTAIN,
                 ),
-                ft.Container(height=18),
+
+                #---Nombre de la aplicacion --------
+                ft.Text(
+                    value = "Extraer PDFs",
+                    size = 40,
+                    weight=ft.FontWeight.W_500, # peso medio/semi-bold
+                    color="#333333",  # tono gris
+                    text_align=ft.TextAlign.CENTER
+                ),
+
+                ft.Container(height=24), # espacio antes del spiner
                 ft.ProgressRing(width=36, height=36, stroke_width=3, color="#CC0000"),
+                ft.Container(height=16), # espacio entre el espiner y el texto
+                
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             alignment=ft.MainAxisAlignment.CENTER,
@@ -362,11 +374,23 @@ def main(page: ft.Page) -> None:
     ))
     page.update()   # ← logo + spinner visible en ~0.5 s desde que abre la ventana
 
-    # Importar módulos de la app DESPUÉS del spinner para no bloquear la UI.
-    # Las instancias secundarias salen antes de llegar aquí.
+    start_time = time.time()
+
+    # 2. Dejamos que Python haga el trabajo pesado (importar módulos)
     import recent_files as rf
     from document_manager_ui import DocumentManagerUI
     from home import HomePage
+
+    # 3. Calculamos cuánto tiempo le tomó a la computadora hacer las importaciones
+    elapsed_time = time.time() - start_time
+
+    # 4. Definimos el tiempo mínimo (en segundos) que queremos que el logo sea visible
+    MIN_SPLASH_TIME = 0.8
+
+    # 5. Solo dormimos si la computadora fue DEMASIADO rápida.
+    # Si la PC fue lenta y ya se tardó más de 0.8 segundos, esto no hace nada.
+    if elapsed_time < MIN_SPLASH_TIME:
+        time.sleep(MIN_SPLASH_TIME - elapsed_time)
 
     _ipc_thread = threading.Thread(
         target=_ipc_server_loop,

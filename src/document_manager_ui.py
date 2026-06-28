@@ -288,13 +288,22 @@ class DocumentManagerUI:
         self._page.update()
 
     def _make_btn(self, entry: _TabEntry, active: bool) -> ft.Container:
-        close_ctrl = ft.Container(
-            content=ft.Icon(ft.Icons.CLOSE, size=11, color=_TEXT_INACT),
+        close_ctrl = ft.IconButton(
+            icon=ft.Icons.CLOSE,
+            icon_size=10,
             width=18,
             height=18,
-            border_radius=9,
             tooltip="Cerrar",
             visible=entry.closeable,
+            icon_color=_TEXT_INACT,
+            hover_color=ft.Colors.RED_700,
+            style=ft.ButtonStyle(
+                color={
+                    ft.ControlState.HOVERED: ft.Colors.WHITE,
+                },
+                padding=ft.padding.all(0),
+                shape=ft.CircleBorder(),
+            ),
             on_click=lambda _, e=entry: e.close_cb() if e.close_cb else None,
         )
 
