@@ -65,7 +65,7 @@ _PREVIEW_QUALITY      = 0.66  # el tier preview rasteriza a esta fracción del z
 
 ## 2. Estructura de clases
 
-`PDFViewerTab` hereda de **nueve mixins**. Cada uno gestiona un dominio concreto y accede al estado compartido mediante `self`. (El antiguo `_RedactAgentMixin` se dividió en `_RedactMixin`, `_ProfilesMixin` y `_AgentMixin`; la impresión vive en `_PrintMixin`.)
+`PDFViewerTab` hereda de **once mixins**. Cada uno gestiona un dominio concreto y accede al estado compartido mediante `self`. (El antiguo `_RedactAgentMixin` se dividió en `_RedactMixin`, `_ProfilesMixin` y `_AgentMixin`; además, `_LegendsMixin` aporta las leyendas y `_SearchMixin` el buscador lateral. La impresión vive en `_PrintMixin`.)
 
 | Mixin | Archivo | Responsabilidad |
 |-------|---------|-----------------|
@@ -76,8 +76,10 @@ _PREVIEW_QUALITY      = 0.66  # el tier preview rasteriza a esta fracción del z
 | `_OCRMixin` | `_ocr_mixin.py` | Ejecución de OCR y panel de resultados |
 | `_RedactMixin` | `_redact_mixin.py` | Búsqueda/términos/preview/aplicar censura |
 | `_ProfilesMixin` | `_profiles_mixin.py` | Diálogos de perfiles de censura |
+| `_LegendsMixin` | `_legends_mixin.py` | Leyendas: menú rápido, gestor y diálogos de edición |
 | `_AgentMixin` | `_agent_mixin.py` | Panel de chat del agente IA |
 | `_PrintMixin` | `_print_mixin.py` | Impresión (PowerShell en Windows, CUPS en Linux/macOS) |
+| `_SearchMixin` | `_search_mixin.py` | Búsqueda en texto, navegación de coincidencias y overlays |
 
 ```mermaid
 classDiagram
@@ -170,6 +172,14 @@ classDiagram
         +_load_profile(profile)
     }
 
+    class _LegendsMixin {
+        +_make_legends_menu_btn()
+        +_rebuild_legends_menu()
+        +_insert_legend(legend_id)
+        +_open_legends_manager()
+        +_open_create_legend_dialog()
+    }
+
     class _AgentMixin {
         +_build_agent_sidebar_panel()
         +_agent_send()
@@ -178,6 +188,16 @@ classDiagram
 
     class _PrintMixin {
         +_print_pdf()
+    }
+
+    class _SearchMixin {
+        +_build_search_sidebar_panel()
+        +_on_search_submit()
+        +_search_worker(query, case_sensitive, gen)
+        +_search_next()
+        +_search_prev()
+        +_clear_search()
+        +_open_search()
     }
 
     class AnnotationManager {
@@ -217,8 +237,10 @@ classDiagram
     PDFViewerTab --|> _OCRMixin
     PDFViewerTab --|> _RedactMixin
     PDFViewerTab --|> _ProfilesMixin
+    PDFViewerTab --|> _LegendsMixin
     PDFViewerTab --|> _AgentMixin
     PDFViewerTab --|> _PrintMixin
+    PDFViewerTab --|> _SearchMixin
     PDFViewerTab *-- AnnotationManager
     PDFViewerTab *-- PageRenderCache
     PDFViewerTab *-- OCRProcessor

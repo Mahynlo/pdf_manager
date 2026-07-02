@@ -4,6 +4,19 @@ Una aplicación de escritorio completa para gestionar, visualizar y manipular ar
 
 ![alt text](/docs/gifs/gif_de_mustra.gif)
 
+## Arquitectura general
+
+La app está organizada por responsabilidades para que la UI principal cargue rápido y cada módulo mantenga su propia lógica:
+
+- `src/main.py`: punto de entrada. Gestiona la instancia única, el menú principal y las pestañas fijas de la aplicación.
+- `src/document_manager_ui.py`: implementa la barra de pestañas personalizada y notifica foco/pérdida de foco a los visores PDF.
+- `src/home.py`: pantalla inicial y accesos a las funciones principales.
+- `src/pdf_viewer/`: visor PDF completo. `viewer.py` ensambla los mixins y delega renderizado, zoom, selección, OCR, censura, búsqueda, leyendas e impresión.
+- `src/pdf_extractor/`, `src/pdf_merge/`, `src/pdf_security/`: módulos especializados para extraer, combinar y proteger PDFs.
+- `src/settings_tab.py` y `src/help_tab.py`: configuración y ayuda dentro de pestañas integradas.
+
+Las pestañas fijas que abre `main.py` son: inicio, extracción, combinación, seguridad, configuración y ayuda. Los PDFs abiertos por el usuario se añaden después como pestañas dinámicas del visor.
+
 ## Características
 
 ### 📖 Visor de PDF
@@ -43,6 +56,9 @@ Extrae texto automáticamente de imágenes en PDFs:
 Añade comentarios y marcas en tus documentos PDF
 
 📚 [Más información sobre el Visor de PDF](docs/visor-pdf.md)
+
+### ❓ Ayuda y documentación
+Consulta la guía de uso integrada desde la pestaña de ayuda.
 
 ### 📄 Fusión de PDF
 Combina múltiples archivos PDF en uno solo
