@@ -61,9 +61,13 @@ orientación. El texto reconocido se puede seleccionar, buscar, censurar y expor
 
 ![OCR](docs/web/imagenes/ocr.png)
 
-### ✨ Asistente IA
+### ✨ Asistente IA (en pruebas)
 Chat sobre el documento, resumen, datos clave y detección de datos sensibles (que se envían a
 Censura). Sin clave de API responde en modo básico.
+
+> ⚠️ El agente de IA está **en fase de pruebas** y todavía no está probado del todo. Sus
+> dependencias no se instalan por defecto (están comentadas en `pyproject.toml`); sin ellas solo
+> funciona el modo básico.
 
 ### 📄 Combinar PDF
 Une varios PDF eligiendo, girando y reordenando las páginas, con vista previa del resultado.
@@ -81,6 +85,20 @@ encontradas.
 - **Desbloquear:** quita la protección de un PDF del que se conoce la contraseña.
 
 ![Seguridad](docs/web/imagenes/seguridad.png)
+
+## 🧪 Qué está en fase de pruebas
+
+La 0.1.29-web es una versión de prueba. Funciona en general, pero estas partes todavía no se han
+probado del todo con uso real:
+
+| Aspecto | Estado |
+|---|---|
+| **Agente de IA** | En pruebas, no probado del todo. Sin sus dependencias (comentadas en `pyproject.toml`) ni clave de API responde en modo básico |
+| **Censura con marcas** | Nueva: las marcas se revisan en la página y Python las aplica. Conviene revisar el resultado antes de compartir la copia censurada |
+| **Deshacer operaciones de página** | Nuevo: Ctrl+Z / Ctrl+Y sobre girar, mover, insertar, duplicar y eliminar páginas, junto con las anotaciones |
+| **Anotaciones** | Edición con EmbedPDF (mover, redimensionar, orden, texto libre). Probadas en pruebas automáticas, falta uso real con PDF variados |
+| **Imprimir** | Nueva: las páginas las dibuja el visor (PDFium). Falta probar con distintas impresoras |
+| **Instalador** | Probados la instalación, «Abrir con» y el OCR. Falta más uso en otros equipos |
 
 ## Instalación
 
