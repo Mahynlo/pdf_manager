@@ -73,9 +73,9 @@ La versión Qt (`src_qt\`, `tests\test_qt_*.py`) no se sube: está en `.gitignor
 ## Convivencia con la versión Flet
 
 El instalador web tiene otro `AppId`, otra carpeta (`Extraer PDFs Web`) y otro ProgID, así las dos
-versiones se pueden instalar a la vez durante la transición.
+versiones se pueden instalar a la vez. Flet ya no tendrá versiones nuevas (la 0.1.28 fue la última).
 
-Cuando la web sustituya a Flet en producción, hay dos opciones:
+Para que la web reemplace una instalación de Flet hay dos opciones:
 - usar en `installer\web\setup.iss` el `AppId` de `installer\setup.iss`, para que instalar la web actualice la instalación existente;
 - desinstalar antes la versión Flet.
 
@@ -91,6 +91,7 @@ Cuando la web sustituya a Flet en producción, hay dos opciones:
   internet; tres PDF abiertos a la vez dibujan sus páginas; girar una página recarga el documento; cerrar
   la pestaña activa deja bien la siguiente. Sin errores de JavaScript.
 
-Pendiente:
-- compilar el instalador: lo hace el workflow `build-web.yml` (en el equipo de desarrollo no se instala Inno Setup);
-- probar «Abrir con» desde el Explorador una vez instalado.
+Con el instalador de `v0.1.29-web` (generado por el workflow `build-web.yml`; en el equipo de
+desarrollo no se instala Inno Setup):
+- el instalador ocupa unos 72-74 MB y la aplicación instalada, 192 MB;
+- «Abrir con» desde el Explorador y los modelos de OCR funcionan.

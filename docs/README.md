@@ -4,8 +4,8 @@ El proyecto tiene tres versiones de la interfaz. La documentación está separad
 
 | Versión | Código | Estado | Documentación |
 |---|---|---|---|
-| **Web** (HTML/CSS/JS + Python con pywebview) | `app/` + `src/pdf_core/` | **En desarrollo. Será la definitiva** y sustituirá a Flet en producción | [web/](web/README.md) |
-| **Flet** | `src/` (salvo `src/pdf_core/`) | **En producción** hasta que la web la sustituya; después se mantiene un tiempo por compatibilidad | [flet/](flet/README.md) |
+| **Web** (HTML/CSS/JS + Python con pywebview) | `app/` + `src/pdf_core/` | **La versión que se publica**, desde la 0.1.29-web (en pruebas) | [web/](web/README.md) |
+| **Flet** | `src/` (salvo `src/pdf_core/`) | **Descartada**: la 0.1.28 fue la última versión y está respaldada en la rama `Flet`. El código se queda solo por compatibilidad hasta retirarlo | [flet/](flet/README.md) |
 | **Qt** (PySide6) | `src_qt/` | **Referencia** de funciones y aspecto mientras se migra a la web. Al terminar la migración se retira de la rama | [qt/](qt/README.md) |
 
 ## Dónde está cada cosa
@@ -13,7 +13,7 @@ El proyecto tiene tres versiones de la interfaz. La documentación está separad
 ```
 app/              versión web: backend Python (servicios) + interfaz en Svelte (app/ui)
 src/pdf_core/     lógica de PDF sin interfaz. Es todo el Python de src/ que usa la web
-src/              versión Flet (interfaz) y módulos de compatibilidad con rutas antiguas
+src/              versión Flet (descartada) y módulos de compatibilidad con rutas antiguas
 src_qt/           versión Qt (se retirará)
 docs/web|flet|qt  documentación de cada versión
 docs/ayuda/       manuales que muestra la pestaña Ayuda

@@ -1,8 +1,8 @@
 # Versión web
 
 Interfaz en **Svelte** (`app/ui`, compilada con Vite) y backend en **Python**, unidos por pywebview
-(WebView2 en Windows). El visor dibuja los PDF con **EmbedPDF** (motor PDFium en el navegador). Es la versión definitiva: sustituirá a Flet en producción. Las funciones se están
-trayendo desde la versión Qt (`src_qt/`), que sirve de referencia.
+(WebView2 en Windows). El visor dibuja los PDF con **EmbedPDF** (motor PDFium en el navegador). Es la versión que se publica desde la 0.1.29-web (en pruebas); Flet queda descartada (la 0.1.28
+fue su última versión). Las funciones se trajeron desde la versión Qt (`src_qt/`), que sirvió de referencia.
 
 ```
 uv run python -m app.main            # arrancar (recompila la interfaz si cambió)
@@ -33,7 +33,7 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
 - **Inicio**: herramientas y archivos recientes (compartidos con Flet y Qt).
 - **Combinar, Seguridad y Extraer**: completas, con trabajos en segundo plano, contraseñas y progreso.
 - **Ajustes y Ayuda**: tema, recientes, registro de diagnóstico, atajos y manuales.
-- **Visor de PDF** (páginas dibujadas por EmbedPDF; migración en curso, ver [embedpdf.md](embedpdf.md)):
+- **Visor de PDF** (páginas dibujadas por EmbedPDF, ver [embedpdf.md](embedpdf.md)):
   - Lectura: zoom, modos de vista, navegación, miniaturas, índice, modo noche.
   - Páginas: rotar, mover (también arrastrando miniaturas), duplicar, insertar, eliminar y extraer.
   - Guardado: guardar y guardar como; un PDF cifrado conserva su contraseña.
@@ -56,13 +56,12 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
   - Exportar: texto e imágenes.
 
 - **Sistema**: arrastrar y soltar PDFs, instancia única y «Abrir con» (el ejecutable recibe las rutas).
-- **Distribución**: ejecutable con PyInstaller (`installer/web/build.ps1`), comprobado con el visor EmbedPDF.
+- **Distribución**: ejecutable con PyInstaller e instalador con Inno Setup (`installer/web/build.ps1`, o el
+  workflow `build-web.yml` con una etiqueta `v*-web`). Probado instalado: «Abrir con» y OCR.
 
 ### Pendiente
 
-- **Visor con EmbedPDF**: paso 4 (herramientas); ver [embedpdf.md](embedpdf.md).
-- **Instalador**: compilarlo con Inno Setup y probar el ejecutable instalado: OCR, «Abrir con» desde
-  el Explorador y arrastrar archivos desde el Explorador.
+- **Pruebas de la 0.1.29-web**: uso real del instalador antes de darla por estable.
 - **Asistente IA con agente**: instalar sus dependencias (comentadas en `pyproject.toml`); sin ellas
   responde en modo básico.
 

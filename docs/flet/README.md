@@ -1,8 +1,9 @@
 # Versión Flet
 
-Es la versión **en producción** (instalador generado con `build.ps1`). La versión web la
-sustituirá. Después se mantendrá un tiempo por compatibilidad y luego se retirará (ver el
-plan en [../web/modulos-python.md](../web/modulos-python.md#plan-de-retirada)).
+Versión **descartada**: la 0.1.28 fue la última (instalador generado con `build.ps1`) y está
+respaldada en la rama `Flet`. Desde la 0.1.29-web solo se publica la versión web. El código se
+mantiene por compatibilidad y luego se retirará (ver el plan en
+[../web/modulos-python.md](../web/modulos-python.md#plan-de-retirada)).
 
 ```
 uv run flet run          # arrancar (código en src/, entrada src/main.py)

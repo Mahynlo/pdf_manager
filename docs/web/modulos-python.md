@@ -5,8 +5,9 @@ Todo el Python de la web está en dos sitios:
 - **`app/`**: la aplicación. Contiene los servicios que llama el frontend, la ventana y el arranque (ver [arquitectura.md](arquitectura.md)).
 - **`src/pdf_core/`**: la lógica de PDF sin interfaz. Es lo único de `src/` que importa `app/`.
 
-`pdf_core` está dentro de `src/` porque la versión Flet, que sigue en producción, también lo usa, y
-`flet build` solo empaqueta `src/`.
+`pdf_core` está dentro de `src/` porque la versión Flet también lo usa y `flet build` solo empaqueta
+`src/`. Flet está descartada (la 0.1.28 fue su última versión, respaldada en la rama `Flet`); al
+retirarla, `pdf_core` puede salir de `src/` (ver el plan).
 
 ## Mapa de `src/pdf_core`
 
@@ -85,7 +86,7 @@ Qt se quita de la rama. Su historia queda en git.
 3. Dejar de comparar `app/ui/src/styles/tokens.css` con `src_qt/core/theme.py`. A partir de ahí, `tokens.css` es la fuente de los colores.
 4. Sustituir las menciones a Qt en `docs/web/` («equivale a … en Qt») por la descripción de la propia web.
 
-### Flet, cuando ya no haga falta por compatibilidad
+### Flet, cuando ya no haga falta por compatibilidad (respaldo: rama `Flet`)
 
 1. Borrar la interfaz Flet de `src/` y los módulos de compatibilidad, y dejar solo `src/pdf_core/` y `src/assets/`.
 2. Quitar `flet` de las dependencias y la sección `[tool.flet]`.
