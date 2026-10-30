@@ -137,3 +137,30 @@ detalles en [docs/web/svelte.md](docs/web/svelte.md).
 El instalador necesita Inno Setup 6. En GitHub lo genera el workflow `build-web.yml` al subir una
 etiqueta `v*-web` (por ejemplo `v0.1.29-web`). Detalle en
 [docs/web/instalador.md](docs/web/instalador.md).
+
+
+## Seguir usando la versión Flet
+
+> ⚠️ **No se recomienda.** La versión Flet ya no recibirá cambios ni versiones nuevas; se mantiene
+> solo por compatibilidad y más adelante se retirará de esta rama. Para uso normal, usa la versión web.
+
+Si aun así la necesitas, sigue disponible:
+
+- **En esta rama:** su código sigue en `src/` (con la lógica compartida de `src/pdf_core/`). Se
+  arranca y se compila igual que antes:
+
+  ```bash
+  uv sync
+  uv run flet run          # arrancar
+  .\build.ps1              # exe + «Abrir con» + instalador (PowerShell, necesita Inno Setup)
+  ```
+
+  Ojo: aquí comparte `pdf_core` con la versión web, que ha cambiado desde la 0.1.28 (por ejemplo,
+  los modelos de OCR), así que puede comportarse distinto que la versión publicada.
+- **Instalador:** `v0.1.28`, la última versión de Flet, en
+  [Releases](https://github.com/Mahynlo/pdf_manager/releases/tag/v0.1.28). Se puede instalar junto a
+  la versión web, porque cada una tiene su propia carpeta e instalación.
+- **Código tal como quedó en la 0.1.28:** rama [`Flet`](https://github.com/Mahynlo/pdf_manager/tree/Flet)
+  (`git clone -b Flet https://github.com/Mahynlo/pdf_manager.git`).
+
+Su documentación está en [docs/flet/](docs/flet/README.md).
