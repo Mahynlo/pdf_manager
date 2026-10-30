@@ -1,0 +1,109 @@
+name: Build & Package Web Installer
+
+# Versión web (app/: Svelte + pywebview/WebView2), ver docs/web/instalador.md.
+# Convive con la versión Flet (build.yml): otro instalador, otra carpeta y otro AppId.
+#
+# Dispara el workflow:
+#   - Al hacer push de un tag vX.Y.Z-web → compila + crea Release (prerelease) en GitHub
+#   - Manualmente desde la UI de GitHub (Actions → Run workflow) → solo el artefacto
+# La versión es APP_VERSION de app/__init__.py; el tag tiene que coincidir con ella.
+on:
+  push:
+    tags:
+      - "v*-web"
+  workflow_dispatch:
+
+jobs:
+  build-web:
+    name: Build Web App + Installer
+    runs-on: windows-2022
+    permissions:
+      contents: write   # necesario para crear GitHub Releases
+
+    steps:
+      # ── 1. Código fuente ────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Versión (APP_VERSION de app/__init__.py; el tag debe coincidir) ──
+      - name: Get version
+        id: version
+        shell: pwsh
+        run: |
+          $content = Get-Content app\__init__.py -Raw
+          if ($content -notmatch 'APP_VERSION\s*=\s*"([^"]+)"') {
+            Write-Error "No se encontró APP_VERSION en app/__init__.py"
+            exit 1
+          }
+          $ver = $Matches[1]
+          if ("${{ github.ref }}" -match "refs/tags/v(.+)") {
+            if ($Matches[1] -ne $ver) {
+              Write-Error "El tag v$($Matches[1]) no coincide con APP_VERSION ($ver) de app/__init__.py"
+              exit 1
+            }
+          }
+          Write-Host "Version: $ver"
+          echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
+
+      # ── 3. Herramientas: uv (Python), pnpm y Node (interfaz) ───────────────
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.22.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: app/ui/pnpm-lock.yaml
+
+      # ── 4. Dependencias de Python ───────────────────────────────────────────
+      - name: Install Python dependencies
+        run: uv sync
+
+      # ── 5. Inno Setup (en el runner, no en el equipo de desarrollo) ────────
+      - name: Install InnoSetup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+
+      # ── 6. Interfaz + PyInstaller + instalador (installer/web/build.ps1) ───
+      - name: Build app and installer
+        shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          .\installer\web\build.ps1 -Version "${{ steps.version.outputs.VERSION }}"
+          $setup = "dist\ExtraerPDFs_Web_Setup_${{ steps.version.outputs.VERSION }}.exe"
+          if (-not (Test-Path $setup)) {
+            Write-Error "No se generó $setup"
+            exit 1
+          }
+          Write-Host "$setup ($([math]::Round((Get-Item $setup).Length / 1MB, 1)) MB)"
+
+      # ── 7. Subir instalador como artefacto del workflow ────────────────────
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExtraerPDFs-Web-installer-${{ steps.version.outputs.VERSION }}
+          path: dist/ExtraerPDFs_Web_Setup_*.exe
+          if-no-files-found: error
+
+      # ── 8. Release en GitHub (solo con tag): siempre prerelease (prueba) ───
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.version.outputs.VERSION }}"
+          name: "Extraer PDFs v${{ steps.version.outputs.VERSION }} (versión web, prueba)"
+          files: dist/ExtraerPDFs_Web_Setup_*.exe
+          generate_release_notes: true
+          draft: false
+          prerelease: true

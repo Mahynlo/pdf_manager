@@ -169,3 +169,13 @@ storage/
 .claude/
 modelos/
 !uv.lock
+# Interfaz en Svelte (app/ui): dependencias y compilación (se genera con pnpm build)
+app/ui/node_modules/
+app/ui/dist/
+# src/lib es código de la interfaz (la regla «lib/» de arriba es para entornos de Python)
+!app/ui/src/lib/
+
+# Versión Qt (PySide6): se conserva en local y en la rama feature/pyside-migration, pero no
+# se sube (la app es la versión web, app/). Solo afecta a archivos que no estén ya versionados.
+src_qt/
+tests/test_qt_*.py

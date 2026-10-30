@@ -1,12 +1,14 @@
 name: Build & Package Windows Installer
 
-# Dispara el workflow:
+# Versión Flet. Dispara el workflow:
 #   - Al hacer push de un tag vX.Y.Z  → compila + crea Release en GitHub
 #   - Manualmente desde la UI de GitHub (Actions → Run workflow)
+# Los tags vX.Y.Z-web son de la versión web (build-web.yml), no de esta.
 on:
   push:
     tags:
       - "v*"
+      - "!v*-web"
   workflow_dispatch:
     inputs:
       version_override:

@@ -112,7 +112,7 @@ PDFSecurityManager.PDF_PERM_PRINT_HQ       # Impresión HD
 
 ## Ver Documentación Completa
 
-[docs/seguridad-pdf.md](../../docs/seguridad-pdf.md) - Guía completa con ejemplos detallados
+[docs/flet/seguridad-pdf.md](../../docs/flet/seguridad-pdf.md) - Guía completa con ejemplos detallados
 
 ## Dependencias
 

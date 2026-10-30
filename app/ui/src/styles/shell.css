@@ -1,0 +1,196 @@
+/* Estructura de la ventana: cabecera con pestañas, vistas, barra de estado e Inicio. */
+
+/* ── Cabecera ────────────────────────────────────────────────────────────── */
+.app-header {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 44px;
+  padding: 0 8px 0 10px;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border-light);
+}
+.app-header > .btn, .header-actions { align-self: center; }
+
+.brand {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px 0 9px;
+  margin-right: 6px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--brand-bg);
+  color: var(--brand);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background var(--speed);
+}
+.brand:hover { background: color-mix(in srgb, var(--brand) 16%, transparent); }
+
+.header-btn { color: var(--icon-color); }
+.header-actions { margin-left: auto; display: flex; gap: 2px; }
+
+/* ── Pestañas ────────────────────────────────────────────────────────────── */
+.tabbar { display: flex; align-items: flex-end; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.tabbar::-webkit-scrollbar { display: none; }
+
+.tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 8px 0 14px;
+  margin-bottom: -1px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  transition: background var(--speed), color var(--speed);
+}
+.tab:hover { background: var(--bg-hover); color: var(--text-primary); }
+.tab.is-active { color: var(--text-primary); background: var(--bg-base); border-color: var(--border-light); }
+.tab.is-active > .icon:first-child { color: var(--accent); }
+.tab:not(.is-closable) { padding-right: 18px; }
+
+.tab__close {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.tab__close:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* ── Vistas y barra de estado ────────────────────────────────────────────── */
+.views { position: relative; flex: 1; min-height: 0; }
+.view { position: absolute; inset: 0; overflow: auto; }
+
+.statusbar {
+  flex: none;
+  height: 26px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg-header);
+  border-top: 1px solid var(--border-light);
+}
+
+/* ── Inicio ──────────────────────────────────────────────────────────────── */
+.home { display: flex; height: 100%; }
+
+.recent {
+  flex: none;
+  width: 330px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 10px 14px 14px;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-light);
+}
+.recent__head { display: flex; align-items: center; gap: 8px; padding: 0 4px 12px; border-bottom: 1px solid var(--border-light); }
+.recent__head > .icon { color: var(--text-muted); }
+.recent__title { flex: 1; font-size: 16px; font-weight: 600; }
+.recent__list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.recent__empty { padding: 16px; text-align: center; color: var(--text-muted); }
+
+.recent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px 6px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--speed);
+}
+.recent-row:hover { background: var(--bg-hover); }
+.recent-row__badge {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius);
+  color: #D32F2F;
+  background: rgba(211, 47, 47, 0.12);
+}
+.recent-row__info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.recent-row__name { font-weight: 500; }
+.recent-row .btn--icon { opacity: 0; }
+.recent-row:hover .btn--icon, .recent-row:focus-within .btn--icon { opacity: 1; }
+
+.home__center {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 36px;
+  text-align: center;
+}
+.home__emoji { font-size: 48px; line-height: 1.1; }
+.home__title { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
+.home__lead { font-size: 15px; color: var(--text-secondary); margin-bottom: 24px; }
+.home__cards { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; }
+
+.home-card {
+  position: relative;
+  width: 220px;
+  height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 18px;
+  cursor: pointer;
+  transition: transform var(--speed), box-shadow var(--speed), border-color var(--speed);
+}
+.home-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); border-color: var(--border); }
+.home-card__icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-lg);
+  font-size: 24px;
+  background: color-mix(in srgb, var(--c) 15%, transparent);
+}
+.home-card__title { font-size: 16px; font-weight: 600; }
+.home-card__text { color: var(--text-secondary); font-size: 13px; white-space: pre-line; }
+
+/* Arrastrar PDFs a la ventana (dropzone.js). */
+body.is-dropping::after {
+  content: "Suelta los PDF para abrirlos";
+  position: fixed;
+  inset: 10px;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  border: 3px dashed var(--accent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-base) 85%);
+  color: var(--accent);
+  font-size: 20px;
+  font-weight: 600;
+  pointer-events: none;
+}

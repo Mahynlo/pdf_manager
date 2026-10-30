@@ -570,7 +570,7 @@ def main(page: ft.Page) -> None:
             PDFPasswordRequiredError,
             PDFSecurityManager,
         )
-        from pdf_viewer import PDFViewerTab  # lazy — carga fitz + onnxtr
+        from pdf_viewer import PDFViewerTab  # lazy — carga fitz + onnxruntime
 
         if not path:
             _dbg_log("OPEN  | ABORT: path is empty/None")

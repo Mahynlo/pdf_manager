@@ -11,21 +11,8 @@ from .renderer import BASE_SCALE
 from ._viewer_defs import _SELECTED_BG
 
 
-# Plegado de acentos para la búsqueda de censura: es habitual escribir los
-# términos sin tilde, así que "COMITÉ" debe coincidir con "COMITE" y "Pública"
-# con "Publica" — para la búsqueda son la misma palabra (solo cambia el acento).
-# La ñ/Ñ se PRESERVA a propósito: es una letra propia del español, no una "n con
-# tilde" ("año" ≠ "ano"). La tabla es 1:1 (no cambia la longitud), lo que importa
-# para mapear posiciones de caracteres en la búsqueda OCR.
-_ACCENT_FOLD = str.maketrans(
-    "áàäâãéèëêíìïîóòöôõúùüûÁÀÄÂÃÉÈËÊÍÌÏÎÓÒÖÔÕÚÙÜÛ",
-    "aaaaaeeeeiiiiooooouuuuAAAAAEEEEIIIIOOOOOUUUU",
-)
-
-
-def _fold_accents(s: str) -> str:
-    """Pliega tildes/diéresis a la vocal base, conservando la ñ."""
-    return s.translate(_ACCENT_FOLD)
+# Plegado de acentos para la búsqueda de censura ("COMITÉ" == "COMITE").
+from text_utils import fold_accents as _fold_accents
 
 
 class _RedactMixin:

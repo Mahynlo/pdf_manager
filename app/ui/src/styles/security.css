@@ -1,0 +1,35 @@
+/* Herramienta Seguridad (y patrón «Paso 1 | Paso 2» reutilizable). */
+.steps { display: flex; gap: 24px; height: 100%; padding: 20px; }
+.steps__col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.steps__sep { flex: none; width: 1px; background: var(--border-light); }
+.step-title { font-size: 16px; font-weight: 700; }
+
+.file-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  background: var(--bg-subtle);
+}
+.file-box > .icon { color: var(--icon-color); }
+
+.audit { display: flex; flex-direction: column; gap: 6px; padding: 16px 18px; box-shadow: none; }
+.status-line { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.note { font-style: italic; }
+.perm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.perm-list li { display: flex; align-items: center; gap: 8px; }
+.perm-list li span { color: var(--text-primary); }
+
+.button-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.info-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  background: var(--accent-light);
+}
+.info-card__title { color: var(--accent); font-weight: 700; }

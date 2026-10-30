@@ -1,177 +1,121 @@
 # PdfManager App
 
-Una aplicación de escritorio completa para gestionar, visualizar y manipular archivos PDF con capacidades avanzadas de seguridad, OCR y anotaciones.
+Aplicación de escritorio para Windows para ver, anotar, censurar y manipular archivos PDF, con OCR,
+extracción por palabras clave, combinación y seguridad.
 
-![alt text](/docs/gifs/gif_de_mustra.gif)
+![Visor PDF](docs/web/imagenes/visor.png)
 
-## Arquitectura general
+> **Versión web 0.1.29-web (en pruebas).** La interfaz ahora usa tecnología web (Svelte) dentro de
+> una ventana de escritorio (pywebview + WebView2), con el backend en Python. La versión **Flet** se
+> descarta: la 0.1.28 fue la última y queda respaldada en la rama `Flet`. Su código sigue en `src/`
+> solo por compatibilidad y se retirará más adelante. Ver [docs/README.md](docs/README.md).
 
-La app está organizada por responsabilidades para que la UI principal cargue rápido y cada módulo mantenga su propia lógica:
+## Arquitectura
 
-- `src/main.py`: punto de entrada. Gestiona la instancia única, el menú principal y las pestañas fijas de la aplicación.
-- `src/document_manager_ui.py`: implementa la barra de pestañas personalizada y notifica foco/pérdida de foco a los visores PDF.
-- `src/home.py`: pantalla inicial y accesos a las funciones principales.
-- `src/pdf_viewer/`: visor PDF completo. `viewer.py` ensambla los mixins y delega renderizado, zoom, selección, OCR, censura, búsqueda, leyendas e impresión.
-- `src/pdf_extractor/`, `src/pdf_merge/`, `src/pdf_security/`: módulos especializados para extraer, combinar y proteger PDFs.
-- `src/settings_tab.py` y `src/help_tab.py`: configuración y ayuda dentro de pestañas integradas.
+```
+app/            aplicación: ventana (pywebview), arranque y servicios Python que llama la interfaz
+app/ui/         interfaz en Svelte (compilada con Vite); el visor dibuja los PDF con EmbedPDF (PDFium)
+src/pdf_core/   lógica de PDF sin interfaz (PyMuPDF, OCR, censura, combinar, seguridad...)
+installer/web/  ejecutable (PyInstaller) e instalador (Inno Setup)
+docs/web/       documentación de la versión web
+```
 
-Las pestañas fijas que abre `main.py` son: inicio, extracción, combinación, seguridad, configuración y ayuda. Los PDFs abiertos por el usuario se añaden después como pestañas dinámicas del visor.
+La interfaz llama a los servicios de Python con `call('servicio.metodo', ...)`. EmbedPDF dibuja las
+páginas y edita las anotaciones en la ventana; Python guarda el archivo y hace lo pesado (operaciones
+de página, OCR, censura, IA, combinar y seguridad). Detalle en
+[docs/web/arquitectura.md](docs/web/arquitectura.md).
 
 ## Características
 
+### 🏠 Inicio
+Accesos a cada herramienta y archivos recientes. Cada PDF y cada herramienta se abren en su pestaña.
+
+![Inicio](docs/web/imagenes/inicio.png)
+
 ### 📖 Visor de PDF
-Visualiza y navega por documentos PDF con soporte para:
-- Anotaciones en el documento
-- Zoom y navegación fluida
-- Selección de texto
+- Zoom, scroll continuo, doble página o página única, miniaturas, índice y modo noche.
+- Selección de texto (también entre páginas) y búsqueda con lista de resultados.
+- **Anotaciones:** resaltar, subrayar, tachar, formas, flechas, pluma, texto libre, notas, imágenes y
+  sellos. Se mueven, se redimensionan y se cambian de color, grosor y orden.
+- **Páginas:** girar, mover (también arrastrando miniaturas), duplicar, insertar, eliminar y extraer.
+- Deshacer y rehacer (Ctrl+Z / Ctrl+Y) tanto las anotaciones como las operaciones de página.
+- Imprimir con vista previa: páginas, orden, orientación, color y escala.
+- Exportar el texto y las imágenes del documento.
 
-![Visor PDF](src/assets/app_imagenes/visor_abierto.png)
+📚 [Cómo está hecho el visor](docs/web/embedpdf.md)
 
-📚 [Más información sobre el Visor de PDF](docs/visor-pdf.md)
+### 🖍️ Censura
+Marca lo que hay que tapar y revísalo en la página antes de aplicarlo:
+- frases, expresiones regulares y patrones de datos personales (correos, teléfonos, tarjetas, RFC/CURP...);
+- texto seleccionado y áreas dibujadas a mano;
+- perfiles de censura guardados.
+
+Cada coincidencia es una marca que se puede mover, borrar o deshacer. Al aplicar, el contenido de
+debajo se borra para siempre y el documento solo se guarda como copia.
+
+![Censura](docs/web/imagenes/censura.png)
+
+### 🔍 OCR
+Reconoce el texto de páginas escaneadas (página actual, recorte o documento entero) y corrige la
+orientación. El texto reconocido se puede seleccionar, buscar, censurar y exportar.
+
+![OCR](docs/web/imagenes/ocr.png)
+
+### ✨ Asistente IA
+Chat sobre el documento, resumen, datos clave y detección de datos sensibles (que se envían a
+Censura). Sin clave de API responde en modo básico.
+
+### 📄 Combinar PDF
+Une varios PDF eligiendo, girando y reordenando las páginas, con vista previa del resultado.
+
+![Combinar PDF](docs/web/imagenes/combinar.png)
+
+### 📊 Extraer
+Busca en varios PDF por palabras clave (o por rango de páginas) y genera un PDF con las páginas
+encontradas.
+
+![Extraer](docs/web/imagenes/extraer.png)
 
 ### 🔐 Seguridad
-Protege tus documentos PDF con:
-- **Proteger PDF**: Añade contraseña y permisos de acceso
-- **Desbloquear PDF**: Elimina protecciones existentes
+- **Proteger:** contraseña de usuario y de propietario (AES-256) y permisos.
+- **Desbloquear:** quita la protección de un PDF del que se conoce la contraseña.
 
-![Seguridad - Proteger](src/assets/app_imagenes/seguridad_proteger.png)
-![Seguridad - Desbloquear](src/assets/app_imagenes/seguridad_desbloquear.png)
+![Seguridad](docs/web/imagenes/seguridad.png)
 
-📚 [Más información sobre Seguridad en PDF](docs/seguridad-pdf.md)
+## Instalación
 
-### 🖍️ Redacción y Censura
-Censura información sensible en tus documentos:
+Descarga el instalador `ExtraerPDFs_Web_Setup_<versión>.exe` de la página de
+[Releases](https://github.com/Mahynlo/pdf_manager/releases). Añade «Abrir con» para los PDF y admite
+arrastrar archivos a la ventana.
 
-![Censura de texto](src/assets/app_imagenes/cencura_texto_1.png)
-![Censura aplicada](src/assets/app_imagenes/cencura_texto_2.png)
+## Desarrollo
 
-📚 [Más información sobre Seguridad en PDF](docs/seguridad-pdf.md)
-
-### 🔍 OCR (Reconocimiento Óptico de Caracteres)
-Extrae texto automáticamente de imágenes en PDFs:
-
-![OCR](src/assets/app_imagenes/OCR_pagina.png)
-
-### ✏️ Anotaciones
-Añade comentarios y marcas en tus documentos PDF
-
-📚 [Más información sobre el Visor de PDF](docs/visor-pdf.md)
-
-### ❓ Ayuda y documentación
-Consulta la guía de uso integrada desde la pestaña de ayuda.
-
-### 📄 Fusión de PDF
-Combina múltiples archivos PDF en uno solo
-![combinar pdf](src/assets/app_imagenes/combinar_pdf.png)
-![combinar pdf](src/assets/app_imagenes/combinar_pdf_vista_previa.png)
-
-📚 [Más información sobre Combinar PDF](docs/combinar-pdf.md)
-
-### 📊 Extracción de Datos
-Extrae información de tus documentos PDF
-![combinar pdf](src/assets/app_imagenes/extraccion_pdf.png)
-
-📚 [Más información sobre Extracción de PDF](docs/extraer-pdf.md)
-
-## Instalación y Ejecución
-
-### Modo desarrollo (clonar y ejecutar)
-
-1. Clona el repositorio y sitúate en la carpeta del proyecto:
+Requisitos: Windows, Python 3.10 o superior con [uv](https://docs.astral.sh/uv/), y Node.js con
+pnpm (para compilar la interfaz).
 
 ```bash
 git clone https://github.com/Mahynlo/pdf_manager.git
 cd pdf_manager
-```
-
-2. Crea y activa un entorno virtual:
-
-- En Linux / macOS:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-```
-
-- En Windows (PowerShell):
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-
-Nota: el usuario solicitó el método clásico de activación Windows `\.venv\Scripts\activate`; use la variante adecuada para su shell.
-
-3. Instala la herramienta `uv` si no la tienes (opcional, `uv` es la envoltura usada en este repo para ejecutar comandos):
-
-```bash
-pip install uv
-```
-
-4. (Una sola vez) sincroniza dependencias/entorno con `uv` (según flujo del proyecto):
-
-```bash
 uv sync
 ```
 
-5. Ejecuta la aplicación en modo desarrollo:
-
 ```bash
-uv run flet run
+uv run python -m app.main            # arrancar (recompila la interfaz si cambió)
+uv run python -m app.main --dev      # con el servidor de Vite: recarga al guardar
+uv run python -m app.main --debug    # con herramientas de desarrollo (F12)
+uv run pytest                        # pruebas
 ```
 
-Para ejecutar en modo web:
-
-```bash
-uv run flet run --web
-```
-
-Si prefieres no usar `uv`, sigue estos pasos alternativos con `poetry` o `pip`.
-
-### Usando Poetry (alternativa)
-
-**Instalar dependencias:**
-
-```bash
-poetry install
-```
-
-**Ejecutar como aplicación de escritorio:**
-
-```bash
-poetry run flet run
-```
-
-**Ejecutar como aplicación web:**
-
-```bash
-poetry run flet run --web
-```
-
-### Usando pip + virtualenv (otra alternativa)
-
-Después de crear y activar el entorno virtual (ver arriba), instala dependencias con:
-
-```bash
-pip install -r requirements.txt
-```
-
-Si no existe `requirements.txt`, puedes instalar directamente desde el `pyproject.toml` usando `pip` junto con `pip-tools` o usar `poetry` para exportar las dependencias.
-
-Para más detalles, consulta la [Guía de Inicio](https://flet.dev/docs/getting-started/).
+La primera vez, si falta `app/ui/node_modules`, se ejecuta `pnpm install` automáticamente. Más
+detalles en [docs/web/svelte.md](docs/web/svelte.md).
 
 ## Compilación
 
-Para más detalles, consulta la [Guía de Empaquetado para Linux](https://flet.dev/docs/publish/linux/).
-
-### Windows
-
-```bash
-flet build windows -v
+```powershell
+.\installer\web\build.ps1                  # ejecutable + instalador
+.\installer\web\build.ps1 -SkipInstaller   # solo el ejecutable
 ```
 
-Para más detalles, consulta la [Guía de Empaquetado para Windows](https://flet.dev/docs/publish/windows/).
-
-> Para generar el instalador completo (exe + launcher de "Abrir con" + Inno Setup) usa `.\build.ps1`.
-
-📚 [Más información sobre "Abrir con" e instalador en Windows](docs/abrir-con-windows.md)
+El instalador necesita Inno Setup 6. En GitHub lo genera el workflow `build-web.yml` al subir una
+etiqueta `v*-web` (por ejemplo `v0.1.29-web`). Detalle en
+[docs/web/instalador.md](docs/web/instalador.md).
