@@ -1,0 +1,34 @@
+{
+  "name": "pdf-manager-ui",
+  "private": true,
+  "description": "Interfaz de la app en Svelte. Compila a app/ui/dist/ (ver docs/web/svelte.md).",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "@embedpdf/core": "2.15.1",
+    "@embedpdf/engines": "2.15.1",
+    "@embedpdf/models": "2.15.1",
+    "@embedpdf/pdfium": "2.15.1",
+    "@embedpdf/plugin-annotation": "2.15.1",
+    "@embedpdf/plugin-document-manager": "2.15.1",
+    "@embedpdf/plugin-export": "2.15.1",
+    "@embedpdf/plugin-history": "2.15.1",
+    "@embedpdf/plugin-interaction-manager": "2.15.1",
+    "@embedpdf/plugin-redaction": "2.15.1",
+    "@embedpdf/plugin-render": "2.15.1",
+    "@embedpdf/plugin-rotate": "2.15.1",
+    "@embedpdf/plugin-scroll": "2.15.1",
+    "@embedpdf/plugin-search": "2.15.1",
+    "@embedpdf/plugin-selection": "2.15.1",
+    "@embedpdf/plugin-spread": "2.15.1",
+    "@embedpdf/plugin-tiling": "2.15.1",
+    "@embedpdf/plugin-viewport": "2.15.1",
+    "@embedpdf/plugin-zoom": "2.15.1",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "svelte": "5.51.0",
+    "vite": "8.3.4"
+  }
+}

@@ -1,29 +1,11 @@
-"""Persistent recent-files list stored as JSON in the user's home directory."""
+"""Compatibilidad (Flet/Qt): este módulo vive en ``pdf_core.recent_files``.
 
-from __future__ import annotations
+Se registra con el mismo objeto, así ``import recent_files`` y ``import pdf_core.recent_files`` son
+el mismo módulo. Se borrará al retirar las versiones Flet y Qt.
+"""
 
-import json
-from pathlib import Path
+import sys
 
-_MAX = 12
-_STORE = Path.home() / ".extraer_pdfs_recent.json"
+from pdf_core import recent_files as _module
 
-
-def load() -> list[str]:
-    """Return the recent-files list (only paths that still exist on disk)."""
-    try:
-        data = json.loads(_STORE.read_text(encoding="utf-8"))
-        if isinstance(data, list):
-            return [p for p in data if isinstance(p, str) and Path(p).exists()][:_MAX]
-    except Exception:
-        pass
-    return []
-
-
-def push(path: str) -> None:
-    """Add *path* to the front of the list, deduplicate, and persist."""
-    existing = [p for p in load() if p != path]
-    try:
-        _STORE.write_text(json.dumps([path, *existing][:_MAX]), encoding="utf-8")
-    except Exception:
-        pass
+sys.modules[__name__] = _module

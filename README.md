@@ -4,6 +4,10 @@ Una aplicación de escritorio completa para gestionar, visualizar y manipular ar
 
 ![alt text](/docs/gifs/gif_de_mustra.gif)
 
+> **Versiones:** hoy en producción está la versión **Flet** (`src/`), que es la que describe este README.
+> La versión **web** (`app/`, HTML/CSS/JS + Python) la sustituirá. La versión **Qt** (`src_qt/`) solo sirve
+> de referencia para la migración. Ver [docs/README.md](docs/README.md).
+
 ## Arquitectura general
 
 La app está organizada por responsabilidades para que la UI principal cargue rápido y cada módulo mantenga su propia lógica:
@@ -27,7 +31,7 @@ Visualiza y navega por documentos PDF con soporte para:
 
 ![Visor PDF](src/assets/app_imagenes/visor_abierto.png)
 
-📚 [Más información sobre el Visor de PDF](docs/visor-pdf.md)
+📚 [Más información sobre el Visor de PDF](docs/flet/visor-pdf.md)
 
 ### 🔐 Seguridad
 Protege tus documentos PDF con:
@@ -37,7 +41,7 @@ Protege tus documentos PDF con:
 ![Seguridad - Proteger](src/assets/app_imagenes/seguridad_proteger.png)
 ![Seguridad - Desbloquear](src/assets/app_imagenes/seguridad_desbloquear.png)
 
-📚 [Más información sobre Seguridad en PDF](docs/seguridad-pdf.md)
+📚 [Más información sobre Seguridad en PDF](docs/flet/seguridad-pdf.md)
 
 ### 🖍️ Redacción y Censura
 Censura información sensible en tus documentos:
@@ -45,7 +49,7 @@ Censura información sensible en tus documentos:
 ![Censura de texto](src/assets/app_imagenes/cencura_texto_1.png)
 ![Censura aplicada](src/assets/app_imagenes/cencura_texto_2.png)
 
-📚 [Más información sobre Seguridad en PDF](docs/seguridad-pdf.md)
+📚 [Más información sobre Seguridad en PDF](docs/flet/seguridad-pdf.md)
 
 ### 🔍 OCR (Reconocimiento Óptico de Caracteres)
 Extrae texto automáticamente de imágenes en PDFs:
@@ -55,7 +59,7 @@ Extrae texto automáticamente de imágenes en PDFs:
 ### ✏️ Anotaciones
 Añade comentarios y marcas en tus documentos PDF
 
-📚 [Más información sobre el Visor de PDF](docs/visor-pdf.md)
+📚 [Más información sobre el Visor de PDF](docs/flet/visor-pdf.md)
 
 ### ❓ Ayuda y documentación
 Consulta la guía de uso integrada desde la pestaña de ayuda.
@@ -65,13 +69,13 @@ Combina múltiples archivos PDF en uno solo
 ![combinar pdf](src/assets/app_imagenes/combinar_pdf.png)
 ![combinar pdf](src/assets/app_imagenes/combinar_pdf_vista_previa.png)
 
-📚 [Más información sobre Combinar PDF](docs/combinar-pdf.md)
+📚 [Más información sobre Combinar PDF](docs/flet/combinar-pdf.md)
 
 ### 📊 Extracción de Datos
 Extrae información de tus documentos PDF
 ![combinar pdf](src/assets/app_imagenes/extraccion_pdf.png)
 
-📚 [Más información sobre Extracción de PDF](docs/extraer-pdf.md)
+📚 [Más información sobre Extracción de PDF](docs/flet/extraer-pdf.md)
 
 ## Instalación y Ejecución
 
@@ -174,4 +178,4 @@ Para más detalles, consulta la [Guía de Empaquetado para Windows](https://flet
 
 > Para generar el instalador completo (exe + launcher de "Abrir con" + Inno Setup) usa `.\build.ps1`.
 
-📚 [Más información sobre "Abrir con" e instalador en Windows](docs/abrir-con-windows.md)
+📚 [Más información sobre "Abrir con" e instalador en Windows](docs/flet/abrir-con-windows.md)

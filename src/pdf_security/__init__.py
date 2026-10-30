@@ -1,4 +1,8 @@
-"""PDF Security module: unlock password-protected PDFs and display permissions."""
+"""PDF Security module: unlock password-protected PDFs and display permissions.
+
+``PDFSecurityTab`` (interfaz Flet) se importa de forma diferida para que la
+lógica de ``security`` pueda usarse sin cargar Flet.
+"""
 
 from .security import (
 	PDFFileError,
@@ -8,7 +12,6 @@ from .security import (
 	PDFSecurityError,
 	PDFSecurityManager,
 )
-from .tab import PDFSecurityTab
 
 __all__ = [
 	"PDFSecurityManager",
@@ -19,3 +22,11 @@ __all__ = [
 	"PDFOwnerRequiredError",
 	"PDFFileError",
 ]
+
+
+def __getattr__(name: str):
+	if name == "PDFSecurityTab":
+		from .tab import PDFSecurityTab
+
+		return PDFSecurityTab
+	raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

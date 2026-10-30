@@ -1,0 +1,52 @@
+/* Herramienta Ayuda. */
+.tool-page--fill { height: 100%; }
+.tool-page--fill > .subtabs { min-height: 0; }
+.tool-page--fill .subtabs__panel { min-height: 0; overflow: auto; border: 0; background: transparent; }
+
+.info-row { display: flex; align-items: flex-start; gap: 14px; padding: 6px; }
+.info-row__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius);
+  font-size: 18px;
+  background: rgba(21, 101, 192, 0.12);
+}
+.faq-row { display: flex; flex-direction: column; gap: 3px; padding: 6px; }
+
+.help-docs { height: 100%; display: flex; gap: 14px; padding: 4px 0; }
+.help-docs__list { flex: none; width: 260px; display: flex; flex-direction: column; gap: 10px; padding: 14px; }
+.help-docs__view { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 16px; }
+.doc-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.doc-list__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.doc-list__item:hover { background: var(--bg-hover); }
+.doc-list__item.is-active { background: var(--bg-selected); color: var(--accent); }
+
+/* Manual renderizado desde Markdown */
+.markdown { flex: 1; overflow-y: auto; padding-right: 8px; font-size: 14px; line-height: 1.6; }
+.markdown h1 { font-size: 22px; margin: 4px 0 12px; }
+.markdown h2 { font-size: 18px; margin: 20px 0 8px; }
+.markdown h3 { font-size: 15px; margin: 16px 0 6px; }
+.markdown p, .markdown ul, .markdown ol { margin: 0 0 10px; }
+.markdown a { color: var(--accent); }
+.markdown code { padding: 1px 5px; border-radius: 4px; background: var(--bg-subtle); font-family: Consolas, monospace; font-size: 12.5px; }
+.markdown pre { padding: 10px 12px; border-radius: var(--radius); background: var(--log-bg); overflow-x: auto; }
+.markdown pre code { padding: 0; background: none; }
+.markdown blockquote { margin: 0 0 10px; padding: 4px 12px; border-left: 3px solid var(--accent); color: var(--text-secondary); }
+.markdown table { border-collapse: collapse; margin: 0 0 12px; }
+.markdown th, .markdown td { padding: 6px 10px; border: 1px solid var(--border-light); text-align: left; }
+.markdown th { background: var(--bg-subtle); }
+.markdown img { display: block; max-width: 100%; height: auto; margin: 8px 0 14px; border-radius: var(--radius); }
+.markdown hr { border: 0; border-top: 1px solid var(--border-light); margin: 16px 0; }

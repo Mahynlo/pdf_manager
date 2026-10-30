@@ -3,7 +3,7 @@ name = "extraer-pdfs"
 version = "0.1.28"
 description = "Manejor de PDFs"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [
     { name = "Malcom Navarro", email = "you@example.com" }
 ]
@@ -13,17 +13,22 @@ dependencies = [
   #"langchain-community>=0.3.31",
   #"langchain-google-genai>=2.1.12",
   #"langchain-openai>=0.3.35",
+  "markdown-it-py>=4.0",
+  "numpy>=2.0",
+  # OCR: modelos de PaddleOCR (src/assets/ocr_models) con onnxruntime y NumPy.
+  # Sin onnxtr ni OpenCV/SciPy (~200 MB menos en el ejecutable): ver pdf_core/ocr/paddle.py.
   "onnxruntime>=1.20.1",
-  "onnxtr[cpu,cpu-headless]>=0.5.1",
-  "opencv-python-headless>=4.13.0.92",
   "pydantic>=2.12.5",
   "pymupdf>=1.26.5",
   #"pymupdf4llm>=0.0.27",
+  "pyside6>=6.10.3",
+  "pytest-qt>=4.5.0",
   "python-dotenv>=1.2.1",
   # NOTA: pywin32 se eliminó del empaquetado (~17 MB). No se importa en ningún
   # sitio: el único uso de Win32 (GetCommandLineW en main._win32_cmdline_args)
   # va por ctypes, y la impresión es sin pywin32. Si en el futuro algún módulo
   # lo necesita, volver a añadir: "pywin32>=311 ; sys_platform == 'win32'".
+  "pywebview>=6.2",
 ]
 
 [tool.flet]
@@ -51,9 +56,8 @@ path = "src"
 color = "#FFFFFF"
 image = "PM.png"
 
-[tool.uv]
-dev-dependencies = [
-    "flet[all]==0.28.3",
+[dependency-groups]
+dev = [
     "pytest>=8.4.2",
 ]
 
@@ -67,7 +71,34 @@ pytest = ">=8.4.2"
 [tool.pytest.ini_options]
 # src/ no es un paquete instalable; añadirlo al sys.path para que los tests
 # puedan hacer `import pdf_viewer.renderer`, `import recent_files`, etc.
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 testpaths  = ["tests"]
 # -q: salida concisa, -ra: resumen de tests no-pass al final
 addopts = "-q -ra"
+
+[tool.ruff]
+# App HTML, cliente PySide6 y módulos compartidos sin interfaz. La UI Flet (src/*/tab.py,
+# src/pdf_viewer/_*_mixin.py…) queda fuera hasta que se migre o se retire.
+include = [
+    "app/**/*.py",
+    "tests/test_app_backend.py",
+    "src_qt/**/*.py",
+    "src/text_utils.py",
+    "src/page_ranges.py",
+    "src/pdf_core/**/*.py",
+    "src/recent_files.py",
+    "src/pdf_extractor/engine.py",
+    "src/pdf_extractor/model.py",
+    "src/pdf_merge/engine.py",
+    "src/pdf_merge/model.py",
+]
+line-length = 120
+target-version = "py310"
+src = ["src", "."]
+
+[tool.ruff.lint]
+# F: errores reales · E9: sintaxis · I: orden de imports · B: bugs comunes · UP: sintaxis moderna
+select = ["F", "E9", "I", "B", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "pdf_core", "src_qt", "pdf_viewer", "pdf_extractor", "pdf_merge", "pdf_security", "recent_files", "text_utils", "page_ranges", "agent"]
