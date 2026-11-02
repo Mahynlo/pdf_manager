@@ -178,7 +178,7 @@
 .home-card__title { font-size: 16px; font-weight: 600; }
 .home-card__text { color: var(--text-secondary); font-size: 13px; white-space: pre-line; }
 
-/* Arrastrar PDFs a la ventana (dropzone.js). */
+/* Arrastrar PDFs a la ventana (dropzone.ts). */
 body.is-dropping::after {
   content: "Suelta los PDF para abrirlos";
   position: fixed;

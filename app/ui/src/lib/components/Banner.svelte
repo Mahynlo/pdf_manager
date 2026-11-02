@@ -1,8 +1,10 @@
 <!-- Aviso dentro de la herramienta (StatusBanner en Qt). `message` vacío lo oculta. -->
-<script>
+<script lang="ts">
   import Icon from '../Icon.svelte';
 
-  let { message = '', tone = 'success' } = $props();
+  import type { Tone } from '../feedback.svelte.ts';
+
+  let { message = '', tone = 'success' }: { message?: string; tone?: Tone } = $props();
 </script>
 
 <div class="banner banner--{tone}" role="status" hidden={!message}>

@@ -2,17 +2,21 @@
   Columna izquierda de Extraer: modo «Búsqueda inteligente» (pasos 1 y 2) o «Por rango
   numérico». `params()` da los parámetros del modo activo.
 -->
-<script>
-  import { call } from '$lib/api.js';
+<script lang="ts">
+  import { call } from '$lib/api.ts';
   import Checkbox from '$lib/components/Checkbox.svelte';
   import RadioGroup from '$lib/components/RadioGroup.svelte';
   import SubTabs from '$lib/components/SubTabs.svelte';
   import Icon from '$lib/Icon.svelte';
-  import { openMenu } from '$lib/menu.svelte.js';
-  import { askPassword } from '$lib/ui.js';
+  import { openMenu } from '$lib/menu.svelte.ts';
+  import { askPassword } from '$lib/ui.ts';
+  import { t } from '$texts';
+  import type { ExtractJob } from './types.ts';
+
+  const T = t.extract;
 
   /** `job`: estado del servicio extract; `onState(job)` recibe el nuevo tras un cambio. */
-  let { job, onState } = $props();
+  let { job, onState }: { job: ExtractJob; onState: (job: ExtractJob) => void } = $props();
 
   let mode = $state(0);
   let referencePages = $state('');
@@ -24,7 +28,7 @@
   let hints = $state('');
   let range = $state('');
 
-  export function params() {
+  export function params(): Record<string, unknown> {
     if (mode === 1) return { mode: 'range', range };
     return {
       mode: 'smart',
@@ -39,22 +43,22 @@
   }
 
   async function pickReference() {
-    const res = await call('extract.pick_reference');
+    const res = await call<{ state: ExtractJob; locked: boolean }>('extract.pick_reference');
     onState(res.state);
     if (!res.locked) return;
-    await askPassword(res.state.reference.name, async (pwd) => {
+    await askPassword(res.state.reference!.name, async (pwd) => {
       try {
-        onState(await call('extract.unlock_reference', pwd));
+        onState(await call<ExtractJob>('extract.unlock_reference', pwd));
         return null;
       } catch (err) {
-        return err.message;
+        return (err as Error).message;
       }
     });
   }
 
-  async function presets(ev) {
+  async function presets(ev: MouseEvent & { currentTarget: HTMLButtonElement }) {
     const anchor = ev.currentTarget;
-    const list = await call('extract.presets');
+    const list = await call<{ label: string; keywords: string }[]>('extract.presets');
     openMenu(anchor, list.map((p) => ({
       label: p.label,
       onSelect: () => {
@@ -67,50 +71,47 @@
 
 {#snippet smart()}
   <div class="panel-stack">
-    <h3 class="section-title">Paso 1: Documento de Referencia (Opcional)</h3>
+    <h3 class="section-title">{T.reference.title}</h3>
     <div class="row">
-      <button class="btn grow" type="button" onclick={pickReference}><Icon name="folder-open" />Abrir PDF Referencia</button>
-      <button class="btn" type="button" onclick={async () => onState(await call('extract.clear_reference'))}>
-        <Icon name="x" />Quitar
+      <button class="btn grow" type="button" onclick={pickReference}><Icon name="folder-open" />{T.reference.open}</button>
+      <button class="btn" type="button" onclick={async () => onState(await call<ExtractJob>('extract.clear_reference'))}>
+        <Icon name="x" />{T.reference.remove}
       </button>
     </div>
     <div class="file-box file-box--stack">
-      <p class="muted ellipsis" title={job.reference?.path ?? ''}>Referencia: {job.reference ? job.reference.name : 'sin archivo'}</p>
-      <p class="muted">Tipo: {job.reference ? job.reference.kind : '-'}</p>
+      <p class="muted ellipsis" title={job.reference?.path ?? ''}>{T.reference.file(job.reference?.name ?? null)}</p>
+      <p class="muted">{T.reference.kind(job.reference?.kind ?? null)}</p>
     </div>
-    <input class="input" bind:value={referencePages} placeholder="Páginas de referencia (ej: 1,3-5) — Vacío = todas" />
+    <input class="input" bind:value={referencePages} placeholder={T.reference.pages} />
 
     <hr class="divider" />
     <div class="row">
-      <h3 class="section-title grow">Paso 2: Patrón de Búsqueda y Criterios</h3>
-      <button class="btn btn--ghost btn--sm" type="button" onclick={presets}><Icon name="zap" />Preajustes</button>
+      <h3 class="section-title grow">{T.criteria.title}</h3>
+      <button class="btn btn--ghost btn--sm" type="button" onclick={presets}><Icon name="zap" />{T.criteria.presets}</button>
     </div>
-    <textarea class="input textarea" bind:value={keywords}
-              placeholder="Palabras clave / títulos / nombres (una por línea o separadas por coma)..."></textarea>
+    <textarea class="input textarea" bind:value={keywords} placeholder={T.criteria.keywords}></textarea>
     <RadioGroup bind:value={matchMode} options={[
-      { value: 'all', label: 'Todas las palabras (AND)' },
-      { value: 'any', label: 'Cualquier palabra (OR)' },
+      { value: 'all', label: T.criteria.matchAll },
+      { value: 'any', label: T.criteria.matchAny },
     ]} />
     <div class="radio-group">
-      <Checkbox label="Ignorar tildes (á=a)" bind:checked={accents} />
-      <Checkbox label="Distinguir Mayús." bind:checked={caseSensitive} />
-      <Checkbox label="Palabras completas" bind:checked={wholeWord} />
+      <Checkbox label={T.criteria.ignoreAccents} bind:checked={accents} />
+      <Checkbox label={T.criteria.caseSensitive} bind:checked={caseSensitive} />
+      <Checkbox label={T.criteria.wholeWord} bind:checked={wholeWord} />
     </div>
-    <input class="input" bind:value={hints} placeholder="Páginas sugeridas en objetivos (ej: 1,2) — Vacío = todas" />
+    <input class="input" bind:value={hints} placeholder={T.criteria.hints} />
   </div>
 {/snippet}
 
 {#snippet byRange()}
   <div class="panel-stack">
-    <h3 class="section-title">Extracción Directa por Rango Numérico</h3>
-    <p class="muted">
-      Extrae rápida y directamente páginas específicas de los documentos objetivo seleccionados, sin análisis de texto:
-    </p>
-    <input class="input" bind:value={range} placeholder="Ejemplo: 1-3, 5, 8-10, 15" />
+    <h3 class="section-title">{T.range.title}</h3>
+    <p class="muted">{T.range.text}</p>
+    <input class="input" bind:value={range} placeholder={T.range.placeholder} />
   </div>
 {/snippet}
 
 <SubTabs bind:current={mode} tabs={[
-  { label: 'Búsqueda inteligente', icon: 'sparkles', panel: smart },
-  { label: 'Por rango numérico', icon: 'hash', panel: byRange },
+  { label: T.tabs.smart, icon: 'sparkles', panel: smart },
+  { label: T.tabs.range, icon: 'hash', panel: byRange },
 ]} />

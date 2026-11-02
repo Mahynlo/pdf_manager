@@ -1,6 +1,8 @@
 <!-- Grupo con título (QGroupBox). -->
-<script>
-  let { legend, hidden = false, children } = $props();
+<script lang="ts">
+  import type { Snippet } from 'svelte';
+
+  let { legend, hidden = false, children }: { legend: string; hidden?: boolean; children: Snippet } = $props();
 </script>
 
 <fieldset class="group" {hidden}>

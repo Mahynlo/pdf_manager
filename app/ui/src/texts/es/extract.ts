@@ -1,0 +1,66 @@
+// Textos de Extraer (tools/extract). Lo que escribe el registro de operación lo envía el backend.
+
+export default {
+  title: 'Extracción Inteligente de PDFs',
+  subtitle: 'Escaneo semántico por palabras clave, OCR multicapa y similitud contextual de documentos',
+  tabs: {
+    smart: 'Búsqueda inteligente',
+    range: 'Por rango numérico',
+  },
+  reference: {
+    title: 'Paso 1: Documento de Referencia (Opcional)',
+    open: 'Abrir PDF Referencia',
+    remove: 'Quitar',
+    file: (name: string | null) => `Referencia: ${name ?? 'sin archivo'}`,
+    kind: (kind: string | null) => `Tipo: ${kind ?? '-'}`,
+    pages: 'Páginas de referencia (ej: 1,3-5) — Vacío = todas',
+  },
+  criteria: {
+    title: 'Paso 2: Patrón de Búsqueda y Criterios',
+    presets: 'Preajustes',
+    keywords: 'Palabras clave / títulos / nombres (una por línea o separadas por coma)...',
+    matchAll: 'Todas las palabras (AND)',
+    matchAny: 'Cualquier palabra (OR)',
+    ignoreAccents: 'Ignorar tildes (á=a)',
+    caseSensitive: 'Distinguir Mayús.',
+    wholeWord: 'Palabras completas',
+    hints: 'Páginas sugeridas en objetivos (ej: 1,2) — Vacío = todas',
+  },
+  range: {
+    title: 'Extracción Directa por Rango Numérico',
+    text: 'Extrae rápida y directamente páginas específicas de los documentos objetivo seleccionados, sin análisis de texto:',
+    placeholder: 'Ejemplo: 1-3, 5, 8-10, 15',
+  },
+  targets: {
+    title: 'Paso 3: Documentos Objetivo y Destino',
+    count: (n: number) => `Archivos: ${n}`,
+    load: 'Cargar PDFs...',
+    addFolder: 'Añadir Carpeta...',
+    clear: 'Limpiar',
+    listTip: 'Documentos que serán escaneados',
+    destination: (name: string) => `Destino: ${name}`,
+    changeFolder: 'Cambiar Carpeta...',
+    openFolder: 'Abrir Carpeta',
+    single: 'Combinar en un solo PDF',
+    split: 'Archivos separados por PDF',
+  },
+  run: {
+    start: 'Iniciar Búsqueda y Extracción',
+    cancel: 'Cancelar',
+    cancelling: 'Cancelando...',
+    open: 'Ver PDF Generado',
+    idle: 'Sin búsqueda ejecutada',
+    starting: 'Iniciando análisis…',
+    finished: (count: number, files: number, name: string) =>
+      `Finalizado: ${count} coincidencia(s) en ${files} archivo(s). Salida: ${name}`,
+    startError: (message: string) => `✗ ${message}`,
+    error: (message: string) => `❌ Error: ${message}`,
+    closeTitle: 'Extracción en curso',
+    closeQuestion: 'Hay una extracción en curso. ¿Cancelarla y cerrar la pestaña?',
+  },
+  results: {
+    log: 'Registro de operación',
+    table: (n: number) => `Tabla de coincidencias (${n})`,
+    columns: ['Documento', 'Pág.', 'Puntuación', 'Términos Coincidentes', 'Modo'],
+  },
+};

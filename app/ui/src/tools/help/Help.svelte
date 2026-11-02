@@ -1,45 +1,54 @@
 <!-- Herramienta Ayuda: información general y manuales en Markdown (el backend los da ya en HTML seguro). -->
-<script>
-  import { call } from '$lib/api.js';
+<script lang="ts">
+  import { call } from '$lib/api.ts';
   import SectionCard from '$lib/components/SectionCard.svelte';
   import SubTabs from '$lib/components/SubTabs.svelte';
   import ToolHeader from '$lib/components/ToolHeader.svelte';
   import Icon from '$lib/Icon.svelte';
-  import { toast } from '$lib/ui.js';
-  import { FAQ, GETTING_STARTED, TOOLS_HELP } from './content.js';
+  import { toast } from '$lib/ui.ts';
+  import { t } from '$texts';
+  import type { Tool } from '../../shell/tools.ts';
 
-  let { tool } = $props();
+  /** Manual de `help.documents`. */
+  interface HelpDoc {
+    file: string;
+    title: string;
+  }
 
-  let docs = $state(null);
-  let active = $state(null);
-  let doc = $state({ title: 'Selecciona un documento', html: '' });
-  let body;
+  const T = t.help;
 
-  async function open(item) {
+  let { tool }: { tool: Tool } = $props();
+
+  let docs = $state<HelpDoc[] | null>(null);
+  let active = $state<string | null>(null);
+  let doc = $state({ title: T.manuals.noSelection, html: '' });
+  let body: HTMLElement;
+
+  async function open(item: HelpDoc) {
     active = item.file;
     try {
-      doc = await call('help.document', item.file);
+      doc = await call<{ title: string; html: string }>('help.document', item.file);
       body.scrollTop = 0;
     } catch (err) {
-      toast(err.message, 'danger');
+      toast((err as Error).message, 'danger');
     }
   }
 
-  call('help.documents').then((list) => {
+  call<HelpDoc[]>('help.documents').then((list) => {
     docs = list;
     if (list.length) open(list[0]);
   });
 
   // Los enlaces de los manuales se abren en el navegador, no dentro de la app.
-  function onclick(ev) {
-    const link = ev.target.closest('a[href]');
+  function onclick(ev: MouseEvent) {
+    const link = (ev.target as Element).closest<HTMLAnchorElement>('a[href]');
     if (!link) return;
     ev.preventDefault();
     call('app.open_url', link.href);
   }
 </script>
 
-{#snippet infoRows(rows)}
+{#snippet infoRows(rows: [string, string, string][])}
   {#each rows as [emoji, title, text] (title)}
     <div class="info-row">
       <span class="info-row__icon" aria-hidden="true">{emoji}</span>
@@ -50,11 +59,11 @@
 
 {#snippet info()}
   <div class="settings help-info">
-    <SectionCard title="Primeros pasos">{@render infoRows(GETTING_STARTED)}</SectionCard>
-    <SectionCard title="Herramientas disponibles">{@render infoRows(TOOLS_HELP)}</SectionCard>
-    <SectionCard title="Preguntas frecuentes">
-      {#each FAQ as [question, answer] (question)}
-        <div class="faq-row"><p class="label">Q: {question}</p><p class="muted">{answer}</p></div>
+    <SectionCard title={T.info.gettingStarted}>{@render infoRows(T.gettingStarted)}</SectionCard>
+    <SectionCard title={T.info.tools}>{@render infoRows(T.toolsHelp)}</SectionCard>
+    <SectionCard title={T.info.faq}>
+      {#each T.faq as [question, answer] (question)}
+        <div class="faq-row"><p class="label">{T.info.question(question)}</p><p class="muted">{answer}</p></div>
       {/each}
     </SectionCard>
   </div>
@@ -63,11 +72,11 @@
 {#snippet manuals()}
   <div class="help-docs">
     <aside class="card help-docs__list">
-      <h2 class="step-title">Documentos</h2>
+      <h2 class="step-title">{T.manuals.title}</h2>
       <hr class="divider" />
       <div class="doc-list">
         {#if docs && !docs.length}
-          <p class="muted">No hay documentos de ayuda.</p>
+          <p class="muted">{T.manuals.empty}</p>
         {/if}
         {#each docs ?? [] as item (item.file)}
           <button class="doc-list__item" class:is-active={active === item.file} type="button" onclick={() => open(item)}>
@@ -87,11 +96,10 @@
 {/snippet}
 
 <div class="tool-page tool-page--fill">
-  <ToolHeader emoji={tool.emoji} color={tool.color} title="Ayuda y Guía de Uso"
-              subtitle="Todo lo que necesitas saber para usar Extraer PDFs" />
+  <ToolHeader emoji={tool.emoji} color={tool.color} title={T.title} subtitle={T.subtitle} />
   <hr class="divider" />
   <SubTabs tabs={[
-    { label: 'Información general', icon: 'info', panel: info },
-    { label: 'Documentación y manuales', icon: 'book-open', panel: manuals },
+    { label: T.tabs.info, icon: 'info', panel: info },
+    { label: T.tabs.manuals, icon: 'book-open', panel: manuals },
   ]} />
 </div>

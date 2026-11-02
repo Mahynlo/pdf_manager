@@ -1,6 +1,6 @@
 <!-- Cabecera de herramienta: emoji en una píldora del color de la herramienta, título y subtítulo. -->
-<script>
-  let { emoji, color, title, subtitle } = $props();
+<script lang="ts">
+  let { emoji, color, title, subtitle }: { emoji: string; color: string; title: string; subtitle: string } = $props();
 </script>
 
 <header class="tool-header">

@@ -1240,7 +1240,7 @@ def test_css_tokens_match_qt_palettes():
 
 
 _ICON_USE = re.compile(r"""(?:data-icon=|\bic\(|setIcon\([\w.]+,\s*|\bicon:\s*)["']([a-z0-9-]+)["']""")
-_RPC_USE = re.compile(r"""\bcall\(\s*'([a-z_]+\.[a-z_]+)'""")
+_RPC_USE = re.compile(r"""\bcall(?:<[^>]*>)?\(\s*'([a-z_]+\.[a-z_]+)'""")  # también call<Tipo>('…')
 # Svelte: <Icon name="save" />, <Icon name={dark ? 'sun' : 'moon'} /> y fragmentos que
 # reciben el icono como primer argumento: {@render button('save', 'Guardar', …)}.
 _SVELTE_ICON = re.compile(r"""<Icon\b[^>]*?\bname=(?:"([a-z0-9-]+)"|\{([^}]*)\})""")
@@ -1250,7 +1250,7 @@ UI_SRC_DIR = UI_DIR / "src"
 
 def _frontend_sources() -> str:
     """Código de la interfaz (app/ui/src)."""
-    files = [*UI_SRC_DIR.rglob("*.js"), *UI_SRC_DIR.rglob("*.svelte")]
+    files = [*UI_SRC_DIR.rglob("*.js"), *UI_SRC_DIR.rglob("*.ts"), *UI_SRC_DIR.rglob("*.svelte")]
     return "\n".join(f.read_text(encoding="utf-8") for f in files)
 
 

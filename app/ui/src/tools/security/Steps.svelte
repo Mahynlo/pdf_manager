@@ -1,6 +1,13 @@
 <!-- Dos columnas «Paso 1 | Paso 2» separadas por una línea vertical (las dos pestañas de Seguridad). -->
-<script>
-  let { leftTitle, rightTitle, left, right } = $props();
+<script lang="ts">
+  import type { Snippet } from 'svelte';
+
+  let { leftTitle, rightTitle, left, right }: {
+    leftTitle: string;
+    rightTitle: string;
+    left: Snippet;
+    right: Snippet;
+  } = $props();
 </script>
 
 <div class="steps">

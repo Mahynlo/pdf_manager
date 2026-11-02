@@ -3,7 +3,8 @@
 #  Uso (desde la raíz del proyecto):  .\installer\web\build.ps1 [-SkipInstaller] [-Version x.y.z-web]
 #  La versión es APP_VERSION de app\__init__.py (pyproject.toml lleva la de Flet).
 #
-#  1. pnpm compila la interfaz (app\ui → app\ui\dist). Hace falta Node.js y pnpm.
+#  1. pnpm comprueba los tipos (pnpm check) y compila la interfaz (app\ui → app\ui\dist).
+#     Hace falta Node.js y pnpm.
 #  2. PyInstaller (sin añadirlo al proyecto: uv run --with pyinstaller) genera
 #     dist\web\ExtraerPDFs\ con ExtraerPDFs.exe y sus recursos.
 #  3. Inno Setup compila installer\web\setup.iss → dist\ExtraerPDFs_Web_Setup_<versión>.exe
@@ -39,7 +40,7 @@ $Data = @(
 $DataArgs = $Data | ForEach-Object { "--add-data"; "$Root\$_" }
 
 Write-Host ""
-Write-Host "==> [1/3] Interfaz (pnpm build en app\ui) ..." -ForegroundColor Cyan
+Write-Host "==> [1/3] Interfaz (pnpm check y pnpm build en app\ui) ..." -ForegroundColor Cyan
 if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
     Write-Host "ERROR: falta pnpm (https://pnpm.io/installation); hace falta para compilar la interfaz." -ForegroundColor Red
     exit 1
@@ -47,6 +48,7 @@ if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
 Push-Location (Join-Path $Root "app\ui")
 try {
     pnpm install --frozen-lockfile
+    if ($LASTEXITCODE -eq 0) { pnpm check }  # tipos (TypeScript): con errores no se compila
     if ($LASTEXITCODE -eq 0) { pnpm build }
 } finally {
     Pop-Location

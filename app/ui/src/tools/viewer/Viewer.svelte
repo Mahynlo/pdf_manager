@@ -3,71 +3,86 @@
   de herramientas, las miniaturas, el lienzo (con la selección de texto y las
   anotaciones) y el panel lateral (índice, OCR, censura, IA y búsqueda).
 
-  El lienzo y sus capas son código imperativo (canvas.js, text.js, annotations.js,
-  editing.js) sobre EmbedPDF. Este componente los crea, los coloca en la página y conecta
-  sus avisos con el resto de la interfaz.
+  El lienzo y sus capas son código imperativo (canvas/canvas.ts, canvas/selection.ts,
+  annotations/annotations.ts, annotations/editing.ts) sobre EmbedPDF. Este componente los
+  crea, los coloca en la página y conecta sus avisos con el resto de la interfaz. Qué hay en
+  cada carpeta: README.md.
 
   La abre el shell con la información de `viewer.open`. `close()` cierra la pestaña
   (acción «Cerrar documento») y `update(info)` avisa de que cambió el documento
   (cambios sin guardar, ruta tras «Guardar como»).
 -->
-<script>
+<script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte';
-  import { call } from '$lib/api.js';
+  import { call } from '$lib/api.ts';
   import Icon from '$lib/Icon.svelte';
-  import { openModal, toast } from '$lib/ui.js';
-  import AiPanel from './AiPanel.svelte';
-  import { Annotations } from './annotations.js';
-  import { PageCanvas, TOOLS } from './canvas.js';
-  import { AnnotationEditor } from './editing.js';
-  import { MODES } from './layout.js';
-  import OcrPanel from './OcrPanel.svelte';
-  import { DocumentActions } from './operations.js';
-  import PrintDialog from './PrintDialog.svelte';
-  import PropertiesDialog from './PropertiesDialog.svelte';
-  import RedactPanel from './RedactPanel.svelte';
-  import { RedactionMarks } from './redaction.js';
-  import SearchPanel from './SearchPanel.svelte';
-  import Sidebar from './Sidebar.svelte';
-  import { openLegendsManager, openStampsMenu } from './stamps.js';
-  import { TextSelection } from './text.js';
-  import TocTree from './TocTree.svelte';
-  import Toolbar from './Toolbar.svelte';
-  import ToolsBar from './ToolsBar.svelte';
+  import type { MenuItem } from '$lib/menu.svelte.ts';
+  import type { DocumentInfo } from '$lib/types.ts';
+  import { openModal, toast } from '$lib/ui.ts';
+  import { t, tip } from '$texts';
+  import type { Annot } from './annotations/annotations.ts';
+  import AiPanel from './panels/AiPanel.svelte';
+  import { Annotations } from './annotations/annotations.ts';
+  import { PageCanvas, TOOLS } from './canvas/canvas.ts';
+  import { AnnotationEditor } from './annotations/editing.ts';
+  import { MODES, type Mode } from './canvas/layout.ts';
+  import OcrPanel from './ocr/OcrPanel.svelte';
+  import { DocumentActions } from './document/operations.ts';
+  import PrintDialog from './document/PrintDialog.svelte';
+  import PropertiesDialog from './document/PropertiesDialog.svelte';
+  import RedactPanel from './redact/RedactPanel.svelte';
+  import { RedactionMarks } from './redact/redaction.ts';
+  import SearchPanel from './panels/SearchPanel.svelte';
+  import Thumbnails from './panels/Thumbnails.svelte';
+  import { openLegendsManager, openStampsMenu, type Stamp } from './annotations/stamps.ts';
+  import { TextSelection } from './canvas/selection.ts';
+  import TocTree from './panels/TocTree.svelte';
+  import Toolbar from './toolbars/Toolbar.svelte';
+  import ToolsBar from './toolbars/ToolsBar.svelte';
 
+  const T = t.viewer;
   const INPUTS = 'input, textarea, select, [contenteditable]';
-  const EDIT_TOOLS = new Set([TOOLS.POINTER, TOOLS.SELECT, TOOLS.HAND]); // en las demás se dibuja
+  const EDIT_TOOLS = new Set<string>([TOOLS.POINTER, TOOLS.SELECT, TOOLS.HAND]); // en las demás se dibuja
   const THUMBS_DELAY = 300; // ms tras un cambio de anotaciones antes de rehacer su miniatura
   // Pestañas del panel lateral, en el orden de Qt.
-  const DOCK_TABS = [
-    { key: 'toc', label: 'Índice', icon: 'list-tree' },
-    { key: 'ocr', label: 'OCR', icon: 'scan-text' },
-    { key: 'redact', label: 'Censura', icon: 'eraser' },
-    { key: 'ai', label: 'IA', icon: 'sparkles' },
-    { key: 'search', label: 'Buscar', icon: 'search' },
+  type DockTab = keyof typeof T.dock;
+  const DOCK_TABS: { key: DockTab; icon: string }[] = [
+    { key: 'toc', icon: 'list-tree' },
+    { key: 'ocr', icon: 'scan-text' },
+    { key: 'redact', icon: 'eraser' },
+    { key: 'ai', icon: 'sparkles' },
+    { key: 'search', icon: 'search' },
   ];
 
-  let { info, close, update } = $props();
+  /**
+   * `info`: el documento abierto (`viewer.open`); `close()`: cerrar la pestaña; `update(info)`:
+   * cambió el documento (cambios sin guardar, ruta tras «Guardar como»).
+   */
+  let { info, close, update }: {
+    info: DocumentInfo;
+    close: () => void;
+    update: (info: DocumentInfo) => void;
+  } = $props();
   const doc = untrack(() => info); // el documento se abre una vez; los cambios llegan por `actions`
   const docId = doc.id;
 
   // ── Estado que pinta la interfaz ───────────────────────────────────────
   let view = $state({
-    page: 0, count: doc.pages.length, zoom: 1, mode: MODES.CONTINUOUS,
+    page: 0, count: doc.pages.length, zoom: 1, mode: MODES.CONTINUOUS as Mode,
     canUndo: false, canRedo: false, night: false, sidebar: true, dock: false,
   });
-  let tool = $state(TOOLS.SELECT);
-  let dockTab = $state('toc');
+  let tool = $state<string>(TOOLS.SELECT);
+  let dockTab = $state<DockTab>('toc');
   let toc = $state.raw(doc.toc);
   let revision = $state(0); // cambia con cada operación sobre las páginas
-  let versions = $state.raw({}); // página -> cambios de sus anotaciones (rehacer su miniatura)
+  let versions = $state.raw<Record<number, number>>({}); // página -> cambios de sus anotaciones (rehacer su miniatura)
 
-  let stage;
-  let toolbar = $state();
-  let search = $state();
-  let ocr = $state();
-  let redact = $state();
-  let ai = $state();
+  let stage: HTMLDivElement;
+  let toolbar = $state<Toolbar>();
+  let search = $state<SearchPanel>();
+  let ocr = $state<OcrPanel>();
+  let redact = $state<RedactPanel>();
+  let ai = $state<AiPanel>();
 
   // ── Lienzo y sus capas ─────────────────────────────────────────────────
   // Las páginas y miniaturas las dibuja EmbedPDF con la versión del documento que tiene Python.
@@ -83,7 +98,7 @@
     onDocument: () => annotations.documentShown(),
   });
   const total = () => canvas.pageCount;
-  const goTo = (index) => canvas.scrollToPage(Math.max(0, Math.min(total() - 1, index)));
+  const goTo = (index: number) => canvas.scrollToPage(Math.max(0, Math.min(total() - 1, index)));
 
   const selection = new TextSelection(canvas, {
     searchDocument: (text) => openSearch(text),
@@ -98,7 +113,7 @@
     },
     explain(text) {
       openDockTab('ai');
-      ai.explain(text);
+      ai!.explain(text);
     },
   });
 
@@ -112,8 +127,8 @@
       revision++;
       versions = {};
       toc = next.toc;
-      search.refresh();
-      ocr.refresh();
+      search!.refresh();
+      ocr!.refresh();
       goTo(page);
       update(next);
       showHistory();
@@ -138,12 +153,12 @@
   }
 
   // Miniaturas de las páginas cuyas anotaciones cambiaron (juntas, tras una pausa).
-  let touched = new Set();
+  let touched = new Set<number>();
   let thumbsTimer = 0;
-  function refreshThumbs(pages) {
+  function refreshThumbs(pages: number[]) {
     for (const page of pages) touched.add(page);
     clearTimeout(thumbsTimer);
-    thumbsTimer = setTimeout(() => {
+    thumbsTimer = window.setTimeout(() => {
       const next = { ...versions };
       for (const page of touched) next[page] = (next[page] ?? 0) + 1;
       touched = new Set();
@@ -166,14 +181,14 @@
   const marks = new RedactionMarks(annotations);
 
   /** Va a una marca de censura y la selecciona (para moverla o borrarla). */
-  function showMark(mark) {
+  function showMark(mark: Annot) {
     canvas.scrollToRect(mark.pageIndex, canvas.toView(mark.pageIndex, mark.rect));
     if (!EDIT_TOOLS.has(tool)) setTool(TOOLS.POINTER);
     annotations.select([mark]);
   }
 
   // ── Acciones ───────────────────────────────────────────────────────────
-  function setTool(next) {
+  function setTool(next: string) {
     if (next !== TOOLS.SELECT) selection.clear();
     if (!EDIT_TOOLS.has(next)) editor.clear();
     canvas.setTool(next);
@@ -181,14 +196,14 @@
   }
 
   /** Color de la paleta: lo usan las siguientes anotaciones y, como en Qt, también recolorea las seleccionadas. */
-  function setColor(color) {
+  function setColor(color: string) {
     Object.assign(annotations.style, { penColor: color, shapeColor: color, highlightColor: color });
     if (editor.items.length) editor.setColor(color);
     canvas.setTool(canvas.tool); // la herramienta activa toma el color nuevo
   }
 
   /** Inserta un sello o leyenda en el centro de la vista y lo deja seleccionado. */
-  function insertStamp(stamp) {
+  function insertStamp(stamp: Stamp) {
     const at = canvas.viewCenter() ?? { index: canvas.current, x: 100, y: 100 };
     const created = annotations.stamp(stamp, at);
     if (!created.length) return;
@@ -200,7 +215,7 @@
   async function print() {
     await annotations.commit();
     openModal(PrintDialog, {
-      docId, current: canvas.current, sizes: canvas.sizes, render: (pages, dpi, gray) => canvas.pageImages(pages, dpi, gray),
+      docId, current: canvas.current, sizes: canvas.sizes, render: (pages: number[], dpi: number, gray = false) => canvas.pageImages(pages, dpi, gray),
     });
   }
 
@@ -208,21 +223,21 @@
     try {
       openModal(PropertiesDialog, await call('viewer.properties', docId));
     } catch (err) {
-      toast(err.message, 'danger');
+      toast((err as Error).message, 'danger');
     }
   }
 
-  function openDockTab(key) {
+  function openDockTab(key: DockTab) {
     view.dock = true;
     dockTab = key;
   }
 
   /** Ctrl+F, botón de la barra o «Buscar en el documento» de la selección. */
-  async function openSearch(text = null) {
+  async function openSearch(text: string | null = null) {
     openDockTab('search');
-    if (text) search.setQuery(text);
+    if (text) search!.setQuery(text);
     await tick(); // el panel debe estar ya a la vista para recibir el foco
-    search.focus();
+    search!.focus();
   }
 
   // En doble página se avanza de par en par (1-2 → 3-4).
@@ -238,16 +253,16 @@
   };
 
   const toolbarActions = {
-    moreMenu: () => {
+    moreMenu: (): MenuItem[] => {
       const [save, saveAs, ...rest] = actions.menuItems();
       return [
         save, saveAs,
-        { label: 'Imprimir documento (Ctrl+P)', icon: 'printer', onSelect: print },
-        { label: 'Propiedades del documento', icon: 'info', onSelect: showProperties },
+        { label: tip(T.more.print), icon: 'printer', onSelect: print },
+        { label: T.more.properties, icon: 'info', onSelect: showProperties },
         ...rest,
         'separator',
-        { label: 'Gestionar Leyendas y Sellos...', icon: 'tag', onSelect: () => openLegendsManager(insertStamp) },
-        { label: 'Cerrar documento', icon: 'x', onSelect: close },
+        { label: T.more.legends, icon: 'tag', onSelect: () => openLegendsManager(insertStamp) },
+        { label: T.more.close, icon: 'x', onSelect: close },
       ];
     },
     first: () => goTo(0),
@@ -257,10 +272,10 @@
     goTo,
     zoomIn: () => canvas.zoomIn(),
     zoomOut: () => canvas.zoomOut(),
-    setZoom: (z) => canvas.setZoom(z),
+    setZoom: (z: number) => canvas.setZoom(z),
     fitWidth: () => canvas.fitWidth(),
     fitPage: () => canvas.fitPage(),
-    setMode: (m) => canvas.setMode(m),
+    setMode: (m: string) => canvas.setMode(m as Mode),
     toggleNight: () => {
       view.night = !view.night;
       canvas.setNight(view.night);
@@ -274,26 +289,27 @@
   };
 
   // ── Atajos (ver Configuración → Atajos de teclado) ─────────────────────
-  const ctrlKeys = {
+  type Keys = Record<string, () => unknown>;
+  const ctrlKeys: Keys = {
     '=': () => canvas.zoomIn(),
     '+': () => canvas.zoomIn(),
     '-': () => canvas.zoomOut(),
     0: () => canvas.setZoom(1),
     h: () => canvas.fitPage(),
     w: () => canvas.fitWidth(),
-    g: () => toolbar.focusPage(),
+    g: () => toolbar!.focusPage(),
     s: () => actions.save(),
     p: () => print(),
     f: () => openSearch(),
     home: () => goTo(0),
     end: () => goTo(total() - 1),
   };
-  const ctrlShiftKeys = {
+  const ctrlShiftKeys: Keys = {
     s: () => actions.saveAs(),
     '+': () => canvas.zoomIn(), // teclados en los que «+» va con Mayúsculas
   };
   // Ctrl+C, Ctrl+A y deshacer/rehacer son del lienzo solo fuera de los campos de texto.
-  const ctrlCanvasKeys = {
+  const ctrlCanvasKeys: Keys = {
     c: () => selection.copy(),
     a: () => {
       selection.selectPage();
@@ -308,7 +324,7 @@
       return true;
     },
   };
-  const plainKeys = {
+  const plainKeys: Keys = {
     escape: () => selection.clear(),
     t: () => setTool(TOOLS.TEXT),
     home: () => goTo(0),
@@ -322,9 +338,9 @@
   };
 
   /** Atajos del visor; solo llegan aquí cuando esta pestaña es la activa. */
-  export function onKey(ev) {
+  export function onKey(ev: KeyboardEvent): boolean {
     const key = ev.key.toLowerCase();
-    const inField = Boolean(ev.target.closest?.(INPUTS));
+    const inField = Boolean((ev.target as Element | null)?.closest?.(INPUTS));
     // Esc termina de marcar para censurar (aunque la marca recién puesta esté seleccionada).
     if (key === 'escape' && !inField && tool === TOOLS.REDACT) {
       setTool(TOOLS.SELECT);
@@ -334,7 +350,7 @@
     if (!inField && editor.onKey(ev)) return true;
     if (key === 'escape' && editor.stopTyping()) return true;
     if (key === 'f3' && !ev.ctrlKey && !ev.altKey) {
-      if (!search.step(ev.shiftKey ? -1 : 1)) openSearch();
+      if (!search!.step(ev.shiftKey ? -1 : 1)) openSearch();
       return true;
     }
     if (ev.ctrlKey && !ev.altKey && ev.shiftKey && key === 'z') return !inField && Boolean(ctrlCanvasKeys.y());
@@ -378,15 +394,15 @@
   <Toolbar bind:this={toolbar} {view} actions={toolbarActions} />
   <ToolsBar {tool} {setTool} {setColor} stamps={(button) => openStampsMenu(button, insertStamp)} />
   <div class="viewer__body">
-    <Sidebar {docId} count={view.count} current={view.page} {revision} {versions} visible={view.sidebar}
-             fetchThumbs={(pages) => canvas.thumbnails(pages)} release={(url) => URL.revokeObjectURL(url)} onSelect={goTo} onMove={(src, dst) => actions.move(dst, src)} />
+    <Thumbnails {docId} count={view.count} current={view.page} {revision} {versions} visible={view.sidebar}
+                fetchThumbs={(pages) => canvas.thumbnails(pages)} release={(url) => URL.revokeObjectURL(url)} onSelect={goTo} onMove={(src, dst) => actions.move(dst, src)} />
     <div class="viewer__stage" bind:this={stage}></div>
     <aside class="viewer-dock" hidden={!view.dock}>
       <div class="viewer-dock__bar" role="tablist">
-        {#each DOCK_TABS as { key, label, icon } (key)}
+        {#each DOCK_TABS as { key, icon } (key)}
           <button class="viewer-dock__tab" class:is-active={dockTab === key} type="button" role="tab"
                   aria-selected={dockTab === key} onclick={() => (dockTab = key)}>
-            <Icon name={icon} size={15} />{label}
+            <Icon name={icon} size={15} />{T.dock[key]}
           </button>
         {/each}
       </div>
@@ -402,7 +418,7 @@
                       // Python recibe las anotaciones (se reabre su versión).
                       await actions.run(() => annotations.sync());
                       canvas.reload();
-                      search.refresh();
+                      search!.refresh();
                     }} />
         </div>
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'redact'}>
@@ -413,14 +429,14 @@
           <AiPanel bind:this={ai} {docId} active={view.dock && dockTab === 'ai'} close={() => (view.dock = false)}
                    redact={async (items) => {
                      openDockTab('redact');
-                     for (const item of items) await redact.addTerm(item.texto);
+                     for (const item of items) await redact!.addTerm(item.texto);
                    }} />
         </div>
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'search'}>
           <SearchPanel bind:this={search} {canvas} close={() => (view.dock = false)}
                        redact={(query) => {
                          openDockTab('redact');
-                         redact.addTerm(query);
+                         redact!.addTerm(query);
                        }} />
         </div>
       </div>

@@ -3,7 +3,7 @@
 El frontend solo puede invocar métodos marcados con :func:`exposed` de un servicio
 registrado; cualquier otro nombre se rechaza. Toda respuesta tiene la forma
 ``{"ok": True, "value": ...}`` o ``{"ok": False, "error": {"code", "message"}}``,
-que ``app/ui/src/lib/api.js`` convierte en una promesa resuelta o rechazada.
+que ``app/ui/src/lib/api.ts`` convierte en una promesa resuelta o rechazada.
 """
 
 from __future__ import annotations

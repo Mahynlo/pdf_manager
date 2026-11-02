@@ -62,7 +62,9 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
 ### Pendiente
 
 - **Pruebas de la 0.1.29-web**: uso real del instalador antes de darla por estable.
-- **Asistente IA con agente**: instalar sus dependencias (comentadas en `pyproject.toml`); sin ellas
-  responde en modo básico.
+- **Asistente IA con agente**: en fase de pruebas, no está probado del todo. Sus dependencias están
+  comentadas en `pyproject.toml`; sin ellas responde en modo básico.
+- **En pruebas con uso real**: censura con marcas, deshacer las operaciones de página, anotaciones,
+  impresión e instalador (lista completa en el [README](../../README.md#-qué-está-en-fase-de-pruebas)).
 
 El detalle de cada función, con las diferencias respecto a Qt, está en [paridad.md](paridad.md).

@@ -1,0 +1,23 @@
+{
+  // TypeScript de la interfaz (ver docs/web/svelte.md). Vite compila los .ts y lang="ts" sin más
+  // configuración; `pnpm check` (svelte-check) comprueba los tipos.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "paths": {
+      "$lib/*": ["./src/lib/*"],
+      "$texts": ["./src/texts/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.svelte", "vite.config.ts"]
+}

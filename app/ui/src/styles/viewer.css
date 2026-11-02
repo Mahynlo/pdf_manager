@@ -222,7 +222,7 @@
 
 /* ── Barra de propiedades de la anotación seleccionada ───────────────────── */
 /* Texto libre en edición (EmbedPDF): se ve todo lo escrito, cada línea entera, aunque aún no
-   quepa en la caja; al terminar, la caja se ajusta al texto (annotations.js, _fitText). */
+   quepa en la caja; al terminar, la caja se ajusta al texto (annotations.ts, _fitText). */
 #annotation-layer span[contenteditable="true"] {
   height: auto !important;
   min-height: 100%;

@@ -3,10 +3,10 @@
   Usa stroke="currentColor": toma el color del texto y sigue el tema.
     <Icon name="save" />  <Icon name="plus" size={18} />
 -->
-<script>
-  import { paths } from './icons.js';
+<script lang="ts">
+  import { paths } from './icons.ts';
 
-  let { name, size = 16 } = $props();
+  let { name, size = 16 }: { name: string; size?: number } = $props();
 
   $effect(() => {
     if (!(name in paths)) console.warn(`Icono desconocido: ${name}`);

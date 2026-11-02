@@ -1,6 +1,11 @@
 <!-- Casilla con texto. -->
-<script>
-  let { label, checked = $bindable(false), title, onchange } = $props();
+<script lang="ts">
+  let { label, checked = $bindable(false), title, onchange }: {
+    label: string;
+    checked?: boolean;
+    title?: string;
+    onchange?: (ev: Event & { currentTarget: HTMLInputElement }) => void;
+  } = $props();
 </script>
 
 <label class="check" {title}>

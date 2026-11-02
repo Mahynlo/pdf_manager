@@ -36,25 +36,21 @@ app/
                           ai (asistente IA),
                           legends (sellos y leyendas)
   ui/                     la interfaz, en Svelte (compila a ui/dist con pnpm build): ver svelte.md
-    src/main.js           arranque: estilos, tema guardado y App
+    src/main.ts           arranque: estilos, tema guardado y App
     src/styles/           tokens.css (colores del tema, mismos valores que src_qt/core/theme.py),
                           base.css, components.css y uno por área
     src/assets/icons.json trazos de los iconos (también los usa la versión Qt)
     src/App.svelte        ventana: cabecera con pestañas, vistas, barra de estado, avisos y menú
-    src/lib/              api.js (puente con Python), ui.js (avisos, barra de estado y diálogos),
-                          menu.svelte.js (menús emergentes), theme.svelte.js, thumbs.js
+    src/lib/              api.ts (puente con Python), ui.ts (avisos, barra de estado y diálogos),
+                          menu.svelte.ts (menús emergentes), theme.svelte.ts, thumbs.ts
                           (miniaturas bajo demanda), Icon.svelte, components/ (diálogos y controles)
-    src/shell/            shell.svelte.js (pestañas), tools.js (registro de herramientas), Inicio
-                          y dropzone.js (arrastrar PDFs a la ventana)
+    src/shell/            shell.svelte.ts (pestañas), tools.ts (registro de herramientas), Inicio
+                          y dropzone.ts (arrastrar PDFs a la ventana)
     src/tools/<herramienta>/   un componente por herramienta y sus piezas
-    src/tools/viewer/     visor: Viewer.svelte (compone), barras, miniaturas, índice y pestañas del
-                          panel lateral (OCR, censura, IA, búsqueda) y sus diálogos; el lienzo es
-                          código imperativo: canvas.js (lienzo sobre EmbedPDF, ver embedpdf.md),
-                          embed.js y EmbedRoot.svelte (registro de EmbedPDF), PdfPages.svelte y
-                          PdfPage.svelte (páginas),
-                          layout.js (modos de vista),
-                          text.js (selección de texto con EmbedPDF), annotations.js (anotaciones con EmbedPDF),
-                          editing.js (barra de propiedades), operations.js (menú ⋮)
+    src/tools/viewer/     visor: Viewer.svelte (compone) y una carpeta por parte (ver su README.md):
+                          canvas/ (lienzo, páginas y selección con EmbedPDF), annotations/,
+                          redact/ (censura), ocr/, document/ (guardar, páginas, imprimir),
+                          toolbars/ y panels/ (miniaturas, índice, búsqueda, IA)
 ```
 
 La lógica de PDF está en `src/pdf_core/` (motores de combinar, extraer, seguridad, OCR, capa de texto,
@@ -75,7 +71,7 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
 
 - **Nada de HTML con datos**: Svelte inserta los textos como texto. `{@html}` solo para el HTML que
   el backend ya genera seguro (manuales y respuestas de la IA). El código imperativo del lienzo crea
-  sus elementos con `h()` (`lib/dom.js`).
+  sus elementos con `h()` (`lib/dom.ts`).
 - **Colores solo desde `tokens.css`** (`var(--accent)`…). El tema cambia con `data-theme` en `<html>`.
   Si cambia una paleta de Qt, hay que regenerar `tokens.css` (un test compara ambos).
 - **Iconos**: `<Icon name="nombre" />` (o `ic('nombre')` en el código del lienzo). Usan
@@ -93,7 +89,7 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
   liberó. Si el trabajo necesita algo del usuario (una contraseña), emite un evento y espera la
   respuesta con un `threading.Event`. Una herramienta con trabajo en curso implementa `canClose()`.
 - **Imágenes bajo demanda**: miniaturas solo para lo visible (`IntersectionObserver`), por lotes,
-  en JPEG y con caché acotada (`lib/thumbs.js`). Las páginas del visor las dibuja
+  en JPEG y con caché acotada (`lib/thumbs.ts`). Las páginas del visor las dibuja
   EmbedPDF en el navegador, solo las que están a la vista y en mosaico a la resolución del zoom, a
   partir de los bytes del documento abierto en Python (`viewer.document_url`, ver [embedpdf.md](embedpdf.md)).
 - **Datos grandes hacia el frontend**: el puente de pywebview pasa los valores como texto JSON. Para
@@ -136,7 +132,7 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
   entran en su capa de texto: selección, búsqueda y exportar texto las ven sin cambios. Los lotes los
   recorre el frontend página a página (`ocr.page`), así se puede cancelar entre una y otra.
 - **Censura**: lo que se censura son las marcas de EmbedPDF (anotaciones `Redact`, ver
-  `redaction.js`), que se revisan en la página. El servicio `redact` busca dónde aparece cada término
+  `redaction.ts`), que se revisan en la página. El servicio `redact` busca dónde aparece cada término
   (`find`) y guarda las opciones, el color y el perfil activo en el propio documento abierto
   (`_OpenDocument.extras`). Al aplicar, las marcas llegan con las anotaciones y
   `ViewerService.apply_redaction_marks` las aplica: borra el contenido de debajo (también las
@@ -154,9 +150,9 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
   HTML de Markdown sin HTML crudo, imágenes ni enlaces, que el frontend inserta tal cual.
 - **Arrastrar PDFs y «Abrir con»**: el navegador no da la ruta de un archivo soltado; `WebviewHost`
   escucha el `drop` desde Python (pywebview añade `pywebviewFullPath`) y abre los PDF con
-  `DocumentService.open`. `shell/dropzone.js` solo evita que WebView2 navegue al archivo y muestra el aviso.
+  `DocumentService.open`. `shell/dropzone.ts` solo evita que WebView2 navegue al archivo y muestra el aviso.
   Los PDF recibidos al arrancar (o de otra instancia) se abren cuando el frontend llama a `app.ready`.
-- **Tareas largas con progreso**: `progressDialog()` de `lib/ui.js` (barra y «Cancelar»).
+- **Tareas largas con progreso**: `progressDialog()` de `lib/ui.ts` (barra y «Cancelar»).
 - **Cerrar con cambios sin guardar**: el componente de la pestaña lo pregunta en `canClose()`. Al cerrar la ventana,
   `WebviewHost` cancela el cierre si hay documentos modificados y emite `app:quit-requested`; el
   shell pregunta y, si se acepta, llama a `app.quit`.
@@ -168,7 +164,7 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
    registrarlo en `services/__init__.py`.
 2. Frontend: `app/ui/src/tools/<nombre>/<Nombre>.svelte`, que recibe la entrada del registro como
    prop `tool` y libera lo que use con `onDestroy`. Los estilos nuevos, en su bloque `<style>`.
-3. Añadir su entrada (con `load: () => import(...)`) en `app/ui/src/shell/tools.js`.
+3. Añadir su entrada (con `load: () => import(...)`) en `app/ui/src/shell/tools.ts`.
 4. Pruebas del servicio en `tests/test_app_backend.py` con `FakeHost`. Los tests también verifican
    que cada `call('servicio.metodo')` y cada icono usados en el frontend existen.
 

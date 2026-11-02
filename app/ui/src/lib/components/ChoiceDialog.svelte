@@ -1,16 +1,22 @@
 <!-- Pregunta con botones propios (askChoice); el último recibe el foco. -->
-<script>
+<script lang="ts">
   import Icon from '../Icon.svelte';
+  import type { Choice } from '../dialogs.svelte.ts';
   import Dialog from './Dialog.svelte';
 
-  let { title, message, buttons, done } = $props();
-  let dialog;
-  let actions;
-  let choice = null;
+  let { title, message, buttons, done }: {
+    title: string;
+    message: string;
+    buttons: Choice[];
+    done: (value: unknown) => void;
+  } = $props();
+  let dialog: Dialog;
+  let actions: HTMLDivElement;
+  let choice: unknown = null;
 
-  $effect(() => actions.lastElementChild?.focus());
+  $effect(() => (actions.lastElementChild as HTMLElement | null)?.focus());
 
-  function pick(value) {
+  function pick(value: unknown) {
     choice = value;
     dialog.close();
   }

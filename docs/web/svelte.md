@@ -10,28 +10,34 @@ sigue en el historial de git).
 
 ```
 app/ui/
-  package.json          versiones fijas: svelte, vite, @sveltejs/vite-plugin-svelte
-  vite.config.js        compila a dist/; alias $lib → src/lib
+  package.json          versiones fijas: svelte, vite, @sveltejs/vite-plugin-svelte, typescript,
+                        svelte-check; `pnpm check` comprueba los tipos
+  tsconfig.json         TypeScript (ver «TypeScript»); alias $lib y $texts
+  vite.config.ts        compila a dist/; alias $lib → src/lib, $texts → src/texts (Svelte usa
+                        su configuración predeterminada: no hay svelte.config.js)
   index.html            página base (Vite inserta los módulos)
   src/
-    main.js             arranque: estilos, tema guardado, monta App y avisa a Python (app.ready)
+    main.ts             arranque: estilos, tema guardado, monta App y avisa a Python (app.ready)
     styles/             estilos globales: tokens.css (colores del tema), base, componentes y uno
                         por área (shell, merge, security, extract, settings, help, viewer)
     assets/icons.json   trazos de los iconos (también los usa la versión Qt)
     App.svelte          ventana: cabecera con pestañas, vistas, barra de estado, avisos y menú
+    texts/              textos de la interfaz: es/ (catálogo: un archivo por herramienta, shell.ts
+                        para la ventana y common.ts para los diálogos de lib/) e index.ts (t, tip())
     lib/                piezas comunes
-      api.js            puente con Python: call('servicio.metodo', ...), on('evento', fn)
-      ui.js             toast(), setStatus() y diálogos: askChoice, confirmDialog, askText,
+      api.ts            puente con Python: call('servicio.metodo', ...), on('evento', fn)
+      types.ts          tipos de las respuestas de Python que usan varias partes (DocumentInfo…)
+      ui.ts             toast(), setStatus() y diálogos: askChoice, confirmDialog, askText,
                         askPassword, progressDialog, openModal
-      menu.svelte.js    openMenu(botón, opciones) / openMenuAt(x, y, opciones)
-      theme.svelte.js   tema claro/oscuro compartido (theme.dark, theme.toggle())
-      thumbs.js         miniaturas bajo demanda (ThumbLoader y la acción use:thumb)
+      menu.svelte.ts    openMenu(botón, opciones) / openMenuAt(x, y, opciones)
+      theme.svelte.ts   tema claro/oscuro compartido (theme.dark, theme.toggle())
+      thumbs.ts         miniaturas bajo demanda (ThumbLoader y la acción use:thumb)
       Icon.svelte       iconos del juego común (assets/icons.json)
-      dom.js, icons.js  h() e ic(): solo para el código imperativo del lienzo
-      components/       Dialog y los diálogos de ui.js; controles: PasswordField, Checkbox,
+      dom.ts, icons.ts  h() e ic(): solo para el código imperativo del lienzo
+      components/       Dialog y los diálogos de ui.ts; controles: PasswordField, Checkbox,
                         RadioGroup, Fieldset, Banner, SubTabs, SectionCard, ToolHeader, Menu
-    shell/              shell.svelte.js (estado de las pestañas), tools.js (registro de
-                        herramientas), Home y RecentFiles (Inicio), dropzone.js
+    shell/              shell.svelte.ts (estado de las pestañas), tools.ts (registro de
+                        herramientas), Home y RecentFiles (Inicio), dropzone.ts
     tools/
       settings/  help/  security/  merge/  extract/
       viewer/           Viewer.svelte y sus piezas (ver abajo)
@@ -42,13 +48,14 @@ app/ui/
 
 `Viewer.svelte` compone el visor y conecta sus piezas:
 - **Componentes:**
-  - barras: `Toolbar`, `ToolsBar`;
-  - miniaturas: `Sidebar`;
-  - panel lateral: `TocTree`, `SearchPanel`, `OcrPanel`, `RedactPanel`, `AiPanel`;
+  - barras (`toolbars/`): `Toolbar`, `ToolsBar`;
+  - miniaturas: `panels/Thumbnails`;
+  - panel lateral: `panels/TocTree`, `panels/SearchPanel`, `ocr/OcrPanel`, `redact/RedactPanel`, `panels/AiPanel`;
   - diálogos: imprimir, propiedades, leyendas, perfiles de censura y OCR por lotes.
-- **Lienzo, en código imperativo:** `canvas.js`, `text.js`, `annotations.js` y `editing.js`.
-  - Las páginas, el scroll y el zoom son de EmbedPDF (`embed.js`, `EmbedRoot.svelte`, `PdfPages.svelte`, `PdfPage.svelte`), y también la selección de texto, la búsqueda y las anotaciones;
-    `canvas.js` da al resto la misma API que antes. El visor se está pasando a EmbedPDF paso a paso:
+- **Lienzo, en código imperativo:** `canvas/canvas.ts`, `canvas/selection.ts`, `annotations/annotations.ts` y
+  `annotations/editing.ts`. Qué hay en cada carpeta: `app/ui/src/tools/viewer/README.md`.
+  - Las páginas, el scroll y el zoom son de EmbedPDF (`embed.ts`, `EmbedRoot.svelte`, `PdfPages.svelte`, `PdfPage.svelte`), y también la selección de texto, la búsqueda y las anotaciones;
+    `canvas.ts` da al resto la misma API que antes. El visor se está pasando a EmbedPDF paso a paso:
     ver [embedpdf.md](embedpdf.md).
   - Pintan miles de elementos (páginas, letras, anotaciones) y los actualizan a mano, por rendimiento.
   - El componente los crea y coloca su elemento en la página.
@@ -73,16 +80,72 @@ desarrollar; el ejecutable ya lleva la interfaz compilada).
 - **En un navegador:** la URL de `pnpm dev` no sirve sola, porque la interfaz necesita el backend
   de Python, que solo existe dentro de la ventana. La página lo explica en vez de quedarse en blanco.
 
-El instalador (`installer/web/build.ps1`) compila la interfaz antes de empaquetar.
+El instalador (`installer/web/build.ps1`) comprueba los tipos (`pnpm check`) y compila la
+interfaz antes de empaquetar: con errores de tipos no genera el ejecutable.
+
+Para comprobar los tipos a mano: `pnpm check` en `app/ui`.
+
+## TypeScript
+
+Toda la interfaz (`src/`) está en TypeScript, en modo `strict`: no queda ningún `.js`. Vite compila
+los `.ts` y los componentes con `<script lang="ts">` sin más configuración, y `svelte-check`
+(`pnpm check`) comprueba los tipos. También la configuración de Vite (`vite.config.ts`) está en
+TypeScript; no hay `svelte.config.js` porque Svelte usa su configuración predeterminada.
+
+- **Respuestas de Python:** las que usan varias partes, en `lib/types.ts` (`DocumentInfo`…); las de
+  una herramienta, en su carpeta (`tools/merge/types.ts`, `tools/viewer/ocr/types.ts`, …).
+- **Partes internas de EmbedPDF:** el visor usa cuatro métodos privados de EmbedPDF 2.15.1
+  (`register` del historial, `searchAllPages` con `force`, `endSelection` y la estrategia de
+  scroll paginada). Cada uno tiene su interfaz con un comentario que lo explica (`HistoryInternals`,
+  `ForcedSearch`, `SelectionInternals`, `ScrollInternals`): al actualizar EmbedPDF hay que revisarlos.
+- **Importaciones con la extensión real:** `'$lib/api.ts'`, `'./menu.svelte.ts'` (`allowImportingTsExtensions`).
+- **Respuestas de Python con tipo:** `call<Tipo>('servicio.metodo', …)` y `on<Tipo>('evento', fn)`; sin tipo devuelven `any`.
+- **Archivos nuevos:** en TypeScript (`.ts` y `lang="ts"`).
+- **Tipos de las props:** `let { view, actions }: { view: ToolbarView; actions: ToolbarActions } = $props();`.
+- **Sin parámetros opcionales con `?` en los componentes:** en un `<script lang="ts">`, Svelte 5.51
+  quita el tipo de `function log(text: string, tone?: LogTone)` pero deja el `?`, y la compilación
+  falla (`pnpm check` no lo detecta). Se usa un valor por defecto: `tone: LogTone = null`. En los
+  `.ts` y dentro de un tipo (`{ checked?: boolean }`) no hay problema.
+- **Comprobar siempre con `pnpm check` y `pnpm build`:** algunos fallos solo salen al compilar.
+
+## Textos de la interfaz
+
+Los nombres de botones, descripciones emergentes, menús y avisos van en el catálogo
+`src/texts/es/`, un archivo por herramienta (`viewer.ts`, `merge.ts`, …) reunidos en `es/index.ts`,
+y dentro ordenados por parte de la interfaz (`t.viewer.toolbar.undo`). Para cambiar un texto se edita
+ahí, sin buscarlo por el código.
+
+```svelte
+<script lang="ts">
+  import { t, tip } from '$texts';
+  const T = t.viewer.toolbar;
+</script>
+
+<button title={tip(T.undo)}>…</button>   <!-- «Deshacer (Ctrl+Z)» -->
+```
+
+- **Atajos:** los botones con atajo llevan `{ label, shortcut }`; `tip()` los une en
+  «Etiqueta (atajo)».
+- **Con datos:** un texto con datos es una función (`` color: (name) => `Color ${name}` ``).
+- **Comprobado:** en los componentes con `lang="ts"`, una clave que no existe es un error de
+  `pnpm check` («Did you mean 'dock'?»).
+- **Otro idioma:** sería otro catálogo con las mismas claves (`const en: Texts = { … }`).
+- **Todo en el catálogo:** cada herramienta en su archivo (el visor, Ajustes con la lista de
+  atajos, Ayuda con «Información general», Seguridad, Extraer y Combinar); la ventana principal en
+  `shell.ts` (cabecera, pestañas, Inicio, recientes, nombres y tarjetas de las herramientas, aviso
+  al salir y mensajes de arranque), y los botones y diálogos de `lib/` en `common.ts` («Cancelar»,
+  «Sí/No», contraseña).
+- **Fuera del catálogo:** los manuales de Ayuda (Markdown en `docs/ayuda/`) y los mensajes de error
+  del backend Python.
 
 ## Escribir componentes
 
 ```svelte
-<script>
-  import { call, on } from '$lib/api.js';
-  import { toast } from '$lib/ui.js';
+<script lang="ts">
+  import { call, on } from '$lib/api.ts';
+  import { toast } from '$lib/ui.ts';
 
-  let { tool } = $props();          // entrada del registro (shell/tools.js)
+  let { tool } = $props();          // entrada del registro (shell/tools.ts)
   let merge = $state.raw(null);
   call('merge.state').then((s) => (merge = s)).catch((err) => toast(err.message, 'danger'));
 
@@ -107,7 +170,7 @@ El instalador (`installer/web/build.ps1`) compila la interfaz antes de empaqueta
   - En las tablas de datos, va en una clave `icon:`.
   - Así los tests encuentran todos los iconos.
 - **Estilos:**
-  - Los globales están en `src/styles/` (importados en `src/main.js`).
+  - Los globales están en `src/styles/` (importados en `src/main.ts`).
   - Los nuevos van en el bloque `<style>` del componente, que Svelte aísla.
   - Los colores y medidas salen siempre de las variables de `tokens.css`, para que el tema funcione.
 
