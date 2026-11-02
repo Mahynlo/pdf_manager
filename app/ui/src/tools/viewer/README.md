@@ -1,6 +1,6 @@
 # Visor de PDF (`tools/viewer`)
 
-`Viewer.svelte` es la pestaña de un PDF (la carga `shell/tools.js`) y compone todo lo demás. Cada
+`Viewer.svelte` es la pestaña de un PDF (la carga `shell/tools.ts`) y compone todo lo demás. Cada
 carpeta agrupa una parte del visor:
 
 | Carpeta | Qué contiene |

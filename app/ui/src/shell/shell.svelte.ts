@@ -4,68 +4,89 @@
 //
 // Cada pestaña monta su componente y guarda su instancia (bind:this) para llamar a las
 // funciones que exporte: canClose(), onKey(ev) y onShow() (ver tools.js).
-import { call, on } from '$lib/api.ts';
+import { call, on, type ApiError } from '$lib/api.ts';
 import { fileName } from '$lib/dom.ts';
+import type { MenuItem } from '$lib/menu.svelte.ts';
+import type { DocumentInfo } from '$lib/types.ts';
 import { askChoice, askPassword, setStatus, toast } from '$lib/ui.ts';
-import { getTool, loadViewer, TOOLS } from './tools.js';
+import type { Component } from 'svelte';
+import { getTool, loadViewer, TOOLS } from './tools.ts';
 
 export const HOME = 'home';
 const MAX_TAB_LABEL = 24;
 const MODIFIED_MARK = '● ';
 
-const docKey = (id) => `pdf:${id}`; // por documento del backend: no cambia con «Guardar como»
+const docKey = (id: number) => `pdf:${id}`; // por documento del backend: no cambia con «Guardar como»
+
+/** Funciones que puede exportar el componente de una pestaña (ver tools.ts). */
+export interface TabInstance {
+  canClose?(): boolean | Promise<boolean>;
+  onKey?(ev: KeyboardEvent): boolean | void;
+  onShow?(): void;
+}
 
 class Tab {
+  key: string;
+  icon: string;
+  closable: boolean;
+  viewer: boolean;
   title = $state('');
-  path = $state(null);
+  path = $state<string | null>(null);
   modified = $state(false);
-  component = $state.raw(null); // se carga al abrir la pestaña
-  props = $state.raw({});
-  #instance = null;
+  component = $state.raw<Component<any, TabInstance> | null>(null); // se carga al abrir la pestaña
+  props = $state.raw<Record<string, unknown>>({});
+  #instance: TabInstance | null = null;
 
-  constructor(key, title, icon, { closable = true, path = null, viewer = false } = {}) {
-    Object.assign(this, { key, title, icon, closable, path, viewer });
+  constructor(key: string, title: string, icon: string,
+              { closable = true, path = null as string | null, viewer = false } = {}) {
+    this.key = key;
+    this.title = title;
+    this.icon = icon;
+    this.closable = closable;
+    this.path = path;
+    this.viewer = viewer;
   }
 
   /** Lo asigna bind:this al montar el componente (y null al desmontarlo). */
-  get instance() {
+  get instance(): TabInstance | null {
     return this.#instance;
   }
 
-  set instance(value) {
+  set instance(value: TabInstance | null) {
     this.#instance = value;
     if (value && this.key === shell.current) value.onShow?.();
   }
 
-  get label() {
+  get label(): string {
     const name = this.title.length <= MAX_TAB_LABEL ? this.title : `${this.title.slice(0, MAX_TAB_LABEL - 3)}...`;
     return `${this.modified ? MODIFIED_MARK : ''}${name}`;
   }
 }
 
 class Shell {
-  tabs = $state([]);
+  tabs = $state<Tab[]>([]);
   current = $state(HOME);
-  history = []; // claves en orden de uso, para volver a la anterior al cerrar
-  opening = new Set(); // rutas que se están abriendo (evita pestañas duplicadas)
+  history: string[] = []; // claves en orden de uso, para volver a la anterior al cerrar
+  opening = new Set<string>(); // rutas que se están abriendo (evita pestañas duplicadas)
+  toggleTheme: () => void = () => {};
 
-  start(toggleTheme) {
+  start(toggleTheme: () => void): void {
     this.toggleTheme = toggleTheme;
     this.tabs.push(new Tab(HOME, 'Inicio', 'home', { closable: false }));
     this.activate(HOME);
     // Aperturas pedidas por el backend (Abrir PDF, resultados de otras herramientas…).
-    on('document:open', ({ path, password }) => this.openDocument(path, password));
+    on<{ path: string; password: string | null }>('document:open', ({ path, password }) => this.openDocument(path, password));
     // Se cerró la ventana con documentos sin guardar o trabajos en curso (como closeEvent en Qt).
-    on('app:quit-requested', ({ documents, jobs }) => this.confirmQuit(documents, jobs));
+    on<{ documents: string[]; jobs: string[] }>('app:quit-requested', ({ documents, jobs }) => this.confirmQuit(documents, jobs));
   }
 
-  get(key) {
+  get(key: string): Tab | undefined {
     return this.tabs.find((t) => t.key === key);
   }
 
-  async confirmQuit(documents, jobs) {
+  async confirmQuit(documents: string[], jobs: string[]): Promise<void> {
     if (document.querySelector('dialog[open]')) return; // ya hay una pregunta abierta
-    const list = (items) => items.map((name) => `  • ${name}`).join('\n');
+    const list = (items: string[]) => items.map((name) => `  • ${name}`).join('\n');
     const parts = [];
     if (documents.length) parts.push(`Los siguientes documentos tienen cambios sin guardar:\n\n${list(documents)}`);
     if (jobs.length) parts.push(`Se cancelarán los trabajos en curso:\n\n${list(jobs)}`);
@@ -78,16 +99,16 @@ class Shell {
   }
 
   // ── Documentos ─────────────────────────────────────────────────────────
-  async openPdfDialog() {
+  async openPdfDialog(): Promise<void> {
     try {
       await call('documents.open_dialog');
     } catch (err) {
-      toast(err.message, 'danger');
+      toast((err as Error).message, 'danger');
     }
   }
 
   /** Abre `path` en una pestaña de visor (o cambia a la suya si ya está abierto). */
-  async openDocument(path, password = null) {
+  async openDocument(path: string, password: string | null = null): Promise<void> {
     const existing = this._documentTab(path);
     if (existing) return this.activate(existing.key);
     if (this.opening.has(path)) return;
@@ -101,56 +122,61 @@ class Shell {
       tab.props = {
         info,
         close: () => this.close(key),
-        update: (next) => this._updateDocumentTab(key, next),
+        update: (next: DocumentInfo) => this._updateDocumentTab(key, next),
       };
       this.tabs.push(tab);
       this.activate(key);
       const { default: Viewer } = await loadViewer();
-      if (!this.get(key)) return call('viewer.close_document', info.id);
+      if (!this.get(key)) {
+        call('viewer.close_document', info.id);
+        return;
+      }
       tab.component = Viewer;
       setStatus(`Abierto: ${info.name}`);
     } catch (err) {
       console.error(err);
-      toast(err.message, 'danger');
+      toast((err as Error).message, 'danger');
     } finally {
       this.opening.delete(path);
     }
   }
 
   /** `viewer.open`, pidiendo la contraseña mientras haga falta. `null` si se cancela. */
-  async _loadDocument(path, password) {
+  async _loadDocument(path: string, password: string | null): Promise<DocumentInfo | null> {
     try {
-      return await call('viewer.open', path, password);
+      return await call<DocumentInfo>('viewer.open', path, password);
     } catch (err) {
-      if (err.code !== 'password_required' && err.code !== 'invalid_password') throw err;
+      const code = (err as ApiError).code;
+      if (code !== 'password_required' && code !== 'invalid_password') throw err;
     }
-    let info = null;
+    let info: DocumentInfo | null = null;
     const unlocked = await askPassword(fileName(path), async (pwd) => {
       try {
-        info = await call('viewer.open', path, pwd);
+        info = await call<DocumentInfo>('viewer.open', path, pwd);
         return null;
       } catch (err) {
-        return err.message;
+        return (err as Error).message;
       }
     });
     return unlocked ? info : null;
   }
 
   /** Marca de cambios sin guardar y, tras «Guardar como», la nueva ruta (como _refresh_viewer_tab en Qt). */
-  _updateDocumentTab(key, { name, path, modified }) {
+  _updateDocumentTab(key: string, { name, path, modified }: Pick<DocumentInfo, 'name' | 'path' | 'modified'>): void {
     const tab = this.get(key);
     if (tab) Object.assign(tab, { title: name, path, modified });
   }
 
-  _documentTab(path) {
+  _documentTab(path: string): Tab | undefined {
     const wanted = path.toLowerCase(); // Windows: las rutas no distinguen mayúsculas
     return this.tabs.find((t) => t.path?.toLowerCase() === wanted);
   }
 
   // ── Pestañas ───────────────────────────────────────────────────────────
-  async open(key) {
+  async open(key: string): Promise<void> {
     if (this.get(key)) return this.activate(key);
     const tool = getTool(key);
+    if (!tool) return;
     const tab = new Tab(key, tool.title, tool.icon);
     tab.props = { tool };
     this.tabs.push(tab);
@@ -160,18 +186,18 @@ class Shell {
       tab.component = component; // si la pestaña se cerró mientras cargaba, ya no se pinta
     } catch (err) {
       console.error(err);
-      toast(`No se pudo abrir ${tool.title}: ${err.message}`, 'danger');
+      toast(`No se pudo abrir ${tool.title}: ${(err as Error).message}`, 'danger');
     }
   }
 
-  activate(key) {
+  activate(key: string): void {
     this.current = key;
     this.history = [...this.history.filter((k) => k !== key), key];
     this.get(key)?.instance?.onShow?.();
   }
 
   /** Cierra la pestaña; la herramienta puede impedirlo con `canClose()` (p. ej. trabajo en curso). */
-  async close(key) {
+  async close(key: string): Promise<void> {
     const tab = this.get(key);
     if (!tab?.closable) return;
     if (tab.instance?.canClose && !(await tab.instance.canClose())) return;
@@ -182,17 +208,17 @@ class Shell {
   }
 
   /** Cierra varias pestañas por clave, de la última a la primera (como Qt). */
-  async closeMany(keys) {
+  async closeMany(keys: string[]): Promise<void> {
     for (const key of [...keys].reverse()) await this.close(key);
   }
 
-  cycle(step) {
+  cycle(step: number): void {
     const keys = this.tabs.map((t) => t.key);
     const next = (keys.indexOf(this.current) + step + keys.length) % keys.length;
     this.activate(keys[next]);
   }
 
-  onKey(ev) {
+  onKey(ev: KeyboardEvent): void {
     if (document.querySelector('dialog[open]')) return; // los diálogos modales gestionan su teclado
     const key = ev.key.toLowerCase();
     let handled = true;
@@ -204,8 +230,8 @@ class Shell {
   }
 
   // ── Menús de la cabecera ───────────────────────────────────────────────
-  brandMenu() {
-    const items = [{ label: 'Abrir PDF (Ctrl+O)', icon: 'folder-open', onSelect: () => this.openPdfDialog() }, 'separator'];
+  brandMenu(): MenuItem[] {
+    const items: MenuItem[] = [{ label: 'Abrir PDF (Ctrl+O)', icon: 'folder-open', onSelect: () => this.openPdfDialog() }, 'separator'];
     let section = 0;
     for (const tool of TOOLS) {
       if ((tool.section ?? 0) !== section) {
@@ -218,19 +244,19 @@ class Shell {
     return items;
   }
 
-  tabsMenu() {
+  tabsMenu(): MenuItem[] {
     return this.tabs.map((tab) => ({
-      label: `${tab.modified ? MODIFIED_MARK : ''}${tab.title}`, icon: tab.key === this.current ? 'check' : null,
+      label: `${tab.modified ? MODIFIED_MARK : ''}${tab.title}`, icon: tab.key === this.current ? 'check' : undefined,
       onSelect: () => this.activate(tab.key),
     }));
   }
 
   /** Menú contextual de una pestaña (como _show_tab_context_menu en Qt). */
-  tabContextMenu(key) {
+  tabContextMenu(key: string): MenuItem[] {
     const keys = this.tabs.filter((t) => t.closable).map((t) => t.key);
     const index = keys.indexOf(key);
-    const { path } = this.get(key); // se lee al abrir el menú: puede cambiar con «Guardar como»
-    const items = [
+    const { path } = this.get(key)!; // se lee al abrir el menú: puede cambiar con «Guardar como»
+    const items: MenuItem[] = [
       { label: 'Cerrar pestaña', icon: 'x', onSelect: () => this.close(key) },
       { label: 'Cerrar las otras pestañas', icon: 'x', onSelect: () => this.closeMany(keys.filter((k) => k !== key)) },
       { label: 'Cerrar pestañas a la derecha', icon: 'arrow-right', onSelect: () => this.closeMany(keys.slice(index + 1)) },

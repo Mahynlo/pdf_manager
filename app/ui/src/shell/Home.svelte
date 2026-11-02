@@ -1,8 +1,8 @@
 <!-- Pantalla de Inicio: archivos recientes a la izquierda y tarjetas de herramientas al centro. -->
-<script>
+<script lang="ts">
   import RecentFiles from './RecentFiles.svelte';
-  import { shell } from './shell.svelte.js';
-  import { homeCards } from './tools.js';
+  import { shell } from './shell.svelte.ts';
+  import { homeCards } from './tools.ts';
 
   const cards = homeCards();
 </script>

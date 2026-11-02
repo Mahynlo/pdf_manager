@@ -36,7 +36,7 @@ app/
                           ai (asistente IA),
                           legends (sellos y leyendas)
   ui/                     la interfaz, en Svelte (compila a ui/dist con pnpm build): ver svelte.md
-    src/main.js           arranque: estilos, tema guardado y App
+    src/main.ts           arranque: estilos, tema guardado y App
     src/styles/           tokens.css (colores del tema, mismos valores que src_qt/core/theme.py),
                           base.css, components.css y uno por área
     src/assets/icons.json trazos de los iconos (también los usa la versión Qt)
@@ -44,8 +44,8 @@ app/
     src/lib/              api.ts (puente con Python), ui.ts (avisos, barra de estado y diálogos),
                           menu.svelte.ts (menús emergentes), theme.svelte.ts, thumbs.ts
                           (miniaturas bajo demanda), Icon.svelte, components/ (diálogos y controles)
-    src/shell/            shell.svelte.js (pestañas), tools.js (registro de herramientas), Inicio
-                          y dropzone.js (arrastrar PDFs a la ventana)
+    src/shell/            shell.svelte.ts (pestañas), tools.ts (registro de herramientas), Inicio
+                          y dropzone.ts (arrastrar PDFs a la ventana)
     src/tools/<herramienta>/   un componente por herramienta y sus piezas
     src/tools/viewer/     visor: Viewer.svelte (compone) y una carpeta por parte (ver su README.md):
                           canvas/ (lienzo, páginas y selección con EmbedPDF), annotations/,
@@ -150,7 +150,7 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
   HTML de Markdown sin HTML crudo, imágenes ni enlaces, que el frontend inserta tal cual.
 - **Arrastrar PDFs y «Abrir con»**: el navegador no da la ruta de un archivo soltado; `WebviewHost`
   escucha el `drop` desde Python (pywebview añade `pywebviewFullPath`) y abre los PDF con
-  `DocumentService.open`. `shell/dropzone.js` solo evita que WebView2 navegue al archivo y muestra el aviso.
+  `DocumentService.open`. `shell/dropzone.ts` solo evita que WebView2 navegue al archivo y muestra el aviso.
   Los PDF recibidos al arrancar (o de otra instancia) se abren cuando el frontend llama a `app.ready`.
 - **Tareas largas con progreso**: `progressDialog()` de `lib/ui.ts` (barra y «Cancelar»).
 - **Cerrar con cambios sin guardar**: el componente de la pestaña lo pregunta en `canClose()`. Al cerrar la ventana,
@@ -164,7 +164,7 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
    registrarlo en `services/__init__.py`.
 2. Frontend: `app/ui/src/tools/<nombre>/<Nombre>.svelte`, que recibe la entrada del registro como
    prop `tool` y libera lo que use con `onDestroy`. Los estilos nuevos, en su bloque `<style>`.
-3. Añadir su entrada (con `load: () => import(...)`) en `app/ui/src/shell/tools.js`.
+3. Añadir su entrada (con `load: () => import(...)`) en `app/ui/src/shell/tools.ts`.
 4. Pruebas del servicio en `tests/test_app_backend.py` con `FakeHost`. Los tests también verifican
    que cada `call('servicio.metodo')` y cada icono usados en el frontend existen.
 

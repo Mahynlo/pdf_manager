@@ -16,7 +16,7 @@ app/ui/
   vite.config.js        compila a dist/; alias $lib → src/lib, $texts → src/texts
   index.html            página base (Vite inserta los módulos)
   src/
-    main.js             arranque: estilos, tema guardado, monta App y avisa a Python (app.ready)
+    main.ts             arranque: estilos, tema guardado, monta App y avisa a Python (app.ready)
     styles/             estilos globales: tokens.css (colores del tema), base, componentes y uno
                         por área (shell, merge, security, extract, settings, help, viewer)
     assets/icons.json   trazos de los iconos (también los usa la versión Qt)
@@ -24,6 +24,7 @@ app/ui/
     texts/              textos de la interfaz: es.ts (catálogo) e index.ts (t, tip())
     lib/                piezas comunes
       api.ts            puente con Python: call('servicio.metodo', ...), on('evento', fn)
+      types.ts          tipos de las respuestas de Python que usan varias partes (DocumentInfo…)
       ui.ts             toast(), setStatus() y diálogos: askChoice, confirmDialog, askText,
                         askPassword, progressDialog, openModal
       menu.svelte.ts    openMenu(botón, opciones) / openMenuAt(x, y, opciones)
@@ -33,8 +34,8 @@ app/ui/
       dom.ts, icons.ts  h() e ic(): solo para el código imperativo del lienzo
       components/       Dialog y los diálogos de ui.ts; controles: PasswordField, Checkbox,
                         RadioGroup, Fieldset, Banner, SubTabs, SectionCard, ToolHeader, Menu
-    shell/              shell.svelte.js (estado de las pestañas), tools.js (registro de
-                        herramientas), Home y RecentFiles (Inicio), dropzone.js
+    shell/              shell.svelte.ts (estado de las pestañas), tools.ts (registro de
+                        herramientas), Home y RecentFiles (Inicio), dropzone.ts
     tools/
       settings/  help/  security/  merge/  extract/
       viewer/           Viewer.svelte y sus piezas (ver abajo)
@@ -90,7 +91,7 @@ La interfaz se está pasando a TypeScript. Vite compila los `.ts` y los componen
 - **Migración por carpetas:** primero `lib/`, luego `shell/` y las herramientas pequeñas, y el visor
   al final. Mientras dura, los `.js` que quedan se aceptan sin comprobarlos (`allowJs`, sin
   `checkJs` en `tsconfig.json`). Al terminar se quita `allowJs`.
-- **Ya en TypeScript:** `lib/` (módulos y componentes), `texts/` y las barras del visor (`toolbars/`).
+- **Ya en TypeScript:** `lib/` (módulos y componentes; `types.ts`: respuestas de Python que usan varias partes), `main.ts`, `App.svelte`, `shell/`, `texts/` y las barras del visor (`toolbars/`).
 - **Importaciones con la extensión real:** `'$lib/api.ts'`, `'./menu.svelte.ts'` (`allowImportingTsExtensions`).
 - **Respuestas de Python con tipo:** `call<Tipo>('servicio.metodo', …)` y `on<Tipo>('evento', fn)`; sin tipo devuelven `any`.
 - **Archivos nuevos:** en TypeScript (`.ts` y `lang="ts"`).
@@ -128,7 +129,7 @@ texto se edita ahí, sin buscarlo por el código.
   import { call, on } from '$lib/api.ts';
   import { toast } from '$lib/ui.ts';
 
-  let { tool } = $props();          // entrada del registro (shell/tools.js)
+  let { tool } = $props();          // entrada del registro (shell/tools.ts)
   let merge = $state.raw(null);
   call('merge.state').then((s) => (merge = s)).catch((err) => toast(err.message, 'danger'));
 
@@ -153,7 +154,7 @@ texto se edita ahí, sin buscarlo por el código.
   - En las tablas de datos, va en una clave `icon:`.
   - Así los tests encuentran todos los iconos.
 - **Estilos:**
-  - Los globales están en `src/styles/` (importados en `src/main.js`).
+  - Los globales están en `src/styles/` (importados en `src/main.ts`).
   - Los nuevos van en el bloque `<style>` del componente, que Svelte aísla.
   - Los colores y medidas salen siempre de las variables de `tokens.css`, para que el tema funcione.
 

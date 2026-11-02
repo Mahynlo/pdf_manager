@@ -6,8 +6,47 @@
 // entrada del registro como prop `tool` y puede exportar las funciones de pestaña
 // que usa el shell: canClose() (puede impedir el cierre), onKey(ev) (atajos cuando es
 // la pestaña activa; devuelve true si los gestionó) y onShow().
+import type { Component } from 'svelte';
 
-export const TOOLS = [
+/** Tarjeta de Inicio: título y texto (con saltos de línea). */
+export interface Card {
+  title: string;
+  text: string;
+}
+
+type Loader = () => Promise<{ default: Component<any> }>;
+
+export interface Tool {
+  key: string;
+  title: string; // pestaña
+  menuLabel: string; // menú de la marca
+  icon: string;
+  emoji: string;
+  color: string;
+  card?: Card; // sin tarjeta no sale en Inicio
+  section?: number; // grupo en el menú de la marca (separador entre grupos)
+  load: Loader;
+}
+
+/** Tarjeta de Inicio que ejecuta una acción en vez de abrir una herramienta. */
+export interface HomeAction {
+  after: string; // clave de la herramienta tras la que va
+  action: 'open-pdf';
+  emoji: string;
+  color: string;
+  card: Card;
+}
+
+/** Tarjeta de Inicio: una herramienta (`tool`, su clave) o una acción. */
+export interface HomeCard {
+  emoji: string;
+  color: string;
+  card: Card;
+  tool?: string;
+  action?: HomeAction['action'];
+}
+
+export const TOOLS: Tool[] = [
   {
     key: 'extract', title: 'Extraer', menuLabel: 'Extraer texto', icon: 'search', emoji: '🔍', color: '#1A73E8',
     card: { title: 'Extraer texto de PDF', text: 'Busca y extrae páginas\npor palabras clave' },
@@ -34,26 +73,26 @@ export const TOOLS = [
 ];
 
 /** Visor de PDF: una pestaña por documento (no está en el menú ni en Inicio). */
-export const loadViewer = () => import('../tools/viewer/Viewer.svelte');
+export const loadViewer: Loader = () => import('../tools/viewer/Viewer.svelte');
 
 // Tarjetas de Inicio que ejecutan una acción en vez de abrir una herramienta
 // (se colocan tras la herramienta indicada en `after`).
-export const HOME_ACTIONS = [
+export const HOME_ACTIONS: HomeAction[] = [
   {
     after: 'merge', action: 'open-pdf', emoji: '📄', color: '#E65100',
     card: { title: 'OCR de PDF', text: 'Abre un PDF y ejecuta\nreconocimiento de texto' },
   },
 ];
 
-export function getTool(key) {
+export function getTool(key: string): Tool | undefined {
   return TOOLS.find((t) => t.key === key);
 }
 
-/** Tarjetas de Inicio en orden: [{ emoji, color, card, tool? , action? }]. */
-export function homeCards() {
-  const cards = [];
+/** Tarjetas de Inicio en orden. */
+export function homeCards(): HomeCard[] {
+  const cards: HomeCard[] = [];
   for (const tool of TOOLS) {
-    if (tool.card) cards.push({ ...tool, tool: tool.key });
+    if (tool.card) cards.push({ ...tool, card: tool.card, tool: tool.key });
     cards.push(...HOME_ACTIONS.filter((a) => a.after === tool.key));
   }
   return cards;

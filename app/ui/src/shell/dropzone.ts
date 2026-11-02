@@ -4,11 +4,11 @@
 // y se muestra el aviso «Suelta…» mientras se arrastra.
 //
 // Solo cuentan los arrastres de archivos: mover miniaturas (visor, combinar) no.
-const hasFiles = (ev) => Array.from(ev.dataTransfer?.types ?? []).includes('Files');
+const hasFiles = (ev: DragEvent) => Array.from(ev.dataTransfer?.types ?? []).includes('Files');
 
-export function enableFileDrop() {
+export function enableFileDrop(): void {
   let depth = 0; // dragenter/dragleave llegan por cada elemento que se cruza
-  const show = (on) => document.body.classList.toggle('is-dropping', on);
+  const show = (on: boolean) => document.body.classList.toggle('is-dropping', on);
   document.addEventListener('dragenter', (ev) => {
     if (!hasFiles(ev)) return;
     ev.preventDefault();
@@ -18,7 +18,7 @@ export function enableFileDrop() {
   document.addEventListener('dragover', (ev) => {
     if (!hasFiles(ev)) return;
     ev.preventDefault(); // sin esto no hay «drop» y WebView2 abriría el archivo
-    ev.dataTransfer.dropEffect = 'copy';
+    ev.dataTransfer!.dropEffect = 'copy';
   });
   document.addEventListener('dragleave', (ev) => {
     if (!hasFiles(ev)) return;

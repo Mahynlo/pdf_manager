@@ -1,18 +1,19 @@
 <!-- Archivos recientes de Inicio: abrir, quitar y menú contextual. -->
-<script>
+<script lang="ts">
   import { call, on } from '$lib/api.ts';
   import Icon from '$lib/Icon.svelte';
   import { openMenuAt } from '$lib/menu.svelte.ts';
+  import type { RecentFile } from '$lib/types.ts';
   import { toast } from '$lib/ui.ts';
-  import { shell } from './shell.svelte.js';
+  import { shell } from './shell.svelte.ts';
 
-  let files = $state([]);
+  let files = $state<RecentFile[]>([]);
 
-  async function run(method, ...args) {
+  async function run(method: string, ...args: unknown[]) {
     try {
-      files = await call(`documents.${method}`, ...args);
+      files = await call<RecentFile[]>(`documents.${method}`, ...args);
     } catch (err) {
-      toast(err.message, 'danger');
+      toast((err as Error).message, 'danger');
     }
   }
 
@@ -20,10 +21,10 @@
   $effect(() => on('recent:changed', refresh));
   refresh();
 
-  const open = (file) => shell.openDocument(file.path);
-  const remove = (file) => run('remove_recent', file.path);
+  const open = (file: RecentFile) => shell.openDocument(file.path);
+  const remove = (file: RecentFile) => run('remove_recent', file.path);
 
-  function contextMenu(ev, file) {
+  function contextMenu(ev: MouseEvent, file: RecentFile) {
     ev.preventDefault();
     openMenuAt(ev.clientX, ev.clientY, [
       { label: 'Abrir documento', icon: 'folder-open', onSelect: () => open(file) },

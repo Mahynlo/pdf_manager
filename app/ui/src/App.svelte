@@ -1,28 +1,29 @@
 <!--
   Ventana principal: cabecera (marca, pestañas, acciones), una vista por pestaña,
   barra de estado, avisos y menú emergente. El estado de las pestañas vive en
-  shell/shell.svelte.js.
+  shell/shell.svelte.ts.
 -->
-<script>
+<script lang="ts">
   import Menu from '$lib/components/Menu.svelte';
   import { feedback } from '$lib/feedback.svelte.ts';
   import Icon from '$lib/Icon.svelte';
   import { openMenu, openMenuAt } from '$lib/menu.svelte.ts';
   import { theme } from '$lib/theme.svelte.ts';
-  import { enableFileDrop } from './shell/dropzone.js';
+  import { enableFileDrop } from './shell/dropzone.ts';
   import Home from './shell/Home.svelte';
-  import { HOME, shell } from './shell/shell.svelte.js';
+  import { HOME, shell } from './shell/shell.svelte.ts';
+  import type { Tone } from '$lib/ui.ts';
 
-  const TOAST_ICONS = { info: 'info', success: 'circle-check', danger: 'circle-alert', warning: 'circle-alert' };
+  const TOAST_ICONS: Record<Tone, string> = { info: 'info', success: 'circle-check', danger: 'circle-alert', warning: 'circle-alert' };
 
   shell.start(theme.toggle);
   enableFileDrop();
 
-  function tabKey(ev, key) {
+  function tabKey(ev: KeyboardEvent, key: string) {
     if (ev.key === 'Enter' || ev.key === ' ') shell.activate(key);
   }
 
-  function tabContextMenu(ev, tab) {
+  function tabContextMenu(ev: MouseEvent, tab: { closable: boolean; key: string }) {
     ev.preventDefault();
     if (tab.closable) openMenuAt(ev.clientX, ev.clientY, shell.tabContextMenu(tab.key));
   }
