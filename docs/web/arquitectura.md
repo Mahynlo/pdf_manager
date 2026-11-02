@@ -41,8 +41,8 @@ app/
                           base.css, components.css y uno por área
     src/assets/icons.json trazos de los iconos (también los usa la versión Qt)
     src/App.svelte        ventana: cabecera con pestañas, vistas, barra de estado, avisos y menú
-    src/lib/              api.js (puente con Python), ui.js (avisos, barra de estado y diálogos),
-                          menu.svelte.js (menús emergentes), theme.svelte.js, thumbs.js
+    src/lib/              api.ts (puente con Python), ui.ts (avisos, barra de estado y diálogos),
+                          menu.svelte.ts (menús emergentes), theme.svelte.ts, thumbs.ts
                           (miniaturas bajo demanda), Icon.svelte, components/ (diálogos y controles)
     src/shell/            shell.svelte.js (pestañas), tools.js (registro de herramientas), Inicio
                           y dropzone.js (arrastrar PDFs a la ventana)
@@ -71,7 +71,7 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
 
 - **Nada de HTML con datos**: Svelte inserta los textos como texto. `{@html}` solo para el HTML que
   el backend ya genera seguro (manuales y respuestas de la IA). El código imperativo del lienzo crea
-  sus elementos con `h()` (`lib/dom.js`).
+  sus elementos con `h()` (`lib/dom.ts`).
 - **Colores solo desde `tokens.css`** (`var(--accent)`…). El tema cambia con `data-theme` en `<html>`.
   Si cambia una paleta de Qt, hay que regenerar `tokens.css` (un test compara ambos).
 - **Iconos**: `<Icon name="nombre" />` (o `ic('nombre')` en el código del lienzo). Usan
@@ -89,7 +89,7 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
   liberó. Si el trabajo necesita algo del usuario (una contraseña), emite un evento y espera la
   respuesta con un `threading.Event`. Una herramienta con trabajo en curso implementa `canClose()`.
 - **Imágenes bajo demanda**: miniaturas solo para lo visible (`IntersectionObserver`), por lotes,
-  en JPEG y con caché acotada (`lib/thumbs.js`). Las páginas del visor las dibuja
+  en JPEG y con caché acotada (`lib/thumbs.ts`). Las páginas del visor las dibuja
   EmbedPDF en el navegador, solo las que están a la vista y en mosaico a la resolución del zoom, a
   partir de los bytes del documento abierto en Python (`viewer.document_url`, ver [embedpdf.md](embedpdf.md)).
 - **Datos grandes hacia el frontend**: el puente de pywebview pasa los valores como texto JSON. Para
@@ -152,7 +152,7 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
   escucha el `drop` desde Python (pywebview añade `pywebviewFullPath`) y abre los PDF con
   `DocumentService.open`. `shell/dropzone.js` solo evita que WebView2 navegue al archivo y muestra el aviso.
   Los PDF recibidos al arrancar (o de otra instancia) se abren cuando el frontend llama a `app.ready`.
-- **Tareas largas con progreso**: `progressDialog()` de `lib/ui.js` (barra y «Cancelar»).
+- **Tareas largas con progreso**: `progressDialog()` de `lib/ui.ts` (barra y «Cancelar»).
 - **Cerrar con cambios sin guardar**: el componente de la pestaña lo pregunta en `canClose()`. Al cerrar la ventana,
   `WebviewHost` cancela el cierre si hay documentos modificados y emite `app:quit-requested`; el
   shell pregunta y, si se acepta, llama a `app.quit`.

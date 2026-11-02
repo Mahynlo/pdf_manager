@@ -23,8 +23,8 @@ import {
   PdfAnnotationReplyType, PdfAnnotationSubtype, PdfStandardFont, PdfTextAlignment, PdfVerticalAlignment, uuidV4,
 } from '@embedpdf/models';
 import { applyInsertUpright } from '@embedpdf/plugin-annotation';
-import { call } from '$lib/api.js';
-import { askText } from '$lib/ui.js';
+import { call } from '$lib/api.ts';
+import { askText } from '$lib/ui.ts';
 import { ANNOTATION_TOOL, TOOLS } from '../canvas/canvas.js';
 import { DEFAULT_STYLE } from './palette.js';
 import { KINDS, MANUAL_LABEL } from '../redact/redaction.js';

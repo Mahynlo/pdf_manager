@@ -1,9 +1,9 @@
 <!-- Archivos recientes de Inicio: abrir, quitar y menú contextual. -->
 <script>
-  import { call, on } from '$lib/api.js';
+  import { call, on } from '$lib/api.ts';
   import Icon from '$lib/Icon.svelte';
-  import { openMenuAt } from '$lib/menu.svelte.js';
-  import { toast } from '$lib/ui.js';
+  import { openMenuAt } from '$lib/menu.svelte.ts';
+  import { toast } from '$lib/ui.ts';
   import { shell } from './shell.svelte.js';
 
   let files = $state([]);

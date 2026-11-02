@@ -1,6 +1,6 @@
 <!-- Paso 3 de Extraer: documentos objetivo, carpeta de destino y forma de salida. -->
 <script>
-  import { call } from '$lib/api.js';
+  import { call } from '$lib/api.ts';
   import RadioGroup from '$lib/components/RadioGroup.svelte';
   import Icon from '$lib/Icon.svelte';
 

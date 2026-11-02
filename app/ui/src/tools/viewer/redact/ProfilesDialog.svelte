@@ -4,10 +4,10 @@
   `active`: id del perfil en uso; `refresh()`: el panel vuelve a pedir su estado.
 -->
 <script>
-  import { call } from '$lib/api.js';
+  import { call } from '$lib/api.ts';
   import Dialog from '$lib/components/Dialog.svelte';
   import Icon from '$lib/Icon.svelte';
-  import { askText, confirmDialog, toast } from '$lib/ui.js';
+  import { askText, confirmDialog, toast } from '$lib/ui.ts';
 
   let { active, refresh, done } = $props();
   let dialog;

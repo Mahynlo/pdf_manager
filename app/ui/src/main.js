@@ -1,8 +1,8 @@
 // Arranque de la interfaz: estilos, tema guardado y componente raíz.
 import { mount } from 'svelte';
 import App from './App.svelte';
-import { call } from './lib/api.js';
-import { theme } from './lib/theme.svelte.js';
+import { call } from './lib/api.ts';
+import { theme } from './lib/theme.svelte.ts';
 // Estilos globales (tokens.css: colores del tema; el resto, por área de la app).
 import './styles/tokens.css';
 import './styles/base.css';

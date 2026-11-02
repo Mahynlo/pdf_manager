@@ -5,10 +5,15 @@
     {#snippet chat()}…{/snippet}
     <SubTabs tabs={[{ label: 'Chat', icon: 'message-circle', panel: chat }, …]} bind:current />
 -->
-<script>
+<script lang="ts">
   import Icon from '../Icon.svelte';
 
-  let { tabs, current = $bindable(0) } = $props();
+  import type { Snippet } from 'svelte';
+
+  let { tabs, current = $bindable(0) }: {
+    tabs: { label: string; icon: string; panel: Snippet }[];
+    current?: number;
+  } = $props();
 </script>
 
 <div class="subtabs">

@@ -4,7 +4,7 @@
 -->
 <script lang="ts">
   import Icon from '$lib/Icon.svelte';
-  import { openMenu } from '$lib/menu.svelte.js';
+  import { openMenu } from '$lib/menu.svelte.ts';
   import { TOOLS } from '../canvas/canvas.js';
   import { PALETTE } from '../annotations/palette.js';
   import { t } from '$texts';

@@ -14,9 +14,9 @@
 -->
 <script>
   import { onDestroy, onMount, tick, untrack } from 'svelte';
-  import { call } from '$lib/api.js';
+  import { call } from '$lib/api.ts';
   import Icon from '$lib/Icon.svelte';
-  import { openModal, toast } from '$lib/ui.js';
+  import { openModal, toast } from '$lib/ui.ts';
   import AiPanel from './panels/AiPanel.svelte';
   import { Annotations } from './annotations/annotations.js';
   import { PageCanvas, TOOLS } from './canvas/canvas.js';

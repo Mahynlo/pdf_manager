@@ -5,9 +5,9 @@
 //
 // Las anotaciones las edita EmbedPDF: antes de cada operación que necesita el documento al
 // día en Python (guardar, cambiar páginas, censurar, exportar una página) se le pasan (`sync`).
-import { call } from '$lib/api.js';
-import { fileName } from '$lib/dom.js';
-import { askChoice, confirmDialog, progressDialog, setStatus, toast } from '$lib/ui.js';
+import { call } from '$lib/api.ts';
+import { fileName } from '$lib/dom.ts';
+import { askChoice, confirmDialog, progressDialog, setStatus, toast } from '$lib/ui.ts';
 
 export class DocumentActions {
   /**

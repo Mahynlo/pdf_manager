@@ -5,10 +5,10 @@
   el documento abierto y entran en su capa de texto, así se pueden seleccionar y buscar.
 -->
 <script>
-  import { call } from '$lib/api.js';
+  import { call } from '$lib/api.ts';
   import Checkbox from '$lib/components/Checkbox.svelte';
   import Icon from '$lib/Icon.svelte';
-  import { openModal, setStatus, toast } from '$lib/ui.js';
+  import { openModal, setStatus, toast } from '$lib/ui.ts';
   import { TOOLS } from '../canvas/canvas.js';
   import OcrBatchDialog from './OcrBatchDialog.svelte';
   import OcrResultDialog from './OcrResultDialog.svelte';

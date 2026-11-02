@@ -1,10 +1,10 @@
 <!-- Pestaña «Desbloquear»: analizar un PDF, ver sus permisos, abrirlo o guardarlo sin contraseña. -->
 <script>
-  import { call } from '$lib/api.js';
+  import { call } from '$lib/api.ts';
   import Banner from '$lib/components/Banner.svelte';
   import Fieldset from '$lib/components/Fieldset.svelte';
   import PasswordField from '$lib/components/PasswordField.svelte';
-  import { fileName } from '$lib/dom.js';
+  import { fileName } from '$lib/dom.ts';
   import Icon from '$lib/Icon.svelte';
   import FileBox from './FileBox.svelte';
   import Steps from './Steps.svelte';

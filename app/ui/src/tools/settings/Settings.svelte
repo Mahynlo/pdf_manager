@@ -1,11 +1,11 @@
 <!-- Herramienta Ajustes: apariencia, atajos de teclado y almacenamiento/diagnóstico. -->
 <script>
-  import { call } from '$lib/api.js';
+  import { call } from '$lib/api.ts';
   import SectionCard from '$lib/components/SectionCard.svelte';
   import ToolHeader from '$lib/components/ToolHeader.svelte';
   import Icon from '$lib/Icon.svelte';
-  import { theme } from '$lib/theme.svelte.js';
-  import { openModal, toast } from '$lib/ui.js';
+  import { theme } from '$lib/theme.svelte.ts';
+  import { openModal, toast } from '$lib/ui.ts';
   import LogDialog from './LogDialog.svelte';
   import { SHORTCUTS } from './shortcuts.js';
 

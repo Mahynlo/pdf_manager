@@ -4,9 +4,9 @@
 //
 // Cada pestaña monta su componente y guarda su instancia (bind:this) para llamar a las
 // funciones que exporte: canClose(), onKey(ev) y onShow() (ver tools.js).
-import { call, on } from '$lib/api.js';
-import { fileName } from '$lib/dom.js';
-import { askChoice, askPassword, setStatus, toast } from '$lib/ui.js';
+import { call, on } from '$lib/api.ts';
+import { fileName } from '$lib/dom.ts';
+import { askChoice, askPassword, setStatus, toast } from '$lib/ui.ts';
 import { getTool, loadViewer, TOOLS } from './tools.js';
 
 export const HOME = 'home';

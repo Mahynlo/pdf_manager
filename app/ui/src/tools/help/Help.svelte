@@ -1,11 +1,11 @@
 <!-- Herramienta Ayuda: información general y manuales en Markdown (el backend los da ya en HTML seguro). -->
 <script>
-  import { call } from '$lib/api.js';
+  import { call } from '$lib/api.ts';
   import SectionCard from '$lib/components/SectionCard.svelte';
   import SubTabs from '$lib/components/SubTabs.svelte';
   import ToolHeader from '$lib/components/ToolHeader.svelte';
   import Icon from '$lib/Icon.svelte';
-  import { toast } from '$lib/ui.js';
+  import { toast } from '$lib/ui.ts';
   import { FAQ, GETTING_STARTED, TOOLS_HELP } from './content.js';
 
   let { tool } = $props();

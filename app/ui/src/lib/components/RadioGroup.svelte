@@ -1,6 +1,10 @@
 <!-- Opciones excluyentes (QRadioButton). `options`: [{ value, label }]. -->
-<script>
-  let { options, value = $bindable(), onchange } = $props();
+<script lang="ts">
+  let { options, value = $bindable(), onchange }: {
+    options: { value: string; label: string }[];
+    value?: string;
+    onchange?: (ev: Event) => void;
+  } = $props();
   const name = `radio-${Math.random().toString(36).slice(2)}`;
 </script>
 

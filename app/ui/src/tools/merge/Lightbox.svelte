@@ -1,6 +1,6 @@
 <!-- Página de la vista previa ampliada, con navegación (← →). `pages`: [{ id, page, name }]. -->
 <script>
-  import { call } from '$lib/api.js';
+  import { call } from '$lib/api.ts';
   import Dialog from '$lib/components/Dialog.svelte';
   import Icon from '$lib/Icon.svelte';
 

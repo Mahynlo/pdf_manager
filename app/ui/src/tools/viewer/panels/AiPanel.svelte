@@ -6,11 +6,11 @@
 -->
 <script>
   import { tick } from 'svelte';
-  import { call } from '$lib/api.js';
+  import { call } from '$lib/api.ts';
   import PasswordField from '$lib/components/PasswordField.svelte';
   import SubTabs from '$lib/components/SubTabs.svelte';
   import Icon from '$lib/Icon.svelte';
-  import { setStatus, toast } from '$lib/ui.js';
+  import { setStatus, toast } from '$lib/ui.ts';
 
   const LEVELS = [['low', 'Baja: solo datos críticos'], ['medium', 'Media: datos personales y financieros'], ['high', 'Alta: todo lo sensible']];
 

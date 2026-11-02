@@ -1,9 +1,9 @@
 // Menú «Sellos» (equivale a _fill_stamps_menu en Qt). Las leyendas se guardan con el
 // servicio `legends`, el mismo almacén que Qt; el gestor es LegendsDialog.svelte.
 // `insert({ text, color, font_size })` coloca el sello en el visor.
-import { call } from '$lib/api.js';
-import { openMenu } from '$lib/menu.svelte.js';
-import { openModal, toast } from '$lib/ui.js';
+import { call } from '$lib/api.ts';
+import { openMenu } from '$lib/menu.svelte.ts';
+import { openModal, toast } from '$lib/ui.ts';
 import LegendsDialog from './LegendsDialog.svelte';
 
 export const DEFAULT_COLOR = '#D32F2F';

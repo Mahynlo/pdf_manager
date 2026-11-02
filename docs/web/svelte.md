@@ -23,15 +23,15 @@ app/ui/
     App.svelte          ventana: cabecera con pestañas, vistas, barra de estado, avisos y menú
     texts/              textos de la interfaz: es.ts (catálogo) e index.ts (t, tip())
     lib/                piezas comunes
-      api.js            puente con Python: call('servicio.metodo', ...), on('evento', fn)
-      ui.js             toast(), setStatus() y diálogos: askChoice, confirmDialog, askText,
+      api.ts            puente con Python: call('servicio.metodo', ...), on('evento', fn)
+      ui.ts             toast(), setStatus() y diálogos: askChoice, confirmDialog, askText,
                         askPassword, progressDialog, openModal
-      menu.svelte.js    openMenu(botón, opciones) / openMenuAt(x, y, opciones)
-      theme.svelte.js   tema claro/oscuro compartido (theme.dark, theme.toggle())
-      thumbs.js         miniaturas bajo demanda (ThumbLoader y la acción use:thumb)
+      menu.svelte.ts    openMenu(botón, opciones) / openMenuAt(x, y, opciones)
+      theme.svelte.ts   tema claro/oscuro compartido (theme.dark, theme.toggle())
+      thumbs.ts         miniaturas bajo demanda (ThumbLoader y la acción use:thumb)
       Icon.svelte       iconos del juego común (assets/icons.json)
-      dom.js, icons.js  h() e ic(): solo para el código imperativo del lienzo
-      components/       Dialog y los diálogos de ui.js; controles: PasswordField, Checkbox,
+      dom.ts, icons.ts  h() e ic(): solo para el código imperativo del lienzo
+      components/       Dialog y los diálogos de ui.ts; controles: PasswordField, Checkbox,
                         RadioGroup, Fieldset, Banner, SubTabs, SectionCard, ToolHeader, Menu
     shell/              shell.svelte.js (estado de las pestañas), tools.js (registro de
                         herramientas), Home y RecentFiles (Inicio), dropzone.js
@@ -90,7 +90,9 @@ La interfaz se está pasando a TypeScript. Vite compila los `.ts` y los componen
 - **Migración por carpetas:** primero `lib/`, luego `shell/` y las herramientas pequeñas, y el visor
   al final. Mientras dura, los `.js` que quedan se aceptan sin comprobarlos (`allowJs`, sin
   `checkJs` en `tsconfig.json`). Al terminar se quita `allowJs`.
-- **Ya en TypeScript:** `texts/` y las barras del visor (`toolbars/`).
+- **Ya en TypeScript:** `lib/` (módulos y componentes), `texts/` y las barras del visor (`toolbars/`).
+- **Importaciones con la extensión real:** `'$lib/api.ts'`, `'./menu.svelte.ts'` (`allowImportingTsExtensions`).
+- **Respuestas de Python con tipo:** `call<Tipo>('servicio.metodo', …)` y `on<Tipo>('evento', fn)`; sin tipo devuelven `any`.
 - **Archivos nuevos:** en TypeScript (`.ts` y `lang="ts"`).
 - **Tipos de las props:** `let { view, actions }: { view: ToolbarView; actions: ToolbarActions } = $props();`.
 
@@ -122,9 +124,9 @@ texto se edita ahí, sin buscarlo por el código.
 ## Escribir componentes
 
 ```svelte
-<script>
-  import { call, on } from '$lib/api.js';
-  import { toast } from '$lib/ui.js';
+<script lang="ts">
+  import { call, on } from '$lib/api.ts';
+  import { toast } from '$lib/ui.ts';
 
   let { tool } = $props();          // entrada del registro (shell/tools.js)
   let merge = $state.raw(null);

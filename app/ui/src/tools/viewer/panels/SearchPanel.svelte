@@ -12,7 +12,7 @@
   import { tick } from 'svelte';
   import { MatchFlag } from '@embedpdf/models';
   import Icon from '$lib/Icon.svelte';
-  import { toast } from '$lib/ui.js';
+  import { toast } from '$lib/ui.ts';
 
   /**
    * `canvas`: el lienzo (su documento en EmbedPDF y sus capas de marcas);

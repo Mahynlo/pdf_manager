@@ -1,17 +1,23 @@
 <!-- Pide un texto (askText). Enter acepta; con `multiline`, Ctrl+Enter. -->
-<script>
+<script lang="ts">
   import Dialog from './Dialog.svelte';
 
-  let { title, label, initial = '', multiline = false, done } = $props();
-  let dialog;
-  let input = $state();
+  let { title, label, initial = '', multiline = false, done }: {
+    title: string;
+    label: string;
+    initial?: string;
+    multiline?: boolean;
+    done: (text: string | null) => void;
+  } = $props();
+  let dialog: Dialog;
+  let input = $state<HTMLInputElement | HTMLTextAreaElement>();
   // svelte-ignore state_referenced_locally
   let value = $state(initial); // texto inicial; luego lo edita el usuario
-  let result = null;
+  let result: string | null = null;
 
   $effect(() => {
-    input.focus();
-    input.select();
+    input!.focus();
+    input!.select();
   });
 
   function accept() {
@@ -19,7 +25,7 @@
     dialog.close();
   }
 
-  function onkeydown(ev) {
+  function onkeydown(ev: KeyboardEvent) {
     if (ev.key === 'Enter' && (!multiline || ev.ctrlKey)) {
       ev.preventDefault();
       accept();

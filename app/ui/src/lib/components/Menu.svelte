@@ -1,9 +1,9 @@
-<!-- Menú emergente abierto con openMenu()/openMenuAt() (ver menu.svelte.js). -->
-<script>
+<!-- Menú emergente abierto con openMenu()/openMenuAt() (ver menu.svelte.ts). -->
+<script lang="ts">
   import Icon from '../Icon.svelte';
-  import { closeMenu, menu } from '../menu.svelte.js';
+  import { closeMenu, menu, type MenuOption } from '../menu.svelte.ts';
 
-  let el = $state();
+  let el = $state<HTMLDivElement>();
 
   // Lo mantiene dentro de la ventana y enfoca la primera opción.
   $effect(() => {
@@ -13,14 +13,14 @@
     if (menu.anchor && menu.x + width > innerWidth - 4) left = menu.anchor.right - width;
     el.style.left = `${Math.max(4, left)}px`;
     el.style.top = `${Math.max(4, Math.min(menu.y, innerHeight - height - 4))}px`;
-    el.querySelector('.menu__item:not(:disabled)')?.focus();
+    el.querySelector<HTMLElement>('.menu__item:not(:disabled)')?.focus();
   });
 
   // Se escucha tras el clic que abrió el menú, para no cerrarlo en el acto.
   $effect(() => {
     if (!menu.items) return;
-    const onOutside = (ev) => el && !el.contains(ev.target) && closeMenu();
-    const onKey = (ev) => {
+    const onOutside = (ev: PointerEvent) => el && !el.contains(ev.target as Node) && closeMenu();
+    const onKey = (ev: KeyboardEvent) => {
       if (ev.key !== 'Escape') return;
       ev.preventDefault();
       closeMenu();
@@ -38,7 +38,7 @@
     };
   });
 
-  function select(item) {
+  function select(item: MenuOption) {
     closeMenu();
     item.onSelect?.();
   }

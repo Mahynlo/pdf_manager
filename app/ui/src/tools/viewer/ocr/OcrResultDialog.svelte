@@ -1,9 +1,9 @@
 <!-- «Resultado del Reconocimiento de Texto (OCR)»: copiar o guardar como TXT. -->
 <script>
-  import { call } from '$lib/api.js';
+  import { call } from '$lib/api.ts';
   import Dialog from '$lib/components/Dialog.svelte';
   import Icon from '$lib/Icon.svelte';
-  import { setStatus, toast } from '$lib/ui.js';
+  import { setStatus, toast } from '$lib/ui.ts';
 
   let { docId, text: initial, done } = $props();
   let dialog;

@@ -7,10 +7,10 @@
 //   · el teclado: Supr, Esc, Ctrl+D y las flechas (con Mayús, de 10 en 10 puntos);
 //   · doble clic en una nota o una marca de inserción: editar su texto (diálogo).
 import { PdfAnnotationSubtype as T } from '@embedpdf/models';
-import { h } from '$lib/dom.js';
-import { ic } from '$lib/icons.js';
-import { openMenu } from '$lib/menu.svelte.js';
-import { askText, toast } from '$lib/ui.js';
+import { h } from '$lib/dom.ts';
+import { ic } from '$lib/icons.ts';
+import { openMenu } from '$lib/menu.svelte.ts';
+import { askText, toast } from '$lib/ui.ts';
 import { FONT_SIZES, PRESET_COLORS, STROKE_WIDTHS } from './palette.js';
 
 const WIDTH_TYPES = new Set([T.SQUARE, T.CIRCLE, T.LINE, T.INK, T.POLYLINE, T.POLYGON]);

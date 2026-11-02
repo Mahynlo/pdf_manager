@@ -3,7 +3,7 @@
 // sistema, donde se eligen la impresora, las copias y la doble cara. Así funciona
 // igual en la ventana de escritorio y en un navegador. Las opciones las elige
 // PrintDialog.svelte.
-import { h } from '$lib/dom.js';
+import { h } from '$lib/dom.ts';
 
 /**
  * `pages`: índices a imprimir; `images`: url de cada una (blob:, se liberan al terminar);

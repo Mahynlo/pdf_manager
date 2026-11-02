@@ -3,10 +3,10 @@
   elegir uno para insertar. Resuelve { text, color, font_size } a insertar, o null.
 -->
 <script>
-  import { call } from '$lib/api.js';
+  import { call } from '$lib/api.ts';
   import Dialog from '$lib/components/Dialog.svelte';
   import Icon from '$lib/Icon.svelte';
-  import { toast } from '$lib/ui.js';
+  import { toast } from '$lib/ui.ts';
   import { DEFAULT_COLOR, DEFAULT_SIZE } from './stamps.js';
 
   let { done } = $props();

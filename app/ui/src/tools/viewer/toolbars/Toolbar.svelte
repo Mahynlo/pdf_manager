@@ -4,7 +4,7 @@
 -->
 <script lang="ts">
   import Icon from '$lib/Icon.svelte';
-  import { openMenu } from '$lib/menu.svelte.js';
+  import { openMenu, type MenuItem } from '$lib/menu.svelte.ts';
   import { t, tip } from '$texts';
   import { MODES } from '../canvas/layout.js';
 
@@ -26,7 +26,7 @@
 
   /** Lo que hace cada botón (`moreMenu()` da las entradas del menú ⋮). */
   interface ToolbarActions {
-    moreMenu(): unknown[];
+    moreMenu(): MenuItem[];
     first(): void;
     prev(): void;
     next(): void;
@@ -92,7 +92,7 @@
   }
 
   function zoomMenu(ev: MouseEvent & { currentTarget: HTMLButtonElement }) {
-    openMenu(ev.currentTarget.parentElement, [
+    openMenu(ev.currentTarget.parentElement!, [
       ...ZOOM_PRESETS.map((pct) => ({
         label: `${pct}%`, checked: Math.round(view.zoom * 100) === pct, onSelect: () => actions.setZoom(pct / 100),
       })),

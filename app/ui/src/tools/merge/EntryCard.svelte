@@ -1,7 +1,7 @@
 <!-- Tarjeta de un PDF fuente: cabecera con acciones, selección rápida, rango y páginas como chips. -->
 <script>
   import Icon from '$lib/Icon.svelte';
-  import { thumb } from '$lib/thumbs.js';
+  import { thumb } from '$lib/thumbs.ts';
 
   /** `actions`: { toggle, selectAll, invert, setRange, rotate, move, remove } (ver Merge.svelte). */
   let { entry, first, last, thumbs, actions } = $props();

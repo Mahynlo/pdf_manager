@@ -1,9 +1,9 @@
 <!-- Campo de contraseña con botón para mostrarla (PasswordLineEdit en Qt). -->
-<script>
+<script lang="ts">
   import Icon from '../Icon.svelte';
 
-  let { value = $bindable(''), placeholder = '', onenter } = $props();
-  let input;
+  let { value = $bindable(''), placeholder = '', onenter }: { value?: string; placeholder?: string; onenter?: () => void } = $props();
+  let input: HTMLInputElement;
   let shown = $state(false);
 
   export const focus = () => input.focus();

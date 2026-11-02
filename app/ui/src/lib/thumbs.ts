@@ -12,19 +12,26 @@
 const MAX_CACHED = 600; // ~15 KB por miniatura JPEG → ~9 MB como máximo
 const BATCH = 24; // páginas por llamada al backend
 
+/** Pide las miniaturas de `pages` del documento `id`: { página: url }. */
+export type ThumbFetch = (id: number, pages: number[]) => Promise<Record<string, string>>;
+
 export class ThumbLoader {
-  constructor(fetch, { release = () => {} } = {}) {
+  fetch: ThumbFetch;
+  release: (url: string) => void;
+  images = new Set<HTMLImageElement>(); // <img> enlazadas (se quitan al desmontarse)
+  cache = new Map<string, string>(); // "id:página:variante" -> data URL (orden de inserción = LRU)
+  pending = new Map<string, Set<number>>(); // "id:variante" -> Set(páginas)
+  timer = 0;
+  observer: IntersectionObserver;
+
+  constructor(fetch: ThumbFetch, { release = (_url: string) => {} } = {}) {
     this.fetch = fetch;
     this.release = release;
-    this.images = new Set(); // <img> enlazadas (se quitan al desmontarse)
-    this.cache = new Map(); // "id:página:variante" -> data URL (orden de inserción = LRU)
-    this.pending = new Map(); // "id:variante" -> Set(páginas)
-    this.timer = 0;
     this.observer = new IntersectionObserver((entries) => this._onVisible(entries), { rootMargin: '300px' });
   }
 
   /** Asocia un <img> a una página; se rellena al entrar en pantalla. */
-  bind(img, id, page, variant = 0) {
+  bind(img: HTMLImageElement, id: number, page: number, variant: number | string = 0): void {
     const key = `${id}:${page}:${variant}`;
     this.images.add(img);
     if (img.dataset.thumb === key) return;
@@ -42,13 +49,13 @@ export class ThumbLoader {
     }
   }
 
-  unbind(img) {
+  unbind(img: HTMLImageElement): void {
     this.images.delete(img);
     this.observer.unobserve(img);
   }
 
   /** Olvida las miniaturas de `id` (p. ej. al cambiar sus páginas). */
-  forget(id) {
+  forget(id: number): void {
     for (const [key, url] of [...this.cache]) {
       if (!key.startsWith(`${id}:`)) continue;
       this.cache.delete(key);
@@ -56,34 +63,34 @@ export class ThumbLoader {
     }
   }
 
-  disconnect() {
+  disconnect(): void {
     this.observer.disconnect();
     for (const url of this.cache.values()) this.release(url);
     this.cache.clear();
     clearTimeout(this.timer);
   }
 
-  _onVisible(entries) {
+  _onVisible(entries: IntersectionObserverEntry[]): void {
     for (const entry of entries) {
       if (!entry.isIntersecting) continue;
       this.observer.unobserve(entry.target);
-      const [id, page, variant] = entry.target.dataset.thumb.split(':').map(Number);
+      const [id, page, variant] = (entry.target as HTMLElement).dataset.thumb!.split(':').map(Number);
       const group = `${id}:${variant}`;
       if (!this.pending.has(group)) this.pending.set(group, new Set());
-      this.pending.get(group).add(page);
+      this.pending.get(group)!.add(page);
     }
     clearTimeout(this.timer);
-    this.timer = setTimeout(() => this._flush(), 30);
+    this.timer = window.setTimeout(() => this._flush(), 30);
   }
 
-  async _flush() {
+  async _flush(): Promise<void> {
     const groups = [...this.pending];
     this.pending.clear();
     for (const [group, pageSet] of groups) {
       const [id, variant] = group.split(':').map(Number);
       const pages = [...pageSet];
       for (let i = 0; i < pages.length; i += BATCH) {
-        let result;
+        let result: Record<string, string>;
         try {
           result = await this.fetch(id, pages.slice(i, i + BATCH));
         } catch {
@@ -98,7 +105,7 @@ export class ThumbLoader {
     }
   }
 
-  _get(key) {
+  _get(key: string): string | undefined {
     const url = this.cache.get(key);
     if (url) {
       this.cache.delete(key);
@@ -107,7 +114,7 @@ export class ThumbLoader {
     return url;
   }
 
-  _put(key, url) {
+  _put(key: string, url: string): void {
     // Las otras variantes de la misma página ya no se verán (p. ej. cambiaron sus anotaciones).
     const page = key.slice(0, key.lastIndexOf(':') + 1);
     for (const [other, old] of this.cache) {
@@ -118,15 +125,18 @@ export class ThumbLoader {
     }
     this.cache.set(key, url);
     if (this.cache.size <= MAX_CACHED) return;
-    const [oldest, old] = this.cache.entries().next().value;
+    const [oldest, old] = this.cache.entries().next().value!;
     this.cache.delete(oldest);
     this.release(old);
   }
 }
 
+/** Argumentos de la acción `thumb`: [cargador, documento, página, variante?]. */
+export type ThumbArgs = [ThumbLoader, number, number, (number | string)?];
+
 /** Acción de Svelte para una miniatura: `<img use:thumb={[loader, id, página, variante]} alt="">`. */
-export function thumb(img, args) {
-  const bind = ([loader, ...rest]) => loader.bind(img, ...rest);
+export function thumb(img: HTMLImageElement, args: ThumbArgs) {
+  const bind = ([loader, ...rest]: ThumbArgs) => loader.bind(img, ...rest);
   bind(args);
   return { update: bind, destroy: () => args[0].unbind(img) };
 }

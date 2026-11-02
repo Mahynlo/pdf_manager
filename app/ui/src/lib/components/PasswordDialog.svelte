@@ -1,12 +1,16 @@
 <!-- Pide la contraseña de un PDF (askPassword); `tryUnlock(pwd)` → null o mensaje de error. -->
-<script>
+<script lang="ts">
   import Icon from '../Icon.svelte';
   import Dialog from './Dialog.svelte';
   import PasswordField from './PasswordField.svelte';
 
-  let { name, tryUnlock, done } = $props();
-  let dialog;
-  let field;
+  let { name, tryUnlock, done }: {
+    name: string;
+    tryUnlock: (password: string) => Promise<string | null>;
+    done: (unlocked: boolean) => void;
+  } = $props();
+  let dialog: Dialog;
+  let field: PasswordField;
   let password = $state('');
   let error = $state('');
   let busy = $state(false);
@@ -14,7 +18,7 @@
 
   $effect(() => field.focus());
 
-  async function submit(ev) {
+  async function submit(ev: SubmitEvent) {
     ev.preventDefault();
     busy = true;
     const message = await tryUnlock(password);

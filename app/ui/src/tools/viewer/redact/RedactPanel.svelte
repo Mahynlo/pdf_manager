@@ -10,11 +10,11 @@
   Las opciones de búsqueda, el color y el perfil activo los guarda el servicio.
 -->
 <script>
-  import { call } from '$lib/api.js';
+  import { call } from '$lib/api.ts';
   import Checkbox from '$lib/components/Checkbox.svelte';
   import Icon from '$lib/Icon.svelte';
-  import { openMenu } from '$lib/menu.svelte.js';
-  import { askText, confirmDialog, openModal, setStatus, toast } from '$lib/ui.js';
+  import { openMenu } from '$lib/menu.svelte.ts';
+  import { askText, confirmDialog, openModal, setStatus, toast } from '$lib/ui.ts';
   import { TOOLS } from '../canvas/canvas.js';
   import ProfilesDialog from './ProfilesDialog.svelte';
 

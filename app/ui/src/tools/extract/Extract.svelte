@@ -4,11 +4,11 @@
 -->
 <script>
   import { onDestroy } from 'svelte';
-  import { call, on } from '$lib/api.js';
+  import { call, on } from '$lib/api.ts';
   import ToolHeader from '$lib/components/ToolHeader.svelte';
-  import { fileName } from '$lib/dom.js';
+  import { fileName } from '$lib/dom.ts';
   import Icon from '$lib/Icon.svelte';
-  import { askPassword, confirmDialog, toast } from '$lib/ui.js';
+  import { askPassword, confirmDialog, toast } from '$lib/ui.ts';
   import Criteria from './Criteria.svelte';
   import Results from './Results.svelte';
   import Targets from './Targets.svelte';

@@ -1,11 +1,11 @@
 <!-- Pestaña «Proteger»: cifrar un PDF con contraseña (AES-256) y permisos. -->
 <script>
-  import { call } from '$lib/api.js';
+  import { call } from '$lib/api.ts';
   import Banner from '$lib/components/Banner.svelte';
   import Checkbox from '$lib/components/Checkbox.svelte';
   import Fieldset from '$lib/components/Fieldset.svelte';
   import PasswordField from '$lib/components/PasswordField.svelte';
-  import { fileName } from '$lib/dom.js';
+  import { fileName } from '$lib/dom.ts';
   import Icon from '$lib/Icon.svelte';
   import FileBox from './FileBox.svelte';
   import Steps from './Steps.svelte';

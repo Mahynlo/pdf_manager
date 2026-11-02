@@ -4,13 +4,13 @@
 -->
 <script>
   import { onDestroy } from 'svelte';
-  import { call, on } from '$lib/api.js';
+  import { call, on } from '$lib/api.ts';
   import Checkbox from '$lib/components/Checkbox.svelte';
   import ToolHeader from '$lib/components/ToolHeader.svelte';
-  import { fileName } from '$lib/dom.js';
+  import { fileName } from '$lib/dom.ts';
   import Icon from '$lib/Icon.svelte';
-  import { ThumbLoader } from '$lib/thumbs.js';
-  import { askPassword, openModal, toast } from '$lib/ui.js';
+  import { ThumbLoader } from '$lib/thumbs.ts';
+  import { askPassword, openModal, toast } from '$lib/ui.ts';
   import EntryCard from './EntryCard.svelte';
   import Lightbox from './Lightbox.svelte';
   import PreviewGrid from './PreviewGrid.svelte';

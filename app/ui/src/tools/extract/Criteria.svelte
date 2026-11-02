@@ -3,13 +3,13 @@
   numérico». `params()` da los parámetros del modo activo.
 -->
 <script>
-  import { call } from '$lib/api.js';
+  import { call } from '$lib/api.ts';
   import Checkbox from '$lib/components/Checkbox.svelte';
   import RadioGroup from '$lib/components/RadioGroup.svelte';
   import SubTabs from '$lib/components/SubTabs.svelte';
   import Icon from '$lib/Icon.svelte';
-  import { openMenu } from '$lib/menu.svelte.js';
-  import { askPassword } from '$lib/ui.js';
+  import { openMenu } from '$lib/menu.svelte.ts';
+  import { askPassword } from '$lib/ui.ts';
 
   /** `job`: estado del servicio extract; `onState(job)` recibe el nuevo tras un cambio. */
   let { job, onState } = $props();

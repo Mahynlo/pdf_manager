@@ -5,11 +5,11 @@
 -->
 <script>
   import { tick } from 'svelte';
-  import { call } from '$lib/api.js';
+  import { call } from '$lib/api.ts';
   import Dialog from '$lib/components/Dialog.svelte';
   import RadioGroup from '$lib/components/RadioGroup.svelte';
   import Icon from '$lib/Icon.svelte';
-  import { toast } from '$lib/ui.js';
+  import { toast } from '$lib/ui.ts';
 
   let { docId, total, setBusy, onPage, done } = $props();
   let dialog;

@@ -10,10 +10,10 @@
 // marcas (`.sel-rect`) y se muestra la barra flotante con sus acciones. Las coordenadas
 // de EmbedPDF son de la página sin girar; las nuestras, de la página tal como se ve, en
 // puntos (como las de Python): las pasa `canvas.toView`.
-import { call } from '$lib/api.js';
-import { h } from '$lib/dom.js';
-import { ic } from '$lib/icons.js';
-import { setStatus, toast } from '$lib/ui.js';
+import { call } from '$lib/api.ts';
+import { h } from '$lib/dom.ts';
+import { ic } from '$lib/icons.ts';
+import { setStatus, toast } from '$lib/ui.ts';
 import { MARKUP_TOOLS, TOOLS } from './canvas.js';
 import { TEXT_MODE } from './embed.js';
 

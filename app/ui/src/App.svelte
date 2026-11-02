@@ -5,10 +5,10 @@
 -->
 <script>
   import Menu from '$lib/components/Menu.svelte';
-  import { feedback } from '$lib/feedback.svelte.js';
+  import { feedback } from '$lib/feedback.svelte.ts';
   import Icon from '$lib/Icon.svelte';
-  import { openMenu, openMenuAt } from '$lib/menu.svelte.js';
-  import { theme } from '$lib/theme.svelte.js';
+  import { openMenu, openMenuAt } from '$lib/menu.svelte.ts';
+  import { theme } from '$lib/theme.svelte.ts';
   import { enableFileDrop } from './shell/dropzone.js';
   import Home from './shell/Home.svelte';
   import { HOME, shell } from './shell/shell.svelte.js';

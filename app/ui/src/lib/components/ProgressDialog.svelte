@@ -1,9 +1,10 @@
 <!-- Progreso con «Cancelar» (progressDialog); `progress` lo actualiza quien lo abrió. -->
-<script>
+<script lang="ts">
+  import type { Progress } from '../dialogs.svelte.ts';
   import Dialog from './Dialog.svelte';
 
-  let { title, progress, done } = $props();
-  let dialog;
+  let { title, progress, done }: { title: string; progress: Progress; done: () => void } = $props();
+  let dialog: Dialog;
 
   $effect(() => {
     if (progress.closed) dialog.close();

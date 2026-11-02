@@ -5,7 +5,7 @@
 -->
 <script>
   import { onDestroy } from 'svelte';
-  import { thumb, ThumbLoader } from '$lib/thumbs.js';
+  import { thumb, ThumbLoader } from '$lib/thumbs.ts';
 
   /**
    * `revision` cambia con cada operación sobre las páginas (las miniaturas se vuelven a pedir);

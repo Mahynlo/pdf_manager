@@ -3,7 +3,7 @@
   arrastrando (pueden intercalarse documentos) y doble clic las amplía.
 -->
 <script>
-  import { thumb } from '$lib/thumbs.js';
+  import { thumb } from '$lib/thumbs.ts';
 
   /** `onReorder([[id, página], …])`; `onOpen(índice)`. */
   let { merge, thumbs, onReorder, onOpen } = $props();
