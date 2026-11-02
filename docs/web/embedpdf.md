@@ -36,12 +36,12 @@ página. Las anotaciones las edita EmbedPDF en su copia (ver «Anotaciones», en
 2. Los bytes viajan en binario por un servidor local de un solo uso (`app/byte_server.py`, `Host.share_bytes`):
    - solo escucha en 127.0.0.1;
    - cada dato lleva un código aleatorio y caduca al primer uso o a los 2 minutos.
-3. `canvas.js` los abre en EmbedPDF con su gestor de documentos (`openDocumentBuffer`). Cuando
+3. `canvas.ts` los abre en EmbedPDF con su gestor de documentos (`openDocumentBuffer`). Cuando
    cambian las claves de página (girar, mover, insertar, censurar), abre la versión nueva y, en
    cuanto está lista, la pone a la vista y cierra la anterior. Mientras tanto se sigue viendo la anterior.
 
 **Sin conexión a internet:**
-- `pdfium.wasm` va dentro de la app (`import … from '@embedpdf/pdfium/pdfium.wasm?url'`, en `embed.js`);
+- `pdfium.wasm` va dentro de la app (`import … from '@embedpdf/pdfium/pdfium.wasm?url'`, en `embed.ts`);
   - su URL se pasa absoluta (`new URL(wasmUrl, location.href)`): el motor corre en un *worker* creado
     desde un `blob:` y no resuelve rutas relativas. Con `--dev`, Vite la da como `/node_modules/…` y el
     motor se quedaba esperando sin error: no se veía ninguna página;
@@ -54,11 +54,11 @@ página. Las anotaciones las edita EmbedPDF en su copia (ver «Anotaciones», en
 
 | Archivo | Qué hace |
 |---|---|
-| `embed.js` | `registry()`: el registro de EmbedPDF, uno para toda la app, con el motor y los complementos: gestor de documentos, `viewport`, `scroll`, `spread`, `render`, `tiling` y `zoom` |
+| `embed.ts` | `registry()`: el registro de EmbedPDF, uno para toda la app, con el motor y los complementos: gestor de documentos, `viewport`, `scroll`, `spread`, `render`, `tiling` y `zoom` |
 | `EmbedRoot.svelte` | La raíz `<EmbedPDF>` de ese registro; no dibuja nada |
 | `PdfPages.svelte` | Uno por visor: registra nuestro contenedor como `Viewport` y dibuja las páginas con `Scroller`. `show(id)` cambia el documento a la vista |
 | `PdfPage.svelte` | Una página: imagen de fondo (`RenderLayer`) y mosaico (`TilingLayer`) dentro de `Rotate`, y nuestras capas encima |
-| `canvas.js` | `PageCanvas`: la misma API de antes (zoom, modos, ir a página, coordenadas, marcas) sobre las capacidades de EmbedPDF |
+| `canvas.ts` | `PageCanvas`: la misma API de antes (zoom, modos, ir a página, coordenadas, marcas) sobre las capacidades de EmbedPDF |
 
 **Un registro para todos los visores:** los componentes de Svelte de EmbedPDF 2.15.1 leen el registro
 de una variable global, así que solo puede haber un `<EmbedPDF>`. Con uno por visor, al abrir un segundo
@@ -87,13 +87,13 @@ al cerrar la pestaña. Las pestañas ocultas no colocan sus páginas hasta que s
 - La escala de EmbedPDF son píxeles por punto; nuestro 100 % son 2 px por punto, como en Qt (`UNIT`).
 - **Ajustar ancho / página** usan los modos de EmbedPDF y se mantienen: al cambiar el tamaño de la
   ventana, abrir el panel lateral o girar una página, el zoom se recalcula. Antes se ajustaba una sola vez.
-- **Ctrl+rueda** la lleva `canvas.js`: un paso de ratón es ×1,25, como antes. El trackpad da pasos
+- **Ctrl+rueda** la lleva `canvas.ts`: un paso de ratón es ×1,25, como antes. El trackpad da pasos
   más finos. La de EmbedPDF duplica el zoom en cada paso de ratón.
 - **Pellizco** en pantallas táctiles: de EmbedPDF (`ZoomGestureWrapper`). Es nuevo.
 - **Modos de vista:**
   - Continuo: estrategia vertical de EmbedPDF.
   - Página única y doble página son paginados: se ve una página o un par, y la rueda pasa de
-    página en el borde. EmbedPDF no los trae; `embed.js` añade al complemento de scroll una
+    página en el borde. EmbedPDF no los trae; `embed.ts` añade al complemento de scroll una
     estrategia `paged` que muestra solo una fila (`showRow`).
   - Doble página usa el complemento Spread (pares 1-2, 3-4…).
 
@@ -148,7 +148,7 @@ Se queda: EmbedPDF no tiene operaciones de página (ver «Operaciones de página
 - EmbedPDF (complemento Selection, con el gestor de interacción) calcula la selección con el texto
   que PDFium lee del documento: arrastrar (también entre páginas), doble clic (palabra), triple clic
   (línea, nuevo) y Ctrl+A (`setSelection` de la página entera). También da el texto seleccionado.
-- `selection.js` dibuja la selección con nuestras marcas (`.sel-rect`) y muestra nuestra barra flotante
+- `selection.ts` dibuja la selección con nuestras marcas (`.sel-rect`) y muestra nuestra barra flotante
   (copiar, resaltar, subrayar, tachar, censurar, buscar, Google, explicar con IA). Con las
   herramientas resaltar, subrayar y tachar, al soltar se crea la anotación, como antes.
 - Desde el paso 4, la selección da a las anotaciones y a la censura sus partes
@@ -169,9 +169,9 @@ a cargar el documento (`canvas.reload`).
 - Con las herramientas de texto (seleccionar, resaltar, subrayar, tachar) el gestor de interacción
   está en el modo de texto; con las demás, en `viewer-tools`, donde la selección está apagada.
 - EmbedPDF solo termina un arrastre con el `pointerup` de la página donde empezó. Si se suelta en
-  otra página, entre páginas o fuera del lienzo, lo termina `selection.js`.
+  otra página, entre páginas o fuera del lienzo, lo termina `selection.ts`.
 
-**Coordenadas:** las de EmbedPDF son de la página sin girar; `selection.js` las pasa a las de la página
+**Coordenadas:** las de EmbedPDF son de la página sin girar; `selection.ts` las pasa a las de la página
 tal como se ve (`transformRect`), que son las de nuestras capas y las de Python.
 
 **Comprobado** con ratón y teclado reales por CDP, en la app compilada y con `--dev` (`sel_e2e`):
@@ -254,7 +254,7 @@ sellos y leyendas, y que tras dibujar una forma se vuelve al puntero con ella se
 | Trazos | Pluma, marcador (translúcido) y trazo fino |
 | Texto e imagen | Texto libre; con clic derecho, llamada (texto con flecha) y nota; imagen (elige un archivo y se coloca con un clic) |
 
-Las de texto seleccionado las crea `annotations.js` (`markup`), como antes; las demás son las
+Las de texto seleccionado las crea `annotations.ts` (`markup`), como antes; las demás son las
 herramientas de EmbedPDF con nuestro estilo. Indicar y reemplazar texto piden el texto en un
 diálogo; con doble clic (o «Editar texto» en la barra) se cambia, como el de una nota.
 No se incluyen los enlaces de EmbedPDF: sus destinos apuntan a páginas y Python conserva los del
@@ -280,7 +280,7 @@ tirador de giro de EmbedPDF), y encima mientras se escribe un texto libre.
 **Reparto con Python:**
 - EmbedPDF las edita en su copia del documento. Antes de lo que necesita el documento al día en
   Python (guardar, «Guardar como», exportar una página, cambiar páginas, censurar, OCR),
-  `annotations.js` (`sync`) sube la copia (`saveAsCopy`) por el servidor local
+  `annotations.ts` (`sync`) sube la copia (`saveAsCopy`) por el servidor local
   (`ByteServer.expect`, `POST`, `Host.upload_url`) y `viewer.sync_annotations` toma de ella solo las
   anotaciones (`pdf_core/annot_transfer.py`): se injertan como objetos PDF, sin perder tipos ni
   apariencias. El resto del documento (contenido, cifrado) sigue siendo el de Python, y el texto de
@@ -296,11 +296,11 @@ tirador de giro de EmbedPDF), y encima mientras se escribe un texto libre.
 
 | Archivo | Qué hace |
 |---|---|
-| `palette.js` | Colores y estilos (solo datos; también los valores iniciales de las herramientas en `embed.js`) |
-| `annotations.js` | `Annotations`: estilo por visor, marcas de texto, sellos, crear/cambiar/borrar, deshacer, aviso de cambios y `sync` con Python |
-| `editing.js` | `AnnotationEditor`: barra de propiedades (color, grosor, letra, relleno, editar nota, traer al frente, enviar al fondo, duplicar, eliminar), teclado (Supr, Esc, Ctrl+D, flechas) y doble clic en una nota |
+| `palette.ts` | Colores y estilos (solo datos; también los valores iniciales de las herramientas en `embed.ts`) |
+| `annotations.ts` | `Annotations`: estilo por visor, marcas de texto, sellos, crear/cambiar/borrar, deshacer, aviso de cambios y `sync` con Python |
+| `editing.ts` | `AnnotationEditor`: barra de propiedades (color, grosor, letra, relleno, editar nota, traer al frente, enviar al fondo, duplicar, eliminar), teclado (Supr, Esc, Ctrl+D, flechas) y doble clic en una nota |
 | `PdfPage.svelte` | `AnnotationLayer` de EmbedPDF dentro de cada página |
-| `canvas.js` | `ANNOTATION_TOOL`: herramienta de EmbedPDF de cada herramienta de dibujo (rectángulo → `square`, flecha → `lineArrow`, pluma y trazo fino → `ink`, texto → `freeText`, nota → `textComment`) |
+| `canvas.ts` | `ANNOTATION_TOOL`: herramienta de EmbedPDF de cada herramienta de dibujo (rectángulo → `square`, flecha → `lineArrow`, pluma y trazo fino → `ink`, texto → `freeText`, nota → `textComment`) |
 
 **Lo que cambia para quien usa el visor:**
 - varias anotaciones se seleccionan con Ctrl+clic (antes, Mayús+clic);
@@ -370,7 +370,7 @@ mueve, se redimensiona (las de área), se borra (Supr) y se deshace (Ctrl+Z) com
 anotaciones. Antes, la vista previa era una capa nuestra que no se podía tocar.
 
 **Quién hace qué:**
-- **Marcas** (`tools/viewer/redact/redaction.js`, `RedactionMarks`). Las ponen:
+- **Marcas** (`tools/viewer/redact/redaction.ts`, `RedactionMarks`). Las ponen:
   - los términos, patrones y perfiles del panel: Python busca dónde aparecen (`redact.find`, con
     nuestras reglas: sin tildes, palabra completa, regex, texto de OCR) y se pone una marca en cada
     coincidencia;
@@ -406,7 +406,7 @@ perfiles (guardan los términos del panel, no las selecciones ni las áreas), co
 **Piezas:** `PdfPage.svelte` da a la capa de anotaciones los dibujantes de las marcas
 (`annotationRenderers={redactRenderers}`) y monta `RedactionLayer` (lo que se dibuja mientras se
 marca) y `MarqueeSelection` (el rectángulo arrastrando: sin él, la herramienta no marca áreas; en la
-selección de texto está apagado). Mientras se marca, `selection.js` no muestra su barra: la selección
+selección de texto está apagado). Mientras se marca, `selection.ts` no muestra su barra: la selección
 es del complemento de censura.
 
 **Comprobado** (scratchpad `redact_e2e.py`, 17 comprobaciones, también en modo desarrollo): término
@@ -420,7 +420,7 @@ En Python, las pruebas `test_redact_*` (las marcas las pone la prueba en la copi
 ### Imprimir (hecho): las páginas las dibuja PDFium
 
 Se queda nuestro diálogo (rango, subconjunto, orden inverso, orientación por página, color, escala
-y vista previa) y la impresión del navegador (`print.js`: `#print-root` y `window.print()`). Lo que
+y vista previa) y la impresión del navegador (`print.ts`: `#print-root` y `window.print()`). Lo que
 cambia es quién dibuja las hojas: antes Python (`viewer.print_images`, tras pasarle las anotaciones);
 ahora PDFium en el navegador (`canvas.pageImages`: `renderPage` con las anotaciones, a 150 ppp, o a
 60 para la vista previa; en grises, pasando la imagen por un canvas). Así sale lo mismo que se ve,

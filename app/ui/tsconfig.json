@@ -1,17 +1,13 @@
 {
   // TypeScript de la interfaz (ver docs/web/svelte.md). Vite compila los .ts y lang="ts" sin más
   // configuración; `pnpm check` (svelte-check) comprueba los tipos.
-  // Migración a TypeScript en curso: los .js que quedan se aceptan (allowJs) sin comprobarlos
-  // (checkJs). Al terminar se quita allowJs.
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
     "strict": true,
-    "allowJs": true,
-    "checkJs": false,
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
@@ -23,5 +19,5 @@
       "$texts": ["./src/texts/index.ts"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.js", "src/**/*.svelte"]
+  "include": ["src/**/*.ts", "src/**/*.svelte"]
 }

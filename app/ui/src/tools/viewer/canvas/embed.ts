@@ -8,16 +8,16 @@
 // más: `paged`, que muestra solo una fila (una página o un par) y deja cambiar de fila
 // con `showRow`.
 import { mount } from 'svelte';
-import { createPluginRegistration } from '@embedpdf/core';
+import { createPluginRegistration, type PluginRegistry } from '@embedpdf/core';
 import { AnnotationPluginPackage, LockModeType } from '@embedpdf/plugin-annotation';
 import { DocumentManagerPluginPackage } from '@embedpdf/plugin-document-manager';
 import { ExportPluginPackage } from '@embedpdf/plugin-export';
 import { HistoryPluginPackage } from '@embedpdf/plugin-history';
-import { InteractionManagerPluginPackage } from '@embedpdf/plugin-interaction-manager';
+import { InteractionManagerPluginPackage, type InteractionManagerPlugin } from '@embedpdf/plugin-interaction-manager';
 import { RedactionPluginPackage } from '@embedpdf/plugin-redaction';
 import { RenderPluginPackage } from '@embedpdf/plugin-render';
 import { RotatePluginPackage } from '@embedpdf/plugin-rotate';
-import { SCROLL_PLUGIN_ID, ScrollPlugin, ScrollPluginPackage, ScrollStrategy } from '@embedpdf/plugin-scroll';
+import { SCROLL_PLUGIN_ID, ScrollPlugin, ScrollPluginPackage, ScrollStrategy, type ScrollPluginConfig } from '@embedpdf/plugin-scroll';
 import { SearchPluginPackage } from '@embedpdf/plugin-search';
 import { SelectionPluginPackage } from '@embedpdf/plugin-selection';
 import { SpreadPluginPackage } from '@embedpdf/plugin-spread';
@@ -25,8 +25,9 @@ import { TilingPluginPackage } from '@embedpdf/plugin-tiling';
 import { ViewportPluginPackage } from '@embedpdf/plugin-viewport';
 import { ZoomPluginPackage } from '@embedpdf/plugin-zoom';
 import wasmUrl from '@embedpdf/pdfium/pdfium.wasm?url';
+import { t } from '$texts';
+import { DEFAULT_STYLE as STYLE, PRESET_COLORS } from '../annotations/palette.ts';
 import EmbedRoot from './EmbedRoot.svelte';
-import { DEFAULT_STYLE as STYLE, PRESET_COLORS } from '../annotations/palette.js';
 
 export const UNIT = 2; // píxeles por punto PDF al 100 % (como el lienzo Qt: una carta mide 1224 px)
 export const ZOOM_MIN = 0.25;
@@ -34,16 +35,17 @@ export const ZOOM_MAX = 4;
 export const PAGED = 'paged';
 const PAGE_GAP = 12; // puntos entre páginas (24 px al 100 %)
 export const VIEWPORT_GAP = 40; // px alrededor del contenido; también el margen al ajustar
-const IMAGE = { type: 'image/webp', quality: 0.92 };
+const IMAGE = { type: 'image/webp', quality: 0.92 } as const;
 // Modos del gestor de interacción: con el de texto (el predeterminado de EmbedPDF) se
 // selecciona texto; con el de las demás herramientas, no (dibujan otros módulos).
 export const TEXT_MODE = 'pointerMode';
 export const OTHER_MODE = 'viewer-tools';
 
 // Herramientas de anotación de EmbedPDF con nuestros valores iniciales (se mezclan con los
-// suyos). Cada visor les aplica después su propio estilo al activarlas (annotations.js).
-const markup = (color) => ({ defaults: { strokeColor: color, color } });
+// suyos). Cada visor les aplica después su propio estilo al activarlas (annotations.ts).
+const markup = (color: string) => ({ defaults: { strokeColor: color, color } });
 const shape = { defaults: { strokeColor: STYLE.shapeColor, strokeWidth: STYLE.shapeWidth } };
+const TEXT = t.viewer.canvas.defaultText;
 const ANNOTATION_TOOLS = [
   { id: 'highlight', ...markup(STYLE.highlightColor) },
   { id: 'underline', ...markup(STYLE.underlineColor) },
@@ -59,20 +61,20 @@ const ANNOTATION_TOOLS = [
   { id: 'inkHighlighter', defaults: { strokeColor: STYLE.highlightColor, strokeWidth: STYLE.markerWidth } },
   {
     id: 'freeText',
-    defaults: { contents: 'Texto', fontColor: STYLE.penColor, fontSize: STYLE.fontSize },
-    clickBehavior: { enabled: true, defaultSize: { width: 120, height: 22 }, defaultContent: 'Texto' },
+    defaults: { contents: TEXT, fontColor: STYLE.penColor, fontSize: STYLE.fontSize },
+    clickBehavior: { enabled: true, defaultSize: { width: 120, height: 22 }, defaultContent: TEXT },
   },
   {
     id: 'freeTextCallout',
     defaults: {
-      contents: 'Texto', fontColor: STYLE.penColor, fontSize: STYLE.fontSize, strokeColor: STYLE.penColor, strokeWidth: 1,
+      contents: TEXT, fontColor: STYLE.penColor, fontSize: STYLE.fontSize, strokeColor: STYLE.penColor, strokeWidth: 1,
     },
   },
   { id: 'textComment', defaults: { strokeColor: STYLE.noteColor, color: STYLE.noteColor } },
   { id: 'link', categories: ['link'] }, // bloqueados (ver `locked`)
 ];
 
-let registryPromise = null;
+let registryPromise: Promise<PluginRegistry> | null = null;
 
 /**
  * El registro de EmbedPDF, uno para toda la app: cada visor abre en él su documento con
@@ -80,18 +82,18 @@ let registryPromise = null;
  * el registro de una variable global (con dos `<EmbedPDF>`, el último pisa al primero).
  * Los componentes (PdfPages.svelte) se montan después de que esté listo.
  */
-export function registry() {
+export function registry(): Promise<PluginRegistry> {
   registryPromise ??= (async () => {
     // El motor PDFium corre en un worker. El WASM va dentro de la app: sin internet. Su
     // URL va absoluta: el worker nace de un blob: y no resolvería una relativa (en
     // desarrollo Vite la da como /node_modules/…, y el motor se quedaba esperando).
     const { createPdfiumEngine } = await import('@embedpdf/engines/pdfium-worker-engine');
     const engine = await createPdfiumEngine(new URL(wasmUrl, location.href).href, { fontFallback: null });
-    const embed = await new Promise((resolve) => {
+    const embed = await new Promise<PluginRegistry>((resolve) => {
       mount(EmbedRoot, { target: document.createElement('div'), props: { engine, plugins: plugins(), onReady: resolve } });
     });
     // Sin `wantsRawTouch`: en pantallas táctiles el dedo sigue desplazando las páginas.
-    const interaction = embed.getPlugin('interaction-manager').provides();
+    const interaction = embed.getPlugin<InteractionManagerPlugin>('interaction-manager')!.provides();
     for (const id of [TEXT_MODE, OTHER_MODE]) interaction.registerMode({ id, scope: 'page', exclusive: false, wantsRawTouch: false });
     return embed;
   })();
@@ -117,9 +119,9 @@ function plugins() {
       tools: ANNOTATION_TOOLS,
       colorPresets: PRESET_COLORS.map(([color]) => color),
       locked: { type: LockModeType.Include, categories: ['link'] },
-    }),
+    } as Parameters<typeof AnnotationPluginPackage.create>[1]),
     // Censura: las marcas pendientes son anotaciones (se revisan, se mueven, se borran y se
-    // deshacen como las demás); la censura la aplica Python (redaction.js).
+    // deshacen como las demás); la censura la aplica Python (redaction.ts).
     createPluginRegistration(RedactionPluginPackage, { useAnnotationMode: true, drawBlackBoxes: true }),
     createPluginRegistration(ExportPluginPackage, { defaultFileName: 'documento.pdf' }),
     // Sin las anotaciones: las dibuja su capa encima (si no, saldrían dos veces).
@@ -133,15 +135,46 @@ function plugins() {
   ];
 }
 
+/**
+ * Estrategia de colocación del complemento de scroll. Sus métodos son protegidos o internos en
+ * EmbedPDF 2.15.1: aquí solo se declaran los que sustituye la estrategia paginada.
+ */
+interface Strategy {
+  paged?: boolean;
+  row?: number;
+  createVirtualItems(spreads: any[]): any[];
+  getTotalContentSize(items: any[]): { width: number; height: number };
+  getVisibleRange(viewport: any, items: any[], scale: number): { start: number; end: number };
+  handleScroll(viewport: any, items: any[], scale: number): Record<string, unknown>;
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+/**
+ * Lo interno de ScrollPlugin que usa el visor: crear la estrategia de cada documento, la de
+ * cada documento abierto y volver a colocar sus páginas. Es privado en EmbedPDF 2.15.1:
+ * revisarlo al actualizarlo.
+ */
+interface ScrollInternals {
+  strategies: Map<string, Strategy>;
+  createStrategy(type: string): Strategy;
+  refreshDocumentLayout(documentId: string): void;
+}
+
+/** Lo público de ScrollPlugin (`keyof` deja fuera lo privado) más lo interno que se usa. */
+export type ViewerScroll = Pick<ScrollPlugin, keyof ScrollPlugin> & ScrollInternals & { showRow(documentId: string, row: number): void };
+
+const ScrollBase = ScrollPlugin as unknown as new (id: string, registry: PluginRegistry, config?: ScrollPluginConfig) =>
+  Pick<ScrollPlugin, keyof ScrollPlugin> & ScrollInternals;
+
 /** Scroll de EmbedPDF con la estrategia paginada además de la vertical. */
-class ViewerScrollPlugin extends ScrollPlugin {
-  createStrategy(type) {
+export class ViewerScrollPlugin extends ScrollBase {
+  createStrategy(type: string): Strategy {
     const vertical = super.createStrategy(ScrollStrategy.Vertical);
     return type === PAGED ? pagedStrategy(vertical) : vertical;
   }
 
   /** Muestra la fila `row` en el modo paginado (no hace nada en el continuo). */
-  showRow(documentId, row) {
+  showRow(documentId: string, row: number): void {
     const strategy = this.strategies.get(documentId);
     if (!strategy?.paged || strategy.row === row) return;
     strategy.row = row;
@@ -151,31 +184,32 @@ class ViewerScrollPlugin extends ScrollPlugin {
 
 const ViewerScrollPackage = {
   ...ScrollPluginPackage,
-  create: (registry, config) => new ViewerScrollPlugin(SCROLL_PLUGIN_ID, registry, config),
+  create: (registry: PluginRegistry, config?: ScrollPluginConfig) =>
+    new ViewerScrollPlugin(SCROLL_PLUGIN_ID, registry, config) as unknown as ScrollPlugin,
 };
 
 /**
  * La estrategia vertical con todas las filas en el origen y solo la fila `row` a la vista:
  * el contenido mide lo que esa fila y el scroll se mueve dentro de ella.
  */
-function pagedStrategy(vertical) {
-  const strategy = Object.create(vertical);
-  const current = (items) => items[Math.min(strategy.row, items.length - 1)];
+function pagedStrategy(vertical: Strategy): Strategy {
+  const strategy: Strategy = Object.create(vertical);
+  const current = <T>(items: T[]) => items[Math.min(strategy.row ?? 0, items.length - 1)] as T | undefined;
   return Object.assign(strategy, {
     paged: true,
     row: 0,
-    createVirtualItems(spreads) {
+    createVirtualItems(this: Strategy, spreads: unknown[]) {
       return vertical.createVirtualItems.call(this, spreads).map((item) => ({ ...item, y: 0, offset: 0 }));
     },
-    getTotalContentSize(items) {
+    getTotalContentSize(items: { width: number; height: number }[]) {
       const item = current(items);
       return item ? { width: item.width, height: item.height } : { width: 0, height: 0 };
     },
-    getVisibleRange(_viewport, items) {
-      const row = Math.min(strategy.row, items.length - 1);
+    getVisibleRange(_viewport: unknown, items: unknown[]) {
+      const row = Math.min(strategy.row ?? 0, items.length - 1);
       return { start: row, end: row };
     },
-    handleScroll(viewport, items, scale) {
+    handleScroll(this: Strategy, viewport: unknown, items: unknown[], scale: number) {
       return { ...vertical.handleScroll.call(this, viewport, items, scale), startSpacing: 0, endSpacing: 0 };
     },
   });

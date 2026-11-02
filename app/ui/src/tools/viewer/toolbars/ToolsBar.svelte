@@ -5,8 +5,8 @@
 <script lang="ts">
   import Icon from '$lib/Icon.svelte';
   import { openMenu } from '$lib/menu.svelte.ts';
-  import { TOOLS } from '../canvas/canvas.js';
-  import { PALETTE } from '../annotations/palette.js';
+  import { TOOLS } from '../canvas/canvas.ts';
+  import { PALETTE } from '../annotations/palette.ts';
   import { t } from '$texts';
 
   /** `tool`: herramienta activa; `setTool(t)`, `setColor(hex)`, `stamps(botón)`: menú «Sellos». */
@@ -53,7 +53,7 @@
   ];
 
   // El botón de texto también vale para la llamada y la nota (clic derecho, como en Qt).
-  const TEXT_VARIANTS = new Set([TOOLS.TEXT, TOOLS.CALLOUT, TOOLS.NOTE]);
+  const TEXT_VARIANTS = new Set<string>([TOOLS.TEXT, TOOLS.CALLOUT, TOOLS.NOTE]);
   const isActive = (key: string) => tool === key || (key === TOOLS.TEXT && TEXT_VARIANTS.has(tool));
 
   function textMenu(ev: MouseEvent & { currentTarget: HTMLElement }, key: string) {

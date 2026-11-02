@@ -6,7 +6,7 @@
   import Icon from '$lib/Icon.svelte';
   import { openMenu, type MenuItem } from '$lib/menu.svelte.ts';
   import { t, tip } from '$texts';
-  import { MODES } from '../canvas/layout.js';
+  import { MODES } from '../canvas/layout.ts';
 
   const T = t.viewer.toolbar;
   const ZOOM_PRESETS = [25, 50, 75, 100, 125, 150, 200, 300, 400];

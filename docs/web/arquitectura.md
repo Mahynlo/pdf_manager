@@ -132,7 +132,7 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
   entran en su capa de texto: selección, búsqueda y exportar texto las ven sin cambios. Los lotes los
   recorre el frontend página a página (`ocr.page`), así se puede cancelar entre una y otra.
 - **Censura**: lo que se censura son las marcas de EmbedPDF (anotaciones `Redact`, ver
-  `redaction.js`), que se revisan en la página. El servicio `redact` busca dónde aparece cada término
+  `redaction.ts`), que se revisan en la página. El servicio `redact` busca dónde aparece cada término
   (`find`) y guarda las opciones, el color y el perfil activo en el propio documento abierto
   (`_OpenDocument.extras`). Al aplicar, las marcas llegan con las anotaciones y
   `ViewerService.apply_redaction_marks` las aplica: borra el contenido de debajo (también las

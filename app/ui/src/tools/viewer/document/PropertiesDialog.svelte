@@ -1,9 +1,14 @@
 <!-- Propiedades del documento (viewer.properties): título y filas etiqueta/valor. -->
-<script>
+<script lang="ts">
   import Dialog from '$lib/components/Dialog.svelte';
+  import { t } from '$texts';
 
-  let { title, rows, done } = $props();
-  let dialog;
+  let { title, rows, done }: {
+    title: string;
+    rows: { label: string; value: string }[];
+    done: () => void;
+  } = $props();
+  let dialog: Dialog;
 </script>
 
 <Dialog bind:this={dialog} class="properties-dialog" onclose={() => done()}>
@@ -14,5 +19,7 @@
       <dd>{value}</dd>
     {/each}
   </dl>
-  <div class="dialog__actions"><button class="btn btn--primary" type="button" onclick={() => dialog.close()}>Aceptar</button></div>
+  <div class="dialog__actions">
+    <button class="btn btn--primary" type="button" onclick={() => dialog.close()}>{t.viewer.properties.accept}</button>
+  </div>
 </Dialog>

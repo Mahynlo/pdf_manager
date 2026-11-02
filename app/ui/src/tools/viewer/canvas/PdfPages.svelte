@@ -1,11 +1,12 @@
 <!--
   Páginas del visor dibujadas por EmbedPDF dentro del lienzo (`canvas.el`, que es el
-  contenedor con scroll). canvas.js lo monta cuando el registro de la app está listo
+  contenedor con scroll). canvas.ts lo monta cuando el registro de la app está listo
   (los hooks de EmbedPDF lo leen al crearse). Solo se montan las páginas a la vista: el
   Scroller las crea y las quita al desplazarse. Cada página es un PdfPage.svelte.
 -->
-<script>
+<script lang="ts">
   import { setContext } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import { useDocumentState } from '@embedpdf/core/svelte';
   import { Scroller } from '@embedpdf/plugin-scroll/svelte';
   import { useIsViewportGated, useViewportRef } from '@embedpdf/plugin-viewport/svelte';
@@ -14,11 +15,12 @@
 
   const BASE_SCALE = 1; // px por punto de la imagen de fondo (sin contar la densidad de pantalla)
 
-  let { element, overlay } = $props();
-  let documentId = $state(null);
+  /** `element`: el contenedor con scroll del lienzo; `overlay(i)`: engancha la capa del visor de la página `i`. */
+  let { element, overlay }: { element: HTMLDivElement; overlay: (index: number) => Attachment<HTMLElement> } = $props();
+  let documentId = $state<string | null>(null);
 
-  /** Pone a la vista el documento `id` del registro (canvas.js, cuando ya está cargado). */
-  export function show(id) {
+  /** Pone a la vista el documento `id` del registro (canvas.ts, cuando ya está cargado). */
+  export function show(id: string) {
     documentId = id;
   }
 
@@ -35,11 +37,11 @@
 </script>
 
 {#if documentId && !gated.current}
-  <!-- Ctrl+rueda lo lleva canvas.js: aquí cada paso de ratón duplicaría el zoom. -->
+  <!-- Ctrl+rueda lo lleva canvas.ts: aquí cada paso de ratón duplicaría el zoom. -->
   <ZoomGestureWrapper {documentId} class="pdf-canvas__inner" enableWheel={false}>
     <Scroller {documentId}>
       {#snippet renderPage(page)}
-        <PdfPage {documentId} pageIndex={page.pageIndex} {baseScale} {overlay} />
+        <PdfPage documentId={documentId!} pageIndex={page.pageIndex} {baseScale} {overlay} />
       {/snippet}
     </Scroller>
   </ZoomGestureWrapper>

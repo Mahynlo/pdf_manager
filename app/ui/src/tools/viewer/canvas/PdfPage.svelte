@@ -7,9 +7,9 @@
     de censura pendientes son anotaciones: las dibuja con los dibujantes del complemento de
     censura, y RedactionLayer, el rectángulo o la selección mientras se marcan;
   - MarqueeSelection: el rectángulo arrastrando de la selección, que solo usa «Marcar» (censura)
-    para marcar un área (en la selección de texto está apagado, ver embed.js);
+    para marcar un área (en la selección de texto está apagado, ver embed.ts);
   - las capas del visor (`overlay`): marcas de selección, búsqueda, OCR o censura. Son
-    elementos que guarda canvas.js y aquí solo se enganchan a la página.
+    elementos que guarda canvas.ts y aquí solo se enganchan a la página.
 
   La imagen, el mosaico y las anotaciones van dentro de:
   - Rotate, que gira con CSS la página según su /Rotate (EmbedPDF la dibuja sin girar);
@@ -23,7 +23,7 @@
   página: el Scroller da objetos de página nuevos en cada cambio de su estado (al
   seleccionar, por ejemplo) y, leídos directamente, el enganche se repetía cada vez.
 -->
-<script>
+<script lang="ts">
   import { AnnotationLayer } from '@embedpdf/plugin-annotation/svelte';
   import { PagePointerProvider } from '@embedpdf/plugin-interaction-manager/svelte';
   import { RedactionLayer, redactRenderers } from '@embedpdf/plugin-redaction/svelte';
@@ -31,8 +31,15 @@
   import { RenderLayer } from '@embedpdf/plugin-render/svelte';
   import { Rotate } from '@embedpdf/plugin-rotate/svelte';
   import { TilingLayer } from '@embedpdf/plugin-tiling/svelte';
+  import type { Attachment } from 'svelte/attachments';
+  import { t } from '$texts';
 
-  let { documentId, pageIndex, baseScale, overlay } = $props();
+  let { documentId, pageIndex, baseScale, overlay }: {
+    documentId: string;
+    pageIndex: number;
+    baseScale: number;
+    overlay: (index: number) => Attachment<HTMLElement>;
+  } = $props();
   const index = $derived(pageIndex); // solo cambia si cambia el número
   // Marco y tiradores de la anotación seleccionada con el color de acento de la app.
   const OUTLINE = { color: 'var(--accent)', width: 1.5, offset: 2 };
@@ -40,7 +47,7 @@
 </script>
 
 <div class="pdf-page">
-  <span class="pdf-page__label">Página {index + 1}</span>
+  <span class="pdf-page__label">{t.viewer.canvas.page(index + 1)}</span>
   <Rotate {documentId} pageIndex={index} class="pdf-page__rotate">
     <PagePointerProvider {documentId} pageIndex={index} class="pdf-page__pointer">
       <RenderLayer {documentId} pageIndex={index} scale={baseScale} class="pdf-page__img" draggable="false" />

@@ -5,12 +5,20 @@
 // PrintDialog.svelte.
 import { h } from '$lib/dom.ts';
 
+export type PrintScale = 'fit' | 'real' | 'fill';
+export type Orientation = 'portrait' | 'landscape';
+
 /**
  * `pages`: índices a imprimir; `images`: url de cada una (blob:, se liberan al terminar);
  * `sizes`: tamaño de las páginas en puntos; `scale`: fit | real | fill;
  * `orientation(página)`: portrait | landscape.
  */
-export function printSheets(pages, images, sizes, { scale, orientation }) {
+export function printSheets(
+  pages: number[],
+  images: string[],
+  sizes: [number, number][],
+  { scale, orientation }: { scale: PrintScale; orientation: (page: number) => Orientation },
+): void {
   document.getElementById('print-root')?.remove();
   const root = h('div', { id: 'print-root', 'data-scale': scale },
     pages.map((page, i) => {

@@ -51,10 +51,10 @@ app/ui/
   - miniaturas: `panels/Thumbnails`;
   - panel lateral: `panels/TocTree`, `panels/SearchPanel`, `ocr/OcrPanel`, `redact/RedactPanel`, `panels/AiPanel`;
   - diálogos: imprimir, propiedades, leyendas, perfiles de censura y OCR por lotes.
-- **Lienzo, en código imperativo:** `canvas/canvas.js`, `canvas/selection.js`, `annotations/annotations.js` y
-  `annotations/editing.js`. Qué hay en cada carpeta: `app/ui/src/tools/viewer/README.md`.
-  - Las páginas, el scroll y el zoom son de EmbedPDF (`embed.js`, `EmbedRoot.svelte`, `PdfPages.svelte`, `PdfPage.svelte`), y también la selección de texto, la búsqueda y las anotaciones;
-    `canvas.js` da al resto la misma API que antes. El visor se está pasando a EmbedPDF paso a paso:
+- **Lienzo, en código imperativo:** `canvas/canvas.ts`, `canvas/selection.ts`, `annotations/annotations.ts` y
+  `annotations/editing.ts`. Qué hay en cada carpeta: `app/ui/src/tools/viewer/README.md`.
+  - Las páginas, el scroll y el zoom son de EmbedPDF (`embed.ts`, `EmbedRoot.svelte`, `PdfPages.svelte`, `PdfPage.svelte`), y también la selección de texto, la búsqueda y las anotaciones;
+    `canvas.ts` da al resto la misma API que antes. El visor se está pasando a EmbedPDF paso a paso:
     ver [embedpdf.md](embedpdf.md).
   - Pintan miles de elementos (páginas, letras, anotaciones) y los actualizan a mano, por rendimiento.
   - El componente los crea y coloca su elemento en la página.
@@ -86,16 +86,17 @@ Para comprobar los tipos a mano: `pnpm check` en `app/ui`.
 
 ## TypeScript
 
-La interfaz se está pasando a TypeScript. Vite compila los `.ts` y los componentes con
-`<script lang="ts">` sin más configuración, y `svelte-check` (`pnpm check`) comprueba los tipos.
+Toda la interfaz (`src/`) está en TypeScript, en modo `strict`: no queda ningún `.js`. Vite compila
+los `.ts` y los componentes con `<script lang="ts">` sin más configuración, y `svelte-check`
+(`pnpm check`) comprueba los tipos. Solo `vite.config.js` y `svelte.config.js` siguen en JavaScript:
+son configuración de las herramientas, fuera de `src/`.
 
-- **Migración por carpetas:** primero `lib/`, luego `shell/` y las herramientas pequeñas, y el visor
-  al final. Mientras dura, los `.js` que quedan se aceptan sin comprobarlos (`allowJs`, sin
-  `checkJs` en `tsconfig.json`). Al terminar se quita `allowJs`.
-- **Ya en TypeScript:** `lib/` (módulos y componentes; `types.ts`: respuestas de Python que usan
-  varias partes), `main.ts`, `App.svelte`, `shell/`, `texts/`, las herramientas Ajustes, Ayuda,
-  Seguridad, Extraer y Combinar, y las barras del visor (`toolbars/`). Falta el resto del visor.
-- **Respuestas de una herramienta:** sus tipos van en su carpeta (`tools/merge/types.ts`, …).
+- **Respuestas de Python:** las que usan varias partes, en `lib/types.ts` (`DocumentInfo`…); las de
+  una herramienta, en su carpeta (`tools/merge/types.ts`, `tools/viewer/ocr/types.ts`, …).
+- **Partes internas de EmbedPDF:** el visor usa cuatro métodos privados de EmbedPDF 2.15.1
+  (`register` del historial, `searchAllPages` con `force`, `endSelection` y la estrategia de
+  scroll paginada). Cada uno tiene su interfaz con un comentario que lo explica (`HistoryInternals`,
+  `ForcedSearch`, `SelectionInternals`, `ScrollInternals`): al actualizar EmbedPDF hay que revisarlos.
 - **Importaciones con la extensión real:** `'$lib/api.ts'`, `'./menu.svelte.ts'` (`allowImportingTsExtensions`).
 - **Respuestas de Python con tipo:** `call<Tipo>('servicio.metodo', …)` y `on<Tipo>('evento', fn)`; sin tipo devuelven `any`.
 - **Archivos nuevos:** en TypeScript (`.ts` y `lang="ts"`).
@@ -128,9 +129,9 @@ ahí, sin buscarlo por el código.
 - **Comprobado:** en los componentes con `lang="ts"`, una clave que no existe es un error de
   `pnpm check` («Did you mean 'dock'?»).
 - **Otro idioma:** sería otro catálogo con las mismas claves (`const en: Texts = { … }`).
-- **Ya en el catálogo:** Ajustes (también la lista de atajos), Ayuda (también «Información general»),
-  Seguridad, Extraer, Combinar y las barras del visor. Faltan el resto del visor, el shell y los
-  diálogos comunes de `lib/`.
+- **Ya en el catálogo:** todas las herramientas: el visor entero, Ajustes (también la lista de
+  atajos), Ayuda (también «Información general»), Seguridad, Extraer y Combinar. Faltan el shell
+  (pestañas, Inicio, menú de la marca) y los diálogos comunes de `lib/` («Cancelar», «Sí/No»…).
 - **Fuera del catálogo:** los manuales de Ayuda (Markdown en `docs/ayuda/`) y los mensajes de error
   del backend Python.
 

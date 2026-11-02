@@ -8,37 +8,65 @@
   Los resultados llegan página a página mientras busca. Todas las coincidencias se marcan
   en el lienzo y la actual, más fuerte.
 -->
-<script>
+<script lang="ts">
   import { tick } from 'svelte';
-  import { MatchFlag } from '@embedpdf/models';
+  import { MatchFlag, type PdfPageSearchProgress, type PdfTask, type SearchAllPagesResult, type SearchResult } from '@embedpdf/models';
+  import type { SearchPlugin } from '@embedpdf/plugin-search';
   import Icon from '$lib/Icon.svelte';
   import { toast } from '$lib/ui.ts';
+  import { t, tip } from '$texts';
+  import type { PageCanvas } from '../canvas/canvas.ts';
+
+  const T = t.viewer.search;
+
+  /** Rectángulo `[x0, y0, x1, y1]` en puntos de la página tal como se ve. */
+  type Box = [number, number, number, number];
+
+  /** Coincidencia de la lista, en puntos de la página tal como se ve. */
+  interface Match {
+    page: number;
+    rects: Box[];
+    before: string;
+    match: string;
+    after: string;
+    cutLeft: boolean;
+    cutRight: boolean;
+  }
+
+  /**
+   * `searchAllPages(consulta, documento, force)` del complemento: con `force` vuelve a buscar aunque
+   * la consulta sea la misma (tras el OCR o un cambio de páginas); la versión pública devuelve los
+   * resultados guardados. Es un método privado de EmbedPDF 2.15.1: revisarlo al actualizarlo.
+   */
+  interface ForcedSearch {
+    searchAllPages(keyword: string, documentId: string, force: boolean): PdfTask<SearchAllPagesResult, PdfPageSearchProgress>;
+  }
 
   /**
    * `canvas`: el lienzo (su documento en EmbedPDF y sus capas de marcas);
    * `redact(query)`: enviar el término buscado a la censura.
    */
-  let { canvas, close, redact } = $props();
+  let { canvas, close, redact }: { canvas: PageCanvas; close: () => void; redact: (query: string) => void } = $props();
 
-  let input;
-  let list;
+  let input: HTMLInputElement;
+  let list: HTMLDivElement;
   let text = $state('');
   let caseSensitive = $state(false);
   let wholeWord = $state(false);
   let query = $state(''); // última consulta buscada
-  let matches = $state.raw([]); // [{ page, rects, before, match, after, cutLeft, cutRight }]
+  let matches = $state.raw<Match[]>([]);
   let current = $state(-1);
   let searching = $state(false);
   let run = 0; // descarta resultados de búsquedas anteriores
   const PAGE = 200; // filas de la lista que se pintan de cada vez (con miles, pintarlas todas tarda)
   let shown = $state(PAGE);
-  let marks = []; // elementos marcados en el lienzo, por coincidencia
+  let marks: HTMLElement[][] = []; // elementos marcados en el lienzo, por coincidencia
 
   const count = $derived.by(() => {
-    if (searching) return matches.length ? `Buscando… ${matches.length}` : 'Buscando…';
-    if (current >= 0) return `${current + 1} de ${matches.length}`;
-    if (!query) return '0 coincidencias';
-    return `${matches.length} coincidencia(s)`;
+    if (searching) return matches.length ? T.searchingCount(matches.length) : T.searching;
+    if (current >= 0) return T.position(current + 1, matches.length);
+    if (!query) return T.none;
+    return T.count(matches.length);
   });
 
   export function focus() {
@@ -47,7 +75,7 @@
   }
 
   /** Busca `value` (p. ej. la selección del lienzo). */
-  export function setQuery(value) {
+  export function setQuery(value: string) {
     text = value.replace(/\s+/g, ' ').trim();
     search();
   }
@@ -58,21 +86,21 @@
   }
 
   /** F3 / Shift+F3 y las flechas: la siguiente o la anterior coincidencia (en bucle). */
-  export function step(delta) {
+  export function step(delta: number): boolean {
     if (!matches.length) return false;
     select((current + delta + matches.length) % matches.length);
     return true;
   }
 
-  function plugin() {
-    return canvas.registry.getPlugin('search');
+  function plugin(): SearchPlugin {
+    return canvas.registry!.getPlugin<SearchPlugin>('search')!;
   }
 
   /** Resultado de EmbedPDF → coincidencia del panel, en puntos de la página tal como se ve. */
-  function toMatch({ pageIndex, rects, context }) {
+  function toMatch({ pageIndex, rects, context }: SearchResult): Match {
     return {
       page: pageIndex,
-      rects: rects.map((rect) => canvas.toView(pageIndex, rect)),
+      rects: rects.map((rect) => canvas.toView(pageIndex, rect) as Box),
       before: context.before,
       match: context.match,
       after: context.after,
@@ -87,7 +115,7 @@
   }
 
   /** Marca en el lienzo las coincidencias `items`, que van a partir de la posición `from`. */
-  function markHits(items, from) {
+  function markHits(items: Match[], from: number) {
     items.forEach((item, i) => {
       marks[from + i] = item.rects.map((rect) => canvas.addMark(item.page, rect, 'search-hit'));
     });
@@ -107,16 +135,17 @@
     searching = true;
     try {
       await canvas.loading; // la versión del documento que se está cargando
-      const documentId = canvas.shown;
+      const documentId: string | null = canvas.shown;
       if (mine !== run || !documentId) return;
-      const flags = [caseSensitive && MatchFlag.MatchCase, wholeWord && MatchFlag.MatchWholeWord].filter(Boolean);
+      const flags = [caseSensitive && MatchFlag.MatchCase, wholeWord && MatchFlag.MatchWholeWord]
+        .filter((flag): flag is MatchFlag => flag !== false);
       // Con la sesión parada, cambiar las opciones no lanza otra búsqueda por su cuenta.
       const scope = plugin().provides().forDocument(documentId);
       scope.stopSearch();
       scope.setFlags(flags);
-      const task = plugin().searchAllPages(query, documentId, true);
+      const task = (plugin() as unknown as ForcedSearch).searchAllPages(query, documentId, true);
       // Los avisos llegan página a página: se juntan y se pintan una vez por fotograma.
-      let pending = [];
+      let pending: Match[] = [];
       let frame = 0;
       const flush = () => {
         frame = 0;
@@ -145,23 +174,24 @@
       if (jump && current < 0 && matches.length) select(0);
       else if (current >= 0) highlight(current);
     } catch (err) {
-      if (mine === run) toast(`No se pudo buscar: ${err?.reason?.message ?? err?.message ?? err}`, 'danger');
+      const e = err as { reason?: { message?: string }; message?: string } | undefined;
+      if (mine === run) toast(T.error(e?.reason?.message ?? e?.message ?? String(err)), 'danger');
     } finally {
       if (mine === run) searching = false;
     }
   }
 
   function stop() {
-    const documentId = canvas.shown;
+    const documentId: string | null = canvas.shown;
     if (documentId && canvas.registry) plugin().provides().forDocument(documentId).stopSearch();
   }
 
-  function highlight(index) {
+  function highlight(index: number) {
     for (const mark of canvas.queryAll('.search-hit.is-current')) mark.classList.remove('is-current');
     for (const mark of marks[index] ?? []) mark.classList.add('is-current');
   }
 
-  async function select(index) {
+  async function select(index: number) {
     current = index;
     if (index >= shown) shown = Math.ceil((index + 1) / PAGE) * PAGE;
     const { page, rects } = matches[index];
@@ -182,7 +212,7 @@
     stop();
   }
 
-  function onkeydown(ev) {
+  function onkeydown(ev: KeyboardEvent) {
     if (ev.key !== 'Enter') return;
     ev.preventDefault();
     // Enter con la misma consulta pasa a la siguiente coincidencia.
@@ -190,54 +220,54 @@
     else search();
   }
 
-  function toggle(option) {
+  function toggle(option: 'case' | 'word') {
     if (option === 'case') caseSensitive = !caseSensitive;
     else wholeWord = !wholeWord;
     if (text.trim()) search();
   }
 </script>
 
-{#snippet button(icon, title, onclick)}
+{#snippet button(icon: string, title: string, onclick: () => void)}
   <button class="btn btn--icon btn--sm" type="button" {title} aria-label={title} {onclick}><Icon name={icon} /></button>
 {/snippet}
 
 <div class="search-panel">
   <div class="search-panel__head">
     <span class="search-panel__icon"><Icon name="search" size={20} /></span>
-    <h2 class="heading">Buscar en el documento</h2>
+    <h2 class="heading">{T.title}</h2>
     <span class="grow"></span>
-    {@render button('x', 'Cerrar', close)}
+    {@render button('x', T.close, close)}
   </div>
   <div class="search-panel__row">
-    <input bind:this={input} bind:value={text} class="input" type="text" placeholder="Buscar texto..."
-           aria-label="Buscar texto" {onkeydown} />
+    <input bind:this={input} bind:value={text} class="input" type="text" placeholder={T.placeholder}
+           aria-label={T.label} {onkeydown} />
     <button class="btn btn--icon search-panel__case" class:is-checked={caseSensitive} type="button"
-            title="Distinguir mayúsculas y minúsculas" aria-pressed={caseSensitive} onclick={() => toggle('case')}>Aa</button>
+            title={T.caseSensitive} aria-pressed={caseSensitive} onclick={() => toggle('case')}>Aa</button>
     <button class="btn btn--icon search-panel__case search-panel__word" class:is-checked={wholeWord} type="button"
-            title="Solo palabras completas" aria-pressed={wholeWord} onclick={() => toggle('word')}>ab</button>
+            title={T.wholeWord} aria-pressed={wholeWord} onclick={() => toggle('word')}>ab</button>
   </div>
   <div class="search-panel__row">
-    {@render button('chevron-up', 'Coincidencia anterior (Shift+F3)', () => step(-1))}
+    {@render button('chevron-up', tip(T.prev), () => step(-1))}
     <span class="caption search-panel__count">{count}</span>
-    {@render button('chevron-down', 'Siguiente coincidencia (F3)', () => step(1))}
-    {@render button('x', 'Limpiar búsqueda', reset)}
-    {@render button('scissors', 'Enviar término a Censura', () => query && redact(query))}
+    {@render button('chevron-down', tip(T.next), () => step(1))}
+    {@render button('x', T.clear, reset)}
+    {@render button('scissors', T.redact, () => query && redact(query))}
   </div>
-  <div class="search-results" role="listbox" aria-label="Coincidencias" bind:this={list}>
+  <div class="search-results" role="listbox" aria-label={T.results} bind:this={list}>
     {#each matches.slice(0, shown) as match, i (i)}
       <button class="search-result" class:is-active={i === current} type="button" role="option" aria-selected={i === current}
               onclick={() => select(i)}>
-        <span class="search-result__page">Pág {match.page + 1}</span>
+        <span class="search-result__page">{T.page(match.page + 1)}</span>
         <span class="search-result__text">{match.cutLeft ? '…' : ''}{match.before ? `${match.before} ` : ''}<mark>{match.match}</mark>{match.after ? ` ${match.after}` : ''}{match.cutRight ? '…' : ''}</span>
       </button>
     {:else}
       {#if query && !searching}
-        <p class="search-results__empty muted">Sin coincidencias encontradas</p>
+        <p class="search-results__empty muted">{T.empty}</p>
       {/if}
     {/each}
     {#if matches.length > shown}
       <button class="btn btn--ghost btn--sm search-results__more" type="button" onclick={() => (shown += PAGE)}>
-        Mostrar más ({matches.length - shown})
+        {T.more(matches.length - shown)}
       </button>
     {/if}
   </div>

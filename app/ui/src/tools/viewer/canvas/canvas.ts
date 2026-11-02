@@ -1,40 +1,47 @@
 // Lienzo del visor: las páginas con zoom, modos de vista y modo noche (equivale a
 // src_qt/ui/viewer/canvas/view.py). Desde el paso 2 de docs/web/embedpdf.md las páginas,
-// el scroll, el zoom y el mosaico son de EmbedPDF (embed.js, PdfPages.svelte); esta
+// el scroll, el zoom y el mosaico son de EmbedPDF (embed.ts, PdfPages.svelte); esta
 // clase da al resto del visor la misma API que antes. El registro de EmbedPDF es uno para
 // toda la app: cada visor abre en él su documento y solo atiende los avisos de ese documento.
 //
 // - Python es el dueño de las páginas: cuando cambian (girar, mover, insertar, censurar…) se
 //   vuelve a abrir en EmbedPDF la versión que él tiene (`viewer.document_url`). Mientras se
 //   carga, la vista sigue con la anterior. Las anotaciones, en cambio, las edita EmbedPDF en
-//   su copia (annotations.js las pasa a Python antes de cada operación).
+//   su copia (annotations.ts las pasa a Python antes de cada operación).
 // - Cada página tiene una capa del visor (`slots[i]`) donde otros módulos dibujan en
 //   porcentaje de la página las marcas (`marks(i)`) de selección, búsqueda, OCR o censura.
 //   Las capas existen siempre, aunque EmbedPDF solo monte las páginas a la vista; se
 //   enganchan a la página al montarse.
 // - `el` es el contenedor con scroll (la vista de EmbedPDF): ahí escuchan el ratón los
-//   demás módulos. La selección de texto es de EmbedPDF (selection.js): está activa con las
+//   demás módulos. La selección de texto es de EmbedPDF (selection.ts): está activa con las
 //   herramientas de texto (modo TEXT_MODE del gestor de interacción). Las de dibujo, texto
 //   libre y notas activan su herramienta de anotación de EmbedPDF (ANNOTATION_TOOL).
 import { flushSync, mount, unmount } from 'svelte';
-import { refreshPages } from '@embedpdf/core';
-import { transformRect } from '@embedpdf/models';
+import { refreshPages, type IPlugin, type PluginRegistry } from '@embedpdf/core';
+import { transformRect, type Rect, type Rotation, type Size } from '@embedpdf/models';
+import type { AnnotationPlugin } from '@embedpdf/plugin-annotation';
+import type { DocumentManagerPlugin } from '@embedpdf/plugin-document-manager';
+import type { HistoryPlugin } from '@embedpdf/plugin-history';
+import type { InteractionManagerPlugin } from '@embedpdf/plugin-interaction-manager';
+import type { RenderPlugin } from '@embedpdf/plugin-render';
 import { ScrollStrategy } from '@embedpdf/plugin-scroll';
-import { SpreadMode } from '@embedpdf/plugin-spread';
-import { ZoomMode } from '@embedpdf/plugin-zoom';
+import { SpreadMode, type SpreadPlugin } from '@embedpdf/plugin-spread';
+import type { ViewportPlugin } from '@embedpdf/plugin-viewport';
+import { ZoomMode, type ZoomLevel, type ZoomPlugin } from '@embedpdf/plugin-zoom';
 import { call } from '$lib/api.ts';
 import { h } from '$lib/dom.ts';
-import { OTHER_MODE, PAGED, registry, TEXT_MODE, UNIT, VIEWPORT_GAP, ZOOM_MAX, ZOOM_MIN } from './embed.js';
-import { MODES, pageStep } from './layout.js';
+import { t } from '$texts';
+import { OTHER_MODE, PAGED, registry, TEXT_MODE, UNIT, VIEWPORT_GAP, ZOOM_MAX, ZOOM_MIN, type ViewerScroll } from './embed.ts';
+import { MODES, pageStep, type Mode } from './layout.ts';
 import PdfPages from './PdfPages.svelte';
 
-export { ZOOM_MAX, ZOOM_MIN } from './embed.js';
+export { ZOOM_MAX, ZOOM_MIN } from './embed.ts';
 
 // Herramientas del lienzo (ToolMode en Qt). El lienzo solo implementa la mano; la
-// selección de texto y las marcas de texto las gestiona selection.js (con EmbedPDF); el dibujo,
-// el texto libre y las notas, las herramientas de anotación de EmbedPDF (annotations.js);
+// selección de texto y las marcas de texto las gestiona selection.ts (con EmbedPDF); el dibujo,
+// el texto libre y las notas, las herramientas de anotación de EmbedPDF (annotations.ts);
 // el puntero (seleccionar y transformar anotaciones), la capa de anotaciones de EmbedPDF
-// con la barra de editing.js, y el recorte de OCR, OcrPanel.svelte. El cursor depende de
+// con la barra de editing.ts, y el recorte de OCR, OcrPanel.svelte. El cursor depende de
 // `data-tool` (ver viewer.css).
 export const TOOLS = {
   HAND: 'hand',
@@ -61,9 +68,15 @@ export const TOOLS = {
   IMAGE: 'image',
   AREA_OCR: 'area-ocr', // rectángulo para reconocer texto
   REDACT: 'redact', // marcar para censurar: texto (arrastrando sobre él) o un área
-};
-// Herramientas que trabajan sobre la selección de texto (selection.js) y la anotación que crean.
-export const MARKUP_TOOLS = {
+} as const;
+
+export type Tool = (typeof TOOLS)[keyof typeof TOOLS];
+
+/** Anotación que crea cada herramienta de texto sobre la selección. */
+export type MarkupKind = 'highlight' | 'underline' | 'strikeout' | 'squiggly' | 'insert' | 'replace';
+
+// Herramientas que trabajan sobre la selección de texto (selection.ts) y la anotación que crean.
+export const MARKUP_TOOLS: Record<string, MarkupKind> = {
   [TOOLS.HIGHLIGHT]: 'highlight',
   [TOOLS.UNDERLINE]: 'underline',
   [TOOLS.STRIKEOUT]: 'strikeout',
@@ -72,10 +85,10 @@ export const MARKUP_TOOLS = {
   [TOOLS.REPLACE_TEXT]: 'replace',
 };
 // Herramientas con las que arrastrar selecciona texto.
-export const TEXT_TOOLS = new Set([TOOLS.SELECT, ...Object.keys(MARKUP_TOOLS)]);
+export const TEXT_TOOLS = new Set<string>([TOOLS.SELECT, ...Object.keys(MARKUP_TOOLS)]);
 // Herramienta de anotación de EmbedPDF de cada herramienta de dibujo (el trazo fino es la
 // pluma con otro grosor).
-export const ANNOTATION_TOOL = {
+export const ANNOTATION_TOOL: Record<string, string> = {
   [TOOLS.RECT]: 'square',
   [TOOLS.ELLIPSE]: 'circle',
   [TOOLS.LINE]: 'line',
@@ -92,7 +105,7 @@ export const ANNOTATION_TOOL = {
   [TOOLS.REDACT]: 'redact', // del complemento de censura
 };
 // Cómo coloca EmbedPDF las páginas en cada modo de vista.
-const LAYOUTS = {
+const LAYOUTS: Record<Mode, { strategy: string; spread: SpreadMode }> = {
   [MODES.CONTINUOUS]: { strategy: ScrollStrategy.Vertical, spread: SpreadMode.None },
   [MODES.SINGLE]: { strategy: PAGED, spread: SpreadMode.None },
   [MODES.DOUBLE]: { strategy: PAGED, spread: SpreadMode.Odd },
@@ -105,37 +118,74 @@ const WHEEL_FLIP_COOLDOWN = 350; // ms entre cambios de página con la rueda (mo
 
 const ANNOTATION_LAYER = '#annotation-layer'; // capa de anotaciones de EmbedPDF (PdfPage.svelte)
 const ANNOTATION = `${ANNOTATION_LAYER} > *`; // sus elementos
-const sameKeys = (a, b) => a?.length === b.length && a.every((key, i) => key === b[i]);
+const sameKeys = (a: string[] | null, b: string[]) => a?.length === b.length && a.every((key, i) => key === b[i]);
+
+/** Rectángulo `[x0, y0, x1, y1]` en puntos de la página tal como se ve. */
+export type Box = [number, number, number, number];
+
+/** Rectángulo de la página en la ventana (como un DOMRect). */
+export interface ClientBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  right: number;
+  bottom: number;
+}
+
+/** Avisos del lienzo al visor. */
+export interface CanvasEvents {
+  onPage?(index: number): void;
+  onZoom?(zoom: number): void;
+  onMode?(mode: Mode): void;
+  /** Se va a activar la herramienta `tool` (para darle su estilo). */
+  onTool?(tool: string, documentId: string): void;
+  /** Se puso a la vista una versión nueva del documento. */
+  onDocument?(documentId: string): void;
+}
+
+/** Al montarse una página: (página, documento) → lo que se llama al desmontarla. */
+type MountHook = (index: number, documentId: string | null) => (() => void) | undefined | void;
+
+/** Lo que exporta PdfPages.svelte. */
+interface PagesComponent {
+  show(documentId: string): void;
+}
 
 export class PageCanvas {
+  docId: number;
+  events: CanvasEvents;
+  zoom = 1;
+  level: ZoomLevel = UNIT; // nivel de zoom de EmbedPDF: escala (px por punto) o un modo de ajuste
+  mode: Mode = MODES.CONTINUOUS;
+  tool: string = TOOLS.SELECT;
+  current = 0;
+  closed = false;
+
+  registry: PluginRegistry | null = null;
+  shown: string | null = null; // id en EmbedPDF del documento a la vista
+  shownKeys: string[] | null = null; // claves de página de esa versión
+  ready = false; // EmbedPDF ya colocó sus páginas
+  target = { index: 0, atBottom: false }; // adónde ir en cuanto se pueda
+  mounted = new Map<number, HTMLElement>(); // página -> capa enganchada a una página montada
+  mountHooks: MountHook[] = []; // al montarse cada página
+  unsubscribe: (() => void)[] = []; // avisos del registro (se quitan al cerrar)
+  seq = 0;
+  lastFlip = 0;
+  sizes!: [number, number][];
+  keys!: string[];
+  slots!: HTMLElement[];
+  pages: (PagesComponent & Record<string, unknown>) | null = null;
+  el: HTMLDivElement;
+  loading: Promise<void>;
+
   /**
-   * @param {number} docId documento del servicio "viewer"
-   * @param {Array<[number, number]>} sizes tamaño de cada página en puntos
-   * @param {string[]} keys clave de cada página (cambia cuando cambia su imagen)
-   * @param {{ onPage?: (i) => void, onZoom?: (z) => void, onMode?: (m) => void,
-   *   onTool?: (tool, documentId) => void, onDocument?: (documentId) => void }} events
-   *   `onTool`: se va a activar la herramienta `tool` (para darle su estilo); `onDocument`:
-   *   se puso a la vista una versión nueva del documento.
+   * `docId`: documento del servicio "viewer"; `sizes`: tamaño de cada página en puntos; `keys`:
+   * clave de cada página (cambia cuando cambia su imagen).
    */
-  constructor(docId, sizes, keys, events = {}) {
+  constructor(docId: number, sizes: [number, number][], keys: string[], events: CanvasEvents = {}) {
     this.docId = docId;
     this.events = events;
-    this.zoom = 1;
-    this.level = UNIT; // nivel de zoom de EmbedPDF: escala (px por punto) o un modo de ajuste
-    this.mode = MODES.CONTINUOUS;
-    this.tool = TOOLS.SELECT;
-    this.current = 0;
-    this.closed = false;
-
-    this.shown = null; // id en EmbedPDF del documento a la vista
-    this.shownKeys = null; // claves de página de esa versión
-    this.ready = false; // EmbedPDF ya colocó sus páginas
-    this.target = { index: 0, atBottom: false }; // adónde ir en cuanto se pueda
-    this.mounted = new Map(); // página -> capa enganchada a una página montada
-    this.mountHooks = []; // (página, documento) => limpieza, al montarse cada página
-    this.seq = 0;
-    this.lastFlip = 0;
-
     this.el = h('div', { class: 'pdf-canvas', tabindex: '0', dataset: { tool: this.tool }, style: { padding: `${VIEWPORT_GAP}px` } });
     this._setSlots(sizes, keys);
 
@@ -144,8 +194,17 @@ export class PageCanvas {
     this.loading = this._start().catch((err) => this._fail(err));
   }
 
+  /** Complemento `id` del registro (ya listo: solo se pide después de `loading`). */
+  _plugin<T extends IPlugin>(id: string): T {
+    return this.registry!.getPlugin<T>(id)!;
+  }
+
+  _scrollPlugin(): ViewerScroll {
+    return this.registry!.getPlugin('scroll') as unknown as ViewerScroll;
+  }
+
   /** Nuevas páginas tras una operación (rotar, insertar, mover…); el llamador elige a cuál ir. */
-  setPages(sizes, keys) {
+  setPages(sizes: [number, number][], keys: string[]): void {
     if (this._turnInPlace(sizes, keys)) return;
     this._setSlots(sizes, keys);
     this.current = Math.min(this.current, this.pageCount - 1);
@@ -159,15 +218,15 @@ export class PageCanvas {
    * calcula en la página sin girar y el giro solo lo usa para mostrarla, así que basta con
    * cambiarlo en su estado, redibujar esas páginas y recolocar las demás. Devuelve si lo hizo.
    */
-  _turnInPlace(sizes, keys) {
+  _turnInPlace(sizes: [number, number][], keys: string[]): boolean {
     const id = this.shown;
-    if (!id || !sameKeys(this.shownKeys, this.keys) || keys.length !== this.keys.length) return false;
-    const turns = new Map();
+    if (!id || !this.registry || !sameKeys(this.shownKeys, this.keys) || keys.length !== this.keys.length) return false;
+    const turns = new Map<number, Rotation>();
     for (const [i, key] of keys.entries()) {
       const [xref, rotation, revision] = key.split(':');
       const [oldXref, oldRotation, oldRevision] = this.keys[i].split(':');
       if (xref !== oldXref || revision !== oldRevision) return false;
-      if (rotation !== oldRotation) turns.set(i, (Number(rotation) / 90) % 4);
+      if (rotation !== oldRotation) turns.set(i, ((Number(rotation) / 90) % 4) as Rotation);
     }
     const store = this.registry.getStore();
     const pages = store.getState().core.documents[id]?.document?.pages;
@@ -175,19 +234,19 @@ export class PageCanvas {
     // EmbedPDF no tiene una acción para girar una página: se cambia en su estado y se avisa.
     for (const [i, rotation] of turns) pages[i].rotation = rotation;
     store.dispatchToCore(refreshPages(id, [...turns.keys()]));
-    this.registry.getPlugin('scroll').refreshDocumentLayout(id);
+    this._scrollPlugin().refreshDocumentLayout(id);
     // Como al volver a cargarlo, el historial de EmbedPDF empieza de nuevo: Ctrl+Z deshace
     // primero lo que hay en él y después las operaciones de página (ver Viewer.svelte).
-    this.registry.getPlugin('history').provides().forDocument(id).purgeByMetadata(() => true);
+    this._plugin<HistoryPlugin>('history').provides().forDocument(id).purgeByMetadata(() => true);
     Object.assign(this, { sizes, keys, shownKeys: keys });
     return true;
   }
 
   /**
    * Vuelve a abrir el documento aunque no cambien las páginas (el OCR añadió texto). Las
-   * anotaciones tienen que estar ya en Python (annotations.js `sync`): se reabre su versión.
+   * anotaciones tienen que estar ya en Python (annotations.ts `sync`): se reabre su versión.
    */
-  reload() {
+  reload(): void {
     if (this.registry) this.loading = this._load().catch((err) => this._fail(err));
   }
 
@@ -197,54 +256,54 @@ export class PageCanvas {
    * entonces quita también la selección): se le da ese clic. Si no, el cuadro seguía
    * admitiendo texto sin guardarlo.
    */
-  finishEditing() {
+  finishEditing(): void {
     const editor = this.el.querySelector(`${ANNOTATION_LAYER} [contenteditable="true"]`);
     // La capa para el clic (mientras edita en esa página): no llega a las demás herramientas.
     editor?.closest('.pdf-page__pointer')?.dispatchEvent(new PointerEvent('pointerdown', { button: 0, isPrimary: true }));
-    if (this.el.contains(document.activeElement)) document.activeElement.blur();
+    if (this.el.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
   }
 
   /**
    * `hook(index, documentId)` se llama al montar EmbedPDF cada página del documento a la vista;
    * lo que devuelva se llama al desmontarla.
    */
-  onPageMount(hook) {
+  onPageMount(hook: MountHook): void {
     this.mountHooks.push(hook);
   }
 
-  _setSlots(sizes, keys) {
+  _setSlots(sizes: [number, number][], keys: string[]): void {
     this.sizes = sizes;
     this.keys = keys;
     this.slots = sizes.map(() => h('div', { class: 'pdf-page__layers' }));
   }
 
-  destroy() {
+  destroy(): void {
     this.closed = true;
-    for (const off of this.unsubscribe ?? []) off();
+    for (const off of this.unsubscribe) off();
     if (this.pages) unmount(this.pages);
     // El registro es de toda la app: se cierra el documento de este visor (uno que aún se
     // esté cargando lo cierra _load al terminar). Se aplaza: destroy() corre mientras Svelte
     // desmonta la pestaña y cerrar ahora cambia el estado de EmbedPDF en mitad de ese cambio
     // (la pestaña siguiente no llegaba a mostrarse).
     const { registry: embed, shown } = this;
-    if (shown) setTimeout(() => embed.getPlugin('document-manager').provides().closeDocument(shown));
+    if (embed && shown) setTimeout(() => embed.getPlugin<DocumentManagerPlugin>('document-manager')!.provides().closeDocument(shown));
   }
 
-  get paged() {
+  get paged(): boolean {
     return this.mode !== MODES.CONTINUOUS;
   }
 
-  get pageCount() {
+  get pageCount(): number {
     return this.sizes.length;
   }
 
   /** Miniaturas { página: url blob: } de la versión actual (liberarlas con `release`). */
-  async thumbnails(pages) {
+  async thumbnails(pages: number[]): Promise<Record<number, string>> {
     await this.loading;
     const id = this.shown;
     if (!id || !sameKeys(this.shownKeys, this.keys)) return {};
-    const render = this.registry.getPlugin('render').provides().forDocument(id);
-    const result = {};
+    const render = this._plugin<RenderPlugin>('render').provides().forDocument(id);
+    const result: Record<number, string> = {};
     for (const index of pages) {
       const [w, h] = this.sizes[index] ?? [];
       if (!w) continue;
@@ -264,15 +323,17 @@ export class PageCanvas {
    * `release`), a `dpi` y con las anotaciones, dibujadas por PDFium como en el lienzo. `gray`:
    * en escala de grises (se pasa por un canvas: así sale igual en cualquier impresora).
    */
-  async pageImages(pages, dpi, gray = false) {
+  async pageImages(pages: number[], dpi: number, gray = false): Promise<Record<number, string>> {
     await this.loading;
     const id = this.shown;
     if (!id) return {};
-    const render = this.registry.getPlugin('render').provides().forDocument(id);
-    const result = {};
+    const render = this._plugin<RenderPlugin>('render').provides().forDocument(id);
+    const result: Record<number, string> = {};
     for (const index of pages) {
       const { rotation } = this.pageInfo(index);
-      const options = { scaleFactor: dpi / 72, rotation, dpr: 1, imageType: 'image/jpeg', imageQuality: PRINT_QUALITY, withAnnotations: true };
+      const options = {
+        scaleFactor: dpi / 72, rotation, dpr: 1, imageType: 'image/jpeg' as const, imageQuality: PRINT_QUALITY, withAnnotations: true,
+      };
       let blob = await render.renderPage({ pageIndex: index, options }).toPromise();
       if (gray) blob = await grayscale(blob);
       result[index] = URL.createObjectURL(blob);
@@ -281,69 +342,69 @@ export class PageCanvas {
   }
 
   /** Página `index` del documento a la vista según EmbedPDF: `{ size }` sin girar y `rotation` (cuartos de vuelta). */
-  pageInfo(index) {
-    const page = this.registry?.getStore().getState().core.documents[this.shown]?.document?.pages[index];
-    return page ?? { size: { width: this.sizes[index][0], height: this.sizes[index][1] }, rotation: 0 };
+  pageInfo(index: number): { size: Size; rotation: Rotation } {
+    const page = this.shown ? this.registry?.getStore().getState().core.documents[this.shown]?.document?.pages[index] : undefined;
+    return page ?? { size: { width: this.sizes[index][0], height: this.sizes[index][1] }, rotation: 0 as Rotation };
   }
 
   /** Rectángulo de EmbedPDF (página sin girar) → `[x0, y0, x1, y1]` en puntos de la página tal como se ve. */
-  toView(index, rect) {
+  toView(index: number, rect: Rect): Box {
     const { size, rotation } = this.pageInfo(index);
     const r = transformRect(size, rect, rotation, 1);
     return [r.origin.x, r.origin.y, r.origin.x + r.size.width, r.origin.y + r.size.height];
   }
 
   /** Lo contrario de `toView`: `[x0, y0, x1, y1]` de la página tal como se ve → rectángulo de EmbedPDF. */
-  toPage(index, [x0, y0, x1, y1]) {
+  toPage(index: number, [x0, y0, x1, y1]: Box): Rect {
     const { size, rotation } = this.pageInfo(index);
     const shown = rotation % 2 ? { width: size.height, height: size.width } : size;
-    return transformRect(shown, { origin: { x: x0, y: y0 }, size: { width: x1 - x0, height: y1 - y0 } }, (4 - rotation) % 4, 1);
+    return transformRect(shown, { origin: { x: x0, y: y0 }, size: { width: x1 - x0, height: y1 - y0 } }, ((4 - rotation) % 4) as Rotation, 1);
   }
 
   // ── Zoom ───────────────────────────────────────────────────────────────
-  zoomIn() {
+  zoomIn(): void {
     this.setZoom(this.zoom * ZOOM_STEP);
   }
 
-  zoomOut() {
+  zoomOut(): void {
     this.setZoom(this.zoom / ZOOM_STEP);
   }
 
   /** Cambia el zoom manteniendo fijo el punto bajo `anchor` (coordenadas de la ventana). */
-  setZoom(factor, anchor = null) {
+  setZoom(factor: number, anchor: { x: number; y: number } | null = null): void {
     const zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, factor));
     const box = this.el.getBoundingClientRect();
     this._requestZoom(zoom * UNIT, anchor ? { vx: anchor.x - box.left, vy: anchor.y - box.top } : undefined);
   }
 
   /** Ajustes que se mantienen al cambiar el tamaño de la ventana (EmbedPDF los recalcula). */
-  fitWidth() {
+  fitWidth(): void {
     this._requestZoom(ZoomMode.FitWidth);
     this.scrollToPage(this.current);
   }
 
-  fitPage() {
+  fitPage(): void {
     this._requestZoom(ZoomMode.FitPage);
     this.scrollToPage(this.current);
   }
 
-  _requestZoom(level, center) {
+  _requestZoom(level: ZoomLevel, center?: { vx: number; vy: number }): void {
     this.level = level;
     if (this.ready) this._zoomScope().requestZoom(level, center);
     else if (typeof level === 'number') this._zoomChanged(level);
   }
 
   _zoomScope() {
-    return this.registry.getPlugin('zoom').provides().forDocument(this.shown);
+    return this._plugin<ZoomPlugin>('zoom').provides().forDocument(this.shown!);
   }
 
-  _zoomChanged(scale) {
+  _zoomChanged(scale: number): void {
     this.zoom = scale / UNIT;
     this.events.onZoom?.(this.zoom);
   }
 
   // ── Modos de vista y navegación ────────────────────────────────────────
-  setMode(mode) {
+  setMode(mode: Mode): void {
     if (mode === this.mode) return;
     const anchor = this.current;
     this.mode = mode;
@@ -352,18 +413,19 @@ export class PageCanvas {
     this.events.onMode?.(mode);
   }
 
-  _applyMode(id) {
+  _applyMode(id: string): void {
     const { strategy, spread } = LAYOUTS[this.mode];
-    this.registry.getPlugin('spread').provides().forDocument(id).setSpreadMode(spread);
-    this.registry.getPlugin('scroll').provides().forDocument(id).setScrollStrategy(strategy);
+    this._plugin<SpreadPlugin>('spread').provides().forDocument(id).setSpreadMode(spread);
+    // La estrategia paginada es nuestra (embed.ts): EmbedPDF no la tiene en su lista.
+    this._scrollPlugin().provides().forDocument(id).setScrollStrategy(strategy as ScrollStrategy);
   }
 
-  step() {
+  step(): number {
     return pageStep(this.mode);
   }
 
   /** Lleva la página `index` a la vista (centrada, o su borde superior si no cabe). */
-  scrollToPage(index, atBottom = false) {
+  scrollToPage(index: number, atBottom = false): void {
     if (index < 0 || index >= this.pageCount) return;
     if (!this._live()) {
       this.target = { index, atBottom };
@@ -379,21 +441,21 @@ export class PageCanvas {
     this._setCurrent(index, true);
   }
 
-  setNight(enabled) {
+  setNight(enabled: boolean): void {
     this.el.classList.toggle('is-night', enabled);
   }
 
-  setTool(tool) {
+  setTool(tool: string): void {
     this.tool = tool;
     this.el.dataset.tool = tool;
     if (this.shown) this._applyTool(this.shown);
   }
 
-  _applyTool(id) {
+  _applyTool(id: string): void {
     // Activar una herramienta de anotación cambia el modo del gestor de interacción (y quitarla
     // vuelve al predeterminado, el de texto).
     const annotationTool = ANNOTATION_TOOL[this.tool];
-    const annotation = this.registry.getPlugin('annotation').provides().forDocument(id);
+    const annotation = this._plugin<AnnotationPlugin>('annotation').provides().forDocument(id);
     if (annotationTool) {
       this.events.onTool?.(this.tool, id);
       annotation.setActiveTool(annotationTool);
@@ -401,12 +463,12 @@ export class PageCanvas {
     }
     if (annotation.getActiveTool()) annotation.setActiveTool(null);
     const mode = TEXT_TOOLS.has(this.tool) ? TEXT_MODE : OTHER_MODE;
-    const interaction = this.registry.getPlugin('interaction-manager').provides().forDocument(id);
+    const interaction = this._plugin<InteractionManagerPlugin>('interaction-manager').provides().forDocument(id);
     if (interaction.getActiveMode() !== mode) interaction.activate(mode);
   }
 
   /** Centra en la vista el rectángulo `[x0, y0, x1, y1]` (puntos) de la página `index`. */
-  scrollToRect(index, [x0, y0, x1, y1]) {
+  scrollToRect(index: number, [x0, y0, x1, y1]: Box): void {
     if (!this._live()) {
       this.scrollToPage(index);
       return;
@@ -422,33 +484,33 @@ export class PageCanvas {
   }
 
   /** La vista muestra la versión actual del documento y ya tiene sus páginas colocadas. */
-  _live() {
+  _live(): boolean {
     return this.ready && sameKeys(this.shownKeys, this.keys);
   }
 
   /** En modo paginado, pasa a la fila (página o par) de `index`. */
-  _showRow(index) {
+  _showRow(index: number): void {
     if (!this.paged) return;
     const { virtualItems } = this._scroll().getLayout();
     const row = virtualItems.find((item) => item.pageNumbers.includes(index + 1));
     if (!row) return;
-    this.registry.getPlugin('scroll').showRow(this.shown, row.index);
+    this._scrollPlugin().showRow(this.shown!, row.index);
     flushSync(); // que el Scroller ya mida lo que la fila nueva
   }
 
   _scroll() {
-    return this.registry.getPlugin('scroll').provides().forDocument(this.shown);
+    return this._scrollPlugin().provides().forDocument(this.shown!);
   }
 
   /** EmbedPDF aplica los desplazamientos en el siguiente fotograma: así no se pisan con los suyos. */
-  _scrollTo(x, y) {
-    this.registry.getPlugin('viewport').provides().forDocument(this.shown).scrollTo({ x, y, behavior: 'instant' });
+  _scrollTo(x: number, y: number): void {
+    this._plugin<ViewportPlugin>('viewport').provides().forDocument(this.shown!).scrollTo({ x, y, behavior: 'instant' });
   }
 
   // ── Coordenadas y marcas ───────────────────────────────────────────────
   /** Página bajo (o más cerca de) un punto de la ventana y ese punto en puntos PDF. */
-  pageAt(clientX, clientY) {
-    let best = null;
+  pageAt(clientX: number, clientY: number): { index: number; x: number; y: number } | null {
+    let best: { index: number; box: DOMRect; dist: number } | null = null;
     for (const [i, slot] of this.mounted) {
       const box = slot.getBoundingClientRect();
       const dx = Math.max(box.left - clientX, 0, clientX - box.right);
@@ -463,26 +525,26 @@ export class PageCanvas {
   }
 
   /** Un punto de la ventana en puntos PDF de la página `index` (aunque caiga fuera de ella). */
-  pointOn(index, clientX, clientY) {
+  pointOn(index: number, clientX: number, clientY: number): [number, number] {
     const box = this.pageRect(index);
     const [pw, ph] = this.sizes[index];
     return [((clientX - box.left) / box.width) * pw, ((clientY - box.top) / box.height) * ph];
   }
 
   /** Centro de la vista: la página que se ve ahí y ese punto (para insertar sellos). */
-  viewCenter() {
+  viewCenter(): { index: number; x: number; y: number } | null {
     const box = this.el.getBoundingClientRect();
     return this.pageAt(box.left + this.el.clientWidth / 2, box.top + this.el.clientHeight / 2);
   }
 
   /** Capa de marcas de la página `index` (se crea al pedirla; se pierde con `setPages`). */
-  marks(index) {
+  marks(index: number): HTMLElement {
     const slot = this.slots[index];
-    return slot.querySelector(':scope > .pdf-page__marks') ?? slot.appendChild(h('div', { class: 'pdf-page__marks' }));
+    return slot.querySelector<HTMLElement>(':scope > .pdf-page__marks') ?? slot.appendChild(h('div', { class: 'pdf-page__marks' }));
   }
 
   /** Añade a la página `index` un rectángulo `[x0, y0, x1, y1]` en puntos con la clase `className`. */
-  addMark(index, [x0, y0, x1, y1], className) {
+  addMark(index: number, [x0, y0, x1, y1]: Box | number[], className: string): HTMLDivElement {
     const [pw, ph] = this.sizes[index];
     const mark = h('div', {
       class: className,
@@ -498,12 +560,12 @@ export class PageCanvas {
   }
 
   /** Elementos de las capas de todas las páginas (también de las que no están montadas). */
-  queryAll(selector) {
-    return this.slots.flatMap((slot) => [...slot.querySelectorAll(selector)]);
+  queryAll(selector: string): HTMLElement[] {
+    return this.slots.flatMap((slot) => [...slot.querySelectorAll<HTMLElement>(selector)]);
   }
 
   /** Rectángulo de la página `index` en la ventana, esté montada o no. */
-  pageRect(index) {
+  pageRect(index: number): ClientBox {
     const slot = this.slots[index];
     if (slot.isConnected || !this.ready) return slot.getBoundingClientRect();
     const r = this._viewRect(index);
@@ -514,10 +576,10 @@ export class PageCanvas {
   }
 
   /** Rectángulo de la página `index` en píxeles del contenedor con scroll (según EmbedPDF). */
-  _viewRect(index) {
+  _viewRect(index: number): { x: number; y: number; w: number; h: number } {
     const { virtualItems, totalContentSize } = this._scroll().getLayout();
-    const item = virtualItems.find((it) => it.pageNumbers.includes(index + 1));
-    const page = item.pageLayouts.find((p) => p.pageIndex === index);
+    const item = virtualItems.find((it) => it.pageNumbers.includes(index + 1))!;
+    const page = item.pageLayouts.find((p) => p.pageIndex === index)!;
     const z = this.zoom * UNIT;
     // El contenido se centra si es más pequeño que la vista (ver .pdf-canvas__inner), y cada fila dentro de él.
     const freeX = Math.max(0, this.el.clientWidth - 2 * VIEWPORT_GAP - totalContentSize.width * z);
@@ -531,30 +593,30 @@ export class PageCanvas {
     };
   }
 
-  _setCurrent(index, force = false) {
+  _setCurrent(index: number, force = false): void {
     if (index === this.current && !force) return;
     this.current = index;
     this.events.onPage?.(index);
   }
 
   // ── EmbedPDF ───────────────────────────────────────────────────────────
-  async _start() {
+  async _start(): Promise<void> {
     const embed = await registry();
     if (this.closed) return;
     this._connect(embed);
     this.pages = mount(PdfPages, {
       target: this.el,
-      props: { element: this.el, overlay: (index) => (page) => this._attach(index, page) },
-    });
+      props: { element: this.el, overlay: (index: number) => (page: HTMLElement) => this._attach(index, page) },
+    }) as unknown as PagesComponent & Record<string, unknown>;
     await this._load();
   }
 
   /** Avisos del registro (compartido por todos los visores): solo los de nuestro documento. */
-  _connect(embed) {
+  _connect(embed: PluginRegistry): void {
     this.registry = embed;
-    const scroll = embed.getPlugin('scroll').provides();
-    const zoom = embed.getPlugin('zoom').provides();
-    const viewport = embed.getPlugin('viewport').provides();
+    const scroll = this._scrollPlugin().provides();
+    const zoom = this._plugin<ZoomPlugin>('zoom').provides();
+    const viewport = this._plugin<ViewportPlugin>('viewport').provides();
     this.unsubscribe = [
       scroll.onPageChange(({ documentId, pageNumber }) => {
         if (documentId === this.shown && this._live()) this._setCurrent(pageNumber - 1);
@@ -579,14 +641,14 @@ export class PageCanvas {
   }
 
   /** Abre en EmbedPDF la versión del documento que tiene Python y la pone a la vista. */
-  async _load() {
+  async _load(): Promise<void> {
     const seq = ++this.seq;
-    const { url, keys } = await call('viewer.document_url', this.docId);
+    const { url, keys } = await call<{ url: string; keys: string[] }>('viewer.document_url', this.docId);
     const response = await fetch(url);
-    if (!response.ok) throw new Error(`No se pudo descargar el documento (${response.status})`);
+    if (!response.ok) throw new Error(t.viewer.canvas.downloadError(response.status));
     const buffer = await response.arrayBuffer();
     if (this.closed || seq !== this.seq) return; // llegó otra versión más nueva
-    const docs = this.registry.getPlugin('document-manager').provides();
+    const docs = this._plugin<DocumentManagerPlugin>('document-manager').provides();
     const { documentId, task } = await docs.openDocumentBuffer({
       buffer, name: `documento-${this.docId}.pdf`, documentId: `viewer-${this.docId}-${seq}`, autoActivate: false,
     }).toPromise();
@@ -601,14 +663,14 @@ export class PageCanvas {
     Object.assign(this, { shown: documentId, shownKeys: keys, ready: false });
     this._applyMode(documentId);
     this._applyTool(documentId);
-    this.pages.show(documentId);
+    this.pages!.show(documentId);
     flushSync(); // la vista suelta el documento anterior antes de cerrarlo
     if (previous) docs.closeDocument(previous);
     this.events.onDocument?.(documentId);
   }
 
   /** Engancha la capa de la página `index` a su página montada por EmbedPDF. */
-  _attach(index, page) {
+  _attach(index: number, page: HTMLElement): (() => void) | undefined {
     const slot = this.slots[index];
     if (!slot) return undefined;
     page.append(slot);
@@ -621,15 +683,15 @@ export class PageCanvas {
     };
   }
 
-  _fail(err) {
+  _fail(err: unknown): void {
     if (this.closed) return;
     console.error('No se pudo mostrar el documento con EmbedPDF', err);
-    this.el.replaceChildren(h('p', { class: 'pdf-canvas__error' }, 'No se pudo mostrar el documento.'));
+    this.el.replaceChildren(h('p', { class: 'pdf-canvas__error' }, t.viewer.canvas.error));
   }
 
   // ── Ratón: rueda (zoom con Ctrl, pasar página en modo paginado), clics y arrastre ──
   // El pellizco es del zoom de EmbedPDF (ZoomGestureWrapper).
-  _onWheel(ev) {
+  _onWheel(ev: WheelEvent): void {
     if (ev.ctrlKey) {
       ev.preventDefault();
       // Un paso de la rueda del ratón (100) es un paso de zoom; el trackpad da pasos más finos.
@@ -640,7 +702,7 @@ export class PageCanvas {
   }
 
   /** Como en Adobe: primero se desplaza dentro de la página y solo en el borde pasa de página. */
-  _wheelFlip(down) {
+  _wheelFlip(down: boolean): boolean {
     const el = this.el;
     const atEdge = down ? el.scrollTop + el.clientHeight >= el.scrollHeight - 1 : el.scrollTop <= 0;
     if (!atEdge) return false;
@@ -656,13 +718,13 @@ export class PageCanvas {
   }
 
   /** Herramienta mano: arrastrar con el botón izquierdo desplaza el documento. */
-  _enablePanning() {
-    let start = null;
+  _enablePanning(): void {
+    let start: { x: number; y: number; left: number; top: number } | null = null;
     this.el.addEventListener('pointerdown', (ev) => {
       const box = this.el.getBoundingClientRect();
       const onScrollbar = ev.clientX - box.left >= this.el.clientWidth || ev.clientY - box.top >= this.el.clientHeight;
       // Sobre una anotación, el arrastre es suyo (moverla).
-      if (ev.button !== 0 || onScrollbar || this.tool !== TOOLS.HAND || ev.target.closest?.(ANNOTATION)) return;
+      if (ev.button !== 0 || onScrollbar || this.tool !== TOOLS.HAND || (ev.target as Element | null)?.closest?.(ANNOTATION)) return;
       start = { x: ev.clientX, y: ev.clientY, left: this.el.scrollLeft, top: this.el.scrollTop };
       this.el.setPointerCapture(ev.pointerId);
       this.el.classList.add('is-panning');
@@ -682,10 +744,10 @@ export class PageCanvas {
 }
 
 /** `blob` (imagen) en escala de grises, como JPEG. */
-async function grayscale(blob) {
+async function grayscale(blob: Blob): Promise<Blob> {
   const bitmap = await createImageBitmap(blob);
   const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-  const context = canvas.getContext('2d');
+  const context = canvas.getContext('2d')!;
   context.filter = 'grayscale(1)';
   context.drawImage(bitmap, 0, 0);
   bitmap.close();

@@ -4,14 +4,14 @@
 // EmbedPDF las dibuja (su capa en PdfPage.svelte), las selecciona, las mueve y redimensiona,
 // edita el texto libre en la página y crea las nuevas con sus herramientas (rectángulo,
 // círculo, línea, flecha, polilínea, polígono, pluma, marcador, texto libre, llamada, nota e
-// imagen: las activa canvas.js). Su historial da deshacer y rehacer. Aquí está lo nuestro:
+// imagen: las activa canvas.ts). Su historial da deshacer y rehacer. Aquí está lo nuestro:
 //   · el estilo de cada visor (colores y grosores), que se da a la herramienta al activarla;
 //   · las anotaciones de la selección de texto: resaltar, subrayar, tachar, ondulado, insertar
 //     y reemplazar texto (estas dos piden el texto); y los sellos y leyendas;
 //   · tras dibujar una forma, el texto, la llamada, la nota o la imagen, volver al puntero con
 //     ella seleccionada (como Qt); la nota pide antes su texto;
 //   · juntar en un solo paso de deshacer lo que se crea a la vez (`batch`: p. ej. las marcas de
-//     censura de un término, ver redaction.js);
+//     censura de un término, ver redaction.ts);
 //   · traer al frente y enviar al fondo (`reorder`), que EmbedPDF no sabe hacer;
 //   · pasar las anotaciones a Python (`sync`) antes de guardar, imprimir o cambiar las
 //     páginas: se sube la copia de EmbedPDF y Python toma de ella las anotaciones
@@ -21,17 +21,65 @@
 // a las de la página tal como se ve).
 import {
   PdfAnnotationReplyType, PdfAnnotationSubtype, PdfStandardFont, PdfTextAlignment, PdfVerticalAlignment, uuidV4,
+  type PdfAnnotationObject, type Rect,
 } from '@embedpdf/models';
-import { applyInsertUpright } from '@embedpdf/plugin-annotation';
+import type { PluginRegistry } from '@embedpdf/core';
+import {
+  applyInsertUpright, type AnnotationEvent, type AnnotationPlugin, type AnnotationScope,
+} from '@embedpdf/plugin-annotation';
+import type { ExportPlugin } from '@embedpdf/plugin-export';
+import type { Command, HistoryPlugin, HistoryScope } from '@embedpdf/plugin-history';
 import { call } from '$lib/api.ts';
 import { askText } from '$lib/ui.ts';
-import { ANNOTATION_TOOL, TOOLS } from '../canvas/canvas.js';
-import { DEFAULT_STYLE } from './palette.js';
-import { KINDS, MANUAL_LABEL } from '../redact/redaction.js';
+import { t } from '$texts';
+import { ANNOTATION_TOOL, TOOLS, type PageCanvas } from '../canvas/canvas.ts';
+import { KINDS, MANUAL_LABEL, type SelectionPart } from '../redact/redaction.ts';
+import { DEFAULT_STYLE, type AnnotationStyle } from './palette.ts';
+
+/**
+ * Anotación de EmbedPDF. Es una unión de tipos (rectángulo, texto libre, nota…) y el código lee
+ * campos que solo tienen algunos (`fontSize`, `inReplyToId`, `intent`…): se da acceso a todos.
+ */
+export type Annot = PdfAnnotationObject & Record<string, any>;
+
+/** Anotación a crear: lo que lleva el objeto, sin `id` (lo pone `create`). */
+export type AnnotDraft = { type: PdfAnnotationSubtype; pageIndex: number; rect: Rect } & Record<string, any>;
+
+/** Estado del historial de EmbedPDF que pinta la barra (deshacer / rehacer). */
+export interface HistoryFlags {
+  canUndo: boolean;
+  canRedo: boolean;
+}
+
+/** Lo que el visor (Viewer.svelte) hace con los avisos de las anotaciones. */
+export interface AnnotationsHost {
+  onHistory(state: HistoryFlags): void;
+  /** Hay cambios sin guardar. */
+  onChanged(): void;
+  /** Cambió la selección (anotaciones de EmbedPDF). */
+  onSelect(items: Annot[]): void;
+  /** El documento de EmbedPDF ya tiene esos cambios (miniaturas). */
+  onRendered(pages: number[]): void;
+  setTool(tool: string): void;
+}
+
+/**
+ * `register(orden, tema, documento)` del historial: apunta la orden y la ejecuta. Es privado en
+ * EmbedPDF 2.15.1; `batch` y `_quietly` lo sustituyen un momento para juntar o no apuntar las
+ * órdenes. Revisarlo al actualizar EmbedPDF.
+ */
+interface HistoryInternals {
+  register(command: Command, topic: string, documentId?: string): void;
+}
+
+type Markup = 'highlight' | 'underline' | 'strikeout' | 'squiggly';
+type TextEdit = 'insert' | 'replace';
+type StyleKey = keyof AnnotationStyle;
 
 const T = PdfAnnotationSubtype;
+const TX = t.viewer.annotations;
 // Marcas de texto: tipo de anotación, herramienta de EmbedPDF (sus valores) y color del estilo.
-const MARKUP = {
+const MARKUP: Record<Markup, [PdfAnnotationSubtype, string, StyleKey]> = {
   highlight: [T.HIGHLIGHT, 'highlight', 'highlightColor'],
   underline: [T.UNDERLINE, 'underline', 'underlineColor'],
   strikeout: [T.STRIKEOUT, 'strikeout', 'strikeoutColor'],
@@ -39,27 +87,26 @@ const MARKUP = {
 };
 // Insertar y reemplazar texto: marca de inserción (Caret) con el texto; al reemplazar, además,
 // lo seleccionado se tacha y queda agrupado con la marca (como Acrobat).
-const TEXT_EDITS = {
-  insert: { intent: 'Insert', title: 'Insertar texto', label: 'Texto a insertar:' },
-  replace: { intent: 'Replace', title: 'Reemplazar texto', label: 'Texto nuevo:' },
+const TEXT_EDITS: Record<TextEdit, { intent: string; title: string; label: string }> = {
+  insert: { intent: 'Insert', title: TX.insertTitle, label: TX.insertLabel },
+  replace: { intent: 'Replace', title: TX.replaceTitle, label: TX.replaceLabel },
 };
 // Tras crear con estas herramientas se pasa al puntero con lo creado seleccionado (como Qt).
-const AUTO_POINTER = new Set([
+const AUTO_POINTER = new Set<string>([
   TOOLS.RECT, TOOLS.ELLIPSE, TOOLS.LINE, TOOLS.ARROW, TOOLS.POLYLINE, TOOLS.POLYGON,
   TOOLS.TEXT, TOOLS.CALLOUT, TOOLS.NOTE, TOOLS.IMAGE,
 ]);
 // Sello (como add_stamp_legend en Qt): texto centrado con marco, sobre blanco.
 const STAMP = { minWidth: 105, minHeight: 29, border: 1.5, padding: 16 };
-const NOTE_TITLE = 'Añadir Nota de Texto';
 // Fuera del orden de dibujo: no se apilan con las demás (enlaces, formularios, ventanas de nota).
-const UNSTACKED = new Set([T.LINK, T.WIDGET, T.POPUP]);
+const UNSTACKED = new Set<PdfAnnotationSubtype>([T.LINK, T.WIDGET, T.POPUP]);
 const HISTORY_TOPIC = 'annotations'; // el de las órdenes de EmbedPDF (ANNOTATION_HISTORY_TOPIC)
 // Caja del texto libre (_fitText): alto de línea (en tamaños de letra) y margen, en puntos.
 const TEXT_LINE = 1.2;
 const TEXT_PADDING = 6;
 
 /** Estilo de `tool` (herramienta del visor) para los valores de su herramienta de EmbedPDF. */
-function toolDefaults(tool, style) {
+function toolDefaults(tool: string, style: AnnotationStyle): Record<string, unknown> {
   switch (tool) {
     case TOOLS.RECT:
     case TOOLS.ELLIPSE:
@@ -92,35 +139,32 @@ function toolDefaults(tool, style) {
 }
 
 export class Annotations {
-  /**
-   * @param {import('../canvas/canvas.js').PageCanvas} canvas
-   * @param {number} docId documento del servicio "viewer"
-   * @param {{ onHistory: (state) => void, onChanged: () => void, onSelect: (items) => void,
-   *   onRendered: (pages) => void, setTool: (tool) => void }} host
-   *   `onHistory({ canUndo, canRedo })`; `onChanged()`: hay cambios sin guardar; `onSelect(items)`:
-   *   cambió la selección (anotaciones de EmbedPDF); `onRendered(páginas)`: el documento de
-   *   EmbedPDF ya tiene esos cambios (miniaturas); `setTool(t)`: cambiar de herramienta.
-   */
-  constructor(canvas, docId, host) {
+  canvas: PageCanvas;
+  docId: number;
+  host: AnnotationsHost;
+  style: AnnotationStyle = { ...DEFAULT_STYLE };
+  version = 0; // cambios hechos en el documento a la vista
+  synced = 0; // `version` que ya tiene Python
+  seen = new Set<string>(); // anotaciones ya creadas (rehacer no vuelve a pedir el texto de la nota)
+  watchers = new Set<() => void>(); // avisar de cualquier cambio en las anotaciones (`watch`)
+  measure: CanvasRenderingContext2D | null = null; // para medir el texto libre (_fitText)
+
+  /** `docId`: documento del servicio "viewer"; `host`: lo que el visor hace con los avisos. */
+  constructor(canvas: PageCanvas, docId: number, host: AnnotationsHost) {
     this.canvas = canvas;
     this.docId = docId;
     this.host = host;
-    this.style = { ...DEFAULT_STYLE };
-    this.version = 0; // cambios hechos en el documento a la vista
-    this.synced = 0; // `version` que ya tiene Python
-    this.seen = new Set(); // anotaciones ya creadas (rehacer no vuelve a pedir el texto de la nota)
-    this.watchers = new Set(); // avisar de cualquier cambio en las anotaciones (`watch`)
     canvas.loading.then(() => this._connect());
   }
 
   /** `fn()` se llama con cada cambio en las anotaciones del documento a la vista; devuelve cómo dejar de avisar. */
-  watch(fn) {
+  watch(fn: () => void): () => void {
     this.watchers.add(fn);
     return () => this.watchers.delete(fn);
   }
 
   /** Lo llama el lienzo al poner a la vista una versión nueva (viene de Python: ya la tiene). */
-  documentShown() {
+  documentShown(): void {
     this.version = 0;
     this.synced = 0;
     this.seen.clear();
@@ -130,32 +174,45 @@ export class Annotations {
   }
 
   /** Lo llama el lienzo antes de activar la herramienta de anotación de `tool`: le da nuestro estilo. */
-  applyStyle(tool) {
-    const id = ANNOTATION_TOOL[tool];
+  applyStyle(tool: string): void {
+    const id = (ANNOTATION_TOOL as Record<string, string | undefined>)[tool];
     if (id) this._plugin().provides().setToolDefaults(id, toolDefaults(tool, this.style));
   }
 
   // ── EmbedPDF ───────────────────────────────────────────────────────────
-  _plugin() {
-    return this.canvas.registry.getPlugin('annotation');
+  _registry(): PluginRegistry {
+    return this.canvas.registry!; // ya está: las anotaciones se usan después de `canvas.loading`
+  }
+
+  _plugin(): AnnotationPlugin {
+    return this._registry().getPlugin<AnnotationPlugin>('annotation')!;
+  }
+
+  _historyPlugin(): HistoryPlugin {
+    return this._registry().getPlugin<HistoryPlugin>('history')!;
+  }
+
+  /** El mismo complemento, con su `register` privado (ver HistoryInternals). */
+  _historyInternals(): HistoryInternals {
+    return this._historyPlugin() as unknown as HistoryInternals;
   }
 
   /** Las anotaciones del documento a la vista (null mientras no hay ninguno). */
-  scope() {
-    const { shown } = this.canvas;
+  scope(): AnnotationScope | null {
+    const shown: string | null = this.canvas.shown;
     return shown ? this._plugin().provides().forDocument(shown) : null;
   }
 
-  _history() {
-    return this.canvas.registry.getPlugin('history').provides().forDocument(this.canvas.shown);
+  _history(): HistoryScope {
+    return this._historyPlugin().provides().forDocument(this.canvas.shown!);
   }
 
   /** Avisos del registro (compartido por todos los visores): solo los de nuestro documento. */
-  _connect() {
+  _connect(): void {
     if (this.canvas.closed) return;
     const annotation = this._plugin().provides();
-    const history = this.canvas.registry.getPlugin('history').provides();
-    const ours = (documentId) => documentId === this.canvas.shown;
+    const history = this._historyPlugin().provides();
+    const ours = (documentId: string) => documentId === this.canvas.shown;
     this.canvas.unsubscribe.push(
       annotation.onAnnotationEvent((event) => {
         if (ours(event.documentId)) this._onEvent(event);
@@ -171,7 +228,7 @@ export class Annotations {
     );
   }
 
-  _onEvent(event) {
+  _onEvent(event: AnnotationEvent): void {
     if (event.type === 'loaded') return;
     // Cada cambio llega dos veces: al hacerlo (también al deshacer) y cuando ya está en el PDF.
     if (event.committed) {
@@ -190,12 +247,13 @@ export class Annotations {
   }
 
   /** Recién creada con una herramienta: la nota pide su texto y se vuelve al puntero (como Qt). */
-  async _created(annotation, pageIndex) {
+  async _created(annotation: PdfAnnotationObject, pageIndex: number): Promise<void> {
     const { tool } = this.canvas;
     if (!AUTO_POINTER.has(tool)) return;
     const scope = this.scope();
+    if (!scope) return;
     if (annotation.type === T.TEXT && tool === TOOLS.NOTE) {
-      const text = (await askText(NOTE_TITLE, 'Texto de la nota:', '', { multiline: true }))?.trim();
+      const text = (await askText(TX.noteTitle, TX.noteLabel, '', { multiline: true }))?.trim();
       if (!text) {
         scope.deleteAnnotation(pageIndex, annotation.id);
         return;
@@ -213,14 +271,14 @@ export class Annotations {
    * todas las líneas. Nunca encoge: se respeta la caja que el usuario agrandó. Las cajas
    * giradas (texto derecho en páginas giradas) se dejan como están.
    */
-  _fitText(pageIndex, id) {
+  _fitText(pageIndex: number, id: string): void {
     const scope = this.scope();
-    const object = scope?.getAnnotationById(id)?.object;
-    if (!object || object.rotation || object.unrotatedRect) return;
+    const object = scope?.getAnnotationById(id)?.object as Annot | undefined;
+    if (!scope || !object || object.rotation || object.unrotatedRect) return;
     const { origin, size } = object.rect;
-    const pageWidth = this.canvas.pageInfo(pageIndex).size.width;
+    const pageWidth: number = this.canvas.pageInfo(pageIndex).size.width;
     const room = Math.max(size.width, pageWidth - origin.x - TEXT_PADDING);
-    const context = (this.measure ??= document.createElement('canvas').getContext('2d'));
+    const context = (this.measure ??= document.createElement('canvas').getContext('2d')!);
     context.font = `${object.fontSize}px Helvetica, Arial, sans-serif`;
     let width = 0;
     let lines = 0;
@@ -237,35 +295,35 @@ export class Annotations {
 
   // ── Selección ──────────────────────────────────────────────────────────
   /** Anotaciones seleccionadas (objetos de EmbedPDF). */
-  selected() {
-    return this.scope()?.getSelectedAnnotations().map((tracked) => tracked.object) ?? [];
+  selected(): Annot[] {
+    return this.scope()?.getSelectedAnnotations().map((tracked) => tracked.object as Annot) ?? [];
   }
 
-  select(items) {
+  select(items: PdfAnnotationObject[]): void {
     this.scope()?.setSelection(items.map((item) => item.id));
   }
 
-  clearSelection() {
+  clearSelection(): void {
     const scope = this.scope();
     if (scope?.getSelectedAnnotationIds().length) scope.deselectAnnotation();
   }
 
   // ── Cambios (cada uno se puede deshacer) ───────────────────────────────
   /** Aplica `change(objeto)` → cambios (o null) a cada anotación de `items`, en un solo paso. */
-  update(items, change) {
+  update<A extends PdfAnnotationObject>(items: A[], change: (item: A) => Record<string, unknown> | null): void {
     const patches = items.map((item) => ({ pageIndex: item.pageIndex, id: item.id, patch: change(item) }))
-      .filter((p) => p.patch);
-    if (patches.length) this.scope().updateAnnotations(patches);
+      .filter((p): p is { pageIndex: number; id: string; patch: Partial<PdfAnnotationObject> } => Boolean(p.patch));
+    if (patches.length) this.scope()?.updateAnnotations(patches);
   }
 
   /**
    * Lo que cree, cambie o borre `fn()` se deshace de una vez: las órdenes que EmbedPDF apunta en
    * su historial (una por anotación) se juntan en una.
    */
-  batch(fn) {
-    const history = this.canvas.registry.getPlugin('history');
+  batch(fn: () => void): void {
+    const history = this._historyInternals();
     const { register } = history;
-    const steps = [];
+    const steps: { command: Command; topic: string; documentId?: string }[] = [];
     history.register = (command, topic, documentId) => {
       command.execute();
       steps.push({ command, topic, documentId });
@@ -283,12 +341,14 @@ export class Annotations {
         done = false;
       },
       undo: () => steps.toReversed().forEach(({ command }) => command.undo()),
-      metadata: { annotationIds: steps.flatMap(({ command }) => command.metadata?.annotationIds ?? []) },
+      metadata: {
+        annotationIds: steps.flatMap(({ command }) => (command.metadata as { annotationIds?: string[] } | undefined)?.annotationIds ?? []),
+      },
     }, steps[0].topic, steps[0].documentId);
   }
 
-  remove(items) {
-    if (items.length) this.scope().deleteAnnotations(items.map((item) => ({ pageIndex: item.pageIndex, id: item.id })));
+  remove(items: PdfAnnotationObject[]): void {
+    if (items.length) this.scope()?.deleteAnnotations(items.map((item) => ({ pageIndex: item.pageIndex, id: item.id })));
   }
 
   /**
@@ -303,16 +363,16 @@ export class Annotations {
    * Los grupos (como reemplazar texto) se mueven enteros. Devuelve las nuevas de `items`, o null
    * si habría que volver a crear una imagen (su objeto no lleva la imagen).
    */
-  reorder(items, front) {
+  reorder(items: Annot[], front: boolean): Annot[] | null {
     const scope = this.scope();
     if (!scope || !items.length) return items;
     const state = scope.getState();
     const chosen = new Set(items.map((item) => item.id));
-    const moved = [];
-    const restore = [];
+    const moved: Annot[] = [];
+    const restore: Annot[] = [];
     for (const pageIndex of new Set(items.map((item) => item.pageIndex))) {
-      const page = (state.pages[pageIndex] ?? []).map((uid) => state.byUid[uid]?.object)
-        .filter((object) => object && !UNSTACKED.has(object.type));
+      const page = (state.pages[pageIndex] ?? []).map((uid) => state.byUid[uid]?.object as Annot | undefined)
+        .filter((object): object is Annot => Boolean(object) && !UNSTACKED.has(object!.type));
       const last = page.findLastIndex((object) => chosen.has(object.id));
       const some = withGroups(page, front
         ? page.filter((object) => chosen.has(object.id))
@@ -323,28 +383,27 @@ export class Annotations {
     }
     if (!moved.length) return items;
     if (restore.some((object) => object.type === T.STAMP)) return null;
-    const current = new Map(); // id de antes -> objeto de ahora
-    const now = (object) => current.get(object.id) ?? object;
-    const toEnd = (objects) => this._quietly(() => {
+    const current = new Map<string, Annot>(); // id de antes -> objeto de ahora
+    const now = (object: Annot) => current.get(object.id) ?? object;
+    const toEnd = (objects: Annot[]) => this._quietly(() => {
       const live = objects.map(now);
       scope.deleteAnnotations(live.map(({ pageIndex, id }) => ({ pageIndex, id })));
       const ids = new Map(live.map((object) => [object.id, uuidV4()]));
       live.forEach((object, k) => {
-        const copy = { ...object, id: ids.get(object.id) };
-        if (ids.has(object.inReplyToId)) copy.inReplyToId = ids.get(object.inReplyToId);
+        const copy: Annot = { ...object, id: ids.get(object.id)! };
+        if (object.inReplyToId && ids.has(object.inReplyToId)) copy.inReplyToId = ids.get(object.inReplyToId);
         this.seen.add(copy.id); // no es de una herramienta
         scope.createAnnotation(object.pageIndex, copy);
         current.set(objects[k].id, copy);
       });
     });
-    const history = this.canvas.registry.getPlugin('history');
-    history.register({ execute: () => toEnd(moved), undo: () => toEnd(restore) }, HISTORY_TOPIC, this.canvas.shown);
+    this._historyInternals().register({ execute: () => toEnd(moved), undo: () => toEnd(restore) }, HISTORY_TOPIC, this.canvas.shown ?? undefined);
     return items.map(now);
   }
 
   /** Hace `fn()` sin que EmbedPDF apunte nada en su historial (quien llama apunta lo suyo). */
-  _quietly(fn) {
-    const history = this.canvas.registry.getPlugin('history');
+  _quietly(fn: () => void): void {
+    const history = this._historyInternals();
     const { register } = history;
     history.register = (command) => command.execute();
     try {
@@ -355,22 +414,23 @@ export class Annotations {
   }
 
   /** Desplaza `items` (dx, dy) puntos en la página tal como se ve (flechas del teclado). */
-  move(items, dx, dy) {
+  move(items: PdfAnnotationObject[], dx: number, dy: number): void {
     const scope = this.scope();
+    if (!scope) return;
     for (const item of items) {
       const { rotation } = this.canvas.pageInfo(item.pageIndex);
       // De la página vista a la página sin girar (los cuartos de vuelta van en sentido horario).
-      const [x, y] = [[dx, dy], [dy, -dx], [-dx, -dy], [-dy, dx]][rotation];
+      const [x, y] = [[dx, dy], [dy, -dx], [-dx, -dy], [-dy, dx]][rotation as number];
       scope.moveAnnotation(item.pageIndex, item.id, { x, y }, 'delta');
     }
   }
 
   /** Crea anotaciones `[{ pageIndex, ...objeto }]`; devuelve las creadas (con su `id`). */
-  create(items) {
+  create(items: AnnotDraft[]): Annot[] {
     const scope = this.scope();
     if (!scope) return [];
     return items.map(({ pageIndex, ...object }) => {
-      const annotation = { ...object, pageIndex, id: uuidV4() };
+      const annotation = { ...object, pageIndex, id: uuidV4() } as Annot;
       this.seen.add(annotation.id); // no es de una herramienta: no se trata como tal
       scope.createAnnotation(pageIndex, annotation);
       return annotation;
@@ -381,8 +441,8 @@ export class Annotations {
    * Anota la selección de texto `parts` (`getFormattedSelection`): resalta, subraya, tacha,
    * ondula, o marca dónde insertar o qué reemplazar (`kind`: insert | replace, piden el texto).
    */
-  markup(kind, parts) {
-    if (TEXT_EDITS[kind]) return this._textEdit(kind, parts);
+  markup(kind: Markup | TextEdit, parts: SelectionPart[]): Annot[] | Promise<Annot[]> {
+    if (kind === 'insert' || kind === 'replace') return this._textEdit(kind, parts);
     const [type, toolId, styleKey] = MARKUP[kind];
     const color = this.style[styleKey];
     const defaults = this._plugin().provides().getTools().find((tool) => tool.id === toolId)?.defaults ?? {};
@@ -396,11 +456,11 @@ export class Annotations {
    * seleccionado; al reemplazar, tacha lo seleccionado (agrupado con la marca: se mueven y
    * borran juntos). Como en la herramienta de EmbedPDF, la marca mide media línea.
    */
-  async _textEdit(kind, parts) {
+  async _textEdit(kind: TextEdit, parts: SelectionPart[]): Promise<Annot[]> {
     const { intent, title, label } = TEXT_EDITS[kind];
     const last = parts.at(-1);
     const line = last?.segmentRects.at(-1);
-    if (!line) return [];
+    if (!last || !line) return [];
     const text = (await askText(title, label, '', { multiline: true }))?.trim();
     if (!text) return [];
     const color = this.style.editColor;
@@ -421,8 +481,9 @@ export class Annotations {
   }
 
   /** Sello o leyenda: texto libre centrado en `at` (página vista), con marco y fondo blanco. */
-  stamp({ text, color, font_size: size }, at) {
-    const [pw, ph] = this.canvas.sizes[at.index];
+  stamp({ text, color, font_size: size }: { text: string; color: string; font_size: number },
+        at: { index: number; x: number; y: number }): Annot[] {
+    const [pw, ph]: [number, number] = this.canvas.sizes[at.index];
     const lines = text.split('\n');
     const longest = Math.max(...lines.map((line) => line.length));
     const w = Math.min(pw, Math.max(STAMP.minWidth, longest * size * 0.62 + STAMP.padding));
@@ -435,20 +496,20 @@ export class Annotations {
       contents: text, fontSize: size, fontColor: color, fontFamily: PdfStandardFont.Helvetica, opacity: 1,
       textAlign: PdfTextAlignment.Center, verticalAlign: PdfVerticalAlignment.Middle,
       color: '#FFFFFF', backgroundColor: '#FFFFFF', strokeColor: color, strokeWidth: STAMP.border,
-    }, rotation, true);
-    return this.create([annotation]);
+    } as unknown as PdfAnnotationObject, rotation, true);
+    return this.create([annotation as AnnotDraft]);
   }
 
-  undo() {
+  undo(): void {
     if (this.canvas.shown) this._history().undo();
   }
 
-  redo() {
+  redo(): void {
     if (this.canvas.shown) this._history().redo();
   }
 
   /** Escribe en el PDF de EmbedPDF lo pendiente (para dibujar las páginas con las anotaciones al día). */
-  async commit() {
+  async commit(): Promise<void> {
     this.canvas.finishEditing(); // el texto que se está escribiendo también cuenta
     await this.scope()?.commit().toPromise();
   }
@@ -459,31 +520,31 @@ export class Annotations {
    * documento de EmbedPDF y Python toma de ella las anotaciones. Llamarlo antes de todo lo
    * que necesita el documento al día en Python. Resuelve `{ modified }` o null si no hacía falta.
    */
-  async sync() {
+  async sync(): Promise<{ modified: boolean } | null> {
     this.canvas.finishEditing(); // el texto que se está escribiendo también cuenta
-    const documentId = this.canvas.shown;
+    const documentId: string | null = this.canvas.shown;
     const version = this.version;
     if (!documentId || version === this.synced) return null;
     const plugin = this._plugin().provides().forDocument(documentId);
     await plugin.commit().toPromise(); // lo pendiente, ya escrito en el PDF de EmbedPDF
-    const buffer = await this.canvas.registry.getPlugin('export').provides().forDocument(documentId).saveAsCopy().toPromise();
-    const url = await call('viewer.upload_url');
+    const buffer = await this._registry().getPlugin<ExportPlugin>('export')!.provides().forDocument(documentId).saveAsCopy().toPromise();
+    const url = await call<string>('viewer.upload_url');
     const response = await fetch(url, { method: 'POST', body: buffer });
-    if (!response.ok) throw new Error(`No se pudo pasar el documento a Python (${response.status})`);
-    const result = await call('viewer.sync_annotations', this.docId, url);
+    if (!response.ok) throw new Error(TX.syncError(response.status));
+    const result = await call<{ modified: boolean }>('viewer.sync_annotations', this.docId, url);
     if (documentId === this.canvas.shown) this.synced = Math.max(this.synced, version);
     return result;
   }
 }
 
 /** `some` (anotaciones de `page`) con los demás miembros de sus grupos, en el orden de la página. */
-function withGroups(page, some) {
+function withGroups(page: Annot[], some: Annot[]): Annot[] {
   const ids = new Set(some.map((object) => object.id));
   for (let grew = true; grew;) {
     grew = false;
     for (const object of page) {
       const linked = ids.has(object.id) ? object.inReplyToId : null;
-      if (!ids.has(object.id) && ids.has(object.inReplyToId)) {
+      if (!ids.has(object.id) && object.inReplyToId && ids.has(object.inReplyToId)) {
         ids.add(object.id);
         grew = true;
       } else if (linked && !ids.has(linked) && page.some((other) => other.id === linked)) {
