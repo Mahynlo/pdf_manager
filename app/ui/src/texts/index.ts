@@ -1,13 +1,13 @@
 // Textos de la interfaz: nombres de botones, descripciones emergentes, menús y avisos. Están
-// todos en el catálogo del idioma (es.ts), ordenados por herramienta y parte, para cambiarlos
-// sin buscar por el código:
+// todos en el catálogo del idioma (es/, un archivo por herramienta), ordenados por parte de la
+// interfaz, para cambiarlos sin buscar por el código:
 //
 //   import { t, tip } from '$texts';
 //   <button title={tip(t.viewer.toolbar.undo)}>      →  «Deshacer (Ctrl+Z)»
 //
 // Otro idioma sería otro catálogo con las mismas claves (`const en: Texts = { ... }`): TypeScript
 // avisa si falta alguna o sobra.
-import es from './es';
+import es from './es/index.ts';
 
 export type Texts = typeof es;
 

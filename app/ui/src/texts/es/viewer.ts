@@ -1,0 +1,62 @@
+// Textos del visor de PDF (tools/viewer). Los botones con atajo llevan `{ label, shortcut }`: el
+// atajo se añade solo a la descripción emergente («Deshacer (Ctrl+Z)», ver tip() en ../index.ts).
+
+export default {
+  /** Barra superior del visor (toolbars/Toolbar.svelte). */
+  toolbar: {
+    more: 'Más opciones y operaciones del documento',
+    first: { label: 'Primera página', shortcut: 'Inicio' },
+    prev: { label: 'Página anterior', shortcut: 'Re Pág / ←' },
+    goToPage: { label: 'Ir a página específica', shortcut: 'Ctrl+G' },
+    next: { label: 'Página siguiente', shortcut: 'Av Pág / →' },
+    last: { label: 'Última página', shortcut: 'Fin' },
+    zoomOut: { label: 'Reducir zoom', shortcut: 'Ctrl -' },
+    zoomLevel: 'Nivel de zoom',
+    zoomLevels: 'Niveles de zoom',
+    fitWidth: 'Ajustar Ancho',
+    fitPage: 'Ajustar Página',
+    zoomIn: { label: 'Aumentar zoom', shortcut: 'Ctrl +' },
+    continuous: 'Scroll continuo',
+    double: 'Doble página (la rueda pasa de par en par)',
+    single: 'Página única (la rueda pasa de página)',
+    undo: { label: 'Deshacer', shortcut: 'Ctrl+Z' },
+    redo: { label: 'Rehacer', shortcut: 'Ctrl+Y' },
+    ocr: 'Ejecutar OCR en la página actual',
+    thumbnails: 'Mostrar/Ocultar miniaturas',
+    search: { label: 'Buscar en el documento', shortcut: 'Ctrl+F' },
+    night: 'Modo noche (Invertir colores del lienzo)',
+    dock: 'Expandir/Colapsar panel lateral',
+  },
+  /** Barra de herramientas del lienzo (toolbars/ToolsBar.svelte); una entrada por herramienta. */
+  tools: {
+    hand: 'Mano: Desplazar página / Panning',
+    select: 'Seleccionar Texto: Copiar, buscar y resaltar texto',
+    pointer: 'Puntero de Objetos: Seleccionar, mover y transformar anotaciones',
+    highlight: 'Resaltar texto',
+    underline: 'Subrayar texto',
+    strikeout: 'Tachar texto',
+    squiggly: 'Subrayado ondulado',
+    insertText: 'Indicar texto omitido: selecciona dónde va y escribe lo que falta',
+    replaceText: 'Reemplazar texto: selecciona lo que sobra y escribe el texto nuevo',
+    rect: 'Forma: Rectángulo',
+    ellipse: 'Forma: Círculo / Elipse',
+    line: 'Línea',
+    arrow: 'Flecha',
+    polyline: 'Polilínea: clic en cada vértice, doble clic para terminar',
+    polygon: 'Polígono: clic en cada vértice, doble clic para cerrar',
+    pen: 'Trazos libres / Pluma',
+    marker: 'Marcador: trazo libre translúcido',
+    draw: 'Dibujo fino',
+    text: 'Insertar texto en página (T) - Clic derecho para opciones',
+    image: 'Imagen: elige un archivo y haz clic donde colocarla',
+    /** Menú del botón de texto (clic derecho). */
+    textMenu: {
+      text: 'Texto libre en página (T)',
+      callout: 'Texto con flecha (llamada)',
+      note: 'Nota adhesiva (comentario)',
+    },
+    color: (name: string) => `Color ${name}`,
+    stamps: 'Sellos',
+    stampsTip: 'Sellos y leyendas de texto',
+  },
+};

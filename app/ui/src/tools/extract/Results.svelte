@@ -1,21 +1,23 @@
 <!-- Resultados de Extraer: registro de operación y tabla de coincidencias. -->
-<script>
+<script lang="ts">
   import { tick } from 'svelte';
   import SubTabs from '$lib/components/SubTabs.svelte';
+  import { t } from '$texts';
+  import type { ExtractMatch, LogTone } from './types.ts';
 
+  const T = t.extract.results;
   const SEPARATOR = '─'.repeat(45);
-  const COLUMNS = ['Documento', 'Pág.', 'Puntuación', 'Términos Coincidentes', 'Modo'];
 
-  let lines = $state([]); // [{ text, tone }]
-  let matches = $state([]);
-  let logEl;
+  let lines = $state<{ text: string; tone: LogTone }[]>([]);
+  let matches = $state<ExtractMatch[]>([]);
+  let logEl: HTMLDivElement;
 
   export function clear() {
     lines = [];
     matches = [];
   }
 
-  export async function log(text, tone) {
+  export async function log(text: string, tone: LogTone = null) {
     const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 24;
     lines.push({ text, tone });
     await tick();
@@ -24,7 +26,7 @@
 
   export const separator = () => log(SEPARATOR, 'muted');
 
-  export function addMatch(match) {
+  export function addMatch(match: ExtractMatch) {
     matches.push(match);
   }
 </script>
@@ -40,7 +42,7 @@
 {#snippet table()}
   <div class="table-wrap">
     <table class="table">
-      <thead><tr>{#each COLUMNS as c (c)}<th>{c}</th>{/each}</tr></thead>
+      <thead><tr>{#each T.columns as c (c)}<th>{c}</th>{/each}</tr></thead>
       <tbody>
         {#each matches as m, i (i)}
           <tr>
@@ -53,6 +55,6 @@
 {/snippet}
 
 <SubTabs tabs={[
-  { label: 'Registro de operación', icon: 'terminal', panel: logPanel },
-  { label: `Tabla de coincidencias (${matches.length})`, icon: 'table', panel: table },
+  { label: T.log, icon: 'terminal', panel: logPanel },
+  { label: T.table(matches.length), icon: 'table', panel: table },
 ]} />

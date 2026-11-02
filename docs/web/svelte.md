@@ -21,7 +21,8 @@ app/ui/
                         por área (shell, merge, security, extract, settings, help, viewer)
     assets/icons.json   trazos de los iconos (también los usa la versión Qt)
     App.svelte          ventana: cabecera con pestañas, vistas, barra de estado, avisos y menú
-    texts/              textos de la interfaz: es.ts (catálogo) e index.ts (t, tip())
+    texts/              textos de la interfaz: es/ (catálogo, un archivo por herramienta) e
+                        index.ts (t, tip())
     lib/                piezas comunes
       api.ts            puente con Python: call('servicio.metodo', ...), on('evento', fn)
       types.ts          tipos de las respuestas de Python que usan varias partes (DocumentInfo…)
@@ -91,17 +92,26 @@ La interfaz se está pasando a TypeScript. Vite compila los `.ts` y los componen
 - **Migración por carpetas:** primero `lib/`, luego `shell/` y las herramientas pequeñas, y el visor
   al final. Mientras dura, los `.js` que quedan se aceptan sin comprobarlos (`allowJs`, sin
   `checkJs` en `tsconfig.json`). Al terminar se quita `allowJs`.
-- **Ya en TypeScript:** `lib/` (módulos y componentes; `types.ts`: respuestas de Python que usan varias partes), `main.ts`, `App.svelte`, `shell/`, `texts/` y las barras del visor (`toolbars/`).
+- **Ya en TypeScript:** `lib/` (módulos y componentes; `types.ts`: respuestas de Python que usan
+  varias partes), `main.ts`, `App.svelte`, `shell/`, `texts/`, las herramientas Ajustes, Ayuda,
+  Seguridad, Extraer y Combinar, y las barras del visor (`toolbars/`). Falta el resto del visor.
+- **Respuestas de una herramienta:** sus tipos van en su carpeta (`tools/merge/types.ts`, …).
 - **Importaciones con la extensión real:** `'$lib/api.ts'`, `'./menu.svelte.ts'` (`allowImportingTsExtensions`).
 - **Respuestas de Python con tipo:** `call<Tipo>('servicio.metodo', …)` y `on<Tipo>('evento', fn)`; sin tipo devuelven `any`.
 - **Archivos nuevos:** en TypeScript (`.ts` y `lang="ts"`).
 - **Tipos de las props:** `let { view, actions }: { view: ToolbarView; actions: ToolbarActions } = $props();`.
+- **Sin parámetros opcionales con `?` en los componentes:** en un `<script lang="ts">`, Svelte 5.51
+  quita el tipo de `function log(text: string, tone?: LogTone)` pero deja el `?`, y la compilación
+  falla (`pnpm check` no lo detecta). Se usa un valor por defecto: `tone: LogTone = null`. En los
+  `.ts` y dentro de un tipo (`{ checked?: boolean }`) no hay problema.
+- **Comprobar siempre con `pnpm check` y `pnpm build`:** algunos fallos solo salen al compilar.
 
 ## Textos de la interfaz
 
 Los nombres de botones, descripciones emergentes, menús y avisos van en el catálogo
-`src/texts/es.ts`, ordenados por herramienta y parte (`t.viewer.toolbar.undo`). Para cambiar un
-texto se edita ahí, sin buscarlo por el código.
+`src/texts/es/`, un archivo por herramienta (`viewer.ts`, `merge.ts`, …) reunidos en `es/index.ts`,
+y dentro ordenados por parte de la interfaz (`t.viewer.toolbar.undo`). Para cambiar un texto se edita
+ahí, sin buscarlo por el código.
 
 ```svelte
 <script lang="ts">
@@ -118,7 +128,9 @@ texto se edita ahí, sin buscarlo por el código.
 - **Comprobado:** en los componentes con `lang="ts"`, una clave que no existe es un error de
   `pnpm check` («Did you mean 'dock'?»).
 - **Otro idioma:** sería otro catálogo con las mismas claves (`const en: Texts = { … }`).
-- **Ya en el catálogo:** las barras del visor. El resto se irá pasando por herramienta.
+- **Ya en el catálogo:** Ajustes (también la lista de atajos), Ayuda (también «Información general»),
+  Seguridad, Extraer, Combinar y las barras del visor. Faltan el resto del visor, el shell y los
+  diálogos comunes de `lib/`.
 - **Fuera del catálogo:** los manuales de Ayuda (Markdown en `docs/ayuda/`) y los mensajes de error
   del backend Python.
 
