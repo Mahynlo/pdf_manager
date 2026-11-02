@@ -47,14 +47,10 @@ app/
     src/shell/            shell.svelte.js (pestañas), tools.js (registro de herramientas), Inicio
                           y dropzone.js (arrastrar PDFs a la ventana)
     src/tools/<herramienta>/   un componente por herramienta y sus piezas
-    src/tools/viewer/     visor: Viewer.svelte (compone), barras, miniaturas, índice y pestañas del
-                          panel lateral (OCR, censura, IA, búsqueda) y sus diálogos; el lienzo es
-                          código imperativo: canvas.js (lienzo sobre EmbedPDF, ver embedpdf.md),
-                          embed.js y EmbedRoot.svelte (registro de EmbedPDF), PdfPages.svelte y
-                          PdfPage.svelte (páginas),
-                          layout.js (modos de vista),
-                          text.js (selección de texto con EmbedPDF), annotations.js (anotaciones con EmbedPDF),
-                          editing.js (barra de propiedades), operations.js (menú ⋮)
+    src/tools/viewer/     visor: Viewer.svelte (compone) y una carpeta por parte (ver su README.md):
+                          canvas/ (lienzo, páginas y selección con EmbedPDF), annotations/,
+                          redact/ (censura), ocr/, document/ (guardar, páginas, imprimir),
+                          toolbars/ y panels/ (miniaturas, índice, búsqueda, IA)
 ```
 
 La lógica de PDF está en `src/pdf_core/` (motores de combinar, extraer, seguridad, OCR, capa de texto,

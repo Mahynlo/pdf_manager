@@ -42,11 +42,12 @@ app/ui/
 
 `Viewer.svelte` compone el visor y conecta sus piezas:
 - **Componentes:**
-  - barras: `Toolbar`, `ToolsBar`;
-  - miniaturas: `Sidebar`;
-  - panel lateral: `TocTree`, `SearchPanel`, `OcrPanel`, `RedactPanel`, `AiPanel`;
+  - barras (`toolbars/`): `Toolbar`, `ToolsBar`;
+  - miniaturas: `panels/Thumbnails`;
+  - panel lateral: `panels/TocTree`, `panels/SearchPanel`, `ocr/OcrPanel`, `redact/RedactPanel`, `panels/AiPanel`;
   - diálogos: imprimir, propiedades, leyendas, perfiles de censura y OCR por lotes.
-- **Lienzo, en código imperativo:** `canvas.js`, `text.js`, `annotations.js` y `editing.js`.
+- **Lienzo, en código imperativo:** `canvas/canvas.js`, `canvas/selection.js`, `annotations/annotations.js` y
+  `annotations/editing.js`. Qué hay en cada carpeta: `app/ui/src/tools/viewer/README.md`.
   - Las páginas, el scroll y el zoom son de EmbedPDF (`embed.js`, `EmbedRoot.svelte`, `PdfPages.svelte`, `PdfPage.svelte`), y también la selección de texto, la búsqueda y las anotaciones;
     `canvas.js` da al resto la misma API que antes. El visor se está pasando a EmbedPDF paso a paso:
     ver [embedpdf.md](embedpdf.md).

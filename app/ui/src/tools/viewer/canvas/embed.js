@@ -26,7 +26,7 @@ import { ViewportPluginPackage } from '@embedpdf/plugin-viewport';
 import { ZoomPluginPackage } from '@embedpdf/plugin-zoom';
 import wasmUrl from '@embedpdf/pdfium/pdfium.wasm?url';
 import EmbedRoot from './EmbedRoot.svelte';
-import { DEFAULT_STYLE as STYLE, PRESET_COLORS } from './palette.js';
+import { DEFAULT_STYLE as STYLE, PRESET_COLORS } from '../annotations/palette.js';
 
 export const UNIT = 2; // píxeles por punto PDF al 100 % (como el lienzo Qt: una carta mide 1224 px)
 export const ZOOM_MIN = 0.25;

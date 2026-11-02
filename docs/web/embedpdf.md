@@ -148,7 +148,7 @@ Se queda: EmbedPDF no tiene operaciones de página (ver «Operaciones de página
 - EmbedPDF (complemento Selection, con el gestor de interacción) calcula la selección con el texto
   que PDFium lee del documento: arrastrar (también entre páginas), doble clic (palabra), triple clic
   (línea, nuevo) y Ctrl+A (`setSelection` de la página entera). También da el texto seleccionado.
-- `text.js` dibuja la selección con nuestras marcas (`.sel-rect`) y muestra nuestra barra flotante
+- `selection.js` dibuja la selección con nuestras marcas (`.sel-rect`) y muestra nuestra barra flotante
   (copiar, resaltar, subrayar, tachar, censurar, buscar, Google, explicar con IA). Con las
   herramientas resaltar, subrayar y tachar, al soltar se crea la anotación, como antes.
 - Desde el paso 4, la selección da a las anotaciones y a la censura sus partes
@@ -169,9 +169,9 @@ a cargar el documento (`canvas.reload`).
 - Con las herramientas de texto (seleccionar, resaltar, subrayar, tachar) el gestor de interacción
   está en el modo de texto; con las demás, en `viewer-tools`, donde la selección está apagada.
 - EmbedPDF solo termina un arrastre con el `pointerup` de la página donde empezó. Si se suelta en
-  otra página, entre páginas o fuera del lienzo, lo termina `text.js`.
+  otra página, entre páginas o fuera del lienzo, lo termina `selection.js`.
 
-**Coordenadas:** las de EmbedPDF son de la página sin girar; `text.js` las pasa a las de la página
+**Coordenadas:** las de EmbedPDF son de la página sin girar; `selection.js` las pasa a las de la página
 tal como se ve (`transformRect`), que son las de nuestras capas y las de Python.
 
 **Comprobado** con ratón y teclado reales por CDP, en la app compilada y con `--dev` (`sel_e2e`):
@@ -370,7 +370,7 @@ mueve, se redimensiona (las de área), se borra (Supr) y se deshace (Ctrl+Z) com
 anotaciones. Antes, la vista previa era una capa nuestra que no se podía tocar.
 
 **Quién hace qué:**
-- **Marcas** (`tools/viewer/redaction.js`, `RedactionMarks`). Las ponen:
+- **Marcas** (`tools/viewer/redact/redaction.js`, `RedactionMarks`). Las ponen:
   - los términos, patrones y perfiles del panel: Python busca dónde aparecen (`redact.find`, con
     nuestras reglas: sin tildes, palabra completa, regex, texto de OCR) y se pone una marca en cada
     coincidencia;
@@ -406,7 +406,7 @@ perfiles (guardan los términos del panel, no las selecciones ni las áreas), co
 **Piezas:** `PdfPage.svelte` da a la capa de anotaciones los dibujantes de las marcas
 (`annotationRenderers={redactRenderers}`) y monta `RedactionLayer` (lo que se dibuja mientras se
 marca) y `MarqueeSelection` (el rectángulo arrastrando: sin él, la herramienta no marca áreas; en la
-selección de texto está apagado). Mientras se marca, `text.js` no muestra su barra: la selección
+selección de texto está apagado). Mientras se marca, `selection.js` no muestra su barra: la selección
 es del complemento de censura.
 
 **Comprobado** (scratchpad `redact_e2e.py`, 17 comprobaciones, también en modo desarrollo): término

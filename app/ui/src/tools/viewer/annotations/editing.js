@@ -55,7 +55,7 @@ const nearest = (values, value) => values.reduce((a, b) => (Math.abs(b - value) 
 
 export class AnnotationEditor {
   /**
-   * @param {import('./canvas.js').PageCanvas} canvas
+   * @param {import('../canvas/canvas.js').PageCanvas} canvas
    * @param {import('./annotations.js').Annotations} annotations
    */
   constructor(canvas, annotations) {

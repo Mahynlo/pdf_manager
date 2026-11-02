@@ -25,9 +25,9 @@ import {
 import { applyInsertUpright } from '@embedpdf/plugin-annotation';
 import { call } from '$lib/api.js';
 import { askText } from '$lib/ui.js';
-import { ANNOTATION_TOOL, TOOLS } from './canvas.js';
+import { ANNOTATION_TOOL, TOOLS } from '../canvas/canvas.js';
 import { DEFAULT_STYLE } from './palette.js';
-import { KINDS, MANUAL_LABEL } from './redaction.js';
+import { KINDS, MANUAL_LABEL } from '../redact/redaction.js';
 
 const T = PdfAnnotationSubtype;
 // Marcas de texto: tipo de anotación, herramienta de EmbedPDF (sus valores) y color del estilo.
@@ -93,7 +93,7 @@ function toolDefaults(tool, style) {
 
 export class Annotations {
   /**
-   * @param {import('./canvas.js').PageCanvas} canvas
+   * @param {import('../canvas/canvas.js').PageCanvas} canvas
    * @param {number} docId documento del servicio "viewer"
    * @param {{ onHistory: (state) => void, onChanged: () => void, onSelect: (items) => void,
    *   onRendered: (pages) => void, setTool: (tool) => void }} host

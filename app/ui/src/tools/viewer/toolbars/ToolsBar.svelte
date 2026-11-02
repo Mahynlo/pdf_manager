@@ -5,8 +5,8 @@
 <script>
   import Icon from '$lib/Icon.svelte';
   import { openMenu } from '$lib/menu.svelte.js';
-  import { TOOLS } from './canvas.js';
-  import { PALETTE } from './palette.js';
+  import { TOOLS } from '../canvas/canvas.js';
+  import { PALETTE } from '../annotations/palette.js';
 
   /** `tool`: herramienta activa; `setTool(t)`, `setColor(hex)`, `stamps(botón)`: menú «Sellos». */
   let { tool, setTool, setColor, stamps } = $props();

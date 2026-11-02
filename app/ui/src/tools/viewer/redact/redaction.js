@@ -19,7 +19,7 @@ const MAX_LABEL = 40; // caracteres del nombre de una selección
 const rect = ([x0, y0, x1, y1]) => ({ origin: { x: x0, y: y0 }, size: { width: x1 - x0, height: y1 - y0 } });
 
 export class RedactionMarks {
-  /** @param {import('./annotations.js').Annotations} annotations */
+  /** @param {import('../annotations/annotations.js').Annotations} annotations */
   constructor(annotations) {
     this.annotations = annotations;
   }

@@ -15,7 +15,7 @@
   import Icon from '$lib/Icon.svelte';
   import { openMenu } from '$lib/menu.svelte.js';
   import { askText, confirmDialog, openModal, setStatus, toast } from '$lib/ui.js';
-  import { TOOLS } from './canvas.js';
+  import { TOOLS } from '../canvas/canvas.js';
   import ProfilesDialog from './ProfilesDialog.svelte';
 
   // Colores de relleno (los mismos que Qt).

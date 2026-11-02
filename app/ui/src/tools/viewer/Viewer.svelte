@@ -3,9 +3,10 @@
   de herramientas, las miniaturas, el lienzo (con la selección de texto y las
   anotaciones) y el panel lateral (índice, OCR, censura, IA y búsqueda).
 
-  El lienzo y sus capas son código imperativo (canvas.js, text.js, annotations.js,
-  editing.js) sobre EmbedPDF. Este componente los crea, los coloca en la página y conecta
-  sus avisos con el resto de la interfaz.
+  El lienzo y sus capas son código imperativo (canvas/canvas.js, canvas/selection.js,
+  annotations/annotations.js, annotations/editing.js) sobre EmbedPDF. Este componente los
+  crea, los coloca en la página y conecta sus avisos con el resto de la interfaz. Qué hay en
+  cada carpeta: README.md.
 
   La abre el shell con la información de `viewer.open`. `close()` cierra la pestaña
   (acción «Cerrar documento») y `update(info)` avisa de que cambió el documento
@@ -16,24 +17,24 @@
   import { call } from '$lib/api.js';
   import Icon from '$lib/Icon.svelte';
   import { openModal, toast } from '$lib/ui.js';
-  import AiPanel from './AiPanel.svelte';
-  import { Annotations } from './annotations.js';
-  import { PageCanvas, TOOLS } from './canvas.js';
-  import { AnnotationEditor } from './editing.js';
-  import { MODES } from './layout.js';
-  import OcrPanel from './OcrPanel.svelte';
-  import { DocumentActions } from './operations.js';
-  import PrintDialog from './PrintDialog.svelte';
-  import PropertiesDialog from './PropertiesDialog.svelte';
-  import RedactPanel from './RedactPanel.svelte';
-  import { RedactionMarks } from './redaction.js';
-  import SearchPanel from './SearchPanel.svelte';
-  import Sidebar from './Sidebar.svelte';
-  import { openLegendsManager, openStampsMenu } from './stamps.js';
-  import { TextSelection } from './text.js';
-  import TocTree from './TocTree.svelte';
-  import Toolbar from './Toolbar.svelte';
-  import ToolsBar from './ToolsBar.svelte';
+  import AiPanel from './panels/AiPanel.svelte';
+  import { Annotations } from './annotations/annotations.js';
+  import { PageCanvas, TOOLS } from './canvas/canvas.js';
+  import { AnnotationEditor } from './annotations/editing.js';
+  import { MODES } from './canvas/layout.js';
+  import OcrPanel from './ocr/OcrPanel.svelte';
+  import { DocumentActions } from './document/operations.js';
+  import PrintDialog from './document/PrintDialog.svelte';
+  import PropertiesDialog from './document/PropertiesDialog.svelte';
+  import RedactPanel from './redact/RedactPanel.svelte';
+  import { RedactionMarks } from './redact/redaction.js';
+  import SearchPanel from './panels/SearchPanel.svelte';
+  import Thumbnails from './panels/Thumbnails.svelte';
+  import { openLegendsManager, openStampsMenu } from './annotations/stamps.js';
+  import { TextSelection } from './canvas/selection.js';
+  import TocTree from './panels/TocTree.svelte';
+  import Toolbar from './toolbars/Toolbar.svelte';
+  import ToolsBar from './toolbars/ToolsBar.svelte';
 
   const INPUTS = 'input, textarea, select, [contenteditable]';
   const EDIT_TOOLS = new Set([TOOLS.POINTER, TOOLS.SELECT, TOOLS.HAND]); // en las demás se dibuja
@@ -378,8 +379,8 @@
   <Toolbar bind:this={toolbar} {view} actions={toolbarActions} />
   <ToolsBar {tool} {setTool} {setColor} stamps={(button) => openStampsMenu(button, insertStamp)} />
   <div class="viewer__body">
-    <Sidebar {docId} count={view.count} current={view.page} {revision} {versions} visible={view.sidebar}
-             fetchThumbs={(pages) => canvas.thumbnails(pages)} release={(url) => URL.revokeObjectURL(url)} onSelect={goTo} onMove={(src, dst) => actions.move(dst, src)} />
+    <Thumbnails {docId} count={view.count} current={view.page} {revision} {versions} visible={view.sidebar}
+                fetchThumbs={(pages) => canvas.thumbnails(pages)} release={(url) => URL.revokeObjectURL(url)} onSelect={goTo} onMove={(src, dst) => actions.move(dst, src)} />
     <div class="viewer__stage" bind:this={stage}></div>
     <aside class="viewer-dock" hidden={!view.dock}>
       <div class="viewer-dock__bar" role="tablist">

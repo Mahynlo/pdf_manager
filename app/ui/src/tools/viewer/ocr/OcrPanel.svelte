@@ -9,7 +9,7 @@
   import Checkbox from '$lib/components/Checkbox.svelte';
   import Icon from '$lib/Icon.svelte';
   import { openModal, setStatus, toast } from '$lib/ui.js';
-  import { TOOLS } from './canvas.js';
+  import { TOOLS } from '../canvas/canvas.js';
   import OcrBatchDialog from './OcrBatchDialog.svelte';
   import OcrResultDialog from './OcrResultDialog.svelte';
 

@@ -5,7 +5,7 @@
 <script>
   import Icon from '$lib/Icon.svelte';
   import { openMenu } from '$lib/menu.svelte.js';
-  import { MODES } from './layout.js';
+  import { MODES } from '../canvas/layout.js';
 
   const ZOOM_PRESETS = [25, 50, 75, 100, 125, 150, 200, 300, 400];
 

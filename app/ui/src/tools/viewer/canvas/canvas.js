@@ -13,7 +13,7 @@
 //   Las capas existen siempre, aunque EmbedPDF solo monte las páginas a la vista; se
 //   enganchan a la página al montarse.
 // - `el` es el contenedor con scroll (la vista de EmbedPDF): ahí escuchan el ratón los
-//   demás módulos. La selección de texto es de EmbedPDF (text.js): está activa con las
+//   demás módulos. La selección de texto es de EmbedPDF (selection.js): está activa con las
 //   herramientas de texto (modo TEXT_MODE del gestor de interacción). Las de dibujo, texto
 //   libre y notas activan su herramienta de anotación de EmbedPDF (ANNOTATION_TOOL).
 import { flushSync, mount, unmount } from 'svelte';
@@ -31,7 +31,7 @@ import PdfPages from './PdfPages.svelte';
 export { ZOOM_MAX, ZOOM_MIN } from './embed.js';
 
 // Herramientas del lienzo (ToolMode en Qt). El lienzo solo implementa la mano; la
-// selección de texto y las marcas de texto las gestiona text.js (con EmbedPDF); el dibujo,
+// selección de texto y las marcas de texto las gestiona selection.js (con EmbedPDF); el dibujo,
 // el texto libre y las notas, las herramientas de anotación de EmbedPDF (annotations.js);
 // el puntero (seleccionar y transformar anotaciones), la capa de anotaciones de EmbedPDF
 // con la barra de editing.js, y el recorte de OCR, OcrPanel.svelte. El cursor depende de
@@ -62,7 +62,7 @@ export const TOOLS = {
   AREA_OCR: 'area-ocr', // rectángulo para reconocer texto
   REDACT: 'redact', // marcar para censurar: texto (arrastrando sobre él) o un área
 };
-// Herramientas que trabajan sobre la selección de texto (text.js) y la anotación que crean.
+// Herramientas que trabajan sobre la selección de texto (selection.js) y la anotación que crean.
 export const MARKUP_TOOLS = {
   [TOOLS.HIGHLIGHT]: 'highlight',
   [TOOLS.UNDERLINE]: 'underline',
