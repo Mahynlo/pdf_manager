@@ -10,8 +10,10 @@ sigue en el historial de git).
 
 ```
 app/ui/
-  package.json          versiones fijas: svelte, vite, @sveltejs/vite-plugin-svelte
-  vite.config.js        compila a dist/; alias $lib → src/lib
+  package.json          versiones fijas: svelte, vite, @sveltejs/vite-plugin-svelte, typescript,
+                        svelte-check; `pnpm check` comprueba los tipos
+  tsconfig.json         TypeScript (ver «TypeScript»); alias $lib y $texts
+  vite.config.js        compila a dist/; alias $lib → src/lib, $texts → src/texts
   index.html            página base (Vite inserta los módulos)
   src/
     main.js             arranque: estilos, tema guardado, monta App y avisa a Python (app.ready)
@@ -19,6 +21,7 @@ app/ui/
                         por área (shell, merge, security, extract, settings, help, viewer)
     assets/icons.json   trazos de los iconos (también los usa la versión Qt)
     App.svelte          ventana: cabecera con pestañas, vistas, barra de estado, avisos y menú
+    texts/              textos de la interfaz: es.ts (catálogo) e index.ts (t, tip())
     lib/                piezas comunes
       api.js            puente con Python: call('servicio.metodo', ...), on('evento', fn)
       ui.js             toast(), setStatus() y diálogos: askChoice, confirmDialog, askText,
@@ -74,7 +77,47 @@ desarrollar; el ejecutable ya lleva la interfaz compilada).
 - **En un navegador:** la URL de `pnpm dev` no sirve sola, porque la interfaz necesita el backend
   de Python, que solo existe dentro de la ventana. La página lo explica en vez de quedarse en blanco.
 
-El instalador (`installer/web/build.ps1`) compila la interfaz antes de empaquetar.
+El instalador (`installer/web/build.ps1`) comprueba los tipos (`pnpm check`) y compila la
+interfaz antes de empaquetar: con errores de tipos no genera el ejecutable.
+
+Para comprobar los tipos a mano: `pnpm check` en `app/ui`.
+
+## TypeScript
+
+La interfaz se está pasando a TypeScript. Vite compila los `.ts` y los componentes con
+`<script lang="ts">` sin más configuración, y `svelte-check` (`pnpm check`) comprueba los tipos.
+
+- **Migración por carpetas:** primero `lib/`, luego `shell/` y las herramientas pequeñas, y el visor
+  al final. Mientras dura, los `.js` que quedan se aceptan sin comprobarlos (`allowJs`, sin
+  `checkJs` en `tsconfig.json`). Al terminar se quita `allowJs`.
+- **Ya en TypeScript:** `texts/` y las barras del visor (`toolbars/`).
+- **Archivos nuevos:** en TypeScript (`.ts` y `lang="ts"`).
+- **Tipos de las props:** `let { view, actions }: { view: ToolbarView; actions: ToolbarActions } = $props();`.
+
+## Textos de la interfaz
+
+Los nombres de botones, descripciones emergentes, menús y avisos van en el catálogo
+`src/texts/es.ts`, ordenados por herramienta y parte (`t.viewer.toolbar.undo`). Para cambiar un
+texto se edita ahí, sin buscarlo por el código.
+
+```svelte
+<script lang="ts">
+  import { t, tip } from '$texts';
+  const T = t.viewer.toolbar;
+</script>
+
+<button title={tip(T.undo)}>…</button>   <!-- «Deshacer (Ctrl+Z)» -->
+```
+
+- **Atajos:** los botones con atajo llevan `{ label, shortcut }`; `tip()` los une en
+  «Etiqueta (atajo)».
+- **Con datos:** un texto con datos es una función (`` color: (name) => `Color ${name}` ``).
+- **Comprobado:** en los componentes con `lang="ts"`, una clave que no existe es un error de
+  `pnpm check` («Did you mean 'dock'?»).
+- **Otro idioma:** sería otro catálogo con las mismas claves (`const en: Texts = { … }`).
+- **Ya en el catálogo:** las barras del visor. El resto se irá pasando por herramienta.
+- **Fuera del catálogo:** los manuales de Ayuda (Markdown en `docs/ayuda/`) y los mensajes de error
+  del backend Python.
 
 ## Escribir componentes
 

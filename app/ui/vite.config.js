@@ -10,7 +10,7 @@ const here = (path) => fileURLToPath(new URL(path, import.meta.url));
 
 export default defineConfig({
   plugins: [svelte()],
-  resolve: { alias: { $lib: here('src/lib') } },
+  resolve: { alias: { $lib: here('src/lib'), $texts: here('src/texts') } },
   base: './', // rutas relativas: pywebview sirve dist/ como raíz
   build: { outDir: 'dist', emptyOutDir: true },
   server: {

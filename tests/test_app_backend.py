@@ -1250,7 +1250,7 @@ UI_SRC_DIR = UI_DIR / "src"
 
 def _frontend_sources() -> str:
     """Código de la interfaz (app/ui/src)."""
-    files = [*UI_SRC_DIR.rglob("*.js"), *UI_SRC_DIR.rglob("*.svelte")]
+    files = [*UI_SRC_DIR.rglob("*.js"), *UI_SRC_DIR.rglob("*.ts"), *UI_SRC_DIR.rglob("*.svelte")]
     return "\n".join(f.read_text(encoding="utf-8") for f in files)
 
 

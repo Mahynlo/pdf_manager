@@ -2,22 +2,54 @@
   Barra superior del visor (como _toolbar_mixin.py en Qt): menú ⋮ · navegación · zoom ·
   modos de vista · deshacer/rehacer · paneles y búsqueda · modo noche.
 -->
-<script>
+<script lang="ts">
   import Icon from '$lib/Icon.svelte';
   import { openMenu } from '$lib/menu.svelte.js';
+  import { t, tip } from '$texts';
   import { MODES } from '../canvas/layout.js';
 
+  const T = t.viewer.toolbar;
   const ZOOM_PRESETS = [25, 50, 75, 100, 125, 150, 200, 300, 400];
 
-  /**
-   * `view`: { page, count, zoom, mode, canUndo, canRedo, night, sidebar, dock } (lo pinta);
-   * `actions`: { moreMenu(), first(), prev(), next(), last(), goTo(i), zoomIn(), zoomOut(),
-   *   setZoom(z), fitWidth(), fitPage(), setMode(m), undo(), redo(), toggleNight(),
-   *   toggleSidebar(), search(), ocr(), toggleDock() }
-   */
-  let { view, actions } = $props();
+  /** Estado que pinta la barra. */
+  interface ToolbarView {
+    page: number;
+    count: number;
+    zoom: number;
+    mode: string;
+    canUndo: boolean;
+    canRedo: boolean;
+    night: boolean;
+    sidebar: boolean;
+    dock: boolean;
+  }
 
-  let pageInput;
+  /** Lo que hace cada botón (`moreMenu()` da las entradas del menú ⋮). */
+  interface ToolbarActions {
+    moreMenu(): unknown[];
+    first(): void;
+    prev(): void;
+    next(): void;
+    last(): void;
+    goTo(page: number): void;
+    zoomIn(): void;
+    zoomOut(): void;
+    setZoom(zoom: number): void;
+    fitWidth(): void;
+    fitPage(): void;
+    setMode(mode: string): void;
+    undo(): void;
+    redo(): void;
+    toggleNight(): void;
+    toggleSidebar(): void;
+    search(): void;
+    ocr(): void;
+    toggleDock(): void;
+  }
+
+  let { view, actions }: { view: ToolbarView; actions: ToolbarActions } = $props();
+
+  let pageInput: HTMLInputElement;
   let pageText = $state('1');
   let zoomText = $state('100%');
   let editingPage = false;
@@ -40,7 +72,7 @@
     pageInput.select();
   }
 
-  function pageKey(ev) {
+  function pageKey(ev: KeyboardEvent) {
     if (ev.key === 'Enter') {
       // Al salir del campo las flechas y Av/Re Pág vuelven a pasar página.
       const page = parseInt(pageText, 10);
@@ -51,7 +83,7 @@
     }
   }
 
-  function zoomKey(ev) {
+  function zoomKey(ev: KeyboardEvent & { currentTarget: HTMLInputElement }) {
     if (ev.key !== 'Enter') return;
     const value = parseFloat(zoomText.replace('%', ''));
     if (Number.isFinite(value) && value > 0) actions.setZoom(value / 100);
@@ -59,19 +91,20 @@
     ev.currentTarget.select();
   }
 
-  function zoomMenu(ev) {
+  function zoomMenu(ev: MouseEvent & { currentTarget: HTMLButtonElement }) {
     openMenu(ev.currentTarget.parentElement, [
       ...ZOOM_PRESETS.map((pct) => ({
         label: `${pct}%`, checked: Math.round(view.zoom * 100) === pct, onSelect: () => actions.setZoom(pct / 100),
       })),
       'separator',
-      { label: 'Ajustar Ancho', onSelect: actions.fitWidth },
-      { label: 'Ajustar Página', onSelect: actions.fitPage },
+      { label: T.fitWidth, onSelect: actions.fitWidth },
+      { label: T.fitPage, onSelect: actions.fitPage },
     ]);
   }
 </script>
 
-{#snippet button(icon, title, onclick, { checked = undefined, disabled = false } = {})}
+{#snippet button(icon: string, title: string, onclick: (ev: MouseEvent & { currentTarget: HTMLButtonElement }) => void,
+                 { checked = undefined, disabled = false }: { checked?: boolean; disabled?: boolean } = {})}
   <button class="btn btn--icon tb-btn" class:is-checked={checked} type="button" {title} aria-label={title}
           aria-pressed={checked} {disabled} {onclick}>
     <Icon name={icon} size={18} />
@@ -81,41 +114,41 @@
 {#snippet separator()}<span class="tb-sep" aria-hidden="true"></span>{/snippet}
 
 <div class="viewer-toolbar" role="toolbar">
-  {@render button('more-vertical', 'Más opciones y operaciones del documento', (ev) => openMenu(ev.currentTarget, actions.moreMenu()))}
+  {@render button('more-vertical', T.more, (ev) => openMenu(ev.currentTarget, actions.moreMenu()))}
   {@render separator()}
-  {@render button('chevrons-left', 'Primera página (Inicio)', actions.first, { disabled: view.page <= 0 })}
-  {@render button('chevron-left', 'Página anterior (Re Pág / ←)', actions.prev, { disabled: view.page <= 0 })}
+  {@render button('chevrons-left', tip(T.first), actions.first, { disabled: view.page <= 0 })}
+  {@render button('chevron-left', tip(T.prev), actions.prev, { disabled: view.page <= 0 })}
   <input bind:this={pageInput} bind:value={pageText} class="input tb-page" type="text" inputmode="numeric"
-         title="Ir a página específica (Ctrl+G)" onkeydown={pageKey}
+         title={tip(T.goToPage)} onkeydown={pageKey}
          onfocus={() => { editingPage = true; pageInput.select(); }}
          onblur={() => { editingPage = false; pageText = String(view.page + 1); }} />
   <span class="tb-total muted">/ {view.count}</span>
-  {@render button('chevron-right', 'Página siguiente (Av Pág / →)', actions.next, { disabled: view.page >= view.count - 1 })}
-  {@render button('chevrons-right', 'Última página (Fin)', actions.last, { disabled: view.page >= view.count - 1 })}
+  {@render button('chevron-right', tip(T.next), actions.next, { disabled: view.page >= view.count - 1 })}
+  {@render button('chevrons-right', tip(T.last), actions.last, { disabled: view.page >= view.count - 1 })}
   {@render separator()}
-  {@render button('minus', 'Reducir zoom (Ctrl -)', actions.zoomOut)}
+  {@render button('minus', tip(T.zoomOut), actions.zoomOut)}
   <div class="tb-zoom">
-    <input bind:value={zoomText} class="tb-zoom__input" type="text" title="Nivel de zoom" aria-label="Nivel de zoom"
+    <input bind:value={zoomText} class="tb-zoom__input" type="text" title={T.zoomLevel} aria-label={T.zoomLevel}
            onkeydown={zoomKey} onfocus={(ev) => { editingZoom = true; ev.currentTarget.select(); }}
            onblur={() => { editingZoom = false; zoomText = zoomLabel(); }} />
-    <button class="tb-zoom__menu" type="button" title="Niveles de zoom" aria-label="Niveles de zoom" onclick={zoomMenu}>
+    <button class="tb-zoom__menu" type="button" title={T.zoomLevels} aria-label={T.zoomLevels} onclick={zoomMenu}>
       <Icon name="chevron-down" size={14} />
     </button>
   </div>
-  {@render button('plus', 'Aumentar zoom (Ctrl +)', actions.zoomIn)}
+  {@render button('plus', tip(T.zoomIn), actions.zoomIn)}
   {@render separator()}
-  {@render button('rows', 'Scroll continuo', () => actions.setMode(MODES.CONTINUOUS), { checked: view.mode === MODES.CONTINUOUS })}
-  {@render button('book-open', 'Doble página (la rueda pasa de par en par)', () => actions.setMode(MODES.DOUBLE), { checked: view.mode === MODES.DOUBLE })}
-  {@render button('file', 'Página única (la rueda pasa de página)', () => actions.setMode(MODES.SINGLE), { checked: view.mode === MODES.SINGLE })}
+  {@render button('rows', T.continuous, () => actions.setMode(MODES.CONTINUOUS), { checked: view.mode === MODES.CONTINUOUS })}
+  {@render button('book-open', T.double, () => actions.setMode(MODES.DOUBLE), { checked: view.mode === MODES.DOUBLE })}
+  {@render button('file', T.single, () => actions.setMode(MODES.SINGLE), { checked: view.mode === MODES.SINGLE })}
   {@render separator()}
-  {@render button('undo', 'Deshacer (Ctrl+Z)', actions.undo, { disabled: !view.canUndo })}
-  {@render button('redo', 'Rehacer (Ctrl+Y)', actions.redo, { disabled: !view.canRedo })}
+  {@render button('undo', tip(T.undo), actions.undo, { disabled: !view.canUndo })}
+  {@render button('redo', tip(T.redo), actions.redo, { disabled: !view.canRedo })}
   {@render separator()}
-  {@render button('scan-text', 'Ejecutar OCR en la página actual', actions.ocr)}
-  {@render button('panel-left', 'Mostrar/Ocultar miniaturas', actions.toggleSidebar, { checked: view.sidebar })}
-  {@render button('search', 'Buscar en el documento (Ctrl+F)', actions.search)}
+  {@render button('scan-text', T.ocr, actions.ocr)}
+  {@render button('panel-left', T.thumbnails, actions.toggleSidebar, { checked: view.sidebar })}
+  {@render button('search', tip(T.search), actions.search)}
   {@render separator()}
-  {@render button('moon', 'Modo noche (Invertir colores del lienzo)', actions.toggleNight, { checked: view.night })}
+  {@render button('moon', T.night, actions.toggleNight, { checked: view.night })}
   <span class="grow"></span>
-  {@render button('panel-right', 'Expandir/Colapsar panel lateral', actions.toggleDock, { checked: view.dock })}
+  {@render button('panel-right', T.dock, actions.toggleDock, { checked: view.dock })}
 </div>

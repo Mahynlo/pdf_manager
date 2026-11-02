@@ -22,8 +22,11 @@
     documentId = id;
   }
 
+  // `element` (el contenedor con scroll del lienzo) no cambia mientras existe el componente.
   const viewport = useViewportRef(() => documentId);
+  // svelte-ignore state_referenced_locally
   viewport.containerRef = element;
+  // svelte-ignore state_referenced_locally
   setContext('viewport-element', { current: element }); // para el zoom con pellizco
 
   const gated = useIsViewportGated(() => documentId);
