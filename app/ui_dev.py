@@ -22,11 +22,11 @@ from app import UI_DIR
 
 log = logging.getLogger(__name__)
 
-DEV_SERVER_URL = "http://localhost:5173"  # el puerto fijo de vite.config.js
+DEV_SERVER_URL = "http://localhost:5173"  # el puerto fijo de vite.config.ts
 DEV_SERVER_WAIT = 60.0  # s: la primera vez Vite optimiza las dependencias
 # Lo que entra en la compilación, además de src/.
 _CONFIG_FILES = (
-    "index.html", "package.json", "pnpm-lock.yaml", "vite.config.js", "svelte.config.js", "tsconfig.json",
+    "index.html", "package.json", "pnpm-lock.yaml", "vite.config.ts", "tsconfig.json",
 )
 
 

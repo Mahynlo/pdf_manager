@@ -1,6 +1,7 @@
 // Textos de la interfaz: nombres de botones, descripciones emergentes, menús y avisos. Están
-// todos en el catálogo del idioma (es/, un archivo por herramienta), ordenados por parte de la
-// interfaz, para cambiarlos sin buscar por el código:
+// todos en el catálogo del idioma (es/: un archivo por herramienta, más shell.ts para la ventana
+// principal y common.ts para los diálogos de lib/), ordenados por parte de la interfaz, para
+// cambiarlos sin buscar por el código:
 //
 //   import { t, tip } from '$texts';
 //   <button title={tip(t.viewer.toolbar.undo)}>      →  «Deshacer (Ctrl+Z)»

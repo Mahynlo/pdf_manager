@@ -1,6 +1,7 @@
 <!-- Pide un texto (askText). Enter acepta; con `multiline`, Ctrl+Enter. -->
 <script lang="ts">
   import Dialog from './Dialog.svelte';
+  import { t } from '$texts';
 
   let { title, label, initial = '', multiline = false, done }: {
     title: string;
@@ -44,7 +45,7 @@
     {/if}
   </label>
   <div class="dialog__actions">
-    <button class="btn" type="button" onclick={() => dialog.close()}>Cancelar</button>
-    <button class="btn btn--primary" type="button" onclick={accept}>Aceptar</button>
+    <button class="btn" type="button" onclick={() => dialog.close()}>{t.common.cancel}</button>
+    <button class="btn btn--primary" type="button" onclick={accept}>{t.common.accept}</button>
   </div>
 </Dialog>

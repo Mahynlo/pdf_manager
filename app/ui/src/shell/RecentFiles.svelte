@@ -6,6 +6,9 @@
   import type { RecentFile } from '$lib/types.ts';
   import { toast } from '$lib/ui.ts';
   import { shell } from './shell.svelte.ts';
+  import { t } from '$texts';
+
+  const T = t.shell.recent;
 
   let files = $state<RecentFile[]>([]);
 
@@ -27,11 +30,11 @@
   function contextMenu(ev: MouseEvent, file: RecentFile) {
     ev.preventDefault();
     openMenuAt(ev.clientX, ev.clientY, [
-      { label: 'Abrir documento', icon: 'folder-open', onSelect: () => open(file) },
-      { label: 'Abrir ubicación en Explorador', icon: 'folder', onSelect: () => call('documents.reveal', file.path) },
-      { label: 'Copiar ruta del archivo', icon: 'copy', onSelect: () => navigator.clipboard.writeText(file.path) },
+      { label: T.menu.open, icon: 'folder-open', onSelect: () => open(file) },
+      { label: T.menu.reveal, icon: 'folder', onSelect: () => call('documents.reveal', file.path) },
+      { label: T.menu.copyPath, icon: 'copy', onSelect: () => navigator.clipboard.writeText(file.path) },
       'separator',
-      { label: 'Quitar de la lista', icon: 'x', onSelect: () => remove(file) },
+      { label: T.menu.remove, icon: 'x', onSelect: () => remove(file) },
     ]);
   }
 </script>
@@ -39,9 +42,9 @@
 <aside class="recent">
   <div class="recent__head">
     <Icon name="clock" size={18} />
-    <h2 class="recent__title">Archivos recientes</h2>
+    <h2 class="recent__title">{T.title}</h2>
     <button class="btn btn--ghost btn--sm" type="button" disabled={!files.length} onclick={() => run('clear_recent')}>
-      Limpiar
+      {T.clear}
     </button>
   </div>
   <div class="recent__list">
@@ -53,13 +56,13 @@
           <span class="recent-row__name ellipsis">{file.name}</span>
           <span class="caption ellipsis">{file.folder}</span>
         </span>
-        <button class="btn btn--icon btn--sm" type="button" title="Quitar de recientes"
+        <button class="btn btn--icon btn--sm" type="button" title={T.remove}
                 onclick={(ev) => { ev.stopPropagation(); remove(file); }}>
           <Icon name="x" size={14} />
         </button>
       </div>
     {:else}
-      <p class="recent__empty">Sin archivos recientes</p>
+      <p class="recent__empty">{T.empty}</p>
     {/each}
   </div>
 </aside>

@@ -5,8 +5,12 @@
 // `load` importa el componente de la herramienta (se carga al abrirla). Recibe la
 // entrada del registro como prop `tool` y puede exportar las funciones de pestaña
 // que usa el shell: canClose() (puede impedir el cierre), onKey(ev) (atajos cuando es
-// la pestaña activa; devuelve true si los gestionó) y onShow().
+// la pestaña activa; devuelve true si los gestionó) y onShow(). Los nombres y las tarjetas
+// están en el catálogo de textos (t.shell.tools).
 import type { Component } from 'svelte';
+import { t } from '$texts';
+
+const T = t.shell.tools;
 
 /** Tarjeta de Inicio: título y texto (con saltos de línea). */
 export interface Card {
@@ -48,26 +52,23 @@ export interface HomeCard {
 
 export const TOOLS: Tool[] = [
   {
-    key: 'extract', title: 'Extraer', menuLabel: 'Extraer texto', icon: 'search', emoji: '🔍', color: '#1A73E8',
-    card: { title: 'Extraer texto de PDF', text: 'Busca y extrae páginas\npor palabras clave' },
+    key: 'extract', ...T.extract, icon: 'search', emoji: '🔍', color: '#1A73E8',
     load: () => import('../tools/extract/Extract.svelte'),
   },
   {
-    key: 'merge', title: 'Combinar', menuLabel: 'Combinar PDFs', icon: 'files', emoji: '📑', color: '#2E7D32',
-    card: { title: 'Combinar PDFs', text: 'Une varios PDFs\neligiendo las páginas' },
+    key: 'merge', ...T.merge, icon: 'files', emoji: '📑', color: '#2E7D32',
     load: () => import('../tools/merge/Merge.svelte'),
   },
   {
-    key: 'security', title: 'Seguridad', menuLabel: 'Seguridad', icon: 'lock', emoji: '🔒', color: '#F9A825',
-    card: { title: 'Gestión de Seguridad', text: 'Desbloquea y protege\ntus documentos' },
+    key: 'security', ...T.security, icon: 'lock', emoji: '🔒', color: '#F9A825',
     load: () => import('../tools/security/Security.svelte'),
   },
   {
-    key: 'settings', title: 'Ajustes', menuLabel: 'Configuración', icon: 'settings', emoji: '⚙️', color: '#607D8B', section: 1,
+    key: 'settings', ...T.settings, icon: 'settings', emoji: '⚙️', color: '#607D8B', section: 1,
     load: () => import('../tools/settings/Settings.svelte'),
   },
   {
-    key: 'help', title: 'Ayuda', menuLabel: 'Ayuda', icon: 'circle-help', emoji: '❓', color: '#7E57C2', section: 1,
+    key: 'help', ...T.help, icon: 'circle-help', emoji: '❓', color: '#7E57C2', section: 1,
     load: () => import('../tools/help/Help.svelte'),
   },
 ];
@@ -79,13 +80,12 @@ export const loadViewer: Loader = () => import('../tools/viewer/Viewer.svelte');
 // (se colocan tras la herramienta indicada en `after`).
 export const HOME_ACTIONS: HomeAction[] = [
   {
-    after: 'merge', action: 'open-pdf', emoji: '📄', color: '#E65100',
-    card: { title: 'OCR de PDF', text: 'Abre un PDF y ejecuta\nreconocimiento de texto' },
+    after: 'merge', action: 'open-pdf', emoji: '📄', color: '#E65100', card: t.shell.actions.openPdf,
   },
 ];
 
 export function getTool(key: string): Tool | undefined {
-  return TOOLS.find((t) => t.key === key);
+  return TOOLS.find((tool) => tool.key === key);
 }
 
 /** Tarjetas de Inicio en orden. */

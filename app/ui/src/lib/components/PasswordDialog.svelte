@@ -3,6 +3,9 @@
   import Icon from '../Icon.svelte';
   import Dialog from './Dialog.svelte';
   import PasswordField from './PasswordField.svelte';
+  import { t } from '$texts';
+
+  const T = t.common.password;
 
   let { name, tryUnlock, done }: {
     name: string;
@@ -35,13 +38,13 @@
 
 <Dialog bind:this={dialog} onclose={() => done(unlocked)}>
   <form class="password-form" onsubmit={submit}>
-    <div class="dialog__head"><Icon name="lock" size={20} /><h2 class="heading">PDF protegido</h2></div>
-    <p class="muted">«{name}» necesita contraseña para abrirse.</p>
-    <PasswordField bind:this={field} bind:value={password} placeholder="Contraseña" />
+    <div class="dialog__head"><Icon name="lock" size={20} /><h2 class="heading">{T.title}</h2></div>
+    <p class="muted">{T.needed(name)}</p>
+    <PasswordField bind:this={field} bind:value={password} placeholder={T.placeholder} />
     <p class="dialog__error">{error}</p>
     <div class="dialog__actions">
-      <button class="btn" type="button" onclick={() => dialog.close()}>Cancelar</button>
-      <button class="btn btn--primary" type="submit" disabled={busy}><Icon name="lock-open" />Desbloquear</button>
+      <button class="btn" type="button" onclick={() => dialog.close()}>{t.common.cancel}</button>
+      <button class="btn btn--primary" type="submit" disabled={busy}><Icon name="lock-open" />{T.unlock}</button>
     </div>
   </form>
 </Dialog>

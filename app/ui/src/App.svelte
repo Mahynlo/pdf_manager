@@ -13,6 +13,9 @@
   import Home from './shell/Home.svelte';
   import { HOME, shell } from './shell/shell.svelte.ts';
   import type { Tone } from '$lib/ui.ts';
+  import { t, tip } from '$texts';
+
+  const T = t.shell.header;
 
   const TOAST_ICONS: Record<Tone, string> = { info: 'info', success: 'circle-check', danger: 'circle-alert', warning: 'circle-alert' };
 
@@ -32,11 +35,11 @@
 <svelte:document onkeydown={(ev) => shell.onKey(ev)} />
 
 <header class="app-header">
-  <button class="brand" type="button" title="Menú de la aplicación"
+  <button class="brand" type="button" title={T.brandMenu}
           onclick={(ev) => openMenu(ev.currentTarget, shell.brandMenu())}>
-    <Icon name="file-text" size={18} />Extraer PDFs
+    <Icon name="file-text" size={18} />{T.appName}
   </button>
-  <div class="tabbar" role="tablist" aria-label="Pestañas abiertas">
+  <div class="tabbar" role="tablist" aria-label={T.tabs}>
     {#each shell.tabs as tab (tab.key)}
       <div class="tab" class:is-closable={tab.closable} class:is-active={tab.key === shell.current}
            role="tab" tabindex="0" aria-selected={tab.key === shell.current} title={tab.path}
@@ -45,7 +48,7 @@
         <Icon name={tab.icon} />
         <span class="ellipsis">{tab.label}</span>
         {#if tab.closable}
-          <button class="tab__close" type="button" title="Cerrar pestaña (Ctrl+F4)"
+          <button class="tab__close" type="button" title={tip(T.closeTab)}
                   onclick={(ev) => { ev.stopPropagation(); shell.close(tab.key); }}>
             <Icon name="x" size={14} />
           </button>
@@ -53,16 +56,16 @@
       </div>
     {/each}
   </div>
-  <button class="btn btn--icon header-btn" type="button" title="Abrir documento PDF (Ctrl+O)"
+  <button class="btn btn--icon header-btn" type="button" title={tip(T.openPdf)}
           onclick={() => shell.openPdfDialog()}>
     <Icon name="plus" size={18} />
   </button>
   <div class="header-actions">
-    <button class="btn btn--icon header-btn" type="button" title="Lista de pestañas abiertas"
+    <button class="btn btn--icon header-btn" type="button" title={T.tabsList}
             onclick={(ev) => openMenu(ev.currentTarget, shell.tabsMenu())}>
       <Icon name="list" size={18} />
     </button>
-    <button class="btn btn--icon header-btn" type="button" title="Cambiar tema claro / oscuro" onclick={theme.toggle}>
+    <button class="btn btn--icon header-btn" type="button" title={T.theme} onclick={theme.toggle}>
       <Icon name={theme.dark ? 'sun' : 'moon'} size={18} />
     </button>
   </div>
@@ -83,9 +86,9 @@
 <footer class="statusbar">{feedback.status}</footer>
 
 <div class="toasts" aria-live="polite">
-  {#each feedback.toasts as t (t.id)}
-    <div class="toast toast--{t.tone}" role="status">
-      <Icon name={TOAST_ICONS[t.tone]} size={18} /><span>{t.message}</span>
+  {#each feedback.toasts as toast (toast.id)}
+    <div class="toast toast--{toast.tone}" role="status">
+      <Icon name={TOAST_ICONS[toast.tone]} size={18} /><span>{toast.message}</span>
     </div>
   {/each}
 </div>

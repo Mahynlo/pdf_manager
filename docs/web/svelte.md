@@ -13,7 +13,8 @@ app/ui/
   package.json          versiones fijas: svelte, vite, @sveltejs/vite-plugin-svelte, typescript,
                         svelte-check; `pnpm check` comprueba los tipos
   tsconfig.json         TypeScript (ver «TypeScript»); alias $lib y $texts
-  vite.config.js        compila a dist/; alias $lib → src/lib, $texts → src/texts
+  vite.config.ts        compila a dist/; alias $lib → src/lib, $texts → src/texts (Svelte usa
+                        su configuración predeterminada: no hay svelte.config.js)
   index.html            página base (Vite inserta los módulos)
   src/
     main.ts             arranque: estilos, tema guardado, monta App y avisa a Python (app.ready)
@@ -21,8 +22,8 @@ app/ui/
                         por área (shell, merge, security, extract, settings, help, viewer)
     assets/icons.json   trazos de los iconos (también los usa la versión Qt)
     App.svelte          ventana: cabecera con pestañas, vistas, barra de estado, avisos y menú
-    texts/              textos de la interfaz: es/ (catálogo, un archivo por herramienta) e
-                        index.ts (t, tip())
+    texts/              textos de la interfaz: es/ (catálogo: un archivo por herramienta, shell.ts
+                        para la ventana y common.ts para los diálogos de lib/) e index.ts (t, tip())
     lib/                piezas comunes
       api.ts            puente con Python: call('servicio.metodo', ...), on('evento', fn)
       types.ts          tipos de las respuestas de Python que usan varias partes (DocumentInfo…)
@@ -88,8 +89,8 @@ Para comprobar los tipos a mano: `pnpm check` en `app/ui`.
 
 Toda la interfaz (`src/`) está en TypeScript, en modo `strict`: no queda ningún `.js`. Vite compila
 los `.ts` y los componentes con `<script lang="ts">` sin más configuración, y `svelte-check`
-(`pnpm check`) comprueba los tipos. Solo `vite.config.js` y `svelte.config.js` siguen en JavaScript:
-son configuración de las herramientas, fuera de `src/`.
+(`pnpm check`) comprueba los tipos. También la configuración de Vite (`vite.config.ts`) está en
+TypeScript; no hay `svelte.config.js` porque Svelte usa su configuración predeterminada.
 
 - **Respuestas de Python:** las que usan varias partes, en `lib/types.ts` (`DocumentInfo`…); las de
   una herramienta, en su carpeta (`tools/merge/types.ts`, `tools/viewer/ocr/types.ts`, …).
@@ -129,9 +130,11 @@ ahí, sin buscarlo por el código.
 - **Comprobado:** en los componentes con `lang="ts"`, una clave que no existe es un error de
   `pnpm check` («Did you mean 'dock'?»).
 - **Otro idioma:** sería otro catálogo con las mismas claves (`const en: Texts = { … }`).
-- **Ya en el catálogo:** todas las herramientas: el visor entero, Ajustes (también la lista de
-  atajos), Ayuda (también «Información general»), Seguridad, Extraer y Combinar. Faltan el shell
-  (pestañas, Inicio, menú de la marca) y los diálogos comunes de `lib/` («Cancelar», «Sí/No»…).
+- **Todo en el catálogo:** cada herramienta en su archivo (el visor, Ajustes con la lista de
+  atajos, Ayuda con «Información general», Seguridad, Extraer y Combinar); la ventana principal en
+  `shell.ts` (cabecera, pestañas, Inicio, recientes, nombres y tarjetas de las herramientas, aviso
+  al salir y mensajes de arranque), y los botones y diálogos de `lib/` en `common.ts` («Cancelar»,
+  «Sí/No», contraseña).
 - **Fuera del catálogo:** los manuales de Ayuda (Markdown en `docs/ayuda/`) y los mensajes de error
   del backend Python.
 

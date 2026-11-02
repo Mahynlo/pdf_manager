@@ -9,6 +9,7 @@ import ChoiceDialog from './components/ChoiceDialog.svelte';
 import PasswordDialog from './components/PasswordDialog.svelte';
 import ProgressDialog from './components/ProgressDialog.svelte';
 import TextDialog from './components/TextDialog.svelte';
+import { t } from '$texts';
 
 /** Botón de askChoice(). */
 export interface Choice<T = unknown> {
@@ -51,9 +52,9 @@ export function askChoice<T>(title: string, message: string, buttons: Choice<T>[
 }
 
 /** Pregunta Sí/No (como QMessageBox.question); resuelve true si se acepta. */
-export async function confirmDialog(title: string, message: string, acceptLabel = 'Sí'): Promise<boolean> {
+export async function confirmDialog(title: string, message: string, acceptLabel = t.common.yes): Promise<boolean> {
   const choice = await askChoice(title, message, [
-    { label: 'No', value: false },
+    { label: t.common.no, value: false },
     { label: acceptLabel, value: true, tone: 'primary' },
   ]);
   return choice === true;

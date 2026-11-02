@@ -3,18 +3,20 @@
 // pinta la cabecera y las vistas a partir de `shell.tabs`.
 //
 // Cada pestaña monta su componente y guarda su instancia (bind:this) para llamar a las
-// funciones que exporte: canClose(), onKey(ev) y onShow() (ver tools.js).
+// funciones que exporte: canClose(), onKey(ev) y onShow() (ver tools.ts).
 import { call, on, type ApiError } from '$lib/api.ts';
 import { fileName } from '$lib/dom.ts';
 import type { MenuItem } from '$lib/menu.svelte.ts';
 import type { DocumentInfo } from '$lib/types.ts';
 import { askChoice, askPassword, setStatus, toast } from '$lib/ui.ts';
 import type { Component } from 'svelte';
+import { t } from '$texts';
 import { getTool, loadViewer, TOOLS } from './tools.ts';
 
 export const HOME = 'home';
 const MAX_TAB_LABEL = 24;
 const MODIFIED_MARK = '● ';
+const T = t.shell;
 
 const docKey = (id: number) => `pdf:${id}`; // por documento del backend: no cambia con «Guardar como»
 
@@ -72,7 +74,7 @@ class Shell {
 
   start(toggleTheme: () => void): void {
     this.toggleTheme = toggleTheme;
-    this.tabs.push(new Tab(HOME, 'Inicio', 'home', { closable: false }));
+    this.tabs.push(new Tab(HOME, T.home.title, 'home', { closable: false }));
     this.activate(HOME);
     // Aperturas pedidas por el backend (Abrir PDF, resultados de otras herramientas…).
     on<{ path: string; password: string | null }>('document:open', ({ path, password }) => this.openDocument(path, password));
@@ -81,19 +83,19 @@ class Shell {
   }
 
   get(key: string): Tab | undefined {
-    return this.tabs.find((t) => t.key === key);
+    return this.tabs.find((tab) => tab.key === key);
   }
 
   async confirmQuit(documents: string[], jobs: string[]): Promise<void> {
     if (document.querySelector('dialog[open]')) return; // ya hay una pregunta abierta
     const list = (items: string[]) => items.map((name) => `  • ${name}`).join('\n');
     const parts = [];
-    if (documents.length) parts.push(`Los siguientes documentos tienen cambios sin guardar:\n\n${list(documents)}`);
-    if (jobs.length) parts.push(`Se cancelarán los trabajos en curso:\n\n${list(jobs)}`);
-    const title = documents.length ? 'Archivos sin guardar' : 'Trabajo en curso';
-    const choice = await askChoice(title, `${parts.join('\n\n')}\n\n¿Cerrar la aplicación de todos modos?`, [
-      { label: 'Cerrar', value: true, tone: 'danger' },
-      { label: 'Cancelar', value: false },
+    if (documents.length) parts.push(T.quit.unsaved(list(documents)));
+    if (jobs.length) parts.push(T.quit.jobs(list(jobs)));
+    const title = documents.length ? T.quit.unsavedTitle : T.quit.jobsTitle;
+    const choice = await askChoice(title, `${parts.join('\n\n')}\n\n${T.quit.question}`, [
+      { label: t.common.close, value: true, tone: 'danger' },
+      { label: t.common.cancel, value: false },
     ]);
     if (choice) call('app.quit');
   }
@@ -132,7 +134,7 @@ class Shell {
         return;
       }
       tab.component = Viewer;
-      setStatus(`Abierto: ${info.name}`);
+      setStatus(T.opened(info.name));
     } catch (err) {
       console.error(err);
       toast((err as Error).message, 'danger');
@@ -169,7 +171,7 @@ class Shell {
 
   _documentTab(path: string): Tab | undefined {
     const wanted = path.toLowerCase(); // Windows: las rutas no distinguen mayúsculas
-    return this.tabs.find((t) => t.path?.toLowerCase() === wanted);
+    return this.tabs.find((tab) => tab.path?.toLowerCase() === wanted);
   }
 
   // ── Pestañas ───────────────────────────────────────────────────────────
@@ -186,7 +188,7 @@ class Shell {
       tab.component = component; // si la pestaña se cerró mientras cargaba, ya no se pinta
     } catch (err) {
       console.error(err);
-      toast(`No se pudo abrir ${tool.title}: ${(err as Error).message}`, 'danger');
+      toast(T.openFailed(tool.title, (err as Error).message), 'danger');
     }
   }
 
@@ -202,7 +204,7 @@ class Shell {
     if (!tab?.closable) return;
     if (tab.instance?.canClose && !(await tab.instance.canClose())) return;
     if (!this.get(key)) return;
-    this.tabs = this.tabs.filter((t) => t.key !== key); // desmontar el componente libera sus recursos
+    this.tabs = this.tabs.filter((tab) => tab.key !== key); // desmontar el componente libera sus recursos
     this.history = this.history.filter((k) => k !== key);
     if (this.current === key) this.activate(this.history.at(-1) ?? HOME);
   }
@@ -213,7 +215,7 @@ class Shell {
   }
 
   cycle(step: number): void {
-    const keys = this.tabs.map((t) => t.key);
+    const keys = this.tabs.map((tab) => tab.key);
     const next = (keys.indexOf(this.current) + step + keys.length) % keys.length;
     this.activate(keys[next]);
   }
@@ -231,7 +233,7 @@ class Shell {
 
   // ── Menús de la cabecera ───────────────────────────────────────────────
   brandMenu(): MenuItem[] {
-    const items: MenuItem[] = [{ label: 'Abrir PDF (Ctrl+O)', icon: 'folder-open', onSelect: () => this.openPdfDialog() }, 'separator'];
+    const items: MenuItem[] = [{ label: T.brand.openPdf, icon: 'folder-open', onSelect: () => this.openPdfDialog() }, 'separator'];
     let section = 0;
     for (const tool of TOOLS) {
       if ((tool.section ?? 0) !== section) {
@@ -240,7 +242,7 @@ class Shell {
       }
       items.push({ label: tool.menuLabel, icon: tool.icon, onSelect: () => this.open(tool.key) });
     }
-    items.push('separator', { label: 'Alternar tema claro / oscuro', icon: 'moon', onSelect: this.toggleTheme });
+    items.push('separator', { label: T.brand.theme, icon: 'moon', onSelect: this.toggleTheme });
     return items;
   }
 
@@ -253,21 +255,21 @@ class Shell {
 
   /** Menú contextual de una pestaña (como _show_tab_context_menu en Qt). */
   tabContextMenu(key: string): MenuItem[] {
-    const keys = this.tabs.filter((t) => t.closable).map((t) => t.key);
+    const keys = this.tabs.filter((tab) => tab.closable).map((tab) => tab.key);
     const index = keys.indexOf(key);
     const { path } = this.get(key)!; // se lee al abrir el menú: puede cambiar con «Guardar como»
     const items: MenuItem[] = [
-      { label: 'Cerrar pestaña', icon: 'x', onSelect: () => this.close(key) },
-      { label: 'Cerrar las otras pestañas', icon: 'x', onSelect: () => this.closeMany(keys.filter((k) => k !== key)) },
-      { label: 'Cerrar pestañas a la derecha', icon: 'arrow-right', onSelect: () => this.closeMany(keys.slice(index + 1)) },
+      { label: T.tab.close, icon: 'x', onSelect: () => this.close(key) },
+      { label: T.tab.closeOthers, icon: 'x', onSelect: () => this.closeMany(keys.filter((k) => k !== key)) },
+      { label: T.tab.closeRight, icon: 'arrow-right', onSelect: () => this.closeMany(keys.slice(index + 1)) },
     ];
     if (path) {
       items.push('separator',
         {
-          label: 'Copiar ruta del archivo', icon: 'copy',
-          onSelect: () => navigator.clipboard.writeText(path).then(() => setStatus('Ruta copiada al portapapeles')),
+          label: T.tab.copyPath, icon: 'copy',
+          onSelect: () => navigator.clipboard.writeText(path).then(() => setStatus(T.tab.pathCopied)),
         },
-        { label: 'Abrir carpeta en el Explorador', icon: 'folder', onSelect: () => call('documents.reveal', path) });
+        { label: T.tab.reveal, icon: 'folder', onSelect: () => call('documents.reveal', path) });
     }
     return items;
   }

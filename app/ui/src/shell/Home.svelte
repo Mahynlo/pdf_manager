@@ -3,6 +3,9 @@
   import RecentFiles from './RecentFiles.svelte';
   import { shell } from './shell.svelte.ts';
   import { homeCards } from './tools.ts';
+  import { t } from '$texts';
+
+  const T = t.shell.home;
 
   const cards = homeCards();
 </script>
@@ -11,8 +14,8 @@
   <RecentFiles />
   <div class="home__center">
     <span class="home__emoji" aria-hidden="true">📑</span>
-    <h1 class="home__title">¿Qué quieres hacer hoy?</h1>
-    <p class="home__lead">Selecciona una herramienta para comenzar a trabajar</p>
+    <h1 class="home__title">{T.heading}</h1>
+    <p class="home__lead">{T.lead}</p>
     <div class="home__cards">
       {#each cards as item (item.card.title)}
         <button class="card home-card" type="button"

@@ -4,6 +4,7 @@ import App from './App.svelte';
 import { call } from './lib/api.ts';
 import type { AppSettings } from './lib/types.ts';
 import { theme } from './lib/theme.svelte.ts';
+import { t } from '$texts';
 // Estilos globales (tokens.css: colores del tema; el resto, por área de la app).
 import './styles/tokens.css';
 import './styles/base.css';
@@ -22,8 +23,7 @@ async function boot(): Promise<void> {
   // Fuera de la app (p. ej. la URL de «pnpm dev» en un navegador) no hay backend y la
   // espera no acabaría nunca: se explica cómo abrirla en vez de dejar la página en blanco.
   const hint = setTimeout(() => {
-    document.body.textContent = 'Esperando al backend de Python… Esta interfaz se abre desde la app: '
-      + 'ejecuta «uv run python -m app.main --dev» desde la raíz del proyecto.';
+    document.body.textContent = t.shell.boot.waiting;
   }, BACKEND_HINT_MS);
   const settings = await call<AppSettings>('app.settings');
   clearTimeout(hint);
@@ -38,6 +38,6 @@ async function boot(): Promise<void> {
 boot()
   .catch((err: Error) => {
     console.error(err);
-    document.body.textContent = `Error al iniciar la interfaz: ${err.message}`;
+    document.body.textContent = t.shell.boot.failed(err.message);
   })
   .finally(() => call('app.ready'));
