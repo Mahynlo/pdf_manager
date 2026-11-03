@@ -34,7 +34,7 @@
   import { RedactionMarks } from './redact/redaction.ts';
   import SearchPanel from './panels/SearchPanel.svelte';
   import Thumbnails from './panels/Thumbnails.svelte';
-  import { openLegendsManager, openStampsMenu, type Stamp } from './annotations/stamps.ts';
+  import StampsPanel from './stamps/StampsPanel.svelte';
   import { TextSelection } from './canvas/selection.ts';
   import TocTree from './panels/TocTree.svelte';
   import Toolbar from './toolbars/Toolbar.svelte';
@@ -50,6 +50,7 @@
     { key: 'toc', icon: 'list-tree' },
     { key: 'ocr', icon: 'scan-text' },
     { key: 'redact', icon: 'eraser' },
+    { key: 'stamps', icon: 'stamp' },
     { key: 'ai', icon: 'sparkles' },
     { key: 'search', icon: 'search' },
   ];
@@ -82,6 +83,7 @@
   let search = $state<SearchPanel>();
   let ocr = $state<OcrPanel>();
   let redact = $state<RedactPanel>();
+  let stamps = $state<StampsPanel>();
   let ai = $state<AiPanel>();
 
   // ── Lienzo y sus capas ─────────────────────────────────────────────────
@@ -202,13 +204,10 @@
     canvas.setTool(canvas.tool); // la herramienta activa toma el color nuevo
   }
 
-  /** Inserta un sello o leyenda en el centro de la vista y lo deja seleccionado. */
-  function insertStamp(stamp: Stamp) {
-    const at = canvas.viewCenter() ?? { index: canvas.current, x: 100, y: 100 };
-    const created = annotations.stamp(stamp, at);
-    if (!created.length) return;
-    setTool(TOOLS.POINTER);
-    annotations.select(created);
+  /** Panel de sellos (0) o de firmas (1). */
+  function openStamps(index: number) {
+    openDockTab('stamps');
+    stamps!.show(index);
   }
 
   /** Imprimir: PDFium dibuja las páginas con las anotaciones tal como están en el visor. */
@@ -261,7 +260,7 @@
         { label: T.more.properties, icon: 'info', onSelect: showProperties },
         ...rest,
         'separator',
-        { label: T.more.legends, icon: 'tag', onSelect: () => openLegendsManager(insertStamp) },
+        { label: T.more.legends, icon: 'tag', onSelect: () => stamps!.manageLegends() },
         { label: T.more.close, icon: 'x', onSelect: close },
       ];
     },
@@ -341,8 +340,9 @@
   export function onKey(ev: KeyboardEvent): boolean {
     const key = ev.key.toLowerCase();
     const inField = Boolean((ev.target as Element | null)?.closest?.(INPUTS));
-    // Esc termina de marcar para censurar (aunque la marca recién puesta esté seleccionada).
-    if (key === 'escape' && !inField && tool === TOOLS.REDACT) {
+    // Esc termina de marcar para censurar (aunque la marca recién puesta esté seleccionada) y
+    // cancela la colocación de un sello o una firma.
+    if (key === 'escape' && !inField && (tool === TOOLS.REDACT || tool === TOOLS.PLACE)) {
       setTool(TOOLS.SELECT);
       return true;
     }
@@ -392,7 +392,7 @@
 
 <div class="viewer">
   <Toolbar bind:this={toolbar} {view} actions={toolbarActions} />
-  <ToolsBar {tool} {setTool} {setColor} stamps={(button) => openStampsMenu(button, insertStamp)} />
+  <ToolsBar {tool} {setTool} {setColor} stamps={() => openStamps(0)} signatures={() => openStamps(1)} />
   <div class="viewer__body">
     <Thumbnails {docId} count={view.count} current={view.page} {revision} {versions} visible={view.sidebar}
                 fetchThumbs={(pages) => canvas.thumbnails(pages)} release={(url) => URL.revokeObjectURL(url)} onSelect={goTo} onMove={(src, dst) => actions.move(dst, src)} />
@@ -424,6 +424,10 @@
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'redact'}>
           <RedactPanel bind:this={redact} {docId} {marks} {tool} {setTool} close={() => (view.dock = false)}
                        show={showMark} commit={(fn) => actions.change(fn)} />
+        </div>
+        <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'stamps'}>
+          <StampsPanel bind:this={stamps} {canvas} {annotations} {setTool} active={view.dock && dockTab === 'stamps'}
+                       close={() => (view.dock = false)} />
         </div>
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'ai'}>
           <AiPanel bind:this={ai} {docId} active={view.dock && dockTab === 'ai'} close={() => (view.dock = false)}

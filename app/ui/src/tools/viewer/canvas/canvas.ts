@@ -66,6 +66,7 @@ export const TOOLS = {
   MARKER: 'marker', // trazo libre translúcido (rotulador)
   DRAW: 'draw', // trazo fino
   IMAGE: 'image',
+  PLACE: 'place', // colocar un sello o una firma: la herramienta de EmbedPDF la pone stamps/
   AREA_OCR: 'area-ocr', // rectángulo para reconocer texto
   REDACT: 'redact', // marcar para censurar: texto (arrastrando sobre él) o un área
 } as const;
@@ -454,6 +455,7 @@ export class PageCanvas {
   _applyTool(id: string): void {
     // Activar una herramienta de anotación cambia el modo del gestor de interacción (y quitarla
     // vuelve al predeterminado, el de texto).
+    if (this.tool === TOOLS.PLACE) return; // ya la activó stamps/ (activateStampPlacement…)
     const annotationTool = ANNOTATION_TOOL[this.tool];
     const annotation = this._plugin<AnnotationPlugin>('annotation').provides().forDocument(id);
     if (annotationTool) {
@@ -529,12 +531,6 @@ export class PageCanvas {
     const box = this.pageRect(index);
     const [pw, ph] = this.sizes[index];
     return [((clientX - box.left) / box.width) * pw, ((clientY - box.top) / box.height) * ph];
-  }
-
-  /** Centro de la vista: la página que se ve ahí y ese punto (para insertar sellos). */
-  viewCenter(): { index: number; x: number; y: number } | null {
-    const box = this.el.getBoundingClientRect();
-    return this.pageAt(box.left + this.el.clientWidth / 2, box.top + this.el.clientHeight / 2);
   }
 
   /** Capa de marcas de la página `index` (se crea al pedirla; se pierde con `setPages`). */

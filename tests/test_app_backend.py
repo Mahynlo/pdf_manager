@@ -612,6 +612,43 @@ def test_legends_menu_and_store(tmp_path, monkeypatch):
     assert svc.delete(legend["id"]) == []
 
 
+def test_stamps_library_store():
+    from app.backend.services import stamps
+    from app.backend.services.stamps import StampsService
+
+    svc = StampsService()
+    assert svc.library() is None
+    doc = fitz.open()
+    doc.new_page(width=120, height=40)
+    pdf = base64.b64encode(doc.tobytes()).decode("ascii")
+    entries = [{"id": "a1", "pageIndex": 0, "name": 36, "subject": "Mi sello"}]
+    svc.save_library(pdf, entries)
+    assert svc.library() == {"pdf": pdf, "stamps": entries}
+    assert not list(stamps.STORE.glob("*.tmp"))  # se escribe en un temporal y se renombra
+    with pytest.raises(UserError, match="no es válida"):
+        svc.save_library(base64.b64encode(b"no es un pdf").decode("ascii"), entries)
+    with pytest.raises(UserError, match="no es válida"):
+        svc.save_library("%%%", entries)
+    assert svc.library() == {"pdf": pdf, "stamps": entries}  # lo guardado sigue intacto
+    svc.save_library(None, [])
+    assert svc.library() is None and not (stamps.STORE / "custom.pdf").exists()
+
+
+def test_stamps_signatures_store():
+    from app.backend.services import stamps
+    from app.backend.services.stamps import StampsService
+
+    svc = StampsService()
+    assert svc.signatures() == []
+    entry = {"id": "s1", "createdAt": 1, "signature": {"creationType": "type", "previewDataUrl": "data:,", "imageData": "AA=="}}
+    svc.save_signatures([entry])
+    assert svc.signatures() == [entry]
+    (stamps.STORE / "signatures.json").write_text("{roto", encoding="utf-8")
+    assert svc.signatures() == []  # un archivo dañado no rompe el visor
+    svc.save_signatures([])
+    assert not (stamps.STORE / "signatures.json").exists()
+
+
 def test_app_quit_closes_without_asking(tmp_path):
     host = FakeHost()
     AppService(host, Settings(tmp_path / "s.json")).quit()

@@ -13,7 +13,7 @@ Cada paso deja el visor completo y funcionando. Lo que aún no se migró sigue c
 | 1. Render | PDFium (el motor de EmbedPDF) dibuja las páginas y las miniaturas en el navegador | Hecho |
 | 2. Desplazamiento y zoom | `Viewport`, `Scroller`, Zoom, Tiling y Spread de EmbedPDF colocan y dibujan las páginas; nuestras capas (marcas, anotaciones) viven dentro de cada página | Hecho |
 | 3. Selección de texto | Complemento Selection, con nuestra barra flotante (copiar, resaltar, censurar, explicar con IA) | Hecho |
-| 4. Herramientas | Una a una: búsqueda (hecha), anotaciones y sellos (hechos), deshacer las operaciones de página (hecho; las hace Python), censura (hecha) e imprimir (hecho) | Hecho |
+| 4. Herramientas | Una a una: búsqueda (hecha), anotaciones (hechas), sellos y firmas (hechos), deshacer las operaciones de página (hecho; las hace Python), censura (hecha) e imprimir (hecho) | Hecho |
 
 Al empezar cada paso hay que decidir qué hace Python y qué hace el navegador. Desde las anotaciones
 el reparto es: **EmbedPDF edita el contenido del documento abierto** (por ahora, las anotaciones) y
@@ -242,8 +242,9 @@ posiciones de la capa). La capa de texto sigue para el asistente IA y el panel d
 ### Anotaciones y sellos (hechos)
 
 Las anotaciones las dibuja y edita el complemento Annotation de EmbedPDF (con su historial para
-deshacer y rehacer). Se conservan nuestras herramientas, la paleta, la barra de propiedades, los
-sellos y leyendas, y que tras dibujar una forma se vuelve al puntero con ella seleccionada.
+deshacer y rehacer). Se conservan nuestras herramientas, la paleta, la barra de propiedades y que
+tras dibujar una forma se vuelve al puntero con ella seleccionada. Los sellos y las firmas tienen su
+propia sección («Sellos y firmas»).
 
 **Herramientas** (barra del lienzo):
 
@@ -297,7 +298,7 @@ tirador de giro de EmbedPDF), y encima mientras se escribe un texto libre.
 | Archivo | Qué hace |
 |---|---|
 | `palette.ts` | Colores y estilos (solo datos; también los valores iniciales de las herramientas en `embed.ts`) |
-| `annotations.ts` | `Annotations`: estilo por visor, marcas de texto, sellos, crear/cambiar/borrar, deshacer, aviso de cambios y `sync` con Python |
+| `annotations.ts` | `Annotations`: estilo por visor, marcas de texto, crear/cambiar/borrar, deshacer, aviso de cambios y `sync` con Python |
 | `editing.ts` | `AnnotationEditor`: barra de propiedades (color, grosor, letra, relleno, editar nota, traer al frente, enviar al fondo, duplicar, eliminar), teclado (Supr, Esc, Ctrl+D, flechas) y doble clic en una nota |
 | `PdfPage.svelte` | `AnnotationLayer` de EmbedPDF dentro de cada página |
 | `canvas.ts` | `ANNOTATION_TOOL`: herramienta de EmbedPDF de cada herramienta de dibujo (rectángulo → `square`, flecha → `lineArrow`, pluma y trazo fino → `ink`, texto → `freeText`, nota → `textComment`) |
@@ -312,10 +313,10 @@ tirador de giro de EmbedPDF), y encima mientras se escribe un texto libre.
   propia orden en el historial: al deshacer, EmbedPDF devolvería lo borrado al final, así que se
   vuelve a llevar al final todo lo que había desde la primera movida, en el orden de antes
   (comprobado en `annot_e2e`: al frente, al fondo, Ctrl+Z, Ctrl+Y y guardado). Los
-  grupos (reemplazar texto) se rehacen enteros y se vuelven a enlazar. Una imagen no se puede
-  volver a crear (su objeto no lleva la imagen): no se mueve ni se puede enviar algo al fondo si
-  tiene una imagen encima (aviso). Las anotaciones que ya traía el PDF, al rehacerse, toman la
-  apariencia que les da EmbedPDF.
+  grupos (reemplazar texto) se rehacen enteros y se vuelven a enlazar. Un sello (también una
+  imagen o una firma escrita) no lleva su dibujo en el objeto: antes de reordenar se exporta
+  (`exportAnnotationAppearanceAsPdf`, un PDF de una página) y se recrea con él, como al colocarlo.
+  Las demás anotaciones que ya traía el PDF, al rehacerse, toman la apariencia que les da EmbedPDF.
 
 **Svelte fijado en 5.51.0:** los componentes de EmbedPDF 2.15.1 vienen compilados con un Svelte
 anterior a 5.51.1, que guardaba los manejadores de eventos delegados en `elemento.__pointerdown`.
@@ -334,6 +335,53 @@ errores de JavaScript.
 
 **Retirado:** `services/annotation_store.py`, `pdf_core/annotations.py` y las llamadas
 `viewer.add_annotations`, `update_annotations`, `delete_annotations`, `reorder_annotations`, `undo` y `redo`.
+
+### Sellos y firmas (hechos): `plugin-stamp` y `plugin-signature`
+
+Todos los sellos y las firmas se colocan igual: se elige en el panel «Sellos» (barra del lienzo:
+**Sellos** o **Firma**) y el siguiente clic en la página lo coloca, con su vista previa bajo el
+puntero; Esc cancela. Después se mueven y se redimensionan como las demás anotaciones. Son
+anotaciones de sello (las firmas dibujadas, de tinta) con su dibujo: un PDF de una página por sello,
+que EmbedPDF pega como apariencia (`/AP`). Python las guarda tal cual, como las demás
+(`pdf_core/annot_transfer.py`).
+
+**Bibliotecas** (`stamps/library.svelte.ts`, una para toda la app, como el registro):
+
+| Biblioteca | Qué tiene | Dónde vive |
+|---|---|---|
+| Estándar | Aprobado, Borrador, Confidencial, Firmar aquí… (17, en español) | El paquete `@embedpdf/default-stamps` (MIT), dentro de la app (`standard.ts`). Por defecto el complemento los descargaría de su CDN al arrancar: se desactiva (`manifests: []`) |
+| De texto | Los sellos rápidos (CONFIDENCIAL, APROBADO…) y las leyendas guardadas | El servicio `legends`, el mismo almacén que Qt y Flet. Su dibujo se genera al vuelo (`stamp-pdf.ts`) en una biblioteca que solo vive en memoria |
+| Propios | Los que crea el usuario desde una imagen (PNG, JPG, WebP, SVG) o desde anotaciones seleccionadas en la página (`createStampFromAnnotations`) | El servicio `stamps`: la biblioteca exportada por EmbedPDF (`~/.pdf_manager/stamps/custom.pdf` y `custom.json`) |
+
+`stamp-pdf.ts` escribe a mano el PDF de un sello, sin PDFium ni Python: el de texto, con texto
+vectorial en Helvetica Negrita (una de las 14 estándar, sin incrustar; WinAnsi, así que acentos y
+ñ sí, otros alfabetos no), marco del color y fondo blanco, como las leyendas de Qt; el de imagen,
+la imagen con su transparencia (máscara `/SMask`); las SVG se dibujan antes en un lienzo.
+
+**Firmas** (`stamps/signatures.svelte.ts`, `SignatureDialog.svelte`): firma e iniciales (opcional),
+dibujadas, escritas o desde una imagen. Los paneles de dibujar y escribir son los de EmbedPDF
+(`SignatureDrawPad`, `SignatureTypePad`); para escribir se usan letras manuscritas que trae Windows
+(Segoe Script, Ink Free, Lucida Handwriting) en vez de su «Dancing Script», que habría que
+descargar. La imagen se pasa a PNG antes (PDFium no pinta una SVG). Es una firma **visual** (trazo
+o imagen), sin certificado digital. El usuario decide si cada firma se guarda en el equipo para
+reutilizarla (`~/.pdf_manager/stamps/signatures.json`, formato de `serializeEntries`); si no, dura
+mientras la app esté abierta.
+
+**Herramienta «colocar»** (`TOOLS.PLACE` en `canvas.ts`): el panel pone la herramienta del lienzo
+en «colocar» y EmbedPDF activa la suya (`rubberStamp`, `signatureStamp` o `signatureInk`). Al
+crear el sello se vuelve al puntero con él seleccionado (`_created`); si EmbedPDF deja la
+herramienta sin crear nada, se vuelve a seleccionar texto (`onActiveToolChange`).
+
+Los paneles de EmbedPDF avisan (`onResult`) desde sus propios efectos: si el aviso lee el estado
+que escribe, Svelte vuelve a ejecutar el efecto sin fin. Por eso `SignatureDialog.set` escribe con
+`untrack`.
+
+**Comprobado** con ratón real por CDP (`stamps_e2e`, 26 comprobaciones): las tres bibliotecas con
+sus miniaturas; colocar un sello estándar y uno de texto; enviarlo al fondo y traerlo al frente
+(conserva su dibujo); Esc cancela; sellos propios desde PNG
+(con su margen transparente) y SVG, guardados por Python; desde un rectángulo seleccionado;
+quitarlos; firma dibujada (guardada) y escrita (solo en la sesión); y Ctrl+S guarda sellos y firmas
+con su dibujo.
 
 ### Operaciones de página (las hace Python, ahora con deshacer)
 
@@ -483,8 +531,9 @@ En `app/ui/package.json`, con versiones fijas (todas iguales, 2.15.1):
 - `@embedpdf/core`, `@embedpdf/engines`, `@embedpdf/pdfium`;
 - `@embedpdf/models`: geometría (`transformRect`);
 - los complementos `document-manager`, `viewport`, `scroll`, `spread`, `rotate`, `render`, `zoom`,
-  `tiling`, `interaction-manager`, `selection`, `search`, `annotation`, `history`, `export` y
-  `redaction`.
+  `tiling`, `interaction-manager`, `selection`, `search`, `annotation`, `history`, `export`,
+  `redaction`, `stamp` y `signature`;
+- `@embedpdf/default-stamps` 0.0.1 (MIT): los sellos estándar, con su manifiesto en español.
 
 Y `svelte` fijado en 5.51.0 (ver «Anotaciones y sellos»).
 

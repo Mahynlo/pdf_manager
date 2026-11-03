@@ -1,6 +1,6 @@
 <!--
   Barra de herramientas del lienzo (AnnotSubBar en Qt): mano, selección de texto,
-  puntero, anotaciones de texto, formas, trazos, texto e imagen, colores y sellos.
+  puntero, anotaciones de texto, formas, trazos, texto e imagen, colores, sellos y firma.
 -->
 <script lang="ts">
   import Icon from '$lib/Icon.svelte';
@@ -9,12 +9,16 @@
   import { PALETTE } from '../annotations/palette.ts';
   import { t } from '$texts';
 
-  /** `tool`: herramienta activa; `setTool(t)`, `setColor(hex)`, `stamps(botón)`: menú «Sellos». */
-  let { tool, setTool, setColor, stamps }: {
+  /**
+   * `tool`: herramienta activa; `setTool(t)`, `setColor(hex)`; `stamps()`, `signatures()`: abrir
+   * el panel de sellos o el de firmas.
+   */
+  let { tool, setTool, setColor, stamps, signatures }: {
     tool: string;
     setTool: (tool: string) => void;
     setColor: (color: string) => void;
-    stamps: (button: HTMLElement) => void;
+    stamps: () => void;
+    signatures: () => void;
   } = $props();
 
   const T = t.viewer.tools;
@@ -81,8 +85,11 @@
     <button class="tb-swatch" type="button" title={T.color(name)} aria-label={T.color(name)} style:--swatch={color}
             onclick={() => setColor(color)}></button>
   {/each}
-  <button class="btn btn--ghost tb-btn tb-text-btn" type="button" title={T.stampsTip}
-          onclick={(ev) => stamps(ev.currentTarget)}>
-    <Icon name="stamp" size={18} />{T.stamps}<Icon name="chevron-down" size={14} />
+  <button class="btn btn--ghost tb-btn tb-text-btn" class:is-checked={tool === TOOLS.PLACE} type="button"
+          title={T.stampsTip} onclick={stamps}>
+    <Icon name="stamp" size={18} />{T.stamps}
+  </button>
+  <button class="btn btn--ghost tb-btn tb-text-btn" type="button" title={T.signaturesTip} onclick={signatures}>
+    <Icon name="signature" size={18} />{T.signatures}
   </button>
 </div>

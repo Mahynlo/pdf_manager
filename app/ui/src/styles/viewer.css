@@ -459,6 +459,76 @@
 .redact-profile.is-selected { background: var(--bg-selected); }
 .redact-profile__active { color: var(--warning); font-size: 11px; }
 
+/* ── Pestaña Sellos y diálogo «Nueva firma» (stamps/) ─────────────────────── */
+.stamps-panel { height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 6px 8px; }
+.stamps-panel__head, .stamps-tab__row, .stamps-tab__actions, .signature-card__row { display: flex; align-items: center; gap: 6px; }
+.stamps-panel__icon, .stamps-panel__head .heading { color: var(--brand); }
+.stamps-panel__icon { display: grid; }
+.stamps-tab { display: flex; flex-direction: column; gap: 8px; padding: 8px 0; overflow-y: auto; }
+.stamps-tab .section-title { font-size: 13px; }
+.stamps-tab__actions { flex-wrap: wrap; }
+/* Los sellos y las firmas se ven sobre blanco, como en la página (también con el tema oscuro). */
+.stamp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
+.stamp-tile { position: relative; }
+/* La rejilla de una sola celda deja a la imagen la altura exacta de la casilla (sin desbordarla). */
+.stamp-tile__button {
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  place-items: center;
+  width: 100%;
+  height: 52px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #FFFFFF;
+  color: #202124;
+  cursor: pointer;
+}
+.stamp-tile__button:hover { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-light); }
+.stamp-tile__img, .signature-card__preview img { width: 100%; height: 100%; object-fit: contain; }
+.stamp-tile__name { max-width: 100%; font-size: 11.5px; font-weight: 600; }
+.stamp-tile__remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  box-shadow: 0 1px 3px var(--shadow);
+  opacity: 0;
+}
+.stamp-tile:hover .stamp-tile__remove, .stamp-tile__remove:focus-visible { opacity: 1; }
+.signature-card { display: flex; flex-direction: column; gap: 4px; padding: 6px; border: 1px solid var(--border-light); border-radius: var(--radius); }
+.signature-card__previews { display: flex; gap: 6px; }
+.signature-card__preview { flex: 3; height: 64px; }
+.signature-card__preview--initials { flex: 1; }
+.signature-card__kept { color: var(--success); }
+.signature-card__row .is-checked { background: var(--bg-selected); color: var(--accent); }
+.signature-dialog .dialog__body { width: min(560px, 94vw); }
+.signature-tab { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; }
+.signature-options { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.signature-options__item { display: flex; align-items: center; gap: 6px; margin-right: 10px; }
+.signature-options .tb-swatch.is-checked { box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 4px var(--accent); }
+.signature-field { display: flex; flex-direction: column; gap: 4px; }
+.signature-field__head { display: flex; align-items: center; gap: 6px; }
+/* Los paneles de EmbedPDF ocupan el 100 % de su contenedor (estilo en línea): el tamaño lo da él. */
+.signature-pad {
+  display: block;
+  width: 100%;
+  height: 130px;
+  overflow: hidden;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: #FFFFFF;
+  touch-action: none;
+}
+.signature-pad--initials { width: 50%; height: 80px; }
+.signature-pad__fill { display: block; width: 100%; height: 100%; }
+.signature-drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 8px; color: #5F6368; text-align: center; cursor: pointer; }
+.signature-drop.is-dragging { border-color: var(--accent); background: #F1F6FE; }
+.signature-drop__img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
 /* ── Diálogo Imprimir (print_dialog.py en Qt) ─────────────────────────────── */
 .print-dialog .dialog__body { width: min(900px, 94vw); height: min(640px, 88vh); padding: 16px; }
 .print-dialog__layout { display: flex; gap: 16px; height: 100%; min-height: 0; }

@@ -10,6 +10,7 @@
   },
   "devDependencies": {
     "@embedpdf/core": "2.15.1",
+    "@embedpdf/default-stamps": "0.0.1",
     "@embedpdf/engines": "2.15.1",
     "@embedpdf/models": "2.15.1",
     "@embedpdf/pdfium": "2.15.1",
@@ -24,7 +25,9 @@
     "@embedpdf/plugin-scroll": "2.15.1",
     "@embedpdf/plugin-search": "2.15.1",
     "@embedpdf/plugin-selection": "2.15.1",
+    "@embedpdf/plugin-signature": "2.15.1",
     "@embedpdf/plugin-spread": "2.15.1",
+    "@embedpdf/plugin-stamp": "2.15.1",
     "@embedpdf/plugin-tiling": "2.15.1",
     "@embedpdf/plugin-viewport": "2.15.1",
     "@embedpdf/plugin-zoom": "2.15.1",

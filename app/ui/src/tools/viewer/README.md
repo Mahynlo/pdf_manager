@@ -6,7 +6,8 @@ carpeta agrupa una parte del visor:
 | Carpeta | Qué contiene |
 |---|---|
 | `canvas/` | El lienzo con EmbedPDF: el registro y sus complementos (`embed.ts`, `EmbedRoot.svelte`), la clase `PageCanvas` con zoom, modos de vista y herramientas (`canvas.ts`, `layout.ts`), las páginas (`PdfPages.svelte`, `PdfPage.svelte`) y la selección de texto (`selection.ts`) |
-| `annotations/` | Anotaciones: el modelo sobre EmbedPDF (`annotations.ts`), la barra de propiedades y el teclado (`editing.ts`), colores y estilos (`palette.ts`), y los sellos y leyendas (`stamps.ts`, `LegendsDialog.svelte`) |
+| `annotations/` | Anotaciones: el modelo sobre EmbedPDF (`annotations.ts`), la barra de propiedades y el teclado (`editing.ts`), y colores y estilos (`palette.ts`) |
+| `stamps/` | Sellos y firmas: las bibliotecas (`library.svelte.ts`, `standard.ts`), el PDF de cada sello (`stamp-pdf.ts`), las firmas (`signatures.svelte.ts`), el panel (`StampsPanel.svelte`) y los diálogos de firma y de leyendas |
 | `redact/` | Censura: las marcas (`redaction.ts`), el panel (`RedactPanel.svelte`) y los perfiles (`ProfilesDialog.svelte`) |
 | `ocr/` | OCR: el panel y sus diálogos de lote y resultado |
 | `document/` | Acciones sobre el archivo: guardar, páginas y exportar (`operations.ts`), imprimir (`PrintDialog.svelte`, `print.ts`) y propiedades |

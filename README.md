@@ -35,8 +35,12 @@ Accesos a cada herramienta y archivos recientes. Cada PDF y cada herramienta se 
 ### 📖 Visor de PDF
 - Zoom, scroll continuo, doble página o página única, miniaturas, índice y modo noche.
 - Selección de texto (también entre páginas) y búsqueda con lista de resultados.
-- **Anotaciones:** resaltar, subrayar, tachar, formas, flechas, pluma, texto libre, notas, imágenes y
-  sellos. Se mueven, se redimensionan y se cambian de color, grosor y orden.
+- **Anotaciones:** resaltar, subrayar, tachar, formas, flechas, pluma, texto libre, notas e imágenes.
+  Se mueven, se redimensionan y se cambian de color, grosor y orden.
+- **Sellos:** estándar (Aprobado, Borrador, Confidencial…), de texto (tus leyendas) y propios, creados
+  desde una imagen (PNG, JPG, SVG) o desde anotaciones de la página.
+- **Firmas:** dibujadas, escritas o desde una imagen, con iniciales opcionales. Se pueden guardar en
+  el equipo para reutilizarlas. Es una firma visual, sin certificado digital.
 - **Páginas:** girar, mover (también arrastrando miniaturas), duplicar, insertar, eliminar y extraer.
 - Deshacer y rehacer (Ctrl+Z / Ctrl+Y) tanto las anotaciones como las operaciones de página.
 - Imprimir con vista previa: páginas, orden, orientación, color y escala.
@@ -98,6 +102,7 @@ probado del todo con uso real:
 | **Deshacer operaciones de página** | Nuevo: Ctrl+Z / Ctrl+Y sobre girar, mover, insertar, duplicar y eliminar páginas, junto con las anotaciones |
 | **Anotaciones** | Edición con EmbedPDF (mover, redimensionar, orden, texto libre). Probadas en pruebas automáticas, falta uso real con PDF variados |
 | **Imprimir** | Nueva: las páginas las dibuja el visor (PDFium). Falta probar con distintas impresoras |
+| **Sellos y firmas** | Nuevos (EmbedPDF): sellos estándar, de texto y propios, y firmas guardables. Probados en pruebas automáticas, falta uso real |
 | **Instalador** | Probados la instalación, «Abrir con» y el OCR. Falta más uso en otros equipos |
 
 ## Instalación

@@ -34,7 +34,7 @@ app/
                           help (manuales Markdown → HTML seguro), viewer (PDFs abiertos en el visor),
                           ocr (OCR y orientación sobre los documentos del visor), redact (censura),
                           ai (asistente IA),
-                          legends (sellos y leyendas)
+                          legends (sellos de texto y leyendas), stamps (sellos propios y firmas)
   ui/                     la interfaz, en Svelte (compila a ui/dist con pnpm build): ver svelte.md
     src/main.ts           arranque: estilos, tema guardado y App
     src/styles/           tokens.css (colores del tema, mismos valores que src_qt/core/theme.py),

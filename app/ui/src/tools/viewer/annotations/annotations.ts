@@ -20,13 +20,11 @@
 // Las coordenadas de EmbedPDF son de la página sin girar (canvas.toView / toPage las pasan
 // a las de la página tal como se ve).
 import {
-  PdfAnnotationReplyType, PdfAnnotationSubtype, PdfStandardFont, PdfTextAlignment, PdfVerticalAlignment, uuidV4,
+  PdfAnnotationReplyType, PdfAnnotationSubtype, uuidV4,
   type PdfAnnotationObject, type Rect,
 } from '@embedpdf/models';
 import type { PluginRegistry } from '@embedpdf/core';
-import {
-  applyInsertUpright, type AnnotationEvent, type AnnotationPlugin, type AnnotationScope,
-} from '@embedpdf/plugin-annotation';
+import type { AnnotationEvent, AnnotationPlugin, AnnotationScope } from '@embedpdf/plugin-annotation';
 import type { ExportPlugin } from '@embedpdf/plugin-export';
 import type { Command, HistoryPlugin, HistoryScope } from '@embedpdf/plugin-history';
 import { call } from '$lib/api.ts';
@@ -94,10 +92,8 @@ const TEXT_EDITS: Record<TextEdit, { intent: string; title: string; label: strin
 // Tras crear con estas herramientas se pasa al puntero con lo creado seleccionado (como Qt).
 const AUTO_POINTER = new Set<string>([
   TOOLS.RECT, TOOLS.ELLIPSE, TOOLS.LINE, TOOLS.ARROW, TOOLS.POLYLINE, TOOLS.POLYGON,
-  TOOLS.TEXT, TOOLS.CALLOUT, TOOLS.NOTE, TOOLS.IMAGE,
+  TOOLS.TEXT, TOOLS.CALLOUT, TOOLS.NOTE, TOOLS.IMAGE, TOOLS.PLACE,
 ]);
-// Sello (como add_stamp_legend en Qt): texto centrado con marco, sobre blanco.
-const STAMP = { minWidth: 105, minHeight: 29, border: 1.5, padding: 16 };
 // Fuera del orden de dibujo: no se apilan con las demás (enlaces, formularios, ventanas de nota).
 const UNSTACKED = new Set<PdfAnnotationSubtype>([T.LINK, T.WIDGET, T.POPUP]);
 const HISTORY_TOPIC = 'annotations'; // el de las órdenes de EmbedPDF (ANNOTATION_HISTORY_TOPIC)
@@ -224,6 +220,15 @@ export class Annotations {
       }),
       history.onHistoryChange(({ documentId, state }) => {
         if (ours(documentId)) this.host.onHistory(state.global);
+      }),
+      // Se dejó de colocar un sello o una firma sin crearlo (p. ej. con Esc): se vuelve a
+      // seleccionar texto. Al crearlo, `_created` ya pasó al puntero (este aviso puede llegar
+      // antes o después de la creación: por eso se mira en la siguiente vuelta).
+      annotation.onActiveToolChange(({ documentId, tool }) => {
+        if (!ours(documentId) || tool) return;
+        setTimeout(() => {
+          if (this.canvas.tool === TOOLS.PLACE) this.host.setTool(TOOLS.SELECT);
+        });
       }),
     );
   }
@@ -363,7 +368,7 @@ export class Annotations {
    * Los grupos (como reemplazar texto) se mueven enteros. Devuelve las nuevas de `items`, o null
    * si habría que volver a crear una imagen (su objeto no lleva la imagen).
    */
-  reorder(items: Annot[], front: boolean): Annot[] | null {
+  async reorder(items: Annot[], front: boolean): Promise<Annot[] | null> {
     const scope = this.scope();
     if (!scope || !items.length) return items;
     const state = scope.getState();
@@ -382,7 +387,10 @@ export class Annotations {
       restore.push(...withGroups(page, page.slice(page.indexOf(some[0]))));
     }
     if (!moved.length) return items;
-    if (restore.some((object) => object.type === T.STAMP)) return null;
+    // Un sello (también una imagen o una firma escrita) se vuelve a crear con su dibujo: su objeto
+    // no lo lleva, así que se exporta antes (un PDF de una página, como al colocarlo).
+    const appearances = await this._appearances(restore.filter((object) => object.type === T.STAMP));
+    if (!appearances) return null;
     const current = new Map<string, Annot>(); // id de antes -> objeto de ahora
     const now = (object: Annot) => current.get(object.id) ?? object;
     const toEnd = (objects: Annot[]) => this._quietly(() => {
@@ -393,12 +401,33 @@ export class Annotations {
         const copy: Annot = { ...object, id: ids.get(object.id)! };
         if (object.inReplyToId && ids.has(object.inReplyToId)) copy.inReplyToId = ids.get(object.inReplyToId);
         this.seen.add(copy.id); // no es de una herramienta
-        scope.createAnnotation(object.pageIndex, copy);
+        const appearance = appearances.get(objects[k].id);
+        // El contexto depende del tipo de anotación (el de un sello es su dibujo).
+        scope.createAnnotation(object.pageIndex, copy, (appearance ? { appearance } : undefined) as never);
         current.set(objects[k].id, copy);
       });
     });
     this._historyInternals().register({ execute: () => toEnd(moved), undo: () => toEnd(restore) }, HISTORY_TOPIC, this.canvas.shown ?? undefined);
     return items.map(now);
+  }
+
+  /** Dibujo de cada sello (id → PDF de una página) o null si no se pudo exportar alguno. */
+  async _appearances(stamps: Annot[]): Promise<Map<string, ArrayBuffer> | null> {
+    const appearances = new Map<string, ArrayBuffer>();
+    if (!stamps.length) return appearances;
+    await this.commit(); // el dibujo sale del PDF de EmbedPDF
+    const registry = this._registry();
+    const doc = registry.getStore().getState().core.documents[this.canvas.shown!]?.document;
+    if (!doc) return null;
+    try {
+      for (const stamp of stamps) {
+        const pdf = await registry.getEngine().exportAnnotationAppearanceAsPdf(doc, doc.pages[stamp.pageIndex], stamp).toPromise();
+        appearances.set(stamp.id, pdf);
+      }
+    } catch {
+      return null;
+    }
+    return appearances;
   }
 
   /** Hace `fn()` sin que EmbedPDF apunte nada en su historial (quien llama apunta lo suyo). */
@@ -480,25 +509,6 @@ export class Annotations {
     return [caret];
   }
 
-  /** Sello o leyenda: texto libre centrado en `at` (página vista), con marco y fondo blanco. */
-  stamp({ text, color, font_size: size }: { text: string; color: string; font_size: number },
-        at: { index: number; x: number; y: number }): Annot[] {
-    const [pw, ph]: [number, number] = this.canvas.sizes[at.index];
-    const lines = text.split('\n');
-    const longest = Math.max(...lines.map((line) => line.length));
-    const w = Math.min(pw, Math.max(STAMP.minWidth, longest * size * 0.62 + STAMP.padding));
-    const h = Math.min(ph, Math.max(STAMP.minHeight, lines.length * size * 1.25 + 12));
-    const x0 = Math.max(0, Math.min(pw - w, at.x - w / 2));
-    const y0 = Math.max(0, Math.min(ph - h, at.y - h / 2));
-    const { rotation } = this.canvas.pageInfo(at.index);
-    const annotation = applyInsertUpright({
-      type: T.FREETEXT, pageIndex: at.index, rect: this.canvas.toPage(at.index, [x0, y0, x0 + w, y0 + h]),
-      contents: text, fontSize: size, fontColor: color, fontFamily: PdfStandardFont.Helvetica, opacity: 1,
-      textAlign: PdfTextAlignment.Center, verticalAlign: PdfVerticalAlignment.Middle,
-      color: '#FFFFFF', backgroundColor: '#FFFFFF', strokeColor: color, strokeWidth: STAMP.border,
-    } as unknown as PdfAnnotationObject, rotation, true);
-    return this.create([annotation as AnnotDraft]);
-  }
 
   undo(): void {
     if (this.canvas.shown) this._history().undo();

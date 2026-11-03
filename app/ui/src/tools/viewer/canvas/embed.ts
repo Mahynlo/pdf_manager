@@ -1,7 +1,8 @@
 // EmbedPDF para el visor (pasos 2 a 4 de docs/web/embedpdf.md): el registro de toda la app
 // con el motor PDFium, el gestor de documentos, la vista con scroll, el zoom, el mosaico, la
 // doble página, la selección de texto, la búsqueda, las anotaciones (con su historial para
-// deshacer y la exportación de la copia que se pasa a Python) y las marcas de censura.
+// deshacer y la exportación de la copia que se pasa a Python), las marcas de censura, los
+// sellos y las firmas (sus bibliotecas: stamps/).
 //
 // EmbedPDF solo sabe desplazarse por todo el documento. Para los modos «Una página» y
 // «Doble página» (paginados, como en Qt) el complemento de scroll lleva una estrategia
@@ -20,11 +21,14 @@ import { RotatePluginPackage } from '@embedpdf/plugin-rotate';
 import { SCROLL_PLUGIN_ID, ScrollPlugin, ScrollPluginPackage, ScrollStrategy, type ScrollPluginConfig } from '@embedpdf/plugin-scroll';
 import { SearchPluginPackage } from '@embedpdf/plugin-search';
 import { SelectionPluginPackage } from '@embedpdf/plugin-selection';
+import { SignatureMode, SignaturePluginPackage } from '@embedpdf/plugin-signature';
 import { SpreadPluginPackage } from '@embedpdf/plugin-spread';
+import { StampPluginPackage } from '@embedpdf/plugin-stamp';
 import { TilingPluginPackage } from '@embedpdf/plugin-tiling';
 import { ViewportPluginPackage } from '@embedpdf/plugin-viewport';
 import { ZoomPluginPackage } from '@embedpdf/plugin-zoom';
 import wasmUrl from '@embedpdf/pdfium/pdfium.wasm?url';
+import { STANDARD_LIBRARY } from '../stamps/standard.ts';
 import { t } from '$texts';
 import { DEFAULT_STYLE as STYLE, PRESET_COLORS } from '../annotations/palette.ts';
 import EmbedRoot from './EmbedRoot.svelte';
@@ -123,6 +127,10 @@ function plugins() {
     // Censura: las marcas pendientes son anotaciones (se revisan, se mueven, se borran y se
     // deshacen como las demás); la censura la aplica Python (redaction.ts).
     createPluginRegistration(RedactionPluginPackage, { useAnnotationMode: true, drawBlackBoxes: true }),
+    // Sellos: los estándar van dentro de la app (sin la descarga de su CDN que trae por
+    // defecto); los de texto y los propios los carga stamps/library.svelte.ts.
+    createPluginRegistration(StampPluginPackage, { libraries: [STANDARD_LIBRARY], manifests: [], defaultLibrary: false }),
+    createPluginRegistration(SignaturePluginPackage, { mode: SignatureMode.SignatureAndInitials }),
     createPluginRegistration(ExportPluginPackage, { defaultFileName: 'documento.pdf' }),
     // Sin las anotaciones: las dibuja su capa encima (si no, saldrían dos veces).
     createPluginRegistration(RenderPluginPackage, {

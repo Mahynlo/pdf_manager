@@ -8,18 +8,19 @@
   import Icon from '$lib/Icon.svelte';
   import { toast } from '$lib/ui.ts';
   import { t } from '$texts';
-  import { DEFAULT_COLOR, DEFAULT_SIZE, type Legend, type Stamp } from './stamps.ts';
+  import { DEFAULT_COLOR, DEFAULT_SIZE, type Legend } from './library.svelte.ts';
+  import type { TextStamp } from './stamp-pdf.ts';
 
-  const T = t.viewer.annotations.stamps;
+  const T = t.viewer.stamps.legends;
 
-  let { done }: { done: (stamp: Stamp | null) => void } = $props();
+  let { done }: { done: (stamp: TextStamp | null) => void } = $props();
   let dialog: Dialog;
   let legends = $state.raw<Legend[]>([]);
   let selected = $state<Legend | null>(null);
   let text = $state('');
   let size = $state<number | string>(DEFAULT_SIZE);
   let color = $state(DEFAULT_COLOR);
-  let result: Stamp | null = null;
+  let result: TextStamp | null = null;
 
   const fontSize = $derived(Number(size) || DEFAULT_SIZE);
 
