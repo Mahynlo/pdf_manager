@@ -1,11 +1,12 @@
 // Bibliotecas de sellos de EmbedPDF (plugin-stamp), una sola para toda la app como el registro.
-// Todos los sellos se colocan igual (clic en el sello y clic en la página, con su vista previa)
-// y son anotaciones de sello con su dibujo: un PDF de una página por sello. Hay tres clases:
+// Todos los sellos se colocan igual (clic en el sello y clic en la página, con su vista previa).
+// Los estándar y los propios son anotaciones de sello con su dibujo (un PDF de una página por
+// sello); los de texto, texto libre editable (Annotations.textStamp). Hay tres clases:
 //
 // - **Estándar** (standard.ts): Aprobado, Borrador, Confidencial… de solo lectura.
 // - **De texto:** los sellos rápidos (CONFIDENCIAL, APROBADO…) y las leyendas guardadas del
-//   servicio `legends`, el almacén que comparten Qt y Flet. Su dibujo se genera al vuelo
-//   (stamp-pdf.ts) en una biblioteca que solo vive en memoria.
+//   servicio `legends`, el almacén que comparten Qt y Flet. En la página son texto libre; su
+//   miniatura se genera al vuelo (stamp-pdf.ts) en una biblioteca que solo vive en memoria.
 // - **Propios:** los que crea el usuario desde una imagen (PNG, JPG, SVG…) o desde anotaciones
 //   de la página. Python guarda la biblioteca (servicio `stamps`).
 import { PdfAnnotationName } from '@embedpdf/models';
@@ -161,20 +162,10 @@ class StampLibraries {
   }
 
   // ── Colocar ────────────────────────────────────────────────────────────
-  /** El siguiente clic en una página de `documentId` coloca el sello. */
+  /** El siguiente clic en una página de `documentId` coloca el sello (estándar o propio). */
   async place(documentId: string, item: StampItem): Promise<void> {
     const stamps = await this.ready();
-    if (item.legendId) call('legends.used', item.legendId).catch(() => {});
     await stamps.forDocument(documentId).activateStampPlacement(item.library, item.stamp).toPromise();
-  }
-
-  /** Como `place`, con un sello de texto cualquiera (el gestor de leyendas inserta sin guardar). */
-  placeText(documentId: string, text: TextStamp): Promise<void> {
-    return this.#run(async () => {
-      const stamps = await this.ready();
-      const stamp = await this.#textStamp(stamps, text);
-      await stamps.forDocument(documentId).activateStampPlacement(TEXT, stamp).toPromise();
-    });
   }
 
   // ── Sellos propios ─────────────────────────────────────────────────────

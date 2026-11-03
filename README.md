@@ -37,8 +37,8 @@ Accesos a cada herramienta y archivos recientes. Cada PDF y cada herramienta se 
 - Selección de texto (también entre páginas) y búsqueda con lista de resultados.
 - **Anotaciones:** resaltar, subrayar, tachar, formas, flechas, pluma, texto libre, notas e imágenes.
   Se mueven, se redimensionan y se cambian de color, grosor y orden.
-- **Sellos:** estándar (Aprobado, Borrador, Confidencial…), de texto (tus leyendas) y propios, creados
-  desde una imagen (PNG, JPG, SVG) o desde anotaciones de la página.
+- **Sellos:** estándar (Aprobado, Borrador, Confidencial…), de texto (tus leyendas, editables como
+  texto libre) y propios, creados desde una imagen (PNG, JPG, SVG) o desde anotaciones de la página.
 - **Firmas:** dibujadas, escritas o desde una imagen, con iniciales opcionales. Se pueden guardar en
   el equipo para reutilizarlas. Es una firma visual, sin certificado digital.
 - **Páginas:** girar, mover (también arrastrando miniaturas), duplicar, insertar, eliminar y extraer.

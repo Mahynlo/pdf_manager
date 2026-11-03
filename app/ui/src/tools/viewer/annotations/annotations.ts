@@ -20,11 +20,13 @@
 // Las coordenadas de EmbedPDF son de la página sin girar (canvas.toView / toPage las pasan
 // a las de la página tal como se ve).
 import {
-  PdfAnnotationReplyType, PdfAnnotationSubtype, uuidV4,
+  PdfAnnotationReplyType, PdfAnnotationSubtype, PdfStandardFont, PdfTextAlignment, PdfVerticalAlignment, uuidV4,
   type PdfAnnotationObject, type Rect,
 } from '@embedpdf/models';
 import type { PluginRegistry } from '@embedpdf/core';
-import type { AnnotationEvent, AnnotationPlugin, AnnotationScope } from '@embedpdf/plugin-annotation';
+import {
+  applyInsertUpright, type AnnotationEvent, type AnnotationPlugin, type AnnotationScope,
+} from '@embedpdf/plugin-annotation';
 import type { ExportPlugin } from '@embedpdf/plugin-export';
 import type { Command, HistoryPlugin, HistoryScope } from '@embedpdf/plugin-history';
 import { call } from '$lib/api.ts';
@@ -32,6 +34,7 @@ import { askText } from '$lib/ui.ts';
 import { t } from '$texts';
 import { ANNOTATION_TOOL, TOOLS, type PageCanvas } from '../canvas/canvas.ts';
 import { KINDS, MANUAL_LABEL, type SelectionPart } from '../redact/redaction.ts';
+import { TEXT_STAMP, textStampSize, type TextStamp } from '../stamps/stamp-pdf.ts';
 import { DEFAULT_STYLE, type AnnotationStyle } from './palette.ts';
 
 /**
@@ -452,6 +455,27 @@ export class Annotations {
       const [x, y] = [[dx, dy], [dy, -dx], [-dx, -dy], [-dy, dx]][rotation as number];
       scope.moveAnnotation(item.pageIndex, item.id, { x, y }, 'delta');
     }
+  }
+
+  /**
+   * Sello de texto (leyenda) centrado en `at` (página vista): texto libre con marco del color y
+   * fondo blanco, editable como cualquier texto libre. Mide lo mismo que su miniatura.
+   */
+  textStamp(stamp: TextStamp, at: { index: number; x: number; y: number }): Annot[] {
+    const [pw, ph]: [number, number] = this.canvas.sizes[at.index];
+    const size = textStampSize(stamp);
+    const w = Math.min(pw, size.width);
+    const h = Math.min(ph, size.height);
+    const x0 = Math.max(0, Math.min(pw - w, at.x - w / 2));
+    const y0 = Math.max(0, Math.min(ph - h, at.y - h / 2));
+    const { rotation } = this.canvas.pageInfo(at.index);
+    const annotation = applyInsertUpright({
+      type: T.FREETEXT, pageIndex: at.index, rect: this.canvas.toPage(at.index, [x0, y0, x0 + w, y0 + h]),
+      contents: stamp.text, fontSize: stamp.font_size, fontColor: stamp.color, fontFamily: PdfStandardFont.Helvetica_Bold,
+      opacity: 1, textAlign: PdfTextAlignment.Center, verticalAlign: PdfVerticalAlignment.Middle,
+      color: '#FFFFFF', backgroundColor: '#FFFFFF', strokeColor: stamp.color, strokeWidth: TEXT_STAMP.border,
+    } as unknown as PdfAnnotationObject, rotation, true);
+    return this.create([annotation as AnnotDraft]);
   }
 
   /** Crea anotaciones `[{ pageIndex, ...objeto }]`; devuelve las creadas (con su `id`). */

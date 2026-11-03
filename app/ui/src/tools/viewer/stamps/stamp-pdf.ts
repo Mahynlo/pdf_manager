@@ -1,7 +1,8 @@
 // PDF de una página con el dibujo de un sello: lo que EmbedPDF guarda en sus bibliotecas
 // (addStampToLibrary) y pega como apariencia al colocarlo. Se escribe a mano, sin PDFium ni
-// Python: un sello de texto es texto vectorial con marco; uno de imagen (PNG, JPG, SVG…), la
-// imagen con su transparencia.
+// Python: un sello de texto es texto vectorial con marco (la miniatura del panel: en la página
+// es texto libre, editable; ver `textStampSize`); uno de imagen (PNG, JPG, SVG…), la imagen con
+// su transparencia.
 //
 //   const pdf = await textStampPdf({ text: 'PAGADO', color: '#2E7D32', font_size: 13 });
 //   const pdf = await imageStampPdf(file);
@@ -14,7 +15,8 @@ export interface TextStamp {
 }
 
 // Aspecto del sello de texto (el de las leyendas en Qt): marco del color del texto sobre blanco.
-const TEXT = { border: 1.5, padX: 10, padY: 6, line: 1.2, minWidth: 60 };
+export const TEXT_STAMP = { border: 1.5, padX: 10, padY: 6, line: 1.2, minWidth: 60 };
+const TEXT = TEXT_STAMP;
 const FONT = 'Helvetica-Bold'; // una de las 14 fuentes estándar: no hace falta incrustarla
 const MEASURE_FONT = 'bold {size}px Arial'; // mismas medidas que Helvetica
 // Imagen: lado mayor del sello en puntos y de la imagen en píxeles (las SVG se dibujan a este tamaño).
@@ -105,14 +107,23 @@ async function deflate(data: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-/** Sello de texto: cada línea centrada, con marco del color del texto y fondo blanco. */
-export async function textStampPdf({ text, color, font_size: size }: TextStamp): Promise<ArrayBuffer> {
+/**
+ * Tamaño en puntos del sello de texto (y el ancho de cada línea): lo usan su miniatura, la vista
+ * previa al colocarlo y el texto libre que se crea en la página, así miden lo mismo.
+ */
+export function textStampSize({ text, font_size: size }: TextStamp): { width: number; height: number; lines: string[]; widths: number[] } {
   const lines = text.split('\n').map((line) => line.trimEnd());
   const context = new OffscreenCanvas(1, 1).getContext('2d')!;
   const widths = lines.map((line) => measure(context, line, size));
   const width = Math.max(TEXT.minWidth, Math.max(...widths) + 2 * TEXT.padX);
+  return { width, height: lines.length * size * TEXT.line + 2 * TEXT.padY, lines, widths };
+}
+
+/** Sello de texto: cada línea centrada, con marco del color del texto y fondo blanco. */
+export async function textStampPdf(stamp: TextStamp): Promise<ArrayBuffer> {
+  const { color, font_size: size } = stamp;
+  const { width, height, lines, widths } = textStampSize(stamp);
   const lineHeight = size * TEXT.line;
-  const height = lines.length * lineHeight + 2 * TEXT.padY;
   const inset = TEXT.border / 2;
   const color_ = rgb(color);
   const ops = [

@@ -2,9 +2,13 @@
   Pestaña «Sellos» del panel lateral: sellos (estándar, de texto y propios) y firmas. Un clic
   en uno lo deja listo y el siguiente clic en la página lo coloca, con su vista previa; Esc
   cancela. Las bibliotecas son de toda la app (library.svelte.ts, signatures.svelte.ts).
+
+  Los sellos de texto se colocan aquí (herramienta `place-text`): son texto libre, editable como
+  cualquier otro (Annotations.textStamp); los demás, con la herramienta de EmbedPDF.
 -->
 <script lang="ts">
   import type { SignatureEntry } from '@embedpdf/plugin-signature';
+  import { call } from '$lib/api.ts';
   import Icon from '$lib/Icon.svelte';
   import SubTabs from '$lib/components/SubTabs.svelte';
   import { askText, confirmDialog, openModal, setStatus, toast } from '$lib/ui.ts';
@@ -15,7 +19,7 @@
   import { CUSTOM, stampLibraries as library, type StampItem } from './library.svelte.ts';
   import SignatureDialog, { type NewSignature } from './SignatureDialog.svelte';
   import { signatures } from './signatures.svelte.ts';
-  import type { TextStamp } from './stamp-pdf.ts';
+  import { textStampSize, type TextStamp } from './stamp-pdf.ts';
 
   const T = t.viewer.stamps;
   const TS = t.viewer.signatures;
@@ -23,12 +27,13 @@
 
   /**
    * `canvas`: el lienzo (documento a la vista); `annotations`: las del documento (para crear un
-   * sello con las seleccionadas); `setTool(t)`: herramienta del lienzo; `active`: la pestaña
-   * se ve (las bibliotecas se cargan la primera vez).
+   * sello con las seleccionadas y los sellos de texto); `tool`, `setTool(t)`: herramienta del
+   * lienzo; `active`: la pestaña se ve (las bibliotecas se cargan la primera vez).
    */
-  let { canvas, annotations, setTool, active, close }: {
+  let { canvas, annotations, tool, setTool, active, close }: {
     canvas: PageCanvas;
     annotations: Annotations;
+    tool: string;
     setTool: (tool: string) => void;
     active: boolean;
     close: () => void;
@@ -36,6 +41,8 @@
 
   let tab = $state(0);
   let picker = $state<HTMLInputElement>();
+  let placing: { text: TextStamp; legendId?: string } | null = null; // sello de texto a colocar
+  let ghost: HTMLElement | null = null;
 
   /** Abre la pestaña de sellos (0) o la de firmas (1). */
   export function show(index: number) {
@@ -46,7 +53,7 @@
   export async function manageLegends() {
     const text = await openModal<TextStamp>(LegendsDialog);
     library.refresh(); // pudo crear o borrar leyendas
-    if (text) arm(() => library.placeText(canvas.shown!, text), T.placeError);
+    if (text) placeText(text);
   }
 
   $effect(() => {
@@ -67,7 +74,72 @@
     }
   }
 
-  const place = (item: StampItem) => arm(() => library.place(canvas.shown!, item), T.placeError);
+  function place(item: StampItem) {
+    if (item.text) placeText(item.text, item.legendId);
+    else arm(() => library.place(canvas.shown!, item), T.placeError);
+  }
+
+  // ── Sellos de texto: vista previa bajo el puntero y texto libre al hacer clic ──────────
+  function placeText(text: TextStamp, legendId: string | undefined = undefined) {
+    if (!canvas.shown) return;
+    setTool(TOOLS.PLACE_TEXT);
+    placing = { text, legendId };
+  }
+
+  function hideGhost() {
+    ghost?.remove();
+    ghost = null;
+  }
+
+  /** Vista previa centrada en el punto de la página `at` (puntos de la página vista). */
+  function showGhost(at: { index: number; x: number; y: number }) {
+    const { text } = placing!;
+    const { width, height } = textStampSize(text);
+    const scale = canvas.pageRect(at.index).width / canvas.sizes[at.index][0]; // px por punto
+    hideGhost();
+    ghost = canvas.addMark(at.index, [at.x - width / 2, at.y - height / 2, at.x + width / 2, at.y + height / 2], 'stamp-ghost');
+    ghost.textContent = text.text;
+    Object.assign(ghost.style, {
+      color: text.color, borderColor: text.color, borderWidth: `${1.5 * scale}px`, fontSize: `${text.font_size * scale}px`,
+    });
+  }
+
+  $effect(() => {
+    if (tool !== TOOLS.PLACE_TEXT) {
+      placing = null;
+      hideGhost();
+    }
+  });
+
+  $effect(() => {
+    const el: HTMLElement = canvas.el;
+    const move = (ev: PointerEvent) => {
+      const at = placing && canvas.tool === TOOLS.PLACE_TEXT ? canvas.pageAt(ev.clientX, ev.clientY) : null;
+      if (at) showGhost(at);
+      else hideGhost();
+    };
+    // En la fase de captura: el clic no llega a la anotación que haya debajo (no la selecciona).
+    const down = (ev: PointerEvent) => {
+      if (ev.button !== 0 || !placing || canvas.tool !== TOOLS.PLACE_TEXT) return;
+      const at = canvas.pageAt(ev.clientX, ev.clientY);
+      if (!at) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const { text, legendId } = placing;
+      const created = annotations.textStamp(text, at);
+      if (legendId) call('legends.used', legendId).catch(() => {});
+      setTool(TOOLS.POINTER); // como tras dibujar una forma: queda seleccionado
+      annotations.select(created);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerleave', hideGhost);
+    el.addEventListener('pointerdown', down, true);
+    return () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerleave', hideGhost);
+      el.removeEventListener('pointerdown', down, true);
+    };
+  });
 
   async function remove(item: StampItem) {
     if (!(await confirmDialog(T.removeTitle, T.removeQuestion(item.name)))) return;

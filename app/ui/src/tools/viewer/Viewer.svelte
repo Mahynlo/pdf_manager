@@ -342,7 +342,7 @@
     const inField = Boolean((ev.target as Element | null)?.closest?.(INPUTS));
     // Esc termina de marcar para censurar (aunque la marca recién puesta esté seleccionada) y
     // cancela la colocación de un sello o una firma.
-    if (key === 'escape' && !inField && (tool === TOOLS.REDACT || tool === TOOLS.PLACE)) {
+    if (key === 'escape' && !inField && (tool === TOOLS.REDACT || tool === TOOLS.PLACE || tool === TOOLS.PLACE_TEXT)) {
       setTool(TOOLS.SELECT);
       return true;
     }
@@ -426,7 +426,7 @@
                        show={showMark} commit={(fn) => actions.change(fn)} />
         </div>
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'stamps'}>
-          <StampsPanel bind:this={stamps} {canvas} {annotations} {setTool} active={view.dock && dockTab === 'stamps'}
+          <StampsPanel bind:this={stamps} {canvas} {annotations} {tool} {setTool} active={view.dock && dockTab === 'stamps'}
                        close={() => (view.dock = false)} />
         </div>
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'ai'}>

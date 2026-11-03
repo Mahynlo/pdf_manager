@@ -283,7 +283,7 @@
 .pdf-canvas[data-tool="pen"], .pdf-canvas[data-tool="marker"], .pdf-canvas[data-tool="draw"],
 .pdf-canvas[data-tool="text"], .pdf-canvas[data-tool="callout"], .pdf-canvas[data-tool="note"],
 .pdf-canvas[data-tool="area-ocr"], .pdf-canvas[data-tool="redact"] { cursor: crosshair; }
-.pdf-canvas[data-tool="image"] { cursor: copy; }
+.pdf-canvas[data-tool="image"], .pdf-canvas[data-tool="place-text"] { cursor: copy; }
 .pdf-canvas[data-tool="pointer"] { cursor: default; }
 /* Encima de la página (y de sus anotaciones): las marcas. */
 .pdf-page__marks { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
@@ -380,6 +380,21 @@
 .ocr-panel__text { flex: 1; min-height: 120px; resize: none; font-size: 12.5px; }
 .ocr-box { outline: 1px solid rgba(30, 142, 62, 0.85); background: rgba(30, 142, 62, 0.08); }
 .ocr-area { border: 2px dashed #2E7D32; background: rgba(46, 125, 50, 0.08); box-sizing: border-box; }
+/* Vista previa del sello de texto bajo el puntero (StampsPanel.svelte): como quedará en la página. */
+.stamp-ghost {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border: solid;
+  background: #FFFFFF;
+  font-family: Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: pre;
+  opacity: 0.75;
+}
 .ocr-batch .radio-group { display: flex; flex-direction: column; gap: 6px; }
 .ocr-result .dialog__body { width: min(680px, 90vw); }
 .ocr-result__text { min-height: 360px; font-family: Consolas, "Cascadia Mono", monospace; font-size: 12.5px; }

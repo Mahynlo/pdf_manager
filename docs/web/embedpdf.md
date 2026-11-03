@@ -340,23 +340,26 @@ errores de JavaScript.
 
 Todos los sellos y las firmas se colocan igual: se elige en el panel «Sellos» (barra del lienzo:
 **Sellos** o **Firma**) y el siguiente clic en la página lo coloca, con su vista previa bajo el
-puntero; Esc cancela. Después se mueven y se redimensionan como las demás anotaciones. Son
-anotaciones de sello (las firmas dibujadas, de tinta) con su dibujo: un PDF de una página por sello,
-que EmbedPDF pega como apariencia (`/AP`). Python las guarda tal cual, como las demás
-(`pdf_core/annot_transfer.py`).
+puntero; Esc cancela. Después se mueven y se redimensionan como las demás anotaciones. Los
+estándar, los propios y las firmas escritas o desde imagen son anotaciones de sello (las firmas
+dibujadas, de tinta) con su dibujo: un PDF de una página por sello, que EmbedPDF pega como
+apariencia (`/AP`). Los **sellos de texto son texto libre** (`Annotations.textStamp`): se editan
+como cualquier texto libre (doble clic) y se les cambia el color y el tamaño en la barra de
+propiedades. Python guarda todo tal cual, como las demás anotaciones (`pdf_core/annot_transfer.py`).
 
 **Bibliotecas** (`stamps/library.svelte.ts`, una para toda la app, como el registro):
 
 | Biblioteca | Qué tiene | Dónde vive |
 |---|---|---|
 | Estándar | Aprobado, Borrador, Confidencial, Firmar aquí… (17, en español) | El paquete `@embedpdf/default-stamps` (MIT), dentro de la app (`standard.ts`). Por defecto el complemento los descargaría de su CDN al arrancar: se desactiva (`manifests: []`) |
-| De texto | Los sellos rápidos (CONFIDENCIAL, APROBADO…) y las leyendas guardadas | El servicio `legends`, el mismo almacén que Qt y Flet. Su dibujo se genera al vuelo (`stamp-pdf.ts`) en una biblioteca que solo vive en memoria |
+| De texto | Los sellos rápidos (CONFIDENCIAL, APROBADO…) y las leyendas guardadas | El servicio `legends`, el mismo almacén que Qt y Flet. En la página son texto libre; su miniatura se genera al vuelo (`stamp-pdf.ts`) en una biblioteca que solo vive en memoria |
 | Propios | Los que crea el usuario desde una imagen (PNG, JPG, WebP, SVG) o desde anotaciones seleccionadas en la página (`createStampFromAnnotations`) | El servicio `stamps`: la biblioteca exportada por EmbedPDF (`~/.pdf_manager/stamps/custom.pdf` y `custom.json`) |
 
-`stamp-pdf.ts` escribe a mano el PDF de un sello, sin PDFium ni Python: el de texto, con texto
-vectorial en Helvetica Negrita (una de las 14 estándar, sin incrustar; WinAnsi, así que acentos y
-ñ sí, otros alfabetos no), marco del color y fondo blanco, como las leyendas de Qt; el de imagen,
-la imagen con su transparencia (máscara `/SMask`); las SVG se dibujan antes en un lienzo.
+`stamp-pdf.ts` escribe a mano el PDF de un sello, sin PDFium ni Python: el de texto (la
+miniatura), con texto vectorial en Helvetica Negrita (una de las 14 estándar, sin incrustar;
+WinAnsi), marco del color y fondo blanco, como las leyendas de Qt; el de imagen, la imagen con su
+transparencia (máscara `/SMask`); las SVG se dibujan antes en un lienzo. `textStampSize` da el
+tamaño del sello de texto: lo usan la miniatura, la vista previa y el texto libre, así miden lo mismo.
 
 **Firmas** (`stamps/signatures.svelte.ts`, `SignatureDialog.svelte`): firma e iniciales (opcional),
 dibujadas, escritas o desde una imagen. Los paneles de dibujar y escribir son los de EmbedPDF
@@ -367,18 +370,22 @@ o imagen), sin certificado digital. El usuario decide si cada firma se guarda en
 reutilizarla (`~/.pdf_manager/stamps/signatures.json`, formato de `serializeEntries`); si no, dura
 mientras la app esté abierta.
 
-**Herramienta «colocar»** (`TOOLS.PLACE` en `canvas.ts`): el panel pone la herramienta del lienzo
-en «colocar» y EmbedPDF activa la suya (`rubberStamp`, `signatureStamp` o `signatureInk`). Al
-crear el sello se vuelve al puntero con él seleccionado (`_created`); si EmbedPDF deja la
-herramienta sin crear nada, se vuelve a seleccionar texto (`onActiveToolChange`).
+**Herramientas «colocar»** (`canvas.ts`): con `TOOLS.PLACE` el panel pone la herramienta del
+lienzo en «colocar» y EmbedPDF activa la suya (`rubberStamp`, `signatureStamp` o `signatureInk`); al
+crear el sello se vuelve al puntero con él seleccionado (`_created`) y, si EmbedPDF deja la
+herramienta sin crear nada, se vuelve a seleccionar texto (`onActiveToolChange`). Los sellos de
+texto usan `TOOLS.PLACE_TEXT`, sin herramienta de EmbedPDF: `StampsPanel.svelte` dibuja la vista
+previa bajo el puntero (una marca de la página con el aspecto del sello) y el clic crea el texto
+libre (en la fase de captura, para no seleccionar la anotación que haya debajo).
 
 Los paneles de EmbedPDF avisan (`onResult`) desde sus propios efectos: si el aviso lee el estado
 que escribe, Svelte vuelve a ejecutar el efecto sin fin. Por eso `SignatureDialog.set` escribe con
 `untrack`.
 
-**Comprobado** con ratón real por CDP (`stamps_e2e`, 26 comprobaciones): las tres bibliotecas con
-sus miniaturas; colocar un sello estándar y uno de texto; enviarlo al fondo y traerlo al frente
-(conserva su dibujo); Esc cancela; sellos propios desde PNG
+**Comprobado** con ratón real por CDP (`stamps_e2e`, 30 comprobaciones): las tres bibliotecas con
+sus miniaturas; colocar un sello estándar; el de texto con su vista previa, editarlo con doble
+clic (el texto nuevo llega al PDF); enviar un sello al fondo y traerlo al frente (conserva su
+dibujo); Esc cancela; sellos propios desde PNG
 (con su margen transparente) y SVG, guardados por Python; desde un rectángulo seleccionado;
 quitarlos; firma dibujada (guardada) y escrita (solo en la sesión); y Ctrl+S guarda sellos y firmas
 con su dibujo.

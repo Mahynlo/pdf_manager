@@ -67,6 +67,7 @@ export const TOOLS = {
   DRAW: 'draw', // trazo fino
   IMAGE: 'image',
   PLACE: 'place', // colocar un sello o una firma: la herramienta de EmbedPDF la pone stamps/
+  PLACE_TEXT: 'place-text', // colocar un sello de texto (texto libre): lo hace StampsPanel.svelte
   AREA_OCR: 'area-ocr', // rectángulo para reconocer texto
   REDACT: 'redact', // marcar para censurar: texto (arrastrando sobre él) o un área
 } as const;
