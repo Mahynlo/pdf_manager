@@ -50,8 +50,11 @@ app/ui/
 - **Componentes:**
   - barras (`toolbars/`): `Toolbar`, `ToolsBar`;
   - miniaturas: `panels/Thumbnails`;
-  - panel lateral: `panels/TocTree`, `panels/SearchPanel`, `ocr/OcrPanel`, `redact/RedactPanel`, `panels/AiPanel`;
-  - diálogos: imprimir, propiedades, leyendas, perfiles de censura y OCR por lotes.
+  - panel lateral, que se elige en la barra vertical de iconos del borde derecho (agrupada:
+    Buscar e Índice; Sellos, Censura y OCR; IA; un clic en el panel abierto lo cierra):
+    `panels/SearchPanel`, `panels/TocTree`, `stamps/StampsPanel`, `redact/RedactPanel`,
+    `ocr/OcrPanel`, `panels/AiPanel`;
+  - diálogos: imprimir, propiedades, leyendas, nueva firma, perfiles de censura y OCR por lotes.
 - **Lienzo, en código imperativo:** `canvas/canvas.ts`, `canvas/selection.ts`, `annotations/annotations.ts` y
   `annotations/editing.ts`. Qué hay en cada carpeta: `app/ui/src/tools/viewer/README.md`.
   - Las páginas, el scroll y el zoom son de EmbedPDF (`embed.ts`, `EmbedRoot.svelte`, `PdfPages.svelte`, `PdfPage.svelte`), y también la selección de texto, la búsqueda y las anotaciones;

@@ -155,6 +155,8 @@ export default {
   },
   /** Índice (panels/TocTree.svelte). */
   toc: {
+    title: 'Índice',
+    close: 'Cerrar panel',
     empty: '(Sin marcadores)',
     row: (title: string, page: number) => `${title} (pág. ${page})`,
     toggle: 'Expandir o contraer',
@@ -523,14 +525,14 @@ export default {
     dismiss: 'Descartar selección',
     status: (chars: number, page: number) => `${chars} caracteres seleccionados en la página ${page}`,
   },
-  /** Pestañas del panel lateral (Viewer.svelte), en el orden de Qt. */
+  /** Paneles laterales (barra vertical de Viewer.svelte): nombre al pasar el ratón. */
   dock: {
+    search: { label: 'Buscar', shortcut: 'Ctrl+F' },
     toc: 'Índice',
-    ocr: 'OCR',
+    stamps: 'Sellos y firmas',
     redact: 'Censura',
-    stamps: 'Sellos',
-    ai: 'IA',
-    search: 'Buscar',
+    ocr: 'OCR',
+    ai: 'Asistente IA',
   },
   /** Entradas del menú ⋮ que añade el visor a las de document/operations.ts. */
   more: {

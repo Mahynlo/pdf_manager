@@ -140,21 +140,47 @@
   background: var(--bg-card);
   border-left: 1px solid var(--border);
 }
-.viewer-dock__bar { flex: none; display: flex; border-bottom: 1px solid var(--border); padding: 0 6px; }
-.viewer-dock__tab {
+/* Barra vertical de los paneles (siempre a la vista): un icono por panel, agrupados. */
+.viewer-rail {
+  flex: none;
+  width: 44px;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 7px 8px;
+  gap: 4px;
+  padding: 8px 0;
+  background: var(--bg-toolbar);
+  border-left: 1px solid var(--border);
+}
+.viewer-rail__tab {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
   border: 0;
-  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
+  color: var(--icon-color);
   cursor: pointer;
 }
-.viewer-dock__tab:hover { color: var(--text-primary); background: var(--bg-hover); }
-.viewer-dock__tab.is-active { color: var(--accent); border-bottom-color: var(--accent); }
+.viewer-rail__tab:hover { background: var(--bg-hover); color: var(--text-primary); }
+.viewer-rail__tab.is-active { background: var(--bg-selected); color: var(--accent); }
+/* Marca del panel abierto, pegada al panel (a la izquierda del icono). */
+.viewer-rail__tab.is-active::before {
+  content: '';
+  position: absolute;
+  left: -5px;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.viewer-rail__sep { width: 22px; height: 1px; margin: 4px 0; background: var(--border); }
+.toc-panel__head { display: flex; align-items: center; gap: 6px; padding: 0 2px 6px; }
+.toc-panel__icon, .toc-panel__head .heading { color: var(--accent); }
+.toc-panel__icon { display: grid; }
 .viewer-dock__panels { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .viewer-dock__panel { flex: 1; min-height: 0; overflow: auto; padding: 6px; }
 

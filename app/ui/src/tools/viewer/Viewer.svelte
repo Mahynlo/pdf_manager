@@ -44,15 +44,12 @@
   const INPUTS = 'input, textarea, select, [contenteditable]';
   const EDIT_TOOLS = new Set<string>([TOOLS.POINTER, TOOLS.SELECT, TOOLS.HAND]); // en las demás se dibuja
   const THUMBS_DELAY = 300; // ms tras un cambio de anotaciones antes de rehacer su miniatura
-  // Pestañas del panel lateral, en el orden de Qt.
+  // Paneles laterales en la barra vertical, por grupos: navegar, editar el documento y asistente.
   type DockTab = keyof typeof T.dock;
-  const DOCK_TABS: { key: DockTab; icon: string }[] = [
-    { key: 'toc', icon: 'list-tree' },
-    { key: 'ocr', icon: 'scan-text' },
-    { key: 'redact', icon: 'eraser' },
-    { key: 'stamps', icon: 'stamp' },
-    { key: 'ai', icon: 'sparkles' },
-    { key: 'search', icon: 'search' },
+  const DOCK_GROUPS: { key: DockTab; icon: string }[][] = [
+    [{ key: 'search', icon: 'search' }, { key: 'toc', icon: 'list-tree' }],
+    [{ key: 'stamps', icon: 'stamp' }, { key: 'redact', icon: 'eraser' }, { key: 'ocr', icon: 'scan-text' }],
+    [{ key: 'ai', icon: 'sparkles' }],
   ];
 
   /**
@@ -231,6 +228,12 @@
     dockTab = key;
   }
 
+  /** Barra vertical: abre el panel o, si es el que ya se ve, lo cierra. */
+  function toggleDockTab(key: DockTab) {
+    if (view.dock && dockTab === key) view.dock = false;
+    else openDockTab(key);
+  }
+
   /** Ctrl+F, botón de la barra o «Buscar en el documento» de la selección. */
   async function openSearch(text: string | null = null) {
     openDockTab('search');
@@ -398,16 +401,15 @@
                 fetchThumbs={(pages) => canvas.thumbnails(pages)} release={(url) => URL.revokeObjectURL(url)} onSelect={goTo} onMove={(src, dst) => actions.move(dst, src)} />
     <div class="viewer__stage" bind:this={stage}></div>
     <aside class="viewer-dock" hidden={!view.dock}>
-      <div class="viewer-dock__bar" role="tablist">
-        {#each DOCK_TABS as { key, icon } (key)}
-          <button class="viewer-dock__tab" class:is-active={dockTab === key} type="button" role="tab"
-                  aria-selected={dockTab === key} onclick={() => (dockTab = key)}>
-            <Icon name={icon} size={15} />{T.dock[key]}
-          </button>
-        {/each}
-      </div>
       <div class="viewer-dock__panels">
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'toc'}>
+          <div class="toc-panel__head">
+            <span class="toc-panel__icon"><Icon name="list-tree" size={20} /></span>
+            <h2 class="heading">{T.toc.title}</h2>
+            <span class="grow"></span>
+            <button class="btn btn--icon btn--sm" type="button" title={T.toc.close} aria-label={T.toc.close}
+                    onclick={() => (view.dock = false)}><Icon name="x" /></button>
+          </div>
           <TocTree {toc} onSelect={goTo} />
         </div>
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'ocr'}>
@@ -445,5 +447,17 @@
         </div>
       </div>
     </aside>
+    <div class="viewer-rail" role="tablist" aria-orientation="vertical" aria-label={T.toolbar.dock}>
+      {#each DOCK_GROUPS as group, i (i)}
+        {#if i}<span class="viewer-rail__sep" aria-hidden="true"></span>{/if}
+        {#each group as { key, icon } (key)}
+          {@const open = view.dock && dockTab === key}
+          <button class="viewer-rail__tab" class:is-active={open} type="button" role="tab" aria-selected={open}
+                  title={tip(T.dock[key])} aria-label={tip(T.dock[key])} onclick={() => toggleDockTab(key)}>
+            <Icon name={icon} size={18} />
+          </button>
+        {/each}
+      {/each}
+    </div>
   </div>
 </div>
