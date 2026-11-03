@@ -285,8 +285,6 @@
     toggleSidebar: () => (view.sidebar = !view.sidebar),
     undo,
     redo,
-    search: () => openSearch(),
-    ocr: () => openDockTab('ocr'),
     toggleDock: () => (view.dock = !view.dock),
   };
 

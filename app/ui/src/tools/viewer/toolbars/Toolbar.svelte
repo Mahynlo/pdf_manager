@@ -42,8 +42,6 @@
     redo(): void;
     toggleNight(): void;
     toggleSidebar(): void;
-    search(): void;
-    ocr(): void;
     toggleDock(): void;
   }
 
@@ -144,10 +142,7 @@
   {@render button('undo', tip(T.undo), actions.undo, { disabled: !view.canUndo })}
   {@render button('redo', tip(T.redo), actions.redo, { disabled: !view.canRedo })}
   {@render separator()}
-  {@render button('scan-text', T.ocr, actions.ocr)}
   {@render button('panel-left', T.thumbnails, actions.toggleSidebar, { checked: view.sidebar })}
-  {@render button('search', tip(T.search), actions.search)}
-  {@render separator()}
   {@render button('moon', T.night, actions.toggleNight, { checked: view.night })}
   <span class="grow"></span>
   {@render button('panel-right', T.dock, actions.toggleDock, { checked: view.dock })}
