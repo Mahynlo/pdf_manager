@@ -115,7 +115,6 @@ const LAYOUTS: Record<Mode, { strategy: string; spread: SpreadMode }> = {
 const ZOOM_STEP = 1.25;
 const WHEEL_NOTCH = 100; // deltaY de un paso de la rueda del ratón
 const THUMB_BOX = [230, 290]; // px de la miniatura (115×145 en pantalla, a doble densidad)
-const PRINT_QUALITY = 0.9; // JPEG de las páginas para imprimir
 const WHEEL_FLIP_COOLDOWN = 350; // ms entre cambios de página con la rueda (modo paginado)
 
 const ANNOTATION_LAYER = '#annotation-layer'; // capa de anotaciones de EmbedPDF (PdfPage.svelte)
@@ -315,29 +314,6 @@ export class PageCanvas {
       const { rotation } = this.pageInfo(index);
       const options = { scaleFactor: scale, rotation, dpr: 1, imageQuality: 0.8, withAnnotations: true };
       const blob = await render.renderPage({ pageIndex: index, options }).toPromise();
-      result[index] = URL.createObjectURL(blob);
-    }
-    return result;
-  }
-
-  /**
-   * Páginas `pages` como imágenes para imprimir: `{ página: url blob: }` (liberarlas con
-   * `release`), a `dpi` y con las anotaciones, dibujadas por PDFium como en el lienzo. `gray`:
-   * en escala de grises (se pasa por un canvas: así sale igual en cualquier impresora).
-   */
-  async pageImages(pages: number[], dpi: number, gray = false): Promise<Record<number, string>> {
-    await this.loading;
-    const id = this.shown;
-    if (!id) return {};
-    const render = this._plugin<RenderPlugin>('render').provides().forDocument(id);
-    const result: Record<number, string> = {};
-    for (const index of pages) {
-      const { rotation } = this.pageInfo(index);
-      const options = {
-        scaleFactor: dpi / 72, rotation, dpr: 1, imageType: 'image/jpeg' as const, imageQuality: PRINT_QUALITY, withAnnotations: true,
-      };
-      let blob = await render.renderPage({ pageIndex: index, options }).toPromise();
-      if (gray) blob = await grayscale(blob);
       result[index] = URL.createObjectURL(blob);
     }
     return result;
@@ -738,15 +714,4 @@ export class PageCanvas {
     this.el.addEventListener('pointerup', stop);
     this.el.addEventListener('pointercancel', stop);
   }
-}
-
-/** `blob` (imagen) en escala de grises, como JPEG. */
-async function grayscale(blob: Blob): Promise<Blob> {
-  const bitmap = await createImageBitmap(blob);
-  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-  const context = canvas.getContext('2d')!;
-  context.filter = 'grayscale(1)';
-  context.drawImage(bitmap, 0, 0);
-  bitmap.close();
-  return canvas.convertToBlob({ type: 'image/jpeg', quality: PRINT_QUALITY });
 }

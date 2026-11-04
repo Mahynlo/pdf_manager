@@ -51,7 +51,6 @@ from pdf_core.document_io import (
     sanitize_doc,
     serialize_document,
 )
-from pdf_core.page_ranges import select_pages
 from pdf_core.security import PDFInvalidPasswordError, PDFPasswordRequiredError, PDFSecurityManager
 from pdf_core.text_layer import TextLayer, build_text_layer, embed_ocr_words
 
@@ -555,22 +554,6 @@ class ViewerService:
             Path(path).write_bytes(data)
         except OSError as ex:
             raise UserError(f"No se pudo guardar {Path(path).name}: {ex}", "save_failed") from ex
-
-    # ── Imprimir ─────────────────────────────────────────────────────────
-    @exposed
-    def print_selection(
-        self, doc_id: int, scope: str, custom: str = "", current: int = 0, subset: str = "all", reverse: bool = False
-    ) -> list[int]:
-        """Páginas a imprimir según el diálogo (ver ``pdf_core.page_ranges.select_pages``).
-
-        Las imágenes de las páginas las dibuja el visor con PDFium (``canvas.pageImages``).
-        """
-        with self._lock:
-            total = len(self._doc(doc_id).doc)
-        try:
-            return select_pages(total, scope, custom, int(current), subset, bool(reverse))
-        except ValueError as ex:
-            raise UserError("Selección de páginas no válida.", "bad_scope") from ex
 
     # ── Propiedades ──────────────────────────────────────────────────────
     @exposed

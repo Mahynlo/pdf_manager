@@ -472,25 +472,32 @@ En Python, las pruebas `test_redact_*` (las marcas las pone la prueba en la copi
 **Retirado:** `redact.add_term`, `add_region`, `remove_term` y `clear` (la lista son las marcas),
 `ViewerService.apply_redactions`, `pdf_core.redaction.apply` y la vista previa `.redact-preview`.
 
-### Imprimir (hecho): las páginas las dibuja PDFium
+### Imprimir (hecho): el diálogo de WebView2 con el PDF
 
-Se queda nuestro diálogo (rango, subconjunto, orden inverso, orientación por página, color, escala
-y vista previa) y la impresión del navegador (`print.ts`: `#print-root` y `window.print()`). Lo que
-cambia es quién dibuja las hojas: antes Python (`viewer.print_images`, tras pasarle las anotaciones);
-ahora PDFium en el navegador (`canvas.pageImages`: `renderPage` con las anotaciones, a 150 ppp, o a
-60 para la vista previa; en grises, pasando la imagen por un canvas). Así sale lo mismo que se ve,
-sin esperar a Python ni mandar las imágenes en base64 por el puente. Antes se escriben en el PDF de
-EmbedPDF las anotaciones pendientes (`annotations.commit`).
+Ctrl+P (o «Imprimir documento» en el menú ⋮) abre directamente el diálogo de impresión de
+WebView2, el de Edge: vista previa, impresora, copias, páginas (todas, pares, impares o un rango),
+orientación, color, márgenes, escala, páginas por hoja y doble cara. `document/print.ts` abre en un
+iframe oculto la copia del PDF de EmbedPDF con las anotaciones al día (`Annotations.exportCopy`, la
+misma que recibe Python) y llama a `print()` de su visor de PDF. Se imprime el PDF tal cual:
+vectorial (el texto sale nítido) y sin dibujar antes cada página como imagen (con el PDF de 43 MB y
+120 páginas el diálogo se abre en menos de un segundo). La copia va siempre sin cifrar, así que el
+visor de PDF no pide contraseña.
 
-No se usa el complemento `print` de EmbedPDF: prepara un PDF y lo imprime con el visor de PDF del
-navegador en un marco oculto, sin nuestras opciones (subconjunto, orientación, escala, grises) y
-con dudas en WebView2. Las páginas a imprimir las sigue calculando Python (`viewer.print_selection`,
-`pdf_core.page_ranges`).
+Antes había un diálogo propio (rango, orden inverso, orientación por página, color, escala y vista
+previa) que dibujaba las hojas con PDFium a 150 ppp y después abría el diálogo del navegador: dos
+diálogos seguidos. Del propio solo se pierden el orden inverso y la orientación automática página
+por página; lo demás lo trae el de WebView2.
 
-**Comprobado** (`annot_e2e`, sustituyendo `window.print`): vista previa, hoja de 1240×1754 px (A4 a
-150 ppp) con las anotaciones, y en grises.
+El complemento `print` de EmbedPDF hace lo mismo (el PDF en un iframe oculto); no se usa porque
+`print.ts` son unas líneas y usa la copia que ya se exporta para Python.
 
-**Retirado:** `viewer.print_images` y el parámetro `gray` de `imaging.page_data_url`.
+**Comprobado** (`annot_e2e`, sustituyendo la ventana del iframe: el `print()` del visor de PDF no
+se puede cambiar): Ctrl+P abre el diálogo con un PDF con las tres páginas y sus anotaciones. Y en la
+app aislada, con captura de su ventana (`PrintWindow`), el diálogo real con la vista previa, también
+con el PDF de 120 páginas.
+
+**Retirado:** `PrintDialog.svelte`, `canvas.pageImages`, la capa `#print-root` y sus estilos de
+impresión, y `viewer.print_selection` (Python; `pdf_core.page_ranges` sigue para el OCR por lotes).
 
 ## Rendimiento y memoria
 

@@ -54,7 +54,8 @@ app/ui/
     Buscar e Índice; Sellos, Censura y OCR; IA; un clic en el panel abierto lo cierra):
     `panels/SearchPanel`, `panels/TocTree`, `stamps/StampsPanel`, `redact/RedactPanel`,
     `ocr/OcrPanel`, `panels/AiPanel`;
-  - diálogos: imprimir, propiedades, leyendas, nueva firma, perfiles de censura y OCR por lotes.
+  - diálogos: propiedades, leyendas, nueva firma, perfiles de censura y OCR por lotes (imprimir usa el
+    de WebView2: `document/print.ts`).
 - **Lienzo, en código imperativo:** `canvas/canvas.ts`, `canvas/selection.ts`, `annotations/annotations.ts` y
   `annotations/editing.ts`. Qué hay en cada carpeta: `app/ui/src/tools/viewer/README.md`.
   - Las páginas, el scroll y el zoom son de EmbedPDF (`embed.ts`, `EmbedRoot.svelte`, `PdfPages.svelte`, `PdfPage.svelte`), y también la selección de texto, la búsqueda y las anotaciones;

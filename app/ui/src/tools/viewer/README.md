@@ -10,7 +10,7 @@ carpeta agrupa una parte del visor:
 | `stamps/` | Sellos y firmas: las bibliotecas (`library.svelte.ts`, `standard.ts`), el PDF de cada sello (`stamp-pdf.ts`), las firmas (`signatures.svelte.ts`), el panel (`StampsPanel.svelte`) y los diálogos de firma y de leyendas |
 | `redact/` | Censura: las marcas (`redaction.ts`), el panel (`RedactPanel.svelte`) y los perfiles (`ProfilesDialog.svelte`) |
 | `ocr/` | OCR: el panel y sus diálogos de lote y resultado |
-| `document/` | Acciones sobre el archivo: guardar, páginas y exportar (`operations.ts`), imprimir (`PrintDialog.svelte`, `print.ts`) y propiedades |
+| `document/` | Acciones sobre el archivo: guardar, páginas y exportar (`operations.ts`), imprimir con el diálogo de WebView2 (`print.ts`) y propiedades |
 | `toolbars/` | La barra superior (`Toolbar.svelte`) y la de herramientas del lienzo (`ToolsBar.svelte`) |
 | `panels/` | Los demás paneles: miniaturas (`Thumbnails.svelte`), índice, búsqueda y asistente IA |
 

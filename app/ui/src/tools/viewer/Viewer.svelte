@@ -18,7 +18,7 @@
   import Icon from '$lib/Icon.svelte';
   import type { MenuItem } from '$lib/menu.svelte.ts';
   import type { DocumentInfo } from '$lib/types.ts';
-  import { openModal, toast } from '$lib/ui.ts';
+  import { openModal, setStatus, toast } from '$lib/ui.ts';
   import { t, tip } from '$texts';
   import type { Annot } from './annotations/annotations.ts';
   import AiPanel from './panels/AiPanel.svelte';
@@ -28,7 +28,7 @@
   import { MODES, type Mode } from './canvas/layout.ts';
   import OcrPanel from './ocr/OcrPanel.svelte';
   import { DocumentActions } from './document/operations.ts';
-  import PrintDialog from './document/PrintDialog.svelte';
+  import { printPdf, release as releasePrint } from './document/print.ts';
   import PropertiesDialog from './document/PropertiesDialog.svelte';
   import RedactPanel from './redact/RedactPanel.svelte';
   import { RedactionMarks } from './redact/redaction.ts';
@@ -207,12 +207,14 @@
     stamps!.show(index);
   }
 
-  /** Imprimir: PDFium dibuja las páginas con las anotaciones tal como están en el visor. */
+  /** Imprimir: el diálogo de WebView2 con el PDF y sus anotaciones tal como están en el visor. */
   async function print() {
-    await annotations.commit();
-    openModal(PrintDialog, {
-      docId, current: canvas.current, sizes: canvas.sizes, render: (pages: number[], dpi: number, gray = false) => canvas.pageImages(pages, dpi, gray),
-    });
+    setStatus(T.print.preparing);
+    try {
+      await printPdf(await annotations.exportCopy());
+    } catch (err) {
+      toast(T.print.error((err as Error).message), 'danger');
+    }
   }
 
   async function showProperties() {
@@ -386,6 +388,7 @@
 
   onDestroy(() => {
     clearTimeout(thumbsTimer);
+    releasePrint();
     canvas.destroy();
     call('viewer.close_document', docId).catch(() => {});
   });

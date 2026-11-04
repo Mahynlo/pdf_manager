@@ -30,6 +30,8 @@ export default {
     pathCopied: 'Ruta copiada al portapapeles',
     reveal: 'Abrir carpeta en el Explorador',
   },
+  /** Barra de estado (lib/feedback.svelte.ts): lo que muestra cuando no hay ningún mensaje. */
+  status: { idle: 'Listo • Extraer PDFs' },
   opened: (name: string) => `Abierto: ${name}`,
   openFailed: (tool: string, message: string) => `No se pudo abrir ${tool}: ${message}`,
   /** Al cerrar la ventana con cambios sin guardar o trabajos en curso. */

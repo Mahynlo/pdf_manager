@@ -43,7 +43,8 @@ Accesos a cada herramienta y archivos recientes. Cada PDF y cada herramienta se 
   el equipo para reutilizarlas. Es una firma visual, sin certificado digital.
 - **Páginas:** girar, mover (también arrastrando miniaturas), duplicar, insertar, eliminar y extraer.
 - Deshacer y rehacer (Ctrl+Z / Ctrl+Y) tanto las anotaciones como las operaciones de página.
-- Imprimir con vista previa: páginas, orden, orientación, color y escala.
+- Imprimir con el diálogo de Windows/Edge (vista previa, páginas, orientación, color, márgenes,
+  escala y doble cara), con las anotaciones y en calidad vectorial.
 - Exportar el texto y las imágenes del documento.
 
 📚 [Cómo está hecho el visor](docs/web/embedpdf.md)
@@ -101,7 +102,7 @@ probado del todo con uso real:
 | **Censura con marcas** | Nueva: las marcas se revisan en la página y Python las aplica. Conviene revisar el resultado antes de compartir la copia censurada |
 | **Deshacer operaciones de página** | Nuevo: Ctrl+Z / Ctrl+Y sobre girar, mover, insertar, duplicar y eliminar páginas, junto con las anotaciones |
 | **Anotaciones** | Edición con EmbedPDF (mover, redimensionar, orden, texto libre). Probadas en pruebas automáticas, falta uso real con PDF variados |
-| **Imprimir** | Nueva: las páginas las dibuja el visor (PDFium). Falta probar con distintas impresoras |
+| **Imprimir** | Nueva: el diálogo de WebView2 con el PDF y sus anotaciones. Falta probar con distintas impresoras |
 | **Sellos y firmas** | Nuevos (EmbedPDF): sellos estándar, de texto y propios, y firmas guardables. Probados en pruebas automáticas, falta uso real |
 | **Instalador** | Probados la instalación, «Abrir con» y el OCR. Falta más uso en otros equipos |
 

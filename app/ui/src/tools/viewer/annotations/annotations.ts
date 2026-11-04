@@ -548,6 +548,12 @@ export class Annotations {
     await this.scope()?.commit().toPromise();
   }
 
+  /** Copia del PDF de EmbedPDF con las anotaciones al día (para Python y para imprimir). */
+  async exportCopy(): Promise<ArrayBuffer> {
+    await this.commit(); // lo pendiente, ya escrito en el PDF de EmbedPDF
+    return this._registry().getPlugin<ExportPlugin>('export')!.provides().forDocument(this.canvas.shown!).saveAsCopy().toPromise();
+  }
+
   // ── Python ─────────────────────────────────────────────────────────────
   /**
    * Pasa a Python las anotaciones si cambiaron desde la última vez: sube la copia del
@@ -559,9 +565,7 @@ export class Annotations {
     const documentId: string | null = this.canvas.shown;
     const version = this.version;
     if (!documentId || version === this.synced) return null;
-    const plugin = this._plugin().provides().forDocument(documentId);
-    await plugin.commit().toPromise(); // lo pendiente, ya escrito en el PDF de EmbedPDF
-    const buffer = await this._registry().getPlugin<ExportPlugin>('export')!.provides().forDocument(documentId).saveAsCopy().toPromise();
+    const buffer = await this.exportCopy();
     const url = await call<string>('viewer.upload_url');
     const response = await fetch(url, { method: 'POST', body: buffer });
     if (!response.ok) throw new Error(TX.syncError(response.status));

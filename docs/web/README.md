@@ -49,8 +49,8 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
   - Censura: términos, patrones de datos personales, selecciones, áreas marcadas a mano y perfiles
     guardados; cada coincidencia es una marca que se revisa en la página antes de la aplicación
     irreversible (solo se guarda como copia).
-  - Imprimir: páginas, orden inverso, orientación, color y escala con vista previa; impresora,
-    copias y doble cara en el diálogo del sistema.
+  - Imprimir: el diálogo de WebView2 (vista previa, impresora, copias, páginas, orientación, color,
+    márgenes, escala y doble cara) con el PDF y sus anotaciones;
   - Asistente IA: chat, resumen, datos clave y datos sensibles (que se envían a «Censura»). Sin
     las dependencias del agente ni clave de API responde en modo básico.
   - Exportar: texto e imágenes.

@@ -570,68 +570,8 @@
 .signature-drop.is-dragging { border-color: var(--accent); background: #F1F6FE; }
 .signature-drop__img { max-width: 100%; max-height: 100%; object-fit: contain; }
 
-/* ── Diálogo Imprimir (print_dialog.py en Qt) ─────────────────────────────── */
-.print-dialog .dialog__body { width: min(900px, 94vw); height: min(640px, 88vh); padding: 16px; }
-.print-dialog__layout { display: flex; gap: 16px; height: 100%; min-height: 0; }
-.print-dialog__options { width: 320px; flex: none; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
-.print-dialog__options .radio-group { display: flex; flex-direction: column; gap: 6px; }
-.print-dialog__icon, .print-dialog__options .title { color: var(--accent); }
-.print-dialog__icon { display: grid; }
-.print-dialog__note { display: flex; gap: 6px; align-items: flex-start; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--accent-light); }
-.print-dialog__note svg { flex: none; margin-top: 2px; }
-.print-dialog__pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.print-dialog__summary { white-space: pre-line; }
-.print-dialog__preview { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding-left: 16px; border-left: 1px solid var(--border-light); }
-.print-dialog__preview-head, .print-dialog__nav { display: flex; align-items: center; gap: 6px; }
-.print-dialog__indicator { font-size: 12px; font-weight: 600; color: var(--accent); }
-.print-paper {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-canvas);
-}
-/* La hoja: proporción carta/A4 vertical u horizontal; la página encaja según la escala. */
-.print-sheet-preview {
-  height: 100%;
-  max-width: 100%;
-  aspect-ratio: 210 / 297;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  background: #FFFFFF;
-  border: 1px solid rgba(0, 0, 0, 0.24);
-  border-radius: 2px;
-  box-shadow: 3px 4px 10px rgba(0, 0, 0, 0.18);
-}
-.print-paper.is-landscape .print-sheet-preview { height: auto; width: 100%; aspect-ratio: 297 / 210; }
-.print-sheet-preview img { max-width: 100%; max-height: 100%; }
-.print-paper[data-scale="fill"] .print-sheet-preview img { width: 100%; height: 100%; object-fit: cover; }
-.print-paper[data-scale="real"] .print-sheet-preview { align-items: flex-start; justify-content: flex-start; }
-.print-paper[data-scale="real"] .print-sheet-preview img { max-width: none; max-height: none; width: 100%; }
-#print-root { display: none; }
-
-@media print {
-  /* Las medidas vw/vh se toman de la hoja por defecto (vertical): una hoja horizontal
-     las intercambia, si no se desborda y sale una hoja de más. */
-  @page { size: portrait; margin: 0; }
-  @page pm-portrait { size: portrait; margin: 0; }
-  @page pm-landscape { size: landscape; margin: 0; }
-  html, body { height: auto !important; overflow: visible !important; background: #FFFFFF !important; }
-  body > :not(#print-root) { display: none !important; }
-  #print-root { display: block; }
-  .print-sheet { width: 100vw; height: 100vh; overflow: hidden; display: flex; align-items: center; justify-content: center; break-after: page; break-inside: avoid; }
-  .print-sheet:last-child { break-after: auto; }
-  .print-sheet--portrait { page: pm-portrait; }
-  .print-sheet--landscape { page: pm-landscape; width: 100vh; height: 100vw; }
-  .print-sheet img { max-width: 100%; max-height: 100%; }
-  #print-root[data-scale="fill"] .print-sheet img { width: 100%; height: 100%; object-fit: cover; }
-  #print-root[data-scale="real"] .print-sheet { align-items: flex-start; justify-content: flex-start; }
-  #print-root[data-scale="real"] .print-sheet img { max-width: none; max-height: none; }
-}
+/* ── Imprimir (document/print.ts): el iframe con el PDF no se ve ─────────────── */
+.print-frame { position: fixed; right: 0; bottom: 0; width: 1px; height: 1px; border: 0; opacity: 0; pointer-events: none; }
 
 /* ── Pestaña IA (ai_dock.py en Qt) ────────────────────────────────────────── */
 .ai-panel { height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 6px 8px; }

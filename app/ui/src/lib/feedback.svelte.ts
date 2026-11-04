@@ -1,5 +1,6 @@
 // Avisos flotantes y barra de estado. Cualquier módulo los muestra con toast() y
 // setStatus(); App.svelte los pinta.
+import { t } from '$texts';
 
 export type Tone = 'info' | 'success' | 'warning' | 'danger';
 
@@ -9,7 +10,7 @@ export interface Toast {
   tone: Tone;
 }
 
-const STATUS_IDLE = 'Listo • Extraer PDFs';
+const STATUS_IDLE = t.shell.status.idle;
 const STATUS_MS = 4000;
 
 let nextId = 0;

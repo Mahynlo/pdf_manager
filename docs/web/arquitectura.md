@@ -138,12 +138,8 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
   `ViewerService.apply_redaction_marks` las aplica: borra el contenido de debajo (también las
   palabras de OCR) y sube la revisión de esas páginas, así su clave cambia y el lienzo no reutiliza
   la imagen anterior. Un documento censurado (`redacted`) solo se guarda como copia.
-- **Imprimir**: sin Qt ni pywin32, con la impresión del navegador. El diálogo propio elige las páginas
-  (`viewer.print_selection`) y las opciones; PDFium dibuja esas páginas con sus anotaciones a 150 ppp
-  en el navegador (`canvas.pageImages`), se colocan en `#print-root` (lo único visible con `@media print`, una hoja
-  por página con `page: pm-portrait | pm-landscape`) y `window.print()` abre el diálogo del sistema.
-  Las medidas `vw`/`vh` de impresión son las de la hoja vertical por defecto: las hojas horizontales
-  las intercambian. La capa se borra con `afterprint`.
+- **Imprimir**: sin Qt ni pywin32: el diálogo de impresión de WebView2 con el PDF y sus anotaciones
+  en un iframe oculto (`document/print.ts`). Ver embedpdf.md, «Imprimir».
 - **Asistente IA**: el servicio `ai` copia lo necesario del documento con el candado del visor y
   consulta sin él (las respuestas tardan segundos). Usa `pdf_core.agent.PDFAgent` si sus dependencias
   están instaladas y hay clave; si no, responde en modo básico. Las respuestas llegan también como

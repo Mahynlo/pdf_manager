@@ -27,7 +27,7 @@ retirarla, `pdf_core` puede salir de `src/` (ver el plan).
 | `extractor/` (`engine`, `model`) | Extracción por palabras clave o rango, puntuación y OCR por página | `services/extract/` |
 | `merge/` (`engine`, `model`) | Combinación de PDFs, selección de páginas y rangos | `services/merge.py` |
 | `ocr/` (`processor`, `paddle`) | OCR y detección de orientación. `paddle.py` ejecuta los modelos de PaddleOCR (PP-OCRv6 *small* y PP-LCNet, en `src/assets/ocr_models`) con onnxruntime y NumPy, sin OpenCV | `services/extract/`, `services/ocr.py` |
-| `page_ranges.py` | Rangos de páginas `"1-3, 5"` y páginas elegidas en imprimir u OCR por lotes | `extractor`, `merge`, `services/viewer.py`, `services/ocr.py` |
+| `page_ranges.py` | Rangos de páginas `"1-3, 5"` y páginas elegidas en el OCR por lotes | `extractor`, `merge`, `services/ocr.py` |
 | `launch_args.py` | PDF recibidos al lanzar la app («Abrir con», `EXTRAR_PDF_PATH`) | `app/main.py` |
 | `text_utils.py` | Comparar texto sin tildes | `extractor` |
 

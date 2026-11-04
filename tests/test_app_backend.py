@@ -669,19 +669,6 @@ def test_select_pages_for_print_and_batches():
         select_pages(5, "algunas")
 
 
-def test_viewer_print_selection(tmp_path):
-    pdf = _make_pdf(tmp_path / "imprimir.pdf", 3)
-    viewer = ViewerService(FakeHost())
-    try:
-        doc_id = viewer.open(str(pdf))["id"]
-        assert viewer.print_selection(doc_id, "current", current=1) == [1]
-        assert viewer.print_selection(doc_id, "all", subset="odd", reverse=True) == [2, 0]
-        with pytest.raises(UserError):
-            viewer.print_selection(doc_id, "todas")
-    finally:
-        viewer.close()
-
-
 # ── Servicio OCR (visor) ─────────────────────────────────────────────────────
 class ScriptedOCR:
     """El ``OCRProcessor`` real salvo los modelos: reconoce siempre ``words``.
