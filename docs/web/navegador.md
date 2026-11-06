@@ -70,6 +70,13 @@ escribieron los servicios, y [`files.ts`](../../app/ui/src/lib/browser/files.ts)
 | Guardar como | Diálogo del sistema | Se descarga con el nombre sugerido |
 | Carpeta de salida | Diálogo del sistema | Cada archivo se descarga |
 
+### Pantalla de carga
+
+Mientras arranca Python se ve [`Splash.svelte`](../../app/ui/src/shell/Splash.svelte): el logo y una
+barra con los pasos reales del arranque (evento `boot:progress`). Sale con el último tema usado, que
+se copia en `localStorage` porque el guardado lo tiene Python. Si el arranque falla, el error se
+muestra ahí mismo.
+
 ## Lo que cambia frente al escritorio
 
 - **Recientes:** los archivos solo viven mientras la página está abierta, así que al recargar la lista queda vacía.

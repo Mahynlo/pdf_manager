@@ -16,8 +16,8 @@ type Result = { ok: true; value: unknown } | { ok: false; error: { code: string;
 type GrowableBuffer = SharedArrayBuffer & { grow(length: number): void };
 
 const encoder = new TextEncoder();
-const control = new Int32Array(new SharedArrayBuffer(CONTROL_SLOTS * 4));
-const inbox = new Uint8Array(new SharedArrayBuffer(INBOX_BYTES));
+let control: Int32Array; // sin aislar la página no existe SharedArrayBuffer: se crean en start()
+let inbox: Uint8Array;
 let replyBuffer: GrowableBuffer;
 let worker: Worker;
 let onnx: Worker | null = null; // los modelos del OCR: se arranca la primera vez que hacen falta
@@ -112,6 +112,9 @@ function receive(message: FromWorker): void {
     case 'dirty':
       dirty = message.dirty;
       break;
+    case 'progress':
+      window.pdfm.emit('boot:progress', message.step);
+      break;
     case 'failed':
       console.error('Fallo en el backend:', message.message);
       break;
@@ -121,6 +124,8 @@ function receive(message: FromWorker): void {
 /** Arranca Python; resuelve cuando ya atiende llamadas. */
 export function start(): Promise<void> {
   if (!crossOriginIsolated) return Promise.reject(new Error(t.shell.boot.notIsolated));
+  control = new Int32Array(new SharedArrayBuffer(CONTROL_SLOTS * 4));
+  inbox = new Uint8Array(new SharedArrayBuffer(INBOX_BYTES));
   const options = { maxByteLength: REPLY_MAX_BYTES } as unknown as number;
   const Shared = SharedArrayBuffer as unknown as new (length: number, options: number) => GrowableBuffer;
   replyBuffer = new Shared(REPLY_BYTES, options);

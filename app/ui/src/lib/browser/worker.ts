@@ -94,6 +94,7 @@ async function start({ base, control: sharedControl, reply: sharedReply, inbox: 
   const indexURL = `${base}pyodide/`;
   const { loadPyodide } = await import(/* @vite-ignore */ `${indexURL}pyodide.mjs`) as typeof import('pyodide');
   py = await loadPyodide({ indexURL });
+  scope.postMessage({ type: 'progress', step: 1 });
   const [manifest, archive] = await Promise.all([
     fetch(`${base}backend.json`).then((r) => r.json()) as Promise<{ packages: string[]; wheels: string[] }>,
     fetch(`${base}backend.zip`).then((r) => r.arrayBuffer()),
@@ -102,6 +103,7 @@ async function start({ base, control: sharedControl, reply: sharedReply, inbox: 
   py.unpackArchive(archive, 'zip', { extractDir: BACKEND_ROOT });
   py.FS.mount((py.FS as unknown as { filesystems: { IDBFS: never } }).filesystems.IDBFS, {}, HOME);
   await syncHome(true).catch(console.error); // sin lo guardado también se puede trabajar
+  scope.postMessage({ type: 'progress', step: 2 });
   py.runPython(`import sys; sys.path.insert(0, ${JSON.stringify(BACKEND_ROOT)})`);
   backend = py.pyimport('app.browser.main').Backend(channel);
   scope.postMessage({ type: 'ready' });

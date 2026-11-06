@@ -39,6 +39,7 @@ export type ToWorker =
 /** Del worker a la ventana. */
 export type FromWorker =
   | { type: 'ready' }
+  | { type: 'progress'; step: number } // paso del arranque (textos: shell.boot.steps)
   | { type: 'failed'; message: string }
   | { type: 'result'; id: number; json: string }
   | { type: 'emit'; event: string; json: string }
