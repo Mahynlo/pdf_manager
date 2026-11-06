@@ -63,6 +63,9 @@ class FakeHost:
     def pick_folder(self) -> str | None:
         return self.folder
 
+    def pick_output_folder(self) -> str | None:
+        return self.folder
+
     def save_pdf(self, suggested_path: str) -> str | None:
         self.saved_suggestions.append(suggested_path)
         return self.save_to

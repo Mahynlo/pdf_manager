@@ -16,7 +16,11 @@ class Host(Protocol):
     def pick_pdf(self) -> str | None:
         """Diálogo para elegir un solo PDF; ``None`` si se cancela."""
 
-    def pick_folder(self) -> str | None: ...
+    def pick_folder(self) -> str | None:
+        """Diálogo para elegir una carpeta de la que leer; ``None`` si se cancela."""
+
+    def pick_output_folder(self) -> str | None:
+        """Diálogo para elegir la carpeta donde escribir; ``None`` si se cancela."""
 
     def save_pdf(self, suggested_path: str) -> str | None:
         """Diálogo «Guardar como» para un PDF; ``None`` si se cancela."""

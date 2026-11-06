@@ -1,9 +1,12 @@
 // Arrastrar PDFs desde el Explorador a la ventana (como dropEvent de la ventana Qt).
-// El navegador no da la ruta de un archivo soltado: la recibe la ventana pywebview
-// (WebviewHost), que abre los PDF. Aquí solo se evita que WebView2 navegue al archivo
-// y se muestra el aviso «Suelta…» mientras se arrastra.
+// El navegador no da la ruta de un archivo soltado: en el escritorio la recibe la ventana
+// pywebview (WebviewHost), que abre los PDF; en la versión de navegador se abren con openDropped.
+// Aquí además se evita que el navegador navegue al archivo y se muestra el aviso «Suelta…»
+// mientras se arrastra.
 //
 // Solo cuentan los arrastres de archivos: mover miniaturas (visor, combinar) no.
+import { openDropped } from '$lib/api.ts';
+
 const hasFiles = (ev: DragEvent) => Array.from(ev.dataTransfer?.types ?? []).includes('Files');
 
 export function enableFileDrop(): void {
@@ -30,5 +33,6 @@ export function enableFileDrop(): void {
     ev.preventDefault();
     depth = 0;
     show(false);
+    openDropped(ev.dataTransfer!);
   });
 }

@@ -161,7 +161,7 @@ class ExtractService:
 
     @exposed
     def choose_destination(self) -> dict[str, Any]:
-        folder = self._host.pick_folder()
+        folder = self._host.pick_output_folder()
         with self._lock:
             if folder:
                 self._destination = folder

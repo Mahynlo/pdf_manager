@@ -5,6 +5,8 @@ export default {
   boot: {
     waiting: 'Esperando al backend de Python… Esta interfaz se abre desde la app: '
       + 'ejecuta «uv run python -m app.main --dev» desde la raíz del proyecto.',
+    loading: 'Cargando Extraer PDFs…',
+    notIsolated: 'Esta página necesita las cabeceras COOP y COEP para usar memoria compartida.',
     failed: (message: string) => `Error al iniciar la interfaz: ${message}`,
   },
   header: {

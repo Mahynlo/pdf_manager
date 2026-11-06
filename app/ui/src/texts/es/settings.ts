@@ -63,7 +63,7 @@ export default {
     clearRecent: 'Vaciar historial',
     recentCleared: 'El historial de archivos recientes ha sido eliminado.',
     about: (v: { app: string; pdfium: string; pywebview: string; python: string }) =>
-      `Extraer PDFs v${v.app} · Motor PDF: PDFium ${v.pdfium} | Entorno: pywebview v${v.pywebview} (WebView2) · Python ${v.python}`,
+      `Extraer PDFs v${v.app} · Motor PDF: PDFium ${v.pdfium} | Entorno: ${v.pywebview === '?' ? 'navegador (Pyodide)' : `pywebview v${v.pywebview} (WebView2)`} · Python ${v.python}`,
     showLog: 'Ver Registro de Diagnóstico...',
   },
   log: {

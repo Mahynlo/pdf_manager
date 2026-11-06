@@ -46,6 +46,12 @@ def test_pdf_core_has_no_interface(path):
     assert not _imports(path) & {"app", "webview"}
 
 
+@pytest.mark.parametrize("path", [*_files(ROOT / "app" / "backend"), *_files(SRC / "pdf_core")], ids=lambda p: p.relative_to(ROOT).as_posix())
+def test_the_backend_does_not_know_about_the_browser(path):
+    """Lo propio del navegador va en ``app/browser``: el backend es el mismo en los dos sitios."""
+    assert not _imports(path) & {"js", "pyodide"}
+
+
 def test_only_the_pdf_layer_talks_to_the_engine():
     """PDFium no admite hilos: el candado de ``pdf_core.pdf`` solo protege si todo pasa por él."""
     users = {p.relative_to(ROOT).as_posix() for p in [*_files(ROOT / "app"), *_files(SRC / "pdf_core")] if "pypdfium2" in _imports(p)}

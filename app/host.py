@@ -121,6 +121,9 @@ class WebviewHost:
         result = self.window.create_file_dialog(webview.FileDialog.FOLDER)
         return result[0] if result else None
 
+    def pick_output_folder(self) -> str | None:
+        return self.pick_folder()
+
     def save_pdf(self, suggested_path: str) -> str | None:
         return self._save_dialog(suggested_path, PDF_TYPES)
 

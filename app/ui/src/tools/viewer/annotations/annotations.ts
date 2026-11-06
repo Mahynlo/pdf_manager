@@ -29,7 +29,7 @@ import {
 } from '@embedpdf/plugin-annotation';
 import type { ExportPlugin } from '@embedpdf/plugin-export';
 import type { Command, HistoryPlugin, HistoryScope } from '@embedpdf/plugin-history';
-import { call } from '$lib/api.ts';
+import { call, upload } from '$lib/api.ts';
 import { askText } from '$lib/ui.ts';
 import { t } from '$texts';
 import { ANNOTATION_TOOL, TOOLS, type PageCanvas } from '../canvas/canvas.ts';
@@ -578,7 +578,7 @@ export class Annotations {
     if (!documentId || version === this.synced) return null;
     const buffer = await this.exportCopy();
     const url = await call<string>('viewer.upload_url');
-    const response = await fetch(url, { method: 'POST', body: buffer });
+    const response = await upload(url, buffer);
     if (!response.ok) throw new Error(TX.syncError(response.status));
     const result = await call<{ modified: boolean }>('viewer.sync_annotations', this.docId, url);
     if (documentId === this.canvas.shown) this.synced = Math.max(this.synced, version);

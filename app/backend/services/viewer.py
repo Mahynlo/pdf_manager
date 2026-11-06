@@ -545,7 +545,7 @@ class ViewerService:
         """Extrae las imágenes incrustadas a una carpeta; ``{folder, count}`` o ``None`` si se cancela."""
         with self._lock:
             stem = Path(self._doc(doc_id).path).stem
-        folder = self._host.pick_folder()
+        folder = self._host.pick_output_folder()
         if not folder:
             return None
         with self._lock:

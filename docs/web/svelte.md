@@ -81,7 +81,7 @@ desarrollar; el ejecutable ya lleva la interfaz compilada).
   ventana contra él y lo detiene al cerrar la app. Al guardar un `.svelte`, la ventana se actualiza sola.
 - **Dependencias:** si falta `node_modules`, ejecuta antes `pnpm install`.
 - **`--dev-server URL`:** abre un servidor de Vite que hayas arrancado tú.
-- **En un navegador:** la URL de `pnpm dev` no sirve sola, porque la interfaz necesita el backend
+- **En un navegador** (para la versión de navegador, ver [navegador.md](navegador.md)): la URL de `pnpm dev` no sirve sola, porque la interfaz necesita el backend
   de Python, que solo existe dentro de la ventana. La página lo explica en vez de quedarse en blanco.
 
 El instalador (`installer/web/build.ps1`) comprueba los tipos (`pnpm check`) y compila la

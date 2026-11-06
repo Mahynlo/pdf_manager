@@ -172,6 +172,8 @@ modelos/
 # Interfaz en Svelte (app/ui): dependencias y compilación (se genera con pnpm build)
 app/ui/node_modules/
 app/ui/dist/
+app/ui/dist-web/
+app/ui/public-web/
 # src/lib es código de la interfaz (la regla «lib/» de arriba es para entornos de Python)
 !app/ui/src/lib/
 

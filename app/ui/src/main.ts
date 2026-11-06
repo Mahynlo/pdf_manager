@@ -18,13 +18,14 @@ import './styles/settings.css';
 import './styles/help.css';
 import './styles/viewer.css';
 
-const BACKEND_HINT_MS = 4000;
+const IN_BROWSER = import.meta.env.MODE === 'browser'; // Python tarda unos segundos en arrancar
+const BACKEND_HINT_MS = IN_BROWSER ? 0 : 4000;
 
 async function boot(): Promise<void> {
   // Fuera de la app (p. ej. la URL de «pnpm dev» en un navegador) no hay backend y la
   // espera no acabaría nunca: se explica cómo abrirla en vez de dejar la página en blanco.
   const hint = setTimeout(() => {
-    document.body.textContent = t.shell.boot.waiting;
+    document.body.textContent = IN_BROWSER ? t.shell.boot.loading : t.shell.boot.waiting;
   }, BACKEND_HINT_MS);
   const settings = await call<AppSettings>('app.settings');
   clearTimeout(hint);

@@ -10,6 +10,7 @@ Las versiones anteriores se retiraron de esta rama: **Flet** (la 0.1.28 fue la �
 
 ```
 app/              backend Python (servicios) + interfaz en Svelte (app/ui)
+app/browser/      lo propio de la versión de navegador (web/navegador.md)
 src/pdf_core/     lógica de PDF sin interfaz
 src/assets/       manuales de ayuda y modelos de OCR
 docs/web/         documentación técnica
