@@ -87,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         js_api=Api(registry),
         width=1280,
         height=820,
-        min_size=(960, 640),
+        min_size=(420, 480),  # la interfaz se adapta (styles/responsive.css)
         hidden=True,  # se muestra cuando el frontend ya aplicó el tema (app.ready)
     )
     documents = services["documents"]

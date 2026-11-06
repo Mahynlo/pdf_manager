@@ -18,6 +18,7 @@ import './styles/extract.css';
 import './styles/settings.css';
 import './styles/help.css';
 import './styles/viewer.css';
+import './styles/responsive.css';
 
 const BACKEND_HINT_MS = 4000;
 

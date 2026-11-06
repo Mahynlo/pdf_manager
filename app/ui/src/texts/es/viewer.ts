@@ -22,6 +22,7 @@ export default {
     undo: { label: 'Deshacer', shortcut: 'Ctrl+Z' },
     redo: { label: 'Rehacer', shortcut: 'Ctrl+Y' },
     thumbnails: 'Mostrar/Ocultar miniaturas',
+    tools: 'Mostrar/Ocultar herramientas de anotación',
     night: 'Modo noche (Invertir colores del lienzo)',
     dock: 'Expandir/Colapsar panel lateral',
   },

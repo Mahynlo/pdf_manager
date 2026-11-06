@@ -5,11 +5,15 @@
 <script lang="ts">
   import Icon from '$lib/Icon.svelte';
   import { openMenu, type MenuItem } from '$lib/menu.svelte.ts';
+  import { viewport } from '$lib/viewport.svelte.ts';
   import { t, tip } from '$texts';
   import { MODES } from '../canvas/layout.ts';
 
   const T = t.viewer.toolbar;
   const ZOOM_PRESETS = [25, 50, 75, 100, 125, 150, 200, 300, 400];
+  // Lo que se oculta en una pantalla estrecha (responsive.css): pasa al menú ⋮ (hiddenControls).
+  const WIDE = 'tb-wide';
+  const ZOOM = 'tb-zoom-group';
 
   /** Estado que pinta la barra. */
   interface ToolbarView {
@@ -22,6 +26,7 @@
     night: boolean;
     sidebar: boolean;
     dock: boolean;
+    tools: boolean;
   }
 
   /** Lo que hace cada botón (`moreMenu()` da las entradas del menú ⋮). */
@@ -43,6 +48,7 @@
     toggleNight(): void;
     toggleSidebar(): void;
     toggleDock(): void;
+    toggleTools(): void;
   }
 
   let { view, actions }: { view: ToolbarView; actions: ToolbarActions } = $props();
@@ -102,19 +108,19 @@
 </script>
 
 {#snippet button(icon: string, title: string, onclick: (ev: MouseEvent & { currentTarget: HTMLButtonElement }) => void,
-                 { checked = undefined, disabled = false }: { checked?: boolean; disabled?: boolean } = {})}
-  <button class="btn btn--icon tb-btn" class:is-checked={checked} type="button" {title} aria-label={title}
+                 { checked = undefined, disabled = false, group = '' }: { checked?: boolean; disabled?: boolean; group?: string } = {})}
+  <button class="btn btn--icon tb-btn {group}" class:is-checked={checked} type="button" {title} aria-label={title}
           aria-pressed={checked} {disabled} {onclick}>
     <Icon name={icon} size={18} />
   </button>
 {/snippet}
 
-{#snippet separator()}<span class="tb-sep" aria-hidden="true"></span>{/snippet}
+{#snippet separator(group = '')}<span class="tb-sep {group}" aria-hidden="true"></span>{/snippet}
 
 <div class="viewer-toolbar" role="toolbar">
   {@render button('more-vertical', T.more, (ev) => openMenu(ev.currentTarget, actions.moreMenu()))}
   {@render separator()}
-  {@render button('chevrons-left', tip(T.first), actions.first, { disabled: view.page <= 0 })}
+  {@render button('chevrons-left', tip(T.first), actions.first, { disabled: view.page <= 0, group: WIDE })}
   {@render button('chevron-left', tip(T.prev), actions.prev, { disabled: view.page <= 0 })}
   <input bind:this={pageInput} bind:value={pageText} class="input tb-page" type="text" inputmode="numeric"
          title={tip(T.goToPage)} onkeydown={pageKey}
@@ -122,10 +128,10 @@
          onblur={() => { editingPage = false; pageText = String(view.page + 1); }} />
   <span class="tb-total muted">/ {view.count}</span>
   {@render button('chevron-right', tip(T.next), actions.next, { disabled: view.page >= view.count - 1 })}
-  {@render button('chevrons-right', tip(T.last), actions.last, { disabled: view.page >= view.count - 1 })}
-  {@render separator()}
-  {@render button('minus', tip(T.zoomOut), actions.zoomOut)}
-  <div class="tb-zoom">
+  {@render button('chevrons-right', tip(T.last), actions.last, { disabled: view.page >= view.count - 1, group: WIDE })}
+  {@render separator(ZOOM)}
+  {@render button('minus', tip(T.zoomOut), actions.zoomOut, { group: ZOOM })}
+  <div class="tb-zoom tb-zoom-group">
     <input bind:value={zoomText} class="tb-zoom__input" type="text" title={T.zoomLevel} aria-label={T.zoomLevel}
            onkeydown={zoomKey} onfocus={(ev) => { editingZoom = true; ev.currentTarget.select(); }}
            onblur={() => { editingZoom = false; zoomText = zoomLabel(); }} />
@@ -133,17 +139,20 @@
       <Icon name="chevron-down" size={14} />
     </button>
   </div>
-  {@render button('plus', tip(T.zoomIn), actions.zoomIn)}
-  {@render separator()}
-  {@render button('rows', T.continuous, () => actions.setMode(MODES.CONTINUOUS), { checked: view.mode === MODES.CONTINUOUS })}
-  {@render button('book-open', T.double, () => actions.setMode(MODES.DOUBLE), { checked: view.mode === MODES.DOUBLE })}
-  {@render button('file', T.single, () => actions.setMode(MODES.SINGLE), { checked: view.mode === MODES.SINGLE })}
+  {@render button('plus', tip(T.zoomIn), actions.zoomIn, { group: ZOOM })}
+  {@render separator(WIDE)}
+  {@render button('rows', T.continuous, () => actions.setMode(MODES.CONTINUOUS), { checked: view.mode === MODES.CONTINUOUS, group: WIDE })}
+  {@render button('book-open', T.double, () => actions.setMode(MODES.DOUBLE), { checked: view.mode === MODES.DOUBLE, group: WIDE })}
+  {@render button('file', T.single, () => actions.setMode(MODES.SINGLE), { checked: view.mode === MODES.SINGLE, group: WIDE })}
   {@render separator()}
   {@render button('undo', tip(T.undo), actions.undo, { disabled: !view.canUndo })}
   {@render button('redo', tip(T.redo), actions.redo, { disabled: !view.canRedo })}
   {@render separator()}
+  {#if viewport.reading}
+    {@render button('pencil', T.tools, actions.toggleTools, { checked: view.tools })}
+  {/if}
   {@render button('panel-left', T.thumbnails, actions.toggleSidebar, { checked: view.sidebar })}
-  {@render button('moon', T.night, actions.toggleNight, { checked: view.night })}
+  {@render button('moon', T.night, actions.toggleNight, { checked: view.night, group: WIDE })}
   <span class="grow"></span>
-  {@render button('panel-right', T.dock, actions.toggleDock, { checked: view.dock })}
+  {@render button('panel-right', T.dock, actions.toggleDock, { checked: view.dock, group: 'tb-dock-toggle' })}
 </div>

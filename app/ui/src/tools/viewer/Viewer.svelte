@@ -19,6 +19,7 @@
   import type { MenuItem } from '$lib/menu.svelte.ts';
   import type { DocumentInfo } from '$lib/types.ts';
   import { openModal, setStatus, toast } from '$lib/ui.ts';
+  import { viewport } from '$lib/viewport.svelte.ts';
   import { t, tip } from '$texts';
   import type { Annot } from './annotations/annotations.ts';
   import AiPanel from './panels/AiPanel.svelte';
@@ -67,9 +68,10 @@
   // ── Estado que pinta la interfaz ───────────────────────────────────────
   let view = $state({
     page: 0, count: doc.pages.length, zoom: 1, mode: MODES.CONTINUOUS as Mode,
-    canUndo: false, canRedo: false, night: false, sidebar: true, dock: false,
+    canUndo: false, canRedo: false, night: false, sidebar: !viewport.narrow && !viewport.reading, dock: false, tools: !viewport.reading,
   });
-  let tool = $state<string>(TOOLS.SELECT);
+  // Con el dedo, arrastrar tiene que desplazar la página: seleccionar texto hay que pedirlo.
+  let tool = $state<string>(viewport.touch ? TOOLS.HAND : TOOLS.SELECT);
   let dockTab = $state<DockTab>('toc');
   let toc = $state.raw(doc.toc);
   let revision = $state(0); // cambia con cada operación sobre las páginas
@@ -96,8 +98,13 @@
     onTool: (t) => annotations.applyStyle(t),
     onDocument: () => annotations.documentShown(),
   });
+  if (viewport.narrow || viewport.reading) canvas.fitWidth(); // al 100 % no se vería la página entera
   const total = () => canvas.pageCount;
   const goTo = (index: number) => canvas.scrollToPage(Math.max(0, Math.min(total() - 1, index)));
+  const thumbSelected = (index: number) => {
+    if (viewport.compact) view.sidebar = false;
+    goTo(index);
+  };
 
   const selection = new TextSelection(canvas, {
     searchDocument: (text) => openSearch(text),
@@ -181,6 +188,7 @@
 
   /** Va a una marca de censura y la selecciona (para moverla o borrarla). */
   function showMark(mark: Annot) {
+    leavePanel();
     canvas.scrollToRect(mark.pageIndex, canvas.toView(mark.pageIndex, mark.rect));
     if (!EDIT_TOOLS.has(tool)) setTool(TOOLS.POINTER);
     annotations.select([mark]);
@@ -188,6 +196,7 @@
 
   // ── Acciones ───────────────────────────────────────────────────────────
   function setTool(next: string) {
+    if (!EDIT_TOOLS.has(next)) leavePanel(); // se va a dibujar en la página
     if (next !== TOOLS.SELECT) selection.clear();
     if (!EDIT_TOOLS.has(next)) editor.clear();
     canvas.setTool(next);
@@ -225,7 +234,13 @@
     }
   }
 
+  /** En el móvil el panel tapa la página: se cierra al ir a ella. */
+  function leavePanel() {
+    if (viewport.compact) view.dock = false;
+  }
+
   function openDockTab(key: DockTab) {
+    if (viewport.compact) view.sidebar = false;
     view.dock = true;
     dockTab = key;
   }
@@ -256,6 +271,40 @@
     if (target >= 0) goTo(target);
   };
 
+  /** Lo que no cabe en la barra superior en una pantalla estrecha. */
+  function hiddenControls(): MenuItem[] {
+    if (!viewport.narrow) return [];
+    const B = T.toolbar;
+    const mode = (label: string, icon: string, value: Mode): MenuItem => ({
+      label, icon, checked: view.mode === value, onSelect: () => canvas.setMode(value),
+    });
+    return [
+      ...(viewport.compact ? [
+        { label: tip(B.zoomIn), icon: 'plus', onSelect: () => canvas.zoomIn() },
+        { label: tip(B.zoomOut), icon: 'minus', onSelect: () => canvas.zoomOut() },
+      ] : []),
+      { label: B.fitWidth, icon: 'rows', onSelect: () => canvas.fitWidth() },
+      { label: B.fitPage, icon: 'file', onSelect: () => canvas.fitPage() },
+      'separator',
+      mode(B.continuous, 'rows', MODES.CONTINUOUS),
+      mode(B.double, 'book-open', MODES.DOUBLE),
+      mode(B.single, 'file', MODES.SINGLE),
+      { label: B.night, icon: 'moon', checked: view.night, onSelect: toolbarActions.toggleNight },
+      'separator',
+      { label: tip(B.first), icon: 'chevrons-left', disabled: view.page <= 0, onSelect: () => goTo(0) },
+      { label: tip(B.last), icon: 'chevrons-right', disabled: view.page >= view.count - 1, onSelect: () => goTo(total() - 1) },
+      'separator',
+    ];
+  }
+
+  // Al cambiar de tamaño (girar el móvil, estrechar la ventana) se recolocan las barras.
+  $effect(() => {
+    view.tools = !viewport.reading;
+  });
+  $effect(() => {
+    view.sidebar = !viewport.narrow && !viewport.reading;
+  });
+
   const toolbarActions = {
     moreMenu: (): MenuItem[] => {
       const [save, saveAs, ...rest] = actions.menuItems();
@@ -265,6 +314,7 @@
         { label: T.more.properties, icon: 'info', onSelect: showProperties },
         ...rest,
         'separator',
+        ...hiddenControls(),
         { label: T.more.legends, icon: 'tag', onSelect: () => stamps!.manageLegends() },
         { label: T.more.close, icon: 'x', onSelect: close },
       ];
@@ -284,7 +334,11 @@
       view.night = !view.night;
       canvas.setNight(view.night);
     },
-    toggleSidebar: () => (view.sidebar = !view.sidebar),
+    toggleSidebar: () => {
+      view.sidebar = !view.sidebar;
+      if (view.sidebar) leavePanel();
+    },
+    toggleTools: () => (view.tools = !view.tools),
     undo,
     redo,
     toggleDock: () => (view.dock = !view.dock),
@@ -396,10 +450,13 @@
 
 <div class="viewer">
   <Toolbar bind:this={toolbar} {view} actions={toolbarActions} />
-  <ToolsBar {tool} {setTool} {setColor} stamps={() => openStamps(0)} signatures={() => openStamps(1)} />
+  <ToolsBar {tool} {setTool} {setColor} visible={view.tools} stamps={() => openStamps(0)} signatures={() => openStamps(1)} />
   <div class="viewer__body">
     <Thumbnails {docId} count={view.count} current={view.page} {revision} {versions} visible={view.sidebar}
-                fetchThumbs={(pages) => canvas.thumbnails(pages)} release={(url) => URL.revokeObjectURL(url)} onSelect={goTo} onMove={(src, dst) => actions.move(dst, src)} />
+                fetchThumbs={(pages) => canvas.thumbnails(pages)} release={(url) => URL.revokeObjectURL(url)} onSelect={thumbSelected} onMove={(src, dst) => actions.move(dst, src)} />
+    {#if viewport.compact && view.sidebar}
+      <button class="viewer-scrim" type="button" aria-label={T.toolbar.thumbnails} onclick={() => (view.sidebar = false)}></button>
+    {/if}
     <div class="viewer__stage" bind:this={stage}></div>
     <aside class="viewer-dock" hidden={!view.dock}>
       <div class="viewer-dock__panels">
@@ -411,7 +468,7 @@
             <button class="btn btn--icon btn--sm" type="button" title={T.toc.close} aria-label={T.toc.close}
                     onclick={() => (view.dock = false)}><Icon name="x" /></button>
           </div>
-          <TocTree {toc} onSelect={goTo} />
+          <TocTree {toc} onSelect={(index) => { leavePanel(); goTo(index); }} />
         </div>
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'ocr'}>
           <OcrPanel bind:this={ocr} {canvas} {docId} page={view.page} active={view.dock && dockTab === 'ocr'}
@@ -440,7 +497,7 @@
                    }} />
         </div>
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'search'}>
-          <SearchPanel bind:this={search} {canvas} close={() => (view.dock = false)}
+          <SearchPanel bind:this={search} {canvas} close={() => (view.dock = false)} navigated={leavePanel}
                        redact={(query) => {
                          openDockTab('redact');
                          redact!.addTerm(query);
@@ -448,7 +505,7 @@
         </div>
       </div>
     </aside>
-    <div class="viewer-rail" role="tablist" aria-orientation="vertical" aria-label={T.toolbar.dock}>
+    <div class="viewer-rail" role="tablist" aria-orientation={viewport.compact ? 'horizontal' : 'vertical'} aria-label={T.toolbar.dock}>
       {#each DOCK_GROUPS as group, i (i)}
         {#if i}<span class="viewer-rail__sep" aria-hidden="true"></span>{/if}
         {#each group as { key, icon } (key)}

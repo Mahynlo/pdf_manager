@@ -1,0 +1,231 @@
+/*
+  Adaptación a cada pantalla. Va la última: ajusta lo que definen los demás archivos.
+
+  Cortes (clases de ventana de Material 3; los mismos que lib/viewport.svelte.ts):
+    compacto    < 600    móvil en vertical
+    medio       600-839  tableta en vertical, ventana estrecha
+    expandido   840-1199 tableta en horizontal, portátil pequeño
+    grande      ≥ 1200   escritorio
+    extra       ≥ 1600   pantallas grandes: el contenido deja de crecer
+
+  Además de por ancho: `pointer: coarse` (dedo: objetivos de 40 px o más), `hover: none` (lo que
+  solo se veía al pasar el ratón) y `max-height: 500px` (móvil en horizontal).
+*/
+
+/* ── Todas las pantallas ─────────────────────────────────────────────────── */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body {
+  height: 100dvh; /* la barra del navegador móvil aparece y desaparece */
+  padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
+}
+button, a, [role="tab"] { touch-action: manipulation; }
+.view { overscroll-behavior: contain; }
+.brand { flex: none; white-space: nowrap; }
+.btn { white-space: nowrap; }
+.statusbar { height: calc(26px + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); }
+
+/* Las barras se desplazan si no caben: nada queda fuera de alcance. */
+.viewer-toolbar, .subtabs__bar { overflow-x: auto; scrollbar-width: none; }
+.viewer-toolbar::-webkit-scrollbar, .subtabs__bar::-webkit-scrollbar { display: none; }
+.viewer-toolbar > *, .subtabs__tab, .subtabs__bar { flex: none; }
+.viewer-toolbar > .grow { flex: 1 0 0; }
+.subtabs__tab { white-space: nowrap; }
+
+/* Filas de botones: bajan de línea antes que salirse. */
+.section-head, .extract .row, .tool-page .row, .merge .row { flex-wrap: wrap; }
+.tool-page .row > .btn, .merge .row > .btn { min-width: max-content; }
+.extract__actions, .merge__actions { display: flex; flex-wrap: wrap; }
+.extract__actions > .btn:first-child, .merge__actions > .btn:first-child { flex: 1 1 200px; }
+.merge__actions > .btn { flex: 1 1 auto; }
+
+.dialog { max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+.dialog__body { max-height: calc(100dvh - 18px); overflow: auto; }
+.menu { max-width: calc(100vw - 8px); max-height: calc(100dvh - 8px); overflow-y: auto; }
+.lightbox { height: min(90dvh, 900px); }
+.setting-row { flex-wrap: wrap; }
+.setting-row > .grow { flex: 1 1 220px; }
+.shortcut-row, .shortcut-keys { flex-wrap: wrap; }
+
+/* ── Extra grande: el contenido deja de estirarse ────────────────────────── */
+.tool-page { width: 100%; max-width: 1680px; margin-inline: auto; }
+.settings { width: 100%; max-width: 960px; margin-inline: auto; }
+.markdown { max-width: 80ch; }
+
+@media (min-width: 1600px) {
+  .recent { width: 380px; }
+  .viewer-sidebar { width: 190px; }
+  .viewer-dock { width: 420px; }
+}
+
+/* ── Expandido: las columnas laterales se estrechan ──────────────────────── */
+@media (max-width: 1199.98px) {
+  .viewer-dock { width: 320px; }
+  .recent { width: 280px; }
+}
+
+/* ── Medio y compacto: una sola columna, los paneles flotan ──────────────── */
+@media (max-width: 839.98px) {
+  .home { flex-direction: column; height: auto; min-height: 100%; }
+  .home__center { order: -1; flex: none; overflow: visible; justify-content: flex-start; padding: 28px 16px 20px; }
+  .recent { flex: 1 0 auto; width: auto; padding: 14px 16px; border-right: 0; border-top: 1px solid var(--border-light); }
+  .recent__list { flex: none; overflow: visible; }
+
+  .merge { height: auto; padding: 14px 16px; }
+  .merge__body { grid-template-columns: minmax(0, 1fr); overflow: visible; }
+  .merge__column { min-height: 0; }
+
+  .extract { flex-direction: column; min-height: 0; padding: 12px; }
+  .extract__criteria, .extract__run { flex: none; }
+
+  .steps { flex-direction: column; height: auto; padding: 14px; }
+  .steps__sep { width: 100%; height: 1px; }
+
+  .help-docs { flex-direction: column; height: auto; }
+  .help-docs__list { width: auto; max-height: 240px; }
+
+  .tb-wide { display: none !important; }
+
+  /* Sobre la página: así no la encoge. */
+  .viewer__body { position: relative; }
+  .viewer-dock {
+    position: absolute;
+    z-index: 20;
+    top: 0;
+    bottom: 0;
+    right: 44px;
+    width: min(380px, calc(100% - 44px));
+    box-shadow: var(--shadow-2);
+  }
+}
+
+/* ── Compacto: móvil en vertical ─────────────────────────────────────────── */
+@media (max-width: 599.98px) {
+  .brand { padding: 0 8px; margin-right: 2px; }
+  .brand__label, .header-theme { display: none; }
+  .tab { gap: 6px; padding: 0 4px 0 10px; }
+  .tab > .ellipsis { max-width: 110px; }
+  .tab__close { margin-left: 0; }
+
+  .home__title { font-size: 24px; }
+  .home__lead { margin-bottom: 16px; }
+  .home__cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; width: 100%; }
+  .home-card { width: auto; height: auto; min-height: 148px; padding: 12px 10px; }
+
+  .tool-page { padding: 12px; }
+  .tool-header { gap: 10px; }
+  .tool-header .title { font-size: 18px; }
+  .tool-header__icon { width: 38px; height: 38px; font-size: 18px; }
+  .button-row, .load-row { grid-template-columns: minmax(0, 1fr); }
+  .toasts { left: 8px; right: 8px; bottom: 8px; max-width: none; }
+
+  /* Diálogos: del ancho de la pantalla, con los botones siempre a la vista. */
+  .dialog { width: calc(100vw - 16px); margin: auto; }
+  .dialog__body { min-width: 0; width: 100% !important; padding: 16px; }
+  .dialog__actions { flex-wrap: wrap; }
+  .dialog__actions > .btn { flex: 1 1 auto; }
+  .dialog__message { max-width: none; }
+  .legends { flex-direction: column; }
+  .legends__row > * { min-width: 0; }
+  .legends__row { grid-template-columns: 76px minmax(0, 1fr); }
+
+  /* Visor: la página a todo el ancho y los controles abajo, donde llega el pulgar. */
+  .tb-zoom-group, .tb-dock-toggle { display: none !important; }
+  .sel-bar, .prop-bar { flex-wrap: wrap; max-width: calc(100vw - 16px); }
+  .tb-sep { margin: 0 2px; }
+  .tb-page { width: 46px; }
+  .viewer-toolbar--tools { order: 1; border-top: 1px solid var(--border); border-bottom: 0; }
+  .viewer__body { flex-direction: column; }
+  .viewer__stage { min-height: 0; }
+
+  .viewer-sidebar {
+    position: absolute;
+    z-index: 20;
+    top: 0;
+    bottom: 49px; /* la barra de paneles */
+    left: 0;
+    width: min(200px, 60%);
+    box-shadow: var(--shadow-2);
+  }
+  .viewer-scrim {
+    position: absolute;
+    z-index: 15;
+    inset: 0;
+    padding: 0;
+    border: 0;
+    background: rgba(0, 0, 0, 0.4);
+  }
+  .viewer-dock { top: 0; right: 0; left: 0; bottom: 49px; width: auto; border-left: 0; box-shadow: none; }
+
+  .viewer-rail {
+    flex-direction: row;
+    justify-content: space-around;
+    width: auto;
+    height: calc(49px + env(safe-area-inset-bottom));
+    padding: 4px 8px calc(4px + env(safe-area-inset-bottom));
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+  .viewer-rail__sep { display: none; }
+  .viewer-rail__tab.is-active::before { inset: -5px 7px auto; width: auto; height: 3px; }
+}
+
+/* ── Poca altura: móvil en horizontal ────────────────────────────────────── */
+@media (max-height: 500px) {
+  .statusbar { display: none; }
+  .app-header { height: 40px; }
+  .tab { height: 32px; }
+  .home { flex-direction: row; }
+  .home__center { order: 0; }
+  .extract, .merge__column { min-height: 0; }
+}
+
+/* ── Dedo ────────────────────────────────────────────────────────────────── */
+@media (pointer: coarse) {
+  .app-header { height: 48px; }
+  .tab { height: 40px; }
+  .tab__close { width: 28px; height: 28px; }
+  .btn { height: 40px; }
+  .btn--icon { width: 40px; }
+  .btn--sm { height: 34px; }
+  .btn--sm.btn--icon { width: 34px; }
+  .btn--lg { height: 44px; }
+  .btn--chip { height: 32px; }
+  /* Por debajo de 16 px, Safari acerca la página al enfocar un campo. */
+  .input, .select, textarea, .tb-zoom__input { font-size: 16px; }
+  .input, .select { height: 40px; }
+  .dialog__textarea { height: auto; }
+
+  .viewer-toolbar { height: 52px; }
+  .tb-btn { height: 40px; }
+  .tb-page, .tb-zoom { height: 40px; }
+  .tb-zoom__menu { width: 32px; }
+  .tb-swatch { width: 28px; height: 28px; margin: 0 4px; }
+  .viewer-rail { width: 52px; }
+  .viewer-rail__tab { width: 40px; height: 40px; }
+  .menu__item { height: 44px; }
+  .toc__row { height: 40px; }
+  .thumb-list { gap: 6px; }
+
+  .recent-row { min-height: 48px; }
+}
+
+@media (pointer: coarse) and (max-width: 839.98px) {
+  .viewer-dock { right: 52px; width: min(380px, calc(100% - 52px)); }
+}
+
+@media (pointer: coarse) and (max-width: 599.98px) {
+  .viewer-rail { width: auto; height: calc(53px + env(safe-area-inset-bottom)); }
+  .viewer-sidebar, .viewer-dock { bottom: 53px; right: auto; }
+  .viewer-dock { right: 0; width: auto; }
+}
+
+/* ── Sin ratón: nada puede depender de pasar por encima ──────────────────── */
+@media (hover: none) {
+  .recent-row .btn--icon { opacity: 1; }
+  .stamp-tile__remove { opacity: 1; visibility: visible; }
+  .home-card:hover { transform: none; box-shadow: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; }
+}

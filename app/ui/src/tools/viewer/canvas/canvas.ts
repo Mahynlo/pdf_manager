@@ -710,8 +710,8 @@ export class PageCanvas {
     this.el.addEventListener('pointerdown', (ev) => {
       const box = this.el.getBoundingClientRect();
       const onScrollbar = ev.clientX - box.left >= this.el.clientWidth || ev.clientY - box.top >= this.el.clientHeight;
-      // Sobre una anotación, el arrastre es suyo (moverla).
-      if (ev.button !== 0 || onScrollbar || this.tool !== TOOLS.HAND || (ev.target as Element | null)?.closest?.(ANNOTATION)) return;
+      // Con el dedo desplaza el navegador. Sobre una anotación, el arrastre es suyo (moverla).
+      if (ev.pointerType === 'touch' || ev.button !== 0 || onScrollbar || this.tool !== TOOLS.HAND || (ev.target as Element | null)?.closest?.(ANNOTATION)) return;
       start = { x: ev.clientX, y: ev.clientY, left: this.el.scrollLeft, top: this.el.scrollTop };
       this.el.setPointerCapture(ev.pointerId);
       this.el.classList.add('is-panning');

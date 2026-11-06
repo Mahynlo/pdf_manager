@@ -11,9 +11,10 @@
 
   /**
    * `tool`: herramienta activa; `setTool(t)`, `setColor(hex)`; `stamps()`, `signatures()`: abrir
-   * el panel de sellos o el de firmas.
+   * el panel de sellos o el de firmas; `visible`: en el móvil, la barra se abre al pedirla.
    */
-  let { tool, setTool, setColor, stamps, signatures }: {
+  let { tool, setTool, setColor, stamps, signatures, visible }: {
+    visible: boolean;
     tool: string;
     setTool: (tool: string) => void;
     setColor: (color: string) => void;
@@ -71,7 +72,7 @@
   }
 </script>
 
-<div class="viewer-toolbar viewer-toolbar--tools" role="toolbar">
+<div class="viewer-toolbar viewer-toolbar--tools" role="toolbar" hidden={!visible}>
   {#each GROUPS as group, g (g)}
     {#each group as { key, icon, title } (key)}
       <button class="btn btn--icon tb-btn" class:is-checked={isActive(key)} type="button" {title} aria-label={title}

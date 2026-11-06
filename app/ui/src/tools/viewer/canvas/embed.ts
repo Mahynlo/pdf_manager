@@ -38,7 +38,8 @@ export const ZOOM_MIN = 0.25;
 export const ZOOM_MAX = 4;
 export const PAGED = 'paged';
 const PAGE_GAP = 12; // puntos entre páginas (24 px al 100 %)
-export const VIEWPORT_GAP = 40; // px alrededor del contenido; también el margen al ajustar
+// px alrededor del contenido; también el margen al ajustar. En pantallas estrechas, la página manda.
+export const VIEWPORT_GAP = matchMedia('(max-width: 839.98px)').matches ? 8 : 40;
 const IMAGE = { type: 'image/webp', quality: 0.92 } as const;
 // Modos del gestor de interacción: con el de texto (el predeterminado de EmbedPDF) se
 // selecciona texto; con el de las demás herramientas, no (dibujan otros módulos).
@@ -96,9 +97,13 @@ export function registry(): Promise<PluginRegistry> {
     const embed = await new Promise<PluginRegistry>((resolve) => {
       mount(EmbedRoot, { target: document.createElement('div'), props: { engine, plugins: plugins(), onReady: resolve } });
     });
-    // Sin `wantsRawTouch`: en pantallas táctiles el dedo sigue desplazando las páginas.
+    // Sin `wantsRawTouch`, el dedo desplaza las páginas. En una pantalla táctil, salvo con las
+    // herramientas de texto: ahí arrastrar selecciona (para desplazar está la mano).
     const interaction = embed.getPlugin<InteractionManagerPlugin>('interaction-manager')!.provides();
-    for (const id of [TEXT_MODE, OTHER_MODE]) interaction.registerMode({ id, scope: 'page', exclusive: false, wantsRawTouch: false });
+    const touch = matchMedia('(pointer: coarse)').matches;
+    for (const id of [TEXT_MODE, OTHER_MODE]) {
+      interaction.registerMode({ id, scope: 'page', exclusive: false, wantsRawTouch: touch && id === TEXT_MODE });
+    }
     return embed;
   })();
   return registryPromise;
