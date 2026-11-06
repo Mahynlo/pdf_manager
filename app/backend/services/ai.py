@@ -1,9 +1,9 @@
-"""Servicio ``ai``: asistente IA del visor (equivale a ``ai_dock.py`` en Qt y al panel del
-agente de Flet): chat sobre el documento, resumen, datos clave y datos sensibles.
+"""Servicio ``ai``: asistente IA del visor: chat sobre el documento, resumen, datos clave y
+datos sensibles.
 
 Con las dependencias del agente instaladas y una clave de API configurada, usa
 ``pdf_core.agent.PDFAgent`` (Gemini u OpenAI). Si no, responde en **modo básico**
-con el texto del documento (lo mismo que hace la versión Qt cuando no hay agente):
+con el texto del documento:
 búsqueda de palabras, resumen del inicio, metadatos y patrones de datos personales.
 
 El historial de cada documento se guarda en el documento abierto. Las respuestas
@@ -13,6 +13,7 @@ enlaces, así se pueden insertar tal cual.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
 import re
@@ -33,6 +34,7 @@ log = logging.getLogger(__name__)
 
 SESSION = "ai"  # clave en ``_OpenDocument.extras``
 PROVIDERS = {"google": "Google Gemini", "openai": "OpenAI"}
+CLIENTS = {"google": "google.genai", "openai": "langchain_openai"}  # sus clientes: dependencias opcionales
 LEVELS = ("low", "medium", "high")
 BASIC_NOTE = "Modo básico (sin IA): configura un proveedor y su clave de API para respuestas del agente."
 MAX_SNIPPETS = 4
@@ -77,7 +79,7 @@ class AiService:
 
     @exposed
     def set_config(self, provider: str, api_key: str | None = None, model: str | None = None) -> dict[str, Any]:
-        """Proveedor, clave y modelo (``~/.extraer_pdfs_config.json``, el mismo que Flet)."""
+        """Proveedor, clave y modelo (``~/.extraer_pdfs_config.json``)."""
         if provider not in PROVIDERS:
             raise UserError("Proveedor de IA no válido.", "bad_provider")
         agent_config.set_provider(provider)
@@ -167,6 +169,8 @@ class AiService:
         key = agent_config.get_api_key(provider)
         if cls is None or not key or provider not in PROVIDERS:
             return None
+        if self._factory is None and not _installed(CLIENTS[provider]):
+            return None  # sin el cliente de este proveedor: modo básico
         signature = (provider, key, agent_config.get_model(provider), snap.path)
         if session.agent is None or session.agent_key != signature:
             if session.agent is not None:
@@ -178,10 +182,10 @@ class AiService:
 
     @staticmethod
     def _agent_class() -> Any:
-        try:
-            from pdf_core.agent import PDFAgent
-        except ImportError:
+        if not any(_installed(client) for client in CLIENTS.values()):
             return None  # dependencias del agente sin instalar: modo básico
+        from pdf_core.agent import PDFAgent
+
         return PDFAgent
 
     @staticmethod
@@ -190,6 +194,13 @@ class AiService:
 
     def _html(self, text: str) -> str:
         return self._markdown.render(text)
+
+
+def _installed(module: str) -> bool:
+    try:
+        return importlib.util.find_spec(module) is not None
+    except ModuleNotFoundError:  # falta el paquete que lo contiene
+        return False
 
 
 @dataclass
@@ -206,7 +217,7 @@ class _Snapshot:
     def of(cls, viewer: ViewerService, entry: Any) -> _Snapshot:
         pages, ocr_text = [], {}
         for index, page in enumerate(entry.doc):
-            text = page.get_text("text")
+            text = page.text()
             if not text.strip() and entry.ocr.get(viewer.page_key(entry, page)):
                 text = ocr_text[index] = viewer.text_of(entry, page).text
             pages.append(text)

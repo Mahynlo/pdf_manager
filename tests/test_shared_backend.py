@@ -1,21 +1,19 @@
-"""Módulos sin interfaz compartidos por las versiones Flet y PySide6."""
+"""Módulos sin interfaz de ``pdf_core``: rangos, texto, palabras clave y Unir."""
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
-import fitz
 import pytest
-from page_ranges import parse_page_list, parse_pages
-from pdf_extractor.engine import MatchOptions, score_page
-from pdf_extractor.model import collect_keywords
-from pdf_merge.engine import MergeOptions, merge_pages
-from pdf_merge.model import MergePage, parse_range
-from text_utils import fold_accents
+from pdfkit import pdf_bytes, run_engine
 
-ROOT = Path(__file__).resolve().parents[1]
+from pdf_core.extractor.engine import MatchOptions, score_page
+from pdf_core.extractor.model import collect_keywords
+from pdf_core.merge.engine import MergeOptions, merge_pages
+from pdf_core.merge.model import MergePage, parse_range
+from pdf_core.page_ranges import parse_page_list, parse_pages
+from pdf_core.pdf import Document
+from pdf_core.text_utils import fold_accents
 
 
 # ── page_ranges ──────────────────────────────────────────────────────────────
@@ -66,11 +64,7 @@ def test_match_options_any_accents_whole_word():
 
 # ── merge engine ─────────────────────────────────────────────────────────────
 def _pdf(path: Path, pages: int) -> str:
-    doc = fitz.open()
-    for i in range(pages):
-        doc.new_page().insert_text((72, 72), f"{path.stem}-{i + 1}")
-    doc.save(str(path))
-    doc.close()
+    path.write_bytes(pdf_bytes([[(72, 72, f"{path.stem}-{i + 1}")] for i in range(pages)]))
     return str(path)
 
 
@@ -84,32 +78,21 @@ def test_merge_pages_interleaves_rotates_and_pads_duplex(tmp_path):
         str(out),
         options=MergeOptions(duplex=True),
     )
-    with fitz.open(str(out)) as doc:
+    with Document.open(out) as doc:
         assert total == len(doc) == 4                   # a(1) + blanca + b(2)
         assert doc[0].rotation == 90
-        assert doc[1].get_text().strip() == ""          # hoja en blanco
-        assert doc[2].get_text().strip() == "b-2"       # orden intercalado respetado
-        assert doc.get_toc() == []
+        assert doc[1].text().strip() == ""              # hoja en blanco
+        assert doc[2].text().strip() == "b-2"           # orden intercalado respetado
+        assert doc.toc() == []
 
 
 def test_merge_pages_bookmarks(tmp_path):
     a = _pdf(tmp_path / "a.pdf", 2)
     b = _pdf(tmp_path / "b.pdf", 1)
     out = tmp_path / "out.pdf"
-    merge_pages([MergePage(a, 0), MergePage(a, 1), MergePage(b, 0)], str(out), options=MergeOptions(bookmarks=True))
-    with fitz.open(str(out)) as doc:
-        assert doc.get_toc() == [[1, "a", 1], [1, "b", 3]]
-
-
-# ── separación Flet / Qt ─────────────────────────────────────────────────────
-@pytest.mark.skipif(not (ROOT / "src_qt").is_dir(), reason="la versión Qt no está (no se sube al repositorio)")
-def test_qt_client_does_not_import_flet():
-    code = (
-        "import sys; sys.path[:0] = ['.', 'src'];"
-        "import src_qt.ui.shell.main_window;"
-        "print('flet' in sys.modules)"
+    merge_pages(
+        [MergePage(a, 0), MergePage(a, 1), MergePage(b, 0)], str(out), options=MergeOptions(bookmarks=True),
+        outline=lambda data, items: run_engine("outline", data, {"items": items}),
     )
-    out = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True,
-                         env={"QT_QPA_PLATFORM": "offscreen", **__import__("os").environ})
-    assert out.returncode == 0, out.stderr
-    assert out.stdout.strip() == "False"
+    with Document.open(out) as doc:
+        assert doc.toc() == [(1, "a", 0), (1, "b", 2)]

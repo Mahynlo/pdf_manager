@@ -2,7 +2,6 @@
 
 Nueva interfaz de PDF Manager: **frontend en Svelte** (HTML/CSS/JS compilado con Vite) y
 **backend en Python**, unidos por pywebview (WebView2 de Edge en Windows, que ya viene con el sistema).
-La versión Qt (`src_qt/`) es la referencia de funciones y aspecto hasta completar la migración.
 
 ```
 uv run python -m app.main            # arrancar (compila la interfaz si cambió)
@@ -23,7 +22,7 @@ app/
   single_instance.py      una sola ventana: las nuevas instancias le pasan sus PDF («Abrir con»)
   webview_cache.py        descarta la caché de WebView2 cuando cambia el frontend
   host.py                 WebviewHost: diálogos, abrir carpetas y enlaces, eventos → JS (lo único que usa pywebview)
-  backend/                Python sin interfaz: no importa Qt ni pywebview
+  backend/                Python sin interfaz: no importa pywebview
     rpc.py                @exposed, Registry, UserError, Api (punto de entrada único)
     host.py               protocolo Host que usan los servicios
     settings.py           preferencias en ~/.pdf_manager/settings.json
@@ -37,9 +36,9 @@ app/
                           legends (sellos de texto y leyendas), stamps (sellos propios y firmas)
   ui/                     la interfaz, en Svelte (compila a ui/dist con pnpm build): ver svelte.md
     src/main.ts           arranque: estilos, tema guardado y App
-    src/styles/           tokens.css (colores del tema, mismos valores que src_qt/core/theme.py),
+    src/styles/           tokens.css (colores del tema),
                           base.css, components.css y uno por área
-    src/assets/icons.json trazos de los iconos (también los usa la versión Qt)
+    src/assets/icons.json trazos de los iconos
     src/App.svelte        ventana: cabecera con pestañas, vistas, barra de estado, avisos y menú
     src/lib/              api.ts (puente con Python), ui.ts (avisos, barra de estado y diálogos),
                           menu.svelte.ts (menús emergentes), theme.svelte.ts, thumbs.ts
@@ -65,7 +64,10 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
 - **El estado vive en el backend.** Cada acción devuelve el estado completo y la vista se repinta
   a partir de él; el frontend no duplica lógica (rangos, selección, permisos…).
 - pywebview ejecuta cada llamada en su propio hilo: los servicios protegen su estado con un candado
-  (`fitz.Document` no admite acceso concurrente).
+  (además, PDFium no admite hilos: `pdf_core.pdf` lo serializa todo con un candado global).
+- **Python → motor de la ventana:** `host.run_engine('redact', pdf, args)` para lo que solo sabe
+  hacer el PDFium de EmbedPDF: emite `engine:task`, la ventana hace la tarea (`lib/engine.ts`) y sube
+  el resultado. Ver [embedpdf.md](embedpdf.md), «Un solo motor».
 
 ## Reglas
 
@@ -73,7 +75,6 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
   el backend ya genera seguro (manuales y respuestas de la IA). El código imperativo del lienzo crea
   sus elementos con `h()` (`lib/dom.ts`).
 - **Colores solo desde `tokens.css`** (`var(--accent)`…). El tema cambia con `data-theme` en `<html>`.
-  Si cambia una paleta de Qt, hay que regenerar `tokens.css` (un test compara ambos).
 - **Iconos**: `<Icon name="nombre" />` (o `ic('nombre')` en el código del lienzo). Usan
   `currentColor`, así que siguen el tema solos. Un icono nuevo se añade a `app/ui/src/assets/icons.json`.
 - **Listas con clave**: `{#each lista as item (item.id)}`, así Svelte reutiliza los elementos al
@@ -115,9 +116,8 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
 - **Anotaciones**: las dibuja y edita EmbedPDF (complementos Annotation y History) en su copia del
   documento, con deshacer y rehacer en el navegador. Antes de lo que necesita el documento al día en
   Python (guardar, exportar una página, cambiar páginas, censurar, OCR), el visor sube su
-  copia (`viewer.sync_annotations`, por el servidor local de datos) y Python toma de ella solo las
-  anotaciones (`pdf_core/annot_transfer.py`); el contenido, el cifrado, los formularios y los
-  enlaces siguen siendo los suyos. Ver [embedpdf.md](embedpdf.md).
+  copia (`viewer.sync_annotations`, por el servidor local de datos), que pasa a ser el documento en
+  Python; el texto de OCR que lleva como texto invisible se quita. Ver [embedpdf.md](embedpdf.md).
 - **Ratón en el lienzo**: cada página va en un `PagePointerProvider` de EmbedPDF, que pasa el ratón
   a la selección de texto (solo con las herramientas de texto, por los modos del gestor de
   interacción) y a las anotaciones (seleccionar, mover, dibujar con su herramienta activa). Los
@@ -138,7 +138,7 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
   `ViewerService.apply_redaction_marks` las aplica: borra el contenido de debajo (también las
   palabras de OCR) y sube la revisión de esas páginas, así su clave cambia y el lienzo no reutiliza
   la imagen anterior. Un documento censurado (`redacted`) solo se guarda como copia.
-- **Imprimir**: sin Qt ni pywin32: el diálogo de impresión de WebView2 con el PDF y sus anotaciones
+- **Imprimir**: el diálogo de impresión de WebView2 con el PDF y sus anotaciones
   en un iframe oculto (`document/print.ts`). Ver embedpdf.md, «Imprimir».
 - **Asistente IA**: el servicio `ai` copia lo necesario del documento con el candado del visor y
   consulta sin él (las respuestas tardan segundos). Usa `pdf_core.agent.PDFAgent` si sus dependencias
@@ -156,7 +156,7 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
 ## Añadir una herramienta
 
 1. Backend: `app/backend/services/<nombre>.py` con métodos `@exposed` que usen la lógica de `pdf_core`
-   (si aún está en un módulo de Flet, moverla antes a `pdf_core`, ver [modulos-python.md](modulos-python.md));
+   (ver [modulos-python.md](modulos-python.md));
    registrarlo en `services/__init__.py`.
 2. Frontend: `app/ui/src/tools/<nombre>/<Nombre>.svelte`, que recibe la entrada del registro como
    prop `tool` y libera lo que use con `onDestroy`. Los estilos nuevos, en su bloque `<style>`.

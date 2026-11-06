@@ -18,7 +18,7 @@ from app.backend.rpc import UserError, exposed
 
 log = logging.getLogger(__name__)
 
-# Carpetas donde se buscan los manuales (la primera que exista), como en la versión Qt.
+# Carpetas donde se buscan los manuales (la primera que exista).
 DOCS_DIRS: tuple[Path, ...] = (
     PROJECT_ROOT / "src" / "assets" / "ayuda",
     PROJECT_ROOT / "docs" / "ayuda",

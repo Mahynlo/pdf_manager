@@ -1,7 +1,7 @@
 # ============================================================
 #  installer\web\build.ps1  —  Empaqueta la versión web y genera su instalador
 #  Uso (desde la raíz del proyecto):  .\installer\web\build.ps1 [-SkipInstaller] [-Version x.y.z-web]
-#  La versión es APP_VERSION de app\__init__.py (pyproject.toml lleva la de Flet).
+#  La versión es APP_VERSION de app\__init__.py (pyproject.toml solo admite versiones PEP 440).
 #
 #  1. pnpm comprueba los tipos (pnpm check) y compila la interfaz (app\ui → app\ui\dist).
 #     Hace falta Node.js y pnpm.
@@ -9,8 +9,7 @@
 #     dist\web\ExtraerPDFs\ con ExtraerPDFs.exe y sus recursos.
 #  3. Inno Setup compila installer\web\setup.iss → dist\ExtraerPDFs_Web_Setup_<versión>.exe
 #
-#  No hace falta el launcher de «Abrir con» de la versión Flet: el exe acepta las
-#  rutas como argumentos y, si ya hay una ventana abierta, se las pasa (app/single_instance.py).
+#  «Abrir con»: el exe acepta las rutas como argumentos y, si ya hay una ventana abierta, se las pasa (app/single_instance.py).
 # ============================================================
 param([switch]$SkipInstaller, [string]$Version = "")
 
@@ -68,6 +67,8 @@ uv run --with pyinstaller pyinstaller `
     --distpath $DistDir --workpath $WorkDir --specpath $WorkDir `
     --collect-submodules pdf_core `
     --collect-data markdown_it `
+    --collect-all pypdfium2 `
+    --collect-all pypdfium2_raw `
     @DataArgs `
     "$Root\app\main.py"
 if ($LASTEXITCODE -ne 0) {

@@ -1,5 +1,4 @@
-"""Servicio ``redact``: la censura de un documento del visor (equivale a ``redact_panel.py``
-y ``redact_widgets.py`` en Qt).
+"""Servicio ``redact``: la censura de un documento del visor.
 
 Lo que se va a censurar son las marcas de censura del visor (anotaciones ``Redact`` de
 EmbedPDF): se revisan, se mueven, se borran y se deshacen en la página. Este servicio busca
@@ -9,7 +8,7 @@ que el visor ponga sus marcas, y aplica las marcas que le llegan con las anotaci
 
 Cada documento abierto guarda sus opciones de búsqueda, su color y su perfil activo en el
 propio documento abierto, así desaparecen al cerrarlo. Los perfiles (listas de términos con
-nombre) se comparten con las versiones Flet y Qt (``pdf_core.censorship_profiles``).
+nombre) los guarda ``pdf_core.censorship_profiles``.
 """
 
 from __future__ import annotations
@@ -22,6 +21,7 @@ from app.backend.rpc import UserError, exposed
 from app.backend.services.viewer import ViewerService
 from pdf_core import redaction
 from pdf_core.censorship_profiles import get_profile_manager
+from pdf_core.pdf import TextMap
 
 SESSION = "redact"  # clave en ``_OpenDocument.extras``
 HEX_COLOR = re.compile(r"#[0-9A-Fa-f]{6}")
@@ -76,7 +76,7 @@ class RedactService:
         terms = [t.strip() for t in terms if t.strip()]
         with self._viewer.document(doc_id) as entry:
             session = self._session(entry)
-            texts: dict[int, str] = {}  # el texto de cada página se extrae una vez para todos los términos
+            texts: dict[int, TextMap] = {}  # el texto de cada página se extrae una vez para todos los términos
             result = []
             for term in terms:
                 regex = redaction.looks_like_regex(term)
@@ -84,12 +84,11 @@ class RedactService:
                 matches = []
                 for index, page in enumerate(entry.doc):
                     if index not in texts:
-                        texts[index] = page.get_text("text")
+                        texts[index] = page.text_map()
                     rects = redaction.find_in_page(page, term, text=texts[index], **options)
                     words = entry.ocr.get(entry.key(page)) if session.search_ocr else None
                     if words:  # las palabras de OCR están en la página vista
-                        derot = page.derotation_matrix
-                        found = [r * derot for r in redaction.find_in_ocr(words, term, **options)]
+                        found = [page.to_page(r) for r in redaction.find_in_ocr(words, term, **options)]
                         rects += [r for r in found if not any(r.intersects(n) for n in rects)]
                     matches += [{"page": index, "rect": [round(v, 2) for v in r]} for r in rects]
                 result.append({"term": term, "kind": "regex" if regex else "texto", "matches": matches})
@@ -106,7 +105,7 @@ class RedactService:
         if not count:
             raise UserError("No hay marcas de censura en el documento.", "no_marks")
         with self._viewer.document(doc_id) as entry:
-            self._session(entry).profile_id = None  # como Qt: tras aplicar, la lista queda vacía
+            self._session(entry).profile_id = None  # tras aplicar, la lista queda vacía
         return {"info": info, "count": count}
 
     # ── Perfiles ─────────────────────────────────────────────────────────

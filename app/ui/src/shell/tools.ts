@@ -1,5 +1,5 @@
 // Registro de herramientas: el único sitio que hay que tocar para añadir una
-// (equivale a src_qt/ui/shell/tool_registry.py). De aquí salen las pestañas, el menú
+// De aquí salen las pestañas, el menú
 // de la marca y las tarjetas de Inicio.
 //
 // `load` importa el componente de la herramienta (se carga al abrirla). Recibe la

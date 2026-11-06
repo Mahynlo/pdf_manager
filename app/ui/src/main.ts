@@ -2,6 +2,7 @@
 import { mount } from 'svelte';
 import App from './App.svelte';
 import { call } from './lib/api.ts';
+import { listenEngineTasks } from './lib/engine.ts';
 import type { AppSettings } from './lib/types.ts';
 import { theme } from './lib/theme.svelte.ts';
 import { t } from '$texts';
@@ -31,6 +32,7 @@ async function boot(): Promise<void> {
   theme.init(settings.dark_theme);
   // En <body>: base.css lo maqueta en columna (cabecera, vistas, barra de estado).
   mount(App, { target: document.body });
+  listenEngineTasks();
 }
 
 // La ventana se crea oculta y se muestra con app.ready, ya con el tema aplicado

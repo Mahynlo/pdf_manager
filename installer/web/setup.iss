@@ -3,9 +3,8 @@
 ;  Lo compila installer\web\build.ps1; a mano:
 ;    ISCC.exe /DMyAppVersion=x.y.z /DMyAppSourceDir=dist\web\ExtraerPDFs installer\web\setup.iss
 ;
-;  Convive con la versión Flet (otro AppId, carpeta y ProgID) mientras dure la
-;  transición. Para que sustituya a la de Flet al instalarse, usar el AppId de
-;  installer\setup.iss.
+;  Convive con una instalación de la versión Flet (otro AppId, carpeta y ProgID). Para
+;  que la sustituya al instalarse, usar su AppId: {A3F2C1D0-8B4E-4F9A-B6C2-1D3E5F7A9B0C}.
 ; ============================================================
 
 #define MyAppName        "Extraer PDFs"

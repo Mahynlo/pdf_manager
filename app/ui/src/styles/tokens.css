@@ -1,4 +1,4 @@
-/* Colores del tema. Mismos valores que src_qt/core/theme.py (lo vigila un test). */
+/* Colores del tema. */
 :root {
   color-scheme: light;
   --bg-base: #F7F9FC;

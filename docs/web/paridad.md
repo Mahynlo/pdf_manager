@@ -1,7 +1,6 @@
 # Paridad: versión Qt → versión web
 
-Lista de todo lo que hace la versión Qt (`src_qt/`) y su estado en la versión web (`app/`).
-Cuando no quede nada pendiente, la versión Qt se puede retirar.
+Lista de todo lo que hacía la versión Qt, ya retirada, y su estado en la versión web (`app/`).
 
 ✅ hecho · 🟡 parcial · ⬜ pendiente
 
@@ -38,7 +37,7 @@ Cuando no quede nada pendiente, la versión Qt se puede retirar.
 | Selección de páginas, rangos, Todas/Ninguna/Invertir | ✅ | |
 | Girar, mover, quitar, ordenar A-Z, invertir orden | ✅ | |
 | Vista previa reordenable e intercalable, visor ampliado | ✅ | |
-| Marcadores, dúplex, optimizar, destino, progreso | ✅ | |
+| Marcadores, dúplex, destino, progreso | ✅ | Sin «Optimizar»: PDFium no recomprime al guardar |
 | Ver PDF combinado / abrir carpeta | ✅ | |
 
 ## Seguridad

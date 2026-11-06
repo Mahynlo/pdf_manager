@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import itertools
 import json
 import logging
 import os
@@ -11,6 +12,7 @@ import sys
 import threading
 import webbrowser
 from collections.abc import Callable
+from concurrent.futures import Future
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +24,8 @@ from app.byte_server import ByteServer
 
 log = logging.getLogger(__name__)
 
+ENGINE_TASK = "engine:task"
+ENGINE_TIMEOUT = 300  # segundos
 PDF_TYPES = ("Archivos PDF (*.pdf)",)
 TEXT_TYPES = ("Archivos de Texto (*.txt)",)
 _DWMWA_USE_IMMERSIVE_DARK_MODE = 20
@@ -34,6 +38,8 @@ class WebviewHost:
         self._on_drop_files: Callable[[list[str]], Any] | None = None
         self._quitting = False
         self._bytes = ByteServer()  # datos grandes con el frontend (ver share_bytes y upload_url)
+        self._task_ids = itertools.count(1)
+        self._tasks: dict[int, Future[str | None]] = {}  # tareas de run_engine en curso
 
     def attach(
         self,
@@ -196,6 +202,35 @@ class WebviewHost:
 
     def uploaded(self, url: str) -> bytes | None:
         return self._bytes.received(url)
+
+    def run_engine(self, task: str, data: bytes, args: dict[str, Any]) -> bytes:
+        task_id = next(self._task_ids)
+        upload = self.upload_url()
+        done: Future[str | None] = Future()
+        self._tasks[task_id] = done
+        try:
+            self.emit(ENGINE_TASK, {
+                "id": task_id, "task": task, "args": args, "upload": upload,
+                "url": self.share_bytes(data, "application/pdf"),
+            })
+            try:
+                error = done.result(timeout=ENGINE_TIMEOUT)
+            except TimeoutError as ex:
+                raise RuntimeError("El motor del visor no respondió.") from ex
+        finally:
+            del self._tasks[task_id]
+        if error:
+            raise RuntimeError(error)
+        result = self.uploaded(upload)
+        if result is None:
+            raise RuntimeError("No llegó el resultado del motor del visor.")
+        return result
+
+    def engine_done(self, task_id: int, error: str | None) -> None:
+        """La ventana terminó la tarea ``task_id`` de :meth:`run_engine`."""
+        done = self._tasks.get(task_id)
+        if done is not None:
+            done.set_result(error)
 
     def close(self) -> None:
         """Al cerrar la ventana: detiene el servidor de datos."""

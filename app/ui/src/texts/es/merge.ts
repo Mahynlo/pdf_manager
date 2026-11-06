@@ -40,8 +40,6 @@ export default {
     bookmarksTip: 'Crea un índice con los nombres de los documentos originales',
     duplex: 'Ajuste Dúplex (Doble cara)',
     duplexTip: 'Inserta una página en blanco si un documento termina en página impar',
-    optimize: 'Optimizar PDF',
-    optimizeTip: 'Comprime y limpia objetos redundantes en el PDF resultante',
     noOutput: 'Sin ruta de salida seleccionada',
     changeOutput: 'Cambiar Destino...',
     merge: 'Combinar y Guardar',

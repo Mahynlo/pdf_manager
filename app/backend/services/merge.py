@@ -231,11 +231,11 @@ class MergeService:
     @exposed
     def thumbnails(self, item_id: int, pages: list[int]) -> dict[str, str]:
         """Miniaturas ``{página: data URL}`` de las páginas pedidas (las inválidas se omiten)."""
-        with self._lock:  # fitz.Document no admite hilos concurrentes
+        with self._lock:
             item = self._item(item_id)
             doc = item.entry.doc
             return {
-                str(p): page_data_url(doc[p], THUMB_SCALE, item.rotation, quality=70)
+                str(p): page_data_url(doc[p], THUMB_SCALE, item.rotation)
                 for p in pages
                 if 0 <= p < item.entry.total
             }
@@ -246,7 +246,7 @@ class MergeService:
             item = self._item(item_id)
             if not 0 <= page < item.entry.total:
                 raise UserError("Página fuera de rango.", "out_of_range")
-            return page_data_url(item.entry.doc[page], PREVIEW_SCALE, item.rotation, quality=88)
+            return page_data_url(item.entry.doc[page], PREVIEW_SCALE, item.rotation)
 
     # ── Combinar ─────────────────────────────────────────────────────────────
     @exposed
@@ -281,7 +281,6 @@ class MergeService:
         merge_options = MergeOptions(
             bookmarks=bool(opts.get("bookmarks", True)),
             duplex=bool(opts.get("duplex", False)),
-            optimize=bool(opts.get("optimize", True)),
         )
         last_emit = 0.0
 
@@ -293,7 +292,9 @@ class MergeService:
                 self._host.emit("merge:progress", {"done": done, "total": total})
 
         try:
-            count = engine.merge_pages(pages, out_path, passwords=passwords, options=merge_options, progress=progress)
+            count = engine.merge_pages(
+                pages, out_path, passwords=passwords, options=merge_options, progress=progress, outline=self._outline
+            )
         except Exception as ex:
             raise UserError(f"No se pudo generar el archivo: {ex}", "merge_failed") from ex
         finally:
@@ -302,6 +303,10 @@ class MergeService:
         with self._lock:
             self._last_result = out_path
             return {"count": count, "path": out_path, "state": self.state()}
+
+    def _outline(self, data: bytes, items: list[dict]) -> bytes:
+        """Los marcadores los escribe el motor de EmbedPDF."""
+        return self._host.run_engine("outline", data, {"items": items})
 
     @exposed
     def open_result(self) -> None:

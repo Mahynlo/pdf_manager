@@ -1,4 +1,4 @@
-// Estado de la ventana principal (equivale a src_qt/ui/shell/main_window.py): Inicio
+// Estado de la ventana principal: Inicio
 // fijo, una pestaña única por herramienta y una pestaña de visor por PDF. App.svelte
 // pinta la cabecera y las vistas a partir de `shell.tabs`.
 //

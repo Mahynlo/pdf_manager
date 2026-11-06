@@ -1,15 +1,10 @@
-"""PDF to Markdown conversion using PyMuPDF4LLM.
+"""Texto de un PDF para el agente: el de cada página, con el de OCR en las escaneadas.
 
-Replaces the raw fitz text extraction with a Markdown-aware pipeline
-that preserves tables, headings and document structure — much better
-input quality for LLMs.
-
-OCR overrides (from the viewer's OCR engine) are injected for pages
-that have no native text (scanned documents).
+Los textos reconocidos por el OCR del visor se usan en las páginas sin texto nativo.
 """
 from __future__ import annotations
 
-import pymupdf4llm
+from pdf_core.pdf import Document
 
 
 def to_pages(
@@ -17,24 +12,12 @@ def to_pages(
     ocr_overrides: dict[int, str] | None = None,
     max_pages: int = 300,
 ) -> list[dict]:
-    """
-    Return raw page_chunks from pymupdf4llm with OCR overrides applied.
-
-    Each element is a dict with keys ``"metadata"`` (page_number, etc.)
-    and ``"text"`` (Markdown for that page).
-    """
-    pages: list[dict] = pymupdf4llm.to_markdown(
-        pdf_path,
-        page_chunks=True,
-        show_progress=False,
-    )
+    """Una entrada por página: ``{"metadata": {"page_number": n}, "text": texto}``."""
     result: list[dict] = []
-    for page_data in pages[:max_pages]:
-        pn_0: int = page_data["metadata"].get("page_number", 1) - 1
-        text: str = (page_data.get("text") or "").strip()
-        if not text and ocr_overrides and pn_0 in ocr_overrides:
-            page_data = {**page_data, "text": ocr_overrides[pn_0].strip()}
-        result.append(page_data)
+    with Document.open(pdf_path) as doc:
+        for page in list(doc)[:max_pages]:
+            text = page.text().strip() or (ocr_overrides or {}).get(page.number, "").strip()
+            result.append({"metadata": {"page_number": page.number + 1}, "text": text})
     return result
 
 

@@ -1,0 +1,426 @@
+"""Capa de PDFium (``pdf_core.pdf``), texto y lo que no puede fallar al censurar."""
+from __future__ import annotations
+
+import re
+import threading
+import zlib
+
+import numpy as np
+import pytest
+from pdfkit import add_annot, add_image, add_page, add_text, annots, encrypted, pdf_bytes, run_engine
+
+from pdf_core import page_ops, redaction
+from pdf_core.pdf import UNRESTRICTED, Document, PasswordError, PdfError, Rect, png
+from pdf_core.reading_order import sort_words_clustered, sort_words_column_aware
+from pdf_core.text_layer import build_text_layer, embed_ocr_words, page_words
+
+ROTATIONS = [0, 90, 180, 270]
+
+
+def _doc(rotation: int = 0) -> Document:
+    doc = Document.new()
+    page = add_page(doc, 400, 600)
+    add_text(page, 50, 100, "Hola mundo", 14)
+    add_text(page, 50, 200, "Segunda linea", 12)
+    if rotation:
+        page.set_rotation(rotation)
+    return doc
+
+
+# ── Rect ─────────────────────────────────────────────────────────────────────
+def test_rect():
+    rect = Rect(10, 20, 30, 60)
+    assert (rect.width, rect.height, rect.area) == (20, 40, 800)
+    assert rect & (0, 0, 15, 30) == Rect(10, 20, 15, 30)
+    assert rect.intersects((29, 59, 40, 70)) and not rect.intersects((30, 60, 40, 70))
+    assert Rect(5, 5, 5, 9).is_empty and Rect(5, 5, 5, 9).area == 0
+
+
+# ── Abrir ────────────────────────────────────────────────────────────────────
+def test_open_errors(tmp_path):
+    with pytest.raises(PdfError):
+        Document.open(b"esto no es un PDF")
+    with pytest.raises(OSError):
+        Document.open(tmp_path / "falta.pdf")
+    data = encrypted(pdf_bytes([[(72, 72, "secreto")]]), "clave")
+    with pytest.raises(PasswordError):
+        Document.open(data)
+    with pytest.raises(PasswordError):
+        Document.open(data, "mal")
+    with Document.open(data, "clave") as doc:
+        assert doc.encrypted and doc[0].text().strip() == "secreto"
+
+
+def test_open_does_not_lock_the_file(tmp_path):
+    path = tmp_path / "abierto.pdf"
+    path.write_bytes(pdf_bytes([[(72, 72, "uno")]]))
+    with Document.open(path) as doc:
+        path.write_bytes(pdf_bytes([[(72, 72, "dos")]]))  # en Windows, fallaría si estuviera abierto
+        assert doc[0].text().strip() == "uno"
+
+
+def test_saving_keeps_or_removes_the_encryption():
+    data = encrypted(pdf_bytes([[(72, 72, "texto")]]), "user", "owner", 4)
+    with Document.open(data, "user") as doc:
+        assert doc.permissions == 4
+        doc[0].set_rotation(90)
+        with pytest.raises(PasswordError):
+            Document.open(doc.to_bytes())
+        with Document.open(doc.to_bytes(), "user") as again:
+            assert again[0].rotation == 90 and again.encrypted
+        with Document.open(doc.to_bytes(decrypt=True)) as free:
+            assert not free.encrypted and free.permissions == UNRESTRICTED
+    with Document.open(data, "owner") as doc:
+        assert doc.permissions == UNRESTRICTED
+
+
+# ── Coordenadas y texto ──────────────────────────────────────────────────────
+@pytest.mark.parametrize("rotation", ROTATIONS)
+def test_view_coordinates(rotation):
+    with _doc(rotation) as doc:
+        page = doc[0]
+        assert page.rotation == rotation
+        assert tuple(page.rect) == ((0, 0, 600, 400) if rotation in (90, 270) else (0, 0, 400, 600))
+        assert page.to_page(page.to_view((10, 20, 30, 50))) == (10, 20, 30, 50)
+        word = page.words()[0][0]  # «Hola», cerca de (50, 100) en la página sin girar
+        assert 45 < word.x0 < 55 and 80 < word.y0 < 105
+        assert page.words()[0][1] == "Hola"
+        view = page.to_view(word)
+        assert view.width > view.height if rotation in (0, 180) else view.height > view.width
+
+
+def test_crop_box_moves_the_origin():
+    with _doc() as doc:
+        data = doc.to_bytes()
+    with Document.open(data) as doc:
+        with doc[0]._opened() as page:
+            page.set_cropbox(40, 0, 400, 550)  # quita 40 pt a la izquierda y 50 arriba
+        doc._meta.clear()
+        page = doc[0]
+        assert tuple(page.rect) == (0, 0, 360, 550)
+        word = page.words()[0][0]
+        assert 5 < word.x0 < 15 and 30 < word.y0 < 55
+
+
+@pytest.mark.parametrize("rotation", ROTATIONS)
+def test_text_and_words_follow_the_lines(rotation):
+    with _doc(rotation) as doc:
+        page = doc[0]
+        assert page.text().split("\n") == ["Hola mundo", "Segunda linea"]
+        with Document.open(doc.to_bytes()) as saved:  # leer el texto no cambia el giro guardado
+            assert saved[0].rotation == rotation
+        assert [(text, line) for _rect, text, line in page.words()] == [("Hola", 0), ("mundo", 0), ("Segunda", 1), ("linea", 1)]
+
+
+@pytest.mark.parametrize("rotation", ROTATIONS)
+def test_text_direction_follows_the_rotation(rotation):
+    wx, wy = _doc(rotation)[0].text_direction()
+    expected = {0: (1, 0), 90: (0, 1), 180: (-1, 0), 270: (0, -1)}[rotation]
+    assert (round(wx / max(abs(wx), abs(wy))), round(wy / max(abs(wx), abs(wy)))) == expected
+
+
+def test_render_and_clip():
+    with Document.new() as doc:
+        page = add_page(doc, 200, 100)
+        add_image(page, Rect(0, 0, 100, 100), np.full((10, 10, 3), (255, 0, 0), np.uint8))
+        assert page.render(1).shape == (100, 200, 3)
+        assert page.render(2).shape == (200, 400, 3)
+        assert page.render(1, rotation=90).shape == (200, 100, 3)
+        red = page.render(1, clip=(10, 10, 60, 50))
+        assert red.shape == (40, 50, 3) and red[20, 25].tolist() == [255, 0, 0]  # RGB, no BGR
+        assert page.render(1, clip=(120, 10, 180, 50))[20, 25].tolist() == [255, 255, 255]
+
+
+def test_images_are_found_inside_their_rectangle():
+    with Document.new() as doc:
+        page = add_page(doc, 400, 600)
+        add_image(page, Rect(50, 300, 130, 360), np.full((6, 8, 3), 90, np.uint8))
+        assert page.has_images()
+        assert [tuple(round(v) for v in r) for r in page.image_rects()] == [(50, 300, 130, 360)]
+        page.set_rotation(90)
+        assert [tuple(round(v) for v in r) for r in page.image_rects()] == [(240, 50, 300, 130)]
+        (ext, data), = page.export_images()
+        assert ext == "png" and data.startswith(b"\x89PNG")
+
+
+def test_png():
+    data = png(np.full((3, 4, 3), 7, np.uint8))
+    assert data.startswith(b"\x89PNG\r\n\x1a\n") and b"IHDR" in data and data.endswith(b"IEND\xaeB`\x82")
+    start = data.index(b"IDAT") + 4
+    raw = zlib.decompressobj().decompress(data[start:])
+    assert raw == (b"\0" + b"\x07" * 12) * 3
+
+
+# ── Páginas ──────────────────────────────────────────────────────────────────
+def test_page_operations_keep_identity_and_annotations():
+    with Document.open(pdf_bytes([[(72, 72, f"pagina {i}")] for i in range(3)])) as doc:
+        add_annot(doc[1], "Square", Rect(10, 10, 50, 50))
+        first, second, third = doc.uids
+
+        doc.move_page(0, 2)
+        assert doc.uids == [second, third, first]
+        assert [p.text().strip() for p in doc] == ["pagina 1", "pagina 2", "pagina 0"]
+        doc.move_page(2, 0)
+
+        page_ops.duplicate_page(doc, 1)
+        assert annots(doc[2]) == ["Square"] and doc[2].text().strip() == "pagina 1"
+        assert doc.uids[1] == second and doc.uids[2] not in (first, second, third)
+        doc.delete_page(2)
+
+        page_ops.insert_blank_page(doc, 0)
+        assert tuple(doc[1].rect) == tuple(doc[0].rect) and doc[1].text() == ""
+        doc.delete_page(1)
+
+        with Document.new() as copy:
+            copy.insert_pages(doc, [1], uids=[second])
+            doc.delete_page(1)
+            doc.insert_pages(copy, [0], 1, uids=copy.uids)
+        assert doc.uids == [first, second, third] and annots(doc[1]) == ["Square"]
+
+        with Document.open(doc.to_bytes()) as saved:
+            assert [p.text().strip() for p in saved] == ["pagina 0", "pagina 1", "pagina 2"]
+            saved.adopt_uids(doc)
+            assert saved.uids == doc.uids
+
+
+def test_extract_pages_makes_an_unencrypted_pdf():
+    data = encrypted(pdf_bytes([[(72, 72, "uno")], [(72, 72, "dos")]]), "clave")
+    with Document.open(data, "clave") as doc:
+        extracted = page_ops.extract_pages(doc, [1])
+    with Document.open(extracted) as out:
+        assert not out.encrypted and [p.text().strip() for p in out] == ["dos"]
+
+
+def test_threads_do_not_crash_the_engine():
+    """PDFium no admite hilos: todo pasa por un candado, también con documentos distintos."""
+    data = pdf_bytes([[(72, 72, f"pagina {i}")] for i in range(20)])
+    errors: list[BaseException] = []
+
+    def work() -> None:
+        try:
+            for _ in range(3):
+                with Document.open(data) as doc:
+                    for page in doc:
+                        assert page.text().startswith("pagina")
+                        page.render(0.2)
+        except BaseException as ex:  # noqa: BLE001 - se comprueba abajo
+            errors.append(ex)
+
+    threads = [threading.Thread(target=work) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert not errors
+
+
+# ── Texto invisible del OCR ──────────────────────────────────────────────────
+@pytest.mark.parametrize("rotation", ROTATIONS)
+def test_invisible_text_lands_on_its_rectangle(rotation):
+    with _doc(rotation) as doc:
+        page = doc[0]
+        want = Rect(40, 240, 140, 260)
+        assert page.add_invisible_text([(want, "cañón")]) == 1
+        ((rect, text),) = [(r, t) for r, t, _line in page.words() if "ca" in t]
+        assert text == "cañón"
+        got = page.to_view(rect)
+        assert abs(got.x0 - want.x0) < 5 and abs(got.x1 - want.x1) < 5 and abs(got.y0 - want.y0) < 8
+        # Es invisible: la imagen de la página no cambia.
+        with Document.open(doc.to_bytes()) as saved:
+            before = _doc(rotation)[0].render(1)
+            assert np.array_equal(saved[0].render(1), before)
+
+
+def test_invisible_text_survives_saving_and_is_removed_exactly():
+    with _doc() as doc:
+        doc[0].add_invisible_text([(Rect(40, 240, 140, 260), "reconocido")])
+        data = doc.to_bytes()
+    with Document.open(data) as doc:
+        assert "reconocido" in doc[0].text()
+        assert doc[0].remove_invisible_text() == 1
+        assert doc[0].remove_invisible_text() == 0
+        assert doc[0].text().split("\n") == ["Hola mundo", "Segunda linea"]  # lo demás sigue
+
+
+def test_ocr_words_that_cover_native_text_are_not_embedded():
+    with _doc() as doc:
+        page = doc[0]
+        native = page.to_view(page.words()[0][0])
+        assert embed_ocr_words(page, [(*native, "Repetido"), (40, 400, 100, 420, "Nueva"), (10, 10, 10, 10, "vacia")]) == 1
+        assert "Nueva" in page.text() and "Repetido" not in page.text()
+
+
+# ── Capa de texto y orden de lectura ─────────────────────────────────────────
+def test_text_layer_has_spaces_and_lines():
+    with _doc() as doc:
+        layer = build_text_layer(doc[0])
+        assert layer.text == "Hola mundo\nSegunda linea"
+        assert len(layer.chars) == len(layer.rects) == len(layer.seps)
+
+
+def test_text_layer_keeps_tall_and_short_letters_together():
+    """Las cajas de glifo de «C» y de «o» no están a la misma altura; las líneas no se parten por eso."""
+    with Document.new() as doc:
+        page = add_page(doc)
+        add_text(page, 72, 100, "Contrato con Juan Pérez, gypsy", 12)
+        assert build_text_layer(page).text == "Contrato con Juan Pérez, gypsy"
+
+
+@pytest.mark.parametrize("rotation", ROTATIONS)
+def test_text_layer_reads_rotated_pages(rotation):
+    with _doc(rotation) as doc:
+        assert build_text_layer(doc[0]).text == "Hola mundo\nSegunda linea"
+
+
+def test_page_words_merges_ocr_with_native_text():
+    with _doc() as doc:
+        words = page_words(doc[0], [(50, 300, 100, 320, "Tercera")])
+        assert "Tercera" in [w[1] for w in words]
+
+
+def _char(ch: str, x0: float, x1: float, start: bool = False) -> tuple:
+    return (Rect(x0, 100, x1, 112), ch, start)
+
+
+def test_overlapping_word_boxes_keep_stream_order():
+    """Capa «buscable»: las cajas de palabras vecinas se solapan. Ordenar carácter a carácter
+    por x0 entrelazaba las letras («GASTODSE»); con los grupos del contenido no pasa."""
+    words = [
+        _char("G", 0, 10), _char("A", 10, 20), _char("S", 20, 30), _char("T", 30, 40),
+        _char("O", 40, 50), _char("S", 58, 68), _char("D", 52, 62, True), _char("E", 62, 72),
+    ]
+    out = sort_words_clustered(words, 595, groups=[1, 1, 1, 1, 1, 1, 2, 2])
+    assert "".join(w[1] for w in out) == "GASTOSDE"
+
+
+def test_column_aware_sorter_is_also_group_ordered():
+    words = [_char("A", 0, 12), _char("B", 18, 30), _char("C", 26, 38, True), _char("D", 38, 50)]
+    out = sort_words_column_aware(words, 595, groups=[1, 1, 2, 2])
+    assert "".join(w[1] for w in out) == "ABCD"
+
+
+# ── Buscar para censurar ─────────────────────────────────────────────────────
+def _find(page, term, *, case_sensitive=False, whole_word=False, regex=False):
+    return redaction.find_in_page(page, term, case_sensitive=case_sensitive, whole_word=whole_word, regex=regex)
+
+
+def test_find_ignores_accents_and_case_and_keeps_enye():
+    with Document.open(pdf_bytes([[(72, 100, "Comité de Pérez"), (72, 120, "el año pasado")]])) as doc:
+        page = doc[0]
+        assert len(_find(page, "COMITE")) == 1 and len(_find(page, "perez")) == 1
+        assert _find(page, "ano") == []  # año no es ano
+        assert _find(page, "perez", case_sensitive=True) == [] and len(_find(page, "Perez", case_sensitive=True)) == 1
+
+
+def test_find_whole_word_and_regex():
+    with Document.open(pdf_bytes([[(72, 100, "pago pagos, pago."), (72, 120, "correo juan@correo.com")]])) as doc:
+        page = doc[0]
+        assert len(_find(page, "pago")) == 3
+        assert len(_find(page, "pago", whole_word=True)) == 2
+        assert len(_find(page, r"[\w.]+@[\w.]+", regex=True)) == 1
+        assert _find(page, "[", regex=True) == []  # patrón a medio escribir
+
+
+def test_find_phrase_split_in_two_lines_gives_one_rect_per_line():
+    with Document.open(pdf_bytes([[(72, 100, "dice Juan"), (72, 120, "Pérez y otros")]])) as doc:
+        first, second = _find(doc[0], "juan perez")
+        assert first.y1 <= second.y0 + 4 and first.x0 > second.x0
+
+
+def test_find_rect_covers_the_word():
+    with Document.open(pdf_bytes([[(72, 100, "palabra")]])) as doc:
+        (rect,) = _find(doc[0], "palabra")
+        assert rect.y0 < 95 and rect.y1 > 100  # alto de la fuente: cubre tildes y descendentes
+
+
+# ── Censurar: lo que hay debajo desaparece del archivo ───────────────────────
+SECRET = "SECRETO-123"
+
+
+def _streams(data: bytes) -> list[bytes]:
+    """Todos los streams del archivo, descomprimidos; también los que nadie referencia."""
+    found = []
+    for match in re.finditer(rb"stream\r?\n", data):
+        end = data.find(b"endstream", match.end())
+        chunk = data[match.end():end]
+        try:
+            found.append(zlib.decompressobj().decompress(chunk))
+        except zlib.error:
+            found.append(chunk)
+    return found
+
+
+def _secret_pdf() -> bytes:
+    with Document.new() as doc:
+        page = add_page(doc, 600, 800)
+        add_text(page, 72, 100, "Publico")
+        add_text(page, 72, 140, SECRET)
+        add_image(page, Rect(72, 200, 272, 300), _half_red())
+        return doc.to_bytes()
+
+
+def _half_red() -> np.ndarray:
+    image = np.zeros((100, 200, 3), np.uint8)
+    image[:, :100] = (255, 0, 0)
+    image[:, 100:] = (0, 0, 255)
+    return image
+
+
+def _redacted(rects: list[list[float]], color: str = "#000000") -> bytes:
+    marked = run_engine("mark", _secret_pdf(), {"marks": [{"page": 0, "rect": r, "color": color} for r in rects]})
+    return run_engine("redact", marked, {})
+
+
+def test_redaction_removes_the_text_from_the_file():
+    data = _redacted([[70, 125, 300, 145]])
+    with Document.open(data) as doc:
+        assert SECRET not in doc[0].text() and "Publico" in doc[0].text()
+        assert annots(doc[0]) == []  # la marca desaparece
+    assert not any(SECRET.encode() in s or b"SECRETO" in s for s in [data, *_streams(data)])
+
+
+def test_redaction_clears_the_pixels_under_the_mark():
+    data = _redacted([[72, 200, 172, 300]])  # la mitad roja de la imagen
+    with Document.open(data) as doc:
+        # La imagen sigue, pero en ella ya no hay rojo: tampoco en ningún stream del archivo.
+        image = doc[0].render(1, clip=(180, 210, 260, 290))
+        assert image[40, 40].tolist() == [0, 0, 255]  # la mitad azul sigue ahí
+    (pixels,) = [s for s in _streams(data) if len(s) == 100 * 200 * 3]  # la imagen, decodificada
+    image = np.frombuffer(pixels, np.uint8).reshape(100, 200, 3)
+    assert not ((image[..., 0] > 200) & (image[..., 2] < 50)).any()
+    assert ((image[..., 2] > 200) & (image[..., 0] < 50)).sum() == 100 * 100  # la azul, intacta
+
+
+def test_redaction_paints_the_chosen_color():
+    data = _redacted([[70, 125, 300, 145]], "#B21A1A")
+    with Document.open(data) as doc:
+        r, g, b = doc[0].render(1, clip=(100, 130, 200, 140))[5, 50]
+        assert r > 150 and g < 60 and b < 60
+
+
+@pytest.mark.parametrize("rotation", ROTATIONS)
+def test_redaction_on_rotated_pages(rotation):
+    """Las marcas van en coordenadas de la página sin girar, como en el visor."""
+    with Document.open(_secret_pdf()) as doc:
+        doc[0].set_rotation(rotation)
+        (rect,) = redaction.find_in_page(doc[0], SECRET, case_sensitive=False, whole_word=False, regex=False)
+        view = doc[0].to_view(rect)
+        data = doc.to_bytes()
+    marked = run_engine("mark", data, {"marks": [{"page": 0, "rect": list(rect), "color": "#B21A1A"}]})
+    done = run_engine("redact", marked, {})
+    with Document.open(done) as doc:
+        page = doc[0]
+        assert page.rotation == rotation and "SECRETO" not in page.text() and "Publico" in page.text()
+        image = page.render(1, clip=view)
+        r, g, b = image[image.shape[0] // 2, image.shape[1] // 2]
+        assert r > 150 and g < 60 and b < 60  # el recuadro está donde estaba el texto
+
+
+def test_redaction_keeps_the_encryption():
+    data = encrypted(_secret_pdf(), "clave")
+    marked = run_engine("mark", data, {"password": "clave", "marks": [{"page": 0, "rect": [70, 125, 300, 145], "color": "#000000"}]})
+    done = run_engine("redact", marked, {"password": "clave"})
+    with pytest.raises(PasswordError):
+        Document.open(done)
+    with Document.open(done, "clave") as doc:
+        assert SECRET not in doc[0].text()

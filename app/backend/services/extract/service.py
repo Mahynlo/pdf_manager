@@ -1,7 +1,6 @@
 """Servicio ``extract`` (Extraer): documentos, opciones y el trabajo en segundo plano.
 
-Equivale a ``src_qt/ui/tools/extractor/tab.py`` sin la interfaz. Mientras corre
-un trabajo, sus avisos llegan al frontend como eventos ``extract:*``.
+Mientras corre un trabajo, sus avisos llegan al frontend como eventos ``extract:*``.
 """
 
 from __future__ import annotations

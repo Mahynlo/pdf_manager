@@ -118,14 +118,14 @@ function plugins() {
     createPluginRegistration(SearchPluginPackage),
     createPluginRegistration(HistoryPluginPackage),
     // Las anotaciones las dibuja y edita su capa (PdfPage.svelte); los enlaces quedan bloqueados:
-    // son del documento (Python conserva los suyos al guardar, ver pdf_core/annot_transfer.py).
+    // son del documento.
     createPluginRegistration(AnnotationPluginPackage, {
       tools: ANNOTATION_TOOLS,
       colorPresets: PRESET_COLORS.map(([color]) => color),
       locked: { type: LockModeType.Include, categories: ['link'] },
     } as Parameters<typeof AnnotationPluginPackage.create>[1]),
     // Censura: las marcas pendientes son anotaciones (se revisan, se mueven, se borran y se
-    // deshacen como las demás); la censura la aplica Python (redaction.ts).
+    // deshacen como las demás); se aplican en Python con el motor (redaction.ts).
     createPluginRegistration(RedactionPluginPackage, { useAnnotationMode: true, drawBlackBoxes: true }),
     // Sellos: los estándar van dentro de la app (sin la descarga de su CDN que trae por
     // defecto); los de texto y los propios los carga stamps/library.svelte.ts.

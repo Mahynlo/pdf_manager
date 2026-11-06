@@ -2,7 +2,7 @@
 
 Interfaz en **Svelte** (`app/ui`, compilada con Vite) y backend en **Python**, unidos por pywebview
 (WebView2 en Windows). El visor dibuja los PDF con **EmbedPDF** (motor PDFium en el navegador). Es la versión que se publica desde la 0.1.29-web (en pruebas); Flet queda descartada (la 0.1.28
-fue su última versión). Las funciones se trajeron desde la versión Qt (`src_qt/`), que sirvió de referencia.
+fue su última versión). Las funciones se trajeron desde la versión Qt, ya retirada.
 
 ```
 uv run python -m app.main            # arrancar (recompila la interfaz si cambió)
@@ -16,8 +16,8 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
 | Documento | Contenido |
 |---|---|
 | [arquitectura.md](arquitectura.md) | Estructura de `app/`, comunicación JS ↔ Python, reglas y cómo migrar una herramienta |
-| [modulos-python.md](modulos-python.md) | Módulos de Python que usa la web (`src/pdf_core`), reglas y plan de retirada de Qt y Flet |
-| [paridad.md](paridad.md) | Lista función por función de la versión Qt y su estado en la web |
+| [modulos-python.md](modulos-python.md) | Módulos de Python (`src/pdf_core`), motor de PDF y reglas |
+| [paridad.md](paridad.md) | Lista función por función de la versión Qt (retirada) y su estado en la web |
 | [instalador.md](instalador.md) | Ejecutable (PyInstaller), instalador (Inno Setup), «Abrir con» e instancia única |
 | [svelte.md](svelte.md) | La interfaz en Svelte (`app/ui`): estructura, compilación y cómo escribir componentes |
 | [embedpdf.md](embedpdf.md) | Migración del visor a EmbedPDF paso a paso: plan, estado y cómo está hecho cada paso |
@@ -30,7 +30,7 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
   - Inicio fija, una pestaña por herramienta y una por PDF, menú de marca, tema claro/oscuro;
   - atajos y barra de estado;
   - aviso de cambios sin guardar al cerrar una pestaña o la ventana.
-- **Inicio**: herramientas y archivos recientes (compartidos con Flet y Qt).
+- **Inicio**: herramientas y archivos recientes.
 - **Combinar, Seguridad y Extraer**: completas, con trabajos en segundo plano, contraseñas y progreso.
 - **Ajustes y Ayuda**: tema, recientes, registro de diagnóstico, atajos y manuales.
 - **Visor de PDF** (páginas dibujadas por EmbedPDF, ver [embedpdf.md](embedpdf.md)):

@@ -1,4 +1,4 @@
-// Iconos vectoriales (assets/icons.json, el mismo juego que la versión Qt). En los componentes
+// Iconos vectoriales (assets/icons.json). En los componentes
 // se usa <Icon name="…">; `ic()` es para el código imperativo del lienzo del visor.
 //
 //   button.append(ic('save'));

@@ -548,6 +548,16 @@ export class Annotations {
     await this.scope()?.commit().toPromise();
   }
 
+  /** Copia para imprimir. La de un PDF cifrado la da Python sin cifrar, o el visor de PDF del
+   * diálogo pediría la contraseña. */
+  async printCopy(): Promise<ArrayBuffer> {
+    if (!this.canvas.password) return this.exportCopy();
+    await this.sync();
+    const response = await fetch(await call<string>('viewer.print_url', this.docId));
+    if (!response.ok) throw new Error(TX.syncError(response.status));
+    return response.arrayBuffer();
+  }
+
   /** Copia del PDF de EmbedPDF con las anotaciones al día (para Python y para imprimir). */
   async exportCopy(): Promise<ArrayBuffer> {
     await this.commit(); // lo pendiente, ya escrito en el PDF de EmbedPDF
@@ -557,11 +567,12 @@ export class Annotations {
   // ── Python ─────────────────────────────────────────────────────────────
   /**
    * Pasa a Python las anotaciones si cambiaron desde la última vez: sube la copia del
-   * documento de EmbedPDF y Python toma de ella las anotaciones. Llamarlo antes de todo lo
+   * documento de EmbedPDF, que pasa a ser el documento en Python. Llamarlo antes de todo lo
    * que necesita el documento al día en Python. Resuelve `{ modified }` o null si no hacía falta.
    */
   async sync(): Promise<{ modified: boolean } | null> {
     this.canvas.finishEditing(); // el texto que se está escribiendo también cuenta
+    await this.canvas.loading; // la copia tiene que ser de la versión que tiene Python
     const documentId: string | null = this.canvas.shown;
     const version = this.version;
     if (!documentId || version === this.synced) return null;

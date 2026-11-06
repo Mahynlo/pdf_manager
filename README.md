@@ -6,16 +6,16 @@ extracción por palabras clave, combinación y seguridad.
 ![Visor PDF](docs/web/imagenes/visor.png)
 
 > **Versión web 0.1.29-web (en pruebas).** La interfaz ahora usa tecnología web (Svelte) dentro de
-> una ventana de escritorio (pywebview + WebView2), con el backend en Python. La versión **Flet** se
-> descarta: la 0.1.28 fue la última y queda respaldada en la rama `Flet`. Su código sigue en `src/`
-> solo por compatibilidad y se retirará más adelante. Ver [docs/README.md](docs/README.md).
+> una ventana de escritorio (pywebview + WebView2), con el backend en Python. Todo el trabajo con
+> PDF usa un solo motor, PDFium (licencia Apache/BSD). La versión **Flet** se retiró: la 0.1.28 fue
+> la última y queda en la rama `Flet`. Ver [docs/README.md](docs/README.md).
 
 ## Arquitectura
 
 ```
 app/            aplicación: ventana (pywebview), arranque y servicios Python que llama la interfaz
 app/ui/         interfaz en Svelte (compilada con Vite); el visor dibuja los PDF con EmbedPDF (PDFium)
-src/pdf_core/   lógica de PDF sin interfaz (PyMuPDF, OCR, censura, combinar, seguridad...)
+src/pdf_core/   lógica de PDF sin interfaz (PDFium, OCR, censura, combinar, seguridad...)
 installer/web/  ejecutable (PyInstaller) e instalador (Inno Setup)
 docs/web/       documentación de la versión web
 ```
@@ -145,28 +145,12 @@ etiqueta `v*-web` (por ejemplo `v0.1.29-web`). Detalle en
 [docs/web/instalador.md](docs/web/instalador.md).
 
 
-## Seguir usando la versión Flet
+## Versión Flet
 
-> ⚠️ **No se recomienda.** La versión Flet ya no recibirá cambios ni versiones nuevas; se mantiene
-> solo por compatibilidad y más adelante se retirará de esta rama. Para uso normal, usa la versión web.
+Se retiró de esta rama. Sigue disponible:
 
-Si aun así la necesitas, sigue disponible:
-
-- **En esta rama:** su código sigue en `src/` (con la lógica compartida de `src/pdf_core/`). Se
-  arranca y se compila igual que antes:
-
-  ```bash
-  uv sync
-  uv run flet run          # arrancar
-  .\build.ps1              # exe + «Abrir con» + instalador (PowerShell, necesita Inno Setup)
-  ```
-
-  Ojo: aquí comparte `pdf_core` con la versión web, que ha cambiado desde la 0.1.28 (por ejemplo,
-  los modelos de OCR), así que puede comportarse distinto que la versión publicada.
 - **Instalador:** `v0.1.28`, la última versión de Flet, en
   [Releases](https://github.com/Mahynlo/pdf_manager/releases/tag/v0.1.28). Se puede instalar junto a
   la versión web, porque cada una tiene su propia carpeta e instalación.
 - **Código tal como quedó en la 0.1.28:** rama [`Flet`](https://github.com/Mahynlo/pdf_manager/tree/Flet)
   (`git clone -b Flet https://github.com/Mahynlo/pdf_manager.git`).
-
-Su documentación está en [docs/flet/](docs/flet/README.md).

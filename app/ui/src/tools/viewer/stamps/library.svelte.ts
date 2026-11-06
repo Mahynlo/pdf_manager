@@ -5,7 +5,7 @@
 //
 // - **Estándar** (standard.ts): Aprobado, Borrador, Confidencial… de solo lectura.
 // - **De texto:** los sellos rápidos (CONFIDENCIAL, APROBADO…) y las leyendas guardadas del
-//   servicio `legends`, el almacén que comparten Qt y Flet. En la página son texto libre; su
+//   servicio `legends`, su almacén. En la página son texto libre; su
 //   miniatura se genera al vuelo (stamp-pdf.ts) en una biblioteca que solo vive en memoria.
 // - **Propios:** los que crea el usuario desde una imagen (PNG, JPG, SVG…) o desde anotaciones
 //   de la página. Python guarda la biblioteca (servicio `stamps`).

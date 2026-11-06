@@ -1,5 +1,5 @@
-// Lienzo del visor: las páginas con zoom, modos de vista y modo noche (equivale a
-// src_qt/ui/viewer/canvas/view.py). Desde el paso 2 de docs/web/embedpdf.md las páginas,
+// Lienzo del visor: las páginas con zoom, modos de vista y modo noche.
+// Desde el paso 2 de docs/web/embedpdf.md las páginas,
 // el scroll, el zoom y el mosaico son de EmbedPDF (embed.ts, PdfPages.svelte); esta
 // clase da al resto del visor la misma API que antes. El registro de EmbedPDF es uno para
 // toda la app: cada visor abre en él su documento y solo atiende los avisos de ese documento.
@@ -166,6 +166,7 @@ export class PageCanvas {
   registry: PluginRegistry | null = null;
   shown: string | null = null; // id en EmbedPDF del documento a la vista
   shownKeys: string[] | null = null; // claves de página de esa versión
+  password: string | null = null; // la de esa versión, si está cifrada
   ready = false; // EmbedPDF ya colocó sus páginas
   target = { index: 0, atBottom: false }; // adónde ir en cuanto se pueda
   mounted = new Map<number, HTMLElement>(); // página -> capa enganchada a una página montada
@@ -616,14 +617,18 @@ export class PageCanvas {
   /** Abre en EmbedPDF la versión del documento que tiene Python y la pone a la vista. */
   async _load(): Promise<void> {
     const seq = ++this.seq;
-    const { url, keys } = await call<{ url: string; keys: string[] }>('viewer.document_url', this.docId);
+    const { url, keys, password } = await call<{ url: string; keys: string[]; password: string | null }>('viewer.document_url', this.docId);
     const response = await fetch(url);
     if (!response.ok) throw new Error(t.viewer.canvas.downloadError(response.status));
     const buffer = await response.arrayBuffer();
     if (this.closed || seq !== this.seq) return; // llegó otra versión más nueva
+    this.password = password;
     const docs = this._plugin<DocumentManagerPlugin>('document-manager').provides();
     const { documentId, task } = await docs.openDocumentBuffer({
       buffer, name: `documento-${this.docId}.pdf`, documentId: `viewer-${this.docId}-${seq}`, autoActivate: false,
+      password: password ?? undefined,
+      // Los permisos del PDF los comprueba Python al guardar, como con cualquier otro.
+      permissions: { enforceDocumentPermissions: false },
     }).toPromise();
     await task.toPromise();
     if (this.closed || seq !== this.seq) {

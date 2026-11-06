@@ -1,7 +1,6 @@
 name: Build & Package Web Installer
 
 # Versión web (app/: Svelte + pywebview/WebView2), ver docs/web/instalador.md.
-# Convive con la versión Flet (build.yml): otro instalador, otra carpeta y otro AppId.
 #
 # Dispara el workflow:
 #   - Al hacer push de un tag vX.Y.Z-web → compila + crea Release (prerelease) en GitHub

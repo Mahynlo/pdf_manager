@@ -53,3 +53,17 @@ class Host(Protocol):
 
     def uploaded(self, url: str) -> bytes | None:
         """Lo subido a ``url`` (de :meth:`upload_url`); ``None`` si no llegó o caducó."""
+
+    def run_engine(self, task: str, data: bytes, args: dict[str, Any]) -> bytes:
+        """Hace en la ventana, con el motor de EmbedPDF, lo que no sabe hacer el PDFium de Python.
+
+        ``data`` es un PDF y el resultado, ese PDF cambiado. Tareas (``lib/engine-tasks.ts``):
+        ``redact`` (aplica las marcas de censura), ``encrypt`` (``user``, ``owner``,
+        ``permissions``) y ``outline`` (``items``). ``password`` abre ``data`` si está cifrado.
+        Bloquea hasta que termina: no llamarlo desde el hilo de la ventana.
+
+        :raises RuntimeError: si la tarea falla o no termina.
+        """
+
+    def engine_done(self, task_id: int, error: str | None) -> None:
+        """La ventana terminó la tarea ``task_id`` de :meth:`run_engine`."""

@@ -2,7 +2,7 @@
 
 Pipeline
 --------
-1. build_from_pages()  — split pymupdf4llm page chunks into smaller Chunk objects.
+1. build_from_pages()  — split page chunks into smaller Chunk objects.
 2. embed_all()         — embed every chunk via a provider embedding function.
 3. retrieve()          — cosine similarity search; returns top-K + adjacent neighbors.
 4. build_context()     — format selected chunks into a readable context block.

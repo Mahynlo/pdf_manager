@@ -282,12 +282,11 @@ tirador de giro de EmbedPDF), y encima mientras se escribe un texto libre.
 - EmbedPDF las edita en su copia del documento. Antes de lo que necesita el documento al día en
   Python (guardar, «Guardar como», exportar una página, cambiar páginas, censurar, OCR),
   `annotations.ts` (`sync`) sube la copia (`saveAsCopy`) por el servidor local
-  (`ByteServer.expect`, `POST`, `Host.upload_url`) y `viewer.sync_annotations` toma de ella solo las
-  anotaciones (`pdf_core/annot_transfer.py`): se injertan como objetos PDF, sin perder tipos ni
-  apariencias. El resto del documento (contenido, cifrado) sigue siendo el de Python, y el texto de
-  OCR que la copia lleva como texto invisible no pasa al archivo.
-- Se quedan los formularios y los enlaces del documento: el visor no los edita (los enlaces están
-  bloqueados en EmbedPDF) y sus destinos apuntan a páginas.
+  (`ByteServer.expect`, `POST`, `Host.upload_url`) y con `viewer.sync_annotations` esa copia pasa a
+  ser el documento en Python. Espera antes a que termine de cargar la última versión
+  (`canvas.loading`): una copia anterior desharía lo último que hizo Python. El texto de OCR que
+  lleva como texto invisible se quita (ver «Un solo motor»), así no pasa al archivo.
+- Los enlaces siguen bloqueados en EmbedPDF: son del documento.
 - `viewer.annotations_changed` avisa del primer cambio: así Python sabe que hay cambios sin guardar
   (aviso al cerrar la pestaña o la app).
 - Tras una operación de página, censura u OCR se reabre la versión de Python: el historial de
@@ -345,7 +344,7 @@ estándar, los propios y las firmas escritas o desde imagen son anotaciones de s
 dibujadas, de tinta) con su dibujo: un PDF de una página por sello, que EmbedPDF pega como
 apariencia (`/AP`). Los **sellos de texto son texto libre** (`Annotations.textStamp`): se editan
 como cualquier texto libre (doble clic) y se les cambia el color y el tamaño en la barra de
-propiedades. Python guarda todo tal cual, como las demás anotaciones (`pdf_core/annot_transfer.py`).
+propiedades. Se guarda tal cual, como las demás anotaciones.
 
 **Bibliotecas** (`stamps/library.svelte.ts`, una para toda la app, como el registro):
 
@@ -439,11 +438,13 @@ anotaciones. Antes, la vista previa era una capa nuestra que no se podía tocar.
   junta las órdenes que EmbedPDF apunta en su historial (una por anotación) en una sola.
 - El color del panel es el relleno de todas las marcas (`/IC`).
 - **Aplicar**: las marcas pasan a Python con las demás anotaciones (`sync`) y `redact.apply` →
-  `ViewerService.apply_redaction_marks` las aplica con PyMuPDF (`pdf_core.redaction.apply_marks`):
-  se borra lo de debajo, también las palabras de OCR, y la página cambia de clave. Python aplica y
-  no PDFium porque `sync` solo pasa anotaciones: el contenido borrado por PDFium no llegaría.
-- Se quita `/RO` de cada marca antes de aplicarla (apariencia que escribe EmbedPDF; MuPDF la ignora
-  y avisaba por consola).
+  `ViewerService.apply_redaction_marks` las aplica con el motor de EmbedPDF (`run_engine('redact')`,
+  `applyAllRedactions`): borra lo de debajo (texto, también dentro de Form XObjects; píxeles de las
+  imágenes; dibujos), pinta el recuadro (`/RO`) y quita la marca. Python quita también las palabras de
+  OCR que tapa y la página cambia de clave.
+- **Comprobado** (`tests/test_pdf.py`, con el motor real): en el archivo guardado no queda el texto en
+  ningún stream, en la imagen no queda ni un píxel de la zona tapada (fuera de ella sigue intacta), el
+  recuadro sale del color elegido y en su sitio en los cuatro giros, y un PDF cifrado sigue cifrado.
 
 **Conservado:** términos, patrones ⚡, Aa (mayúsculas), W (palabra completa), buscar en OCR,
 perfiles (guardan los términos del panel, no las selecciones ni las áreas), colores, censura desde
@@ -498,6 +499,53 @@ con el PDF de 120 páginas.
 
 **Retirado:** `PrintDialog.svelte`, `canvas.pageImages`, la capa `#print-root` y sus estilos de
 impresión, y `viewer.print_selection` (Python; `pdf_core.page_ranges` sigue para el OCR por lotes).
+
+## Un solo motor
+
+Todo usa PDFium: el de EmbedPDF en la ventana y `pypdfium2` en Python (`pdf_core/pdf.py`). Antes Python
+usaba PyMuPDF, con licencia AGPL, y había dos motores. Se retiró en la 0.1.29-web.
+
+**Reparto:**
+- **Python tiene el documento** (`entry.doc`, un `pdf_core.pdf.Document`): cambia páginas, extrae texto,
+  dibuja para el OCR, guarda. Se lee a memoria: así se puede sobrescribir el archivo abierto.
+- **EmbedPDF edita las anotaciones** en su copia y, cuando hace falta, esa copia pasa a ser el documento
+  (`viewer.sync_annotations`). No hay que copiar anotaciones entre dos documentos: es el mismo archivo.
+- **Lo que el PDFium normal no sabe hacer** lo hace el de EmbedPDF, que tiene funciones propias:
+
+  | Tarea (`lib/engine-tasks.ts`) | Quién la pide | Función de EmbedPDF |
+  |---|---|---|
+  | `redact` | `viewer.apply_redaction_marks` | `applyAllRedactions` |
+  | `encrypt` | `security.protect` | `setDocumentEncryption` (AES-256, R6) |
+  | `outline` | `merge.merge` (marcadores) | `setBookmarks` |
+
+  `Host.run_engine(tarea, pdf, args)` comparte el PDF por el servidor local, emite `engine:task` y espera
+  a que la ventana suba el resultado y llame a `app.engine_done`. La ventana abre un documento propio
+  en el motor, sin tocar los del visor.
+
+**Identidad de las páginas.** PDFium no da el número de objeto de una página, así que `Document.uids`
+lleva un identificador por página que siguen mover, borrar y restaurar. La clave de página es
+`id:rotación:revisión`, y sobrevive a que la copia del visor sustituya al documento (`adopt_uids`).
+
+**PDF cifrados.** El visor abre el PDF cifrado con su contraseña (`document_url` la devuelve), y por eso
+su copia conserva el cifrado y las dos contraseñas sin conocer la de propietario. Los permisos no se
+aplican en el visor (`enforceDocumentPermissions: false`): los comprueba Python al guardar. Para imprimir,
+la copia la da Python sin cifrar (`viewer.print_url`), o el diálogo pediría la contraseña. Un PDF
+descifrado por PDFium (esa copia y «Desbloquear») ya no está cifrado, pero conserva sin usar el
+diccionario de cifrado antiguo: buscar el texto `/Encrypt` en el archivo da un falso positivo.
+
+**Texto del OCR.** Las palabras reconocidas se escriben como texto invisible en la copia que recibe el
+visor, con la marca de contenido `ExtraerPDFsOCR` (`Page.add_invisible_text`). Al volver la copia se
+quitan por esa marca (`remove_invisible_text`), así el texto reconocido no pasa al archivo.
+
+**Diferencias con PDFium que importan:**
+- Las cajas de los caracteres pueden ser las del glifo o las holgadas, con la altura de la fuente
+  (`Char.rect` y `Char.box`). Para buscar, censurar y ordenar se usan las holgadas: con las del glifo las
+  letras altas y bajas de una línea quedan a distinta altura y el orden de lectura las separa.
+- PDFium ordena el texto de una página girada como se ve; `Page.chars` lo lee con el giro a cero para
+  que se lea en su sentido original.
+- Las marcas y anotaciones van en coordenadas de la página sin girar porque la app abre los documentos
+  con `normalizeRotation` (también en `engine-tasks.ts`).
+- PDFium guarda el archivo entero pero no recomprime los streams: «Optimizar PDF» desapareció de Unir.
 
 ## Rendimiento y memoria
 

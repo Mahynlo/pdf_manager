@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-import recent_files as rf
+from pdf_core import recent_files as rf
 
 
 @pytest.fixture

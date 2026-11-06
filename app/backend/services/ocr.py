@@ -1,5 +1,4 @@
-"""Servicio ``ocr``: reconocimiento de texto y orientación en el visor (equivale a
-``ocr_panel.py`` y ``ocr_worker.py`` en Qt).
+"""Servicio ``ocr``: reconocimiento de texto y orientación en el visor.
 
 Trabaja sobre los documentos abiertos del servicio ``viewer``. Las palabras
 reconocidas se guardan en el documento abierto (``ViewerService.set_ocr_words``) y
@@ -18,13 +17,12 @@ import threading
 from pathlib import Path
 from typing import Any
 
-import fitz
-
 from app import PROJECT_ROOT
 from app.backend.host import Host
 from app.backend.rpc import UserError, exposed
 from app.backend.services.viewer import ViewerService
 from pdf_core.page_ranges import select_pages
+from pdf_core.pdf import Page, Rect
 from pdf_core.text_layer import words_text
 
 log = logging.getLogger(__name__)
@@ -34,8 +32,8 @@ PAGE_KINDS = {"native": "Digital", "scanned": "Escaneado", "hybrid": "Híbrido"}
 MODE_LABELS = {"Hibrido": "Híbrido"}
 
 
-def _rect(r: fitz.Rect) -> list[float]:
-    return [round(v, 2) for v in (r.x0, r.y0, r.x1, r.y1)]
+def _rect(r: Rect) -> list[float]:
+    return [round(v, 2) for v in r]
 
 
 class OcrService:
@@ -64,8 +62,7 @@ class OcrService:
             if ocr:
                 boxes = [[round(v, 2) for v in w[:4]] for w in ocr]
             else:
-                rot = page.rotation_matrix
-                boxes = [_rect(fitz.Rect(w[:4]) * rot) for w in page.get_text("words")]
+                boxes = [_rect(page.to_view(rect)) for rect, _text, _line in page.words()]
             return {
                 "page": index,
                 "text": self._viewer.text_of(entry, page).text,
@@ -101,7 +98,7 @@ class OcrService:
         """OCR del rectángulo ``rect`` (puntos de la página vista); sus palabras se suman a las de la página."""
         with self._viewer.document(doc_id) as entry:
             key = self._viewer.page_key(entry, self._viewer.page(entry, index))
-            prepared = self.processor.prepare_area(entry.doc, index, fitz.Rect(rect))
+            prepared = self.processor.prepare_area(entry.doc, index, Rect(*rect))
         result = self._recognize(prepared)
         words = [(*_rect(s.bbox), s.text) for s in result.segments]
         with self._viewer.document(doc_id) as entry:
@@ -129,7 +126,7 @@ class OcrService:
             finally:
                 self._schedule_release()
 
-    def _current_page(self, entry: Any, index: int, key: str) -> fitz.Page:
+    def _current_page(self, entry: Any, index: int, key: str) -> Page:
         page = self._viewer.page(entry, index)
         if self._viewer.page_key(entry, page) != key:
             raise UserError("La página cambió mientras se reconocía su texto.", "stale")

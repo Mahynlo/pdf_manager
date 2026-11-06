@@ -5,7 +5,6 @@ Covers:
   - score_orientation_fast(): pixel-heuristic detection for scanned pages
   - probe_orientation(): dispatch between native / scanned paths
   - page_kind() / get_doc_kind(): document classification
-  - rotation_matrix linear-part math (the (p - origin) pattern)
   - set_rotation() arithmetic
 
 No test here loads the MobileNetV3 ML model (score_orientation_classifier).
@@ -14,10 +13,10 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import fitz
+from pdfkit import add_page, add_text
 
-from pdf_viewer.ocr.processor import OCRProcessor
-
+from pdf_core.ocr import OCRProcessor
+from pdf_core.pdf import Document
 
 # ─────────────────────────────────────── helpers
 
@@ -26,22 +25,15 @@ def _proc() -> OCRProcessor:
     return OCRProcessor(workspace_root=".")
 
 
-def _native_doc(n_lines: int = 3, rotation: int = 0) -> fitz.Document:
-    """Return an open fitz.Document with one page, native text, and /Rotate=rotation."""
-    doc = fitz.open()
-    page = doc.new_page(width=595, height=842)
+def _native_doc(n_lines: int = 3, rotation: int = 0) -> Document:
+    """Un documento de una página con texto nativo y /Rotate=rotation."""
+    doc = Document.new()
+    page = add_page(doc)
     for i in range(n_lines):
-        page.insert_text((72, 80 + i * 40), f"Texto de prueba línea {i + 1}", fontsize=12)
+        add_text(page, 72, 80 + i * 40, f"Texto de prueba línea {i + 1}", 12)
     if rotation:
         page.set_rotation(rotation)
     return doc
-
-
-def _apply_linear(rm: fitz.Matrix, dx: float, dy: float) -> tuple[float, float]:
-    """Apply only the rotational part of an affine matrix (cancels translation)."""
-    origin = fitz.Point(0.0, 0.0) * rm
-    p = fitz.Point(dx, dy) * rm
-    return p.x - origin.x, p.y - origin.y
 
 
 # ──────────────────────────────────────────── detect_orientation_native
@@ -85,8 +77,8 @@ class TestDetectOrientationNative:
             doc.close()
 
     def test_empty_page_returns_zero(self):
-        doc = fitz.open()
-        doc.new_page(width=595, height=842)
+        doc = Document.new()
+        add_page(doc)
         try:
             assert OCRProcessor.detect_orientation_native(doc[0]) == 0
         finally:
@@ -98,10 +90,10 @@ class TestDetectOrientationNative:
         The old Y-position / 65%-threshold method failed here;
         the direction-vector method should not.
         """
-        doc = fitz.open()
-        page = doc.new_page(width=595, height=842)
+        doc = Document.new()
+        page = add_page(doc)
         for i in range(20):
-            page.insert_text((72, 35 + i * 38), f"Línea {i + 1} con bastante texto de relleno", fontsize=11)
+            add_text(page, 72, 35 + i * 38, f"Línea {i + 1} con bastante texto de relleno", 11)
         page.set_rotation(180)
         try:
             assert OCRProcessor.detect_orientation_native(doc[0]) == 180
@@ -123,14 +115,13 @@ class TestDetectOrientationNative:
 
     def test_pages_evaluated_independently(self):
         """Each page in a mixed document is evaluated on its own."""
-        doc = fitz.open()
+        doc = Document.new()
         # Page 0: correct
-        p0 = doc.new_page(width=595, height=842)
-        p0.insert_text((72, 100), "Página correcta sin rotación", fontsize=12)
+        add_text(add_page(doc), 72, 100, "Página correcta sin rotación", 12)
         # Page 1: inverted
-        p1 = doc.new_page(width=595, height=842)
+        p1 = add_page(doc)
         for i in range(5):
-            p1.insert_text((72, 80 + i * 40), f"Página invertida línea {i}", fontsize=12)
+            add_text(p1, 72, 80 + i * 40, f"Página invertida línea {i}", 12)
         p1.set_rotation(180)
         try:
             assert OCRProcessor.detect_orientation_native(doc[0]) == 0
@@ -140,82 +131,12 @@ class TestDetectOrientationNative:
 
     def test_single_line_of_text(self):
         """A page with only one line of text still returns the correct angle."""
-        doc = fitz.open()
-        page = doc.new_page(width=595, height=842)
-        page.insert_text((72, 100), "Una sola línea", fontsize=14)
+        doc = Document.new()
+        page = add_page(doc)
+        add_text(page, 72, 100, "Una sola línea", 14)
         page.set_rotation(180)
         try:
             assert OCRProcessor.detect_orientation_native(doc[0]) == 180
-        finally:
-            doc.close()
-
-
-# ──────────────────────── rotation_matrix linear-part math
-
-
-class TestRotationMatrixLinearPart:
-    """Validate the (p - origin) pattern that extracts pure rotation from an affine matrix.
-
-    This is the fix for the original bug where fitz.Point(dx, dy) * rotation_matrix
-    included the page translation (e, f), making a rightward (1,0) vector appear as
-    a large positive point like (594, 842) for /Rotate 180.
-    """
-
-    def test_rotation_0_is_identity(self):
-        doc = _native_doc(rotation=0)
-        try:
-            vx, vy = _apply_linear(doc[0].rotation_matrix, 1.0, 0.0)
-            assert abs(vx - 1.0) < 1e-6 and abs(vy) < 1e-6
-        finally:
-            doc.close()
-
-    def test_rotation_180_flips_direction(self):
-        """For /Rotate 180, direction (1, 0) becomes (-1, 0) in display space."""
-        doc = _native_doc(rotation=180)
-        try:
-            vx, vy = _apply_linear(doc[0].rotation_matrix, 1.0, 0.0)
-            assert abs(vx - (-1.0)) < 1e-6 and abs(vy) < 1e-6
-        finally:
-            doc.close()
-
-    def test_rotation_90_wy_is_positive(self):
-        """For /Rotate 90 with portrait text (1,0), wy > 0 → algorithm returns 270°."""
-        doc = _native_doc(rotation=90)
-        try:
-            vx, vy = _apply_linear(doc[0].rotation_matrix, 1.0, 0.0)
-            assert vy > 0, f"Expected vy > 0 for /Rotate 90, got ({vx:.4f}, {vy:.4f})"
-        finally:
-            doc.close()
-
-    def test_rotation_270_wy_is_negative(self):
-        """For /Rotate 270 with portrait text (1,0), wy < 0 → algorithm returns 90°."""
-        doc = _native_doc(rotation=270)
-        try:
-            vx, vy = _apply_linear(doc[0].rotation_matrix, 1.0, 0.0)
-            assert vy < 0, f"Expected vy < 0 for /Rotate 270, got ({vx:.4f}, {vy:.4f})"
-        finally:
-            doc.close()
-
-    def test_naive_multiply_wrong_for_180(self):
-        """Without (p - origin), the result for /Rotate 180 is wrong (the original bug).
-
-        fitz.Point(1, 0) * rotation_matrix_180 gives something like (W-1, H) —
-        both components are large positive — not the direction (-1, 0) we need.
-        """
-        doc = _native_doc(rotation=180)
-        try:
-            rm = doc[0].rotation_matrix
-            naive = fitz.Point(1.0, 0.0) * rm
-            # The naive result must NOT look like a leftward direction:
-            # it includes the page translation so both coords are positive/large.
-            assert naive.x > 0 or naive.y > 0, (
-                "Naive multiply for 180° should yield a large positive result "
-                "due to translation, not (-1, 0)"
-            )
-            # But the corrected version IS (-1, 0):
-            origin = fitz.Point(0.0, 0.0) * rm
-            vx = naive.x - origin.x
-            assert abs(vx - (-1.0)) < 1e-6
         finally:
             doc.close()
 
@@ -280,8 +201,8 @@ class TestProbeOrientation:
             doc.close()
 
     def test_empty_page_returns_none_angle(self):
-        doc = fitz.open()
-        doc.new_page(width=595, height=842)
+        doc = Document.new()
+        add_page(doc)
         try:
             img, native_angle = _proc().probe_orientation(doc, 0)
             assert native_angle is None
@@ -324,18 +245,17 @@ class TestDocumentClassification:
             doc.close()
 
     def test_empty_page_is_scanned(self):
-        doc = fitz.open()
-        doc.new_page(width=595, height=842)
+        doc = Document.new()
+        add_page(doc)
         try:
             assert _proc().page_kind(doc[0]) == "scanned"
         finally:
             doc.close()
 
     def test_get_doc_kind_native_document(self):
-        doc = fitz.open()
+        doc = Document.new()
         for _ in range(3):
-            p = doc.new_page(width=595, height=842)
-            p.insert_text((72, 100), "Texto nativo", fontsize=12)
+            add_text(add_page(doc), 72, 100, "Texto nativo", 12)
         try:
             assert _proc().get_doc_kind(doc) == "native"
         finally:
@@ -349,8 +269,8 @@ class TestDocumentClassification:
             doc.close()
 
     def test_page_needs_ocr_without_text_is_true(self):
-        doc = fitz.open()
-        doc.new_page(width=595, height=842)
+        doc = Document.new()
+        add_page(doc)
         try:
             assert _proc().page_needs_ocr(doc[0]) is True
         finally:

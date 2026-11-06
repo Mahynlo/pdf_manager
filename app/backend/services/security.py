@@ -5,6 +5,7 @@ Envuelve ``pdf_core.security``. No guarda estado: el frontend envía la ruta en 
 
 from __future__ import annotations
 
+import secrets
 import shutil
 from pathlib import Path
 from typing import Any
@@ -141,10 +142,15 @@ class SecurityService:
         if not dest:
             return None
         allowed = {key: bool(permissions.get(key)) for key, _ in PERMISSIONS}
+        args = {
+            "user": user_password,
+            # Sin contraseña de propietario, una al azar: vacía, cualquiera quitaría las restricciones.
+            "owner": owner_password or secrets.token_urlsafe(24),
+            "permissions": PDFSecurityManager.permission_mask(**allowed),
+        }
         try:
-            PDFSecurityManager.protect_pdf_with_permissions(
-                path, dest, user_password=user_password, owner_password=owner_password or None, **allowed
-            )
-        except ValueError as ex:
-            raise UserError(str(ex), "protect_failed") from ex
+            data = self._host.run_engine("encrypt", Path(path).read_bytes(), args)
+            Path(dest).write_bytes(data)
+        except (OSError, RuntimeError) as ex:
+            raise UserError(f"Error al proteger PDF: {ex}", "protect_failed") from ex
         return dest

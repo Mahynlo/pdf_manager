@@ -8,7 +8,7 @@ guardan, para que sigan ahí al volver a abrir la app:
 - **Firmas:** las que el usuario decidió guardar, en el formato de ``serializeEntries`` de
   EmbedPDF (``signatures.json``: trazos o imagen en base64). Se quedan en este equipo.
 
-Los sellos de texto (leyendas) siguen en el servicio ``legends``, compartido con Qt.
+Los sellos de texto (leyendas) siguen en el servicio ``legends``.
 """
 
 from __future__ import annotations

@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 
-import fitz
 import numpy as np
 
 from pdf_core.ocr.paddle import OrientationClassifier, TextRecognizer
+from pdf_core.pdf import Document, Page, Rect
 
 _SCALE_FOR_OCR = 2.0
 _MAX_OCR_PX = 2000  # cap longest edge to avoid huge pixmaps on large pages
@@ -23,7 +23,7 @@ class OCRSegment:
     """
     text: str
     source: str  # native | ocr
-    bbox: fitz.Rect
+    bbox: Rect
 
 
 @dataclass
@@ -34,7 +34,7 @@ class OCRDetection:
     text: str
     score: float
     source: str  # ocr
-    bbox: fitz.Rect
+    bbox: Rect
 
 
 @dataclass
@@ -56,7 +56,7 @@ class PreparedPage:
     """Fase 1 del OCR de una página: clasificación + texto nativo + regiones ya
     RASTERIZADAS, sin inferencia.
 
-    Es todo lo que necesita tocar el ``fitz.Document``: el llamador la produce
+    Es todo lo que necesita tocar el documento: el llamador la produce
     bajo su lock de documento (``prepare_page``) y corre la inferencia —lo
     lento— FUERA del lock (``recognize_page``), de modo que el render/scroll
     del visor no se quede esperando el lock durante los segundos que tarda el
@@ -65,7 +65,7 @@ class PreparedPage:
     page_kind: str
     doc_kind: str
     native_segments: list[OCRSegment]
-    regions: list[tuple[fitz.Rect, float, np.ndarray]]   # (rect, scale, img)
+    regions: list[tuple[Rect, float, np.ndarray]]   # (rect, scale, img)
     start: float   # perf_counter() al iniciar, para el tiempo total reportado
 
 
@@ -107,51 +107,22 @@ class OCRProcessor:
         self._orientation_predictor = None
 
     @staticmethod
-    def detect_orientation_native(page: fitz.Page) -> int:
-        """Detecta la orientación de una página nativa usando vectores de dirección.
+    def detect_orientation_native(page: Page) -> int:
+        """Detecta la orientación de una página nativa por el sentido de su texto.
 
-        Estrategia: para cada línea de texto extrae su vector ``dir`` (espacio de
-        contenido/pre-rotación) y lo lleva al espacio de pantalla multiplicando por
-        ``page.rotation_matrix``.  Si la dirección dominante no es (1, 0) (texto
-        fluyendo de izquierda a derecha), devuelve el ángulo de corrección necesario.
+        Si el sentido dominante en la vista no es (1, 0) (de izquierda a derecha), devuelve el
+        ángulo de corrección. Cada carácter cuenta igual, así los titulares cortos no
+        distorsionan las páginas con mucho cuerpo de texto. Los cuatro casos:
 
-        Ponderación: cada línea contribuye proporcionalmente a su número de
-        caracteres, de modo que los titulares cortos no distorsionen páginas
-        con mucho cuerpo de texto.
-
-        Cubre los cuatro casos:
-          - display_dir ≈ ( 1,  0): sin corrección (0°)
-          - display_dir ≈ (-1,  0): corrección 180°  (texto invertido)
-          - display_dir ≈ ( 0, -1): corrección  90°  (texto sube en pantalla)
-          - display_dir ≈ ( 0, +1): corrección 270°  (texto baja en pantalla)
-
-        Ventaja sobre el enfoque de posición Y anterior: funciona aunque el texto
-        ocupe toda la página (sin depender de un umbral de posición), y detecta
-        también rotaciones de 90°/270°.
+          - ( 1,  0): sin corrección (0°)
+          - (-1,  0): corrección 180°  (texto invertido)
+          - ( 0, -1): corrección  90°  (texto sube en pantalla)
+          - ( 0, +1): corrección 270°  (texto baja en pantalla)
         """
         try:
-            d = page.get_text("dict", flags=0)
+            wx, wy = page.text_direction()
         except Exception:
             return 0
-
-        rm = page.rotation_matrix
-        # Parte lineal (solo rotación, sin traslación): p1 - p0 cancela e,f.
-        # Mismo patrón que _screen_delta_to_page() en annotations.py.
-        origin = fitz.Point(0.0, 0.0) * rm
-        wx, wy = 0.0, 0.0
-
-        for block in d.get("blocks", []):
-            if block.get("type") != 0:          # solo bloques de texto
-                continue
-            for line in block.get("lines", []):
-                dir_vec = line.get("dir", (1.0, 0.0))
-                n_chars = sum(len(s.get("text", "")) for s in line.get("spans", []))
-                if n_chars == 0:
-                    continue
-                # Solo la parte rotacional de la matriz (sin traslación)
-                p = fitz.Point(dir_vec[0], dir_vec[1]) * rm
-                wx += (p.x - origin.x) * n_chars
-                wy += (p.y - origin.y) * n_chars
 
         if wx == 0.0 and wy == 0.0:
             return 0
@@ -178,7 +149,7 @@ class OCRProcessor:
         except Exception:
             return 0, 0.0
 
-    def _run_predictor(self, img: np.ndarray) -> tuple[list[tuple[fitz.Rect, str, float]], float]:
+    def _run_predictor(self, img: np.ndarray) -> tuple[list[tuple[Rect, str, float]], float]:
         """ Regresa una lista de tuplas (rectángulo, texto, puntuación) para cada palabra detectada en la imagen, junto con el tiempo que tomó ejecutar el predictor.
         """
         h, w = img.shape[:2]
@@ -188,21 +159,18 @@ class OCRProcessor:
         start = perf_counter()
         found = self.predictor(img)
         elapsed = perf_counter() - start
-        words = [(fitz.Rect(wd.x0, wd.y0, wd.x1, wd.y1), wd.text, wd.score) for wd in found if wd.text.strip()]
+        words = [(Rect(wd.x0, wd.y0, wd.x1, wd.y1), wd.text, wd.score) for wd in found if wd.text.strip()]
         return words, elapsed
 
-    def render_orientation_probe(self, doc: fitz.Document, page_num: int) -> np.ndarray:
+    def render_orientation_probe(self, doc: Document, page_num: int) -> np.ndarray:
         """Rasteriza la página para sondear su orientación (fase BAJO lock)."""
         page = doc[page_num]
         longest = max(page.rect.width, page.rect.height)
         scale = min(1.5, 1400.0 / max(1.0, longest))
-        pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
-        base = self._pixmap_to_ndarray(pix)
-        del pix
-        return base
+        return page.render(scale)
 
     def probe_orientation(
-        self, doc: fitz.Document, page_num: int
+        self, doc: Document, page_num: int
     ) -> tuple[np.ndarray, int | None]:
         """Renderiza la sonda y detecta orientación nativa en una sola pasada.
 
@@ -215,15 +183,13 @@ class OCRProcessor:
         page = doc[page_num]
         longest = max(page.rect.width, page.rect.height)
         scale = min(1.5, 1400.0 / max(1.0, longest))
-        pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
-        img = self._pixmap_to_ndarray(pix)
-        del pix
+        img = page.render(scale)
         native_angle: int | None = None
         if not self.page_needs_ocr(page):
             native_angle = self.detect_orientation_native(page)
         return img, native_angle
 
-    def detect_orientation(self, doc: fitz.Document, page_num: int) -> int:
+    def detect_orientation(self, doc: Document, page_num: int) -> int:
         """Conveniencia: sondeo + puntuación en un paso (sin lock que liberar)."""
         return self.score_orientation(self.render_orientation_probe(doc, page_num))
 
@@ -369,7 +335,7 @@ class OCRProcessor:
         actual de la página para que el texto quede derecho (fase SIN lock).
 
         Pensado para escaneos cuyo *contenido* está girado pero sin entrada
-        ``/Rotate`` (PyMuPDF informa rotation==0 y la página se ve de lado).
+        ``/Rotate`` (la rotación es 0 y la página se ve de lado).
         Reutiliza los modelos OCR ya incluidos (sin descargas): puntúa las 4
         orientaciones por la suma de confianzas de las palabras reconocidas; la
         orientación correcta produce palabras reales con alta confianza.
@@ -410,7 +376,7 @@ class OCRProcessor:
         return best_angle
 
     def render_orientation_probes(
-        self, doc: fitz.Document, page_nums: list[int]
+        self, doc: Document, page_nums: list[int]
     ) -> list[np.ndarray]:
         """Rasteriza varias páginas para el sondeo multi-página (fase BAJO lock)."""
         images: list[np.ndarray] = []
@@ -418,13 +384,11 @@ class OCRProcessor:
             page = doc[pn]
             longest = max(page.rect.width, page.rect.height)
             scale = min(1.5, 1400.0 / max(1.0, longest))
-            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
-            images.append(self._pixmap_to_ndarray(pix))
-            del pix
+            images.append(page.render(scale))
         return images
 
     def probe_pages_for_orientation(
-        self, doc: fitz.Document, page_nums: list[int]
+        self, doc: Document, page_nums: list[int]
     ) -> list[tuple[np.ndarray, int | None]]:
         """Rasteriza y detecta orientación nativa para varias páginas (BAJO lock).
 
@@ -439,9 +403,7 @@ class OCRProcessor:
             page = doc[pn]
             longest = max(page.rect.width, page.rect.height)
             scale = min(1.5, 1400.0 / max(1.0, longest))
-            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
-            img = self._pixmap_to_ndarray(pix)
-            del pix
+            img = page.render(scale)
             native_angle: int | None = None
             if not self.page_needs_ocr(page):
                 native_angle = self.detect_orientation_native(page)
@@ -473,7 +435,7 @@ class OCRProcessor:
             return best_angle
         return 0
 
-    def get_doc_kind(self, doc: fitz.Document) -> str:
+    def get_doc_kind(self, doc: Document) -> str:
         """Clasificar el documento como 'nativo', 'escaneado' o 'híbrido' según el contenido de sus páginas.
          - 'nativo' si tiene al menos una página con texto extraíble y ninguna con imágenes.
          - 'escaneado' si tiene al menos una página con imágenes y ninguna con texto extraíble.
@@ -494,8 +456,8 @@ class OCRProcessor:
             if text_pages > 0 and image_pages > 0:
                 break  # already "hybrid" — no need to scan more pages
             page = doc[i]
-            has_text = bool(page.get_text("text").strip())
-            has_images = bool(page.get_images(full=True))
+            has_text = bool(page.text().strip())
+            has_images = page.has_images()
             if has_text:
                 text_pages += 1
             if has_images:
@@ -513,7 +475,7 @@ class OCRProcessor:
         self._doc_kind_cache[key] = kind
         return kind
 
-    def page_kind(self, page: fitz.Page) -> str:
+    def page_kind(self, page: Page) -> str:
         """"
         Clasificar la página como 'nativa', 'escaneada' o 'híbrida' según su contenido.
          - 'nativa' si tiene texto extraíble pero no imágenes.
@@ -521,8 +483,8 @@ class OCRProcessor:
          - 'híbrida' si tiene tanto texto extraíble como imágenes.
          - Si no tiene texto ni imágenes, se clasifica como 'escaneada' por defecto.
         """
-        has_text = bool(page.get_text("text").strip())
-        has_images = bool(page.get_images(full=True))
+        has_text = bool(page.text().strip())
+        has_images = page.has_images()
         if has_text and not has_images:
             return "native"
         if has_images and not has_text:
@@ -531,47 +493,31 @@ class OCRProcessor:
             return "hybrid"
         return "scanned" if not has_text else "native"
 
-    def page_needs_ocr(self, page: fitz.Page) -> bool:
+    def page_needs_ocr(self, page: Page) -> bool:
         """Return True only when the page lacks extractable native text."""
-        return not bool(page.get_text("text").strip())
+        return not bool(page.text().strip())
 
-    def _native_segments(self, page: fitz.Page) -> list[OCRSegment]:
-        segments: list[OCRSegment] = []
-        for block in page.get_text("blocks"):
-            if len(block) < 7:
-                continue
-            x0, y0, x1, y1, text, _, block_type = block[:7]
-            if block_type != 0:
-                continue
-            clean = str(text).strip()
-            if not clean:
-                continue
-            segments.append(
-                OCRSegment(
-                    text=clean,
-                    source="native",
-                    bbox=fitz.Rect(float(x0), float(y0), float(x1), float(y1)),
-                )
-            )
+    def _native_segments(self, page: Page) -> list[OCRSegment]:
+        """Una por línea de texto nativo."""
+        lines: dict[int, list[tuple[Rect, str]]] = {}
+        for rect, text, line in page.words():
+            lines.setdefault(line, []).append((rect, text))
+        segments = []
+        for words in lines.values():
+            boxes = [rect for rect, _ in words]
+            segments.append(OCRSegment(
+                text=" ".join(text for _, text in words),
+                source="native",
+                bbox=Rect(min(r.x0 for r in boxes), min(r.y0 for r in boxes),
+                          max(r.x1 for r in boxes), max(r.y1 for r in boxes)),
+            ))
         return segments
 
-    def _image_regions(self, page: fitz.Page) -> list[fitz.Rect]:
-        regions: list[fitz.Rect] = []
-        # get_image_info() only returns image metadata (bbox, size, …) without
-        # loading all text content like get_text("dict") would.
-        for info in page.get_image_info():
-            bbox = info.get("bbox")
-            if not bbox:
-                continue
-            # get_image_info() devuelve el bbox en el espacio SIN rotar de la
-            # página, pero get_pixmap(clip=...) y page.rect viven en el espacio
-            # rotado (el que se muestra). En páginas con /Rotate 90/270 (típico
-            # en escaneos) intersectar directamente recorta a un cuadrado y deja
-            # fuera parte de la página. rotation_matrix mapea sin-rotar → rotado
-            # (identidad si rotation == 0).
-            # Clip to the page so bboxes that fall (partly) outside it don't
-            # produce a degenerate pixmap later.
-            rect = (fitz.Rect(bbox) * page.rotation_matrix) & page.rect
+    def _image_regions(self, page: Page) -> list[Rect]:
+        regions: list[Rect] = []
+        for box in page.image_rects():
+            # Recortadas a la página: las que se salen de ella darían una imagen degenerada.
+            rect = box & page.rect
             if rect.is_empty or rect.width < 8 or rect.height < 8:
                 continue
             regions.append(rect)
@@ -582,43 +528,30 @@ class OCRProcessor:
         return regions
 
     @staticmethod
-    def _pixmap_to_ndarray(pix: fitz.Pixmap) -> np.ndarray:
-        arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
-        return (arr[:, :, :3] if pix.n >= 3 else arr).copy()
-
-    @staticmethod
-    def _ocr_scale(rect: fitz.Rect) -> float:
+    def _ocr_scale(rect: Rect) -> float:
         longest = max(rect.width, rect.height)
         scale = _SCALE_FOR_OCR
         if longest * scale > _MAX_OCR_PX:
             scale = _MAX_OCR_PX / longest
         return max(scale, 1.0)
 
-    def prepare_page(self, doc: fitz.Document, page_num: int, force_ocr: bool = False) -> PreparedPage:
+    def prepare_page(self, doc: Document, page_num: int, force_ocr: bool = False) -> PreparedPage:
         """Fase 1 (BAJO el lock del documento): clasificar la página, extraer el
         texto nativo y rasterizar las regiones a OCRear. Es rápida (decenas de
         ms); todo lo que toca ``doc`` ocurre aquí."""
-        page = doc[page_num]  # número de página 0-indexed en PyMuPDF
+        page = doc[page_num]
         doc_kind = self.get_doc_kind(doc)
         page_kind = self.page_kind(page)
 
         start = perf_counter()
         native_segments = self._native_segments(page)
-        regions: list[tuple[fitz.Rect, float, np.ndarray]] = []
+        regions: list[tuple[Rect, float, np.ndarray]] = []
         if force_ocr or page_kind in ("hybrid", "scanned"):
             for rect in self._image_regions(page):
                 scale = self._ocr_scale(rect)
-                pix = page.get_pixmap(
-                    matrix=fitz.Matrix(scale, scale),
-                    clip=rect,
-                    alpha=False,
-                )
-                if pix.width == 0 or pix.height == 0:
-                    del pix  # nothing to OCR in this region
-                    continue
-                img = self._pixmap_to_ndarray(pix)
-                del pix  # free pixmap memory before inference
-                regions.append((rect, scale, img))
+                img = page.render(scale, clip=rect)
+                if img.size:
+                    regions.append((rect, scale, img))
 
         return PreparedPage(
             page_kind=page_kind,
@@ -643,7 +576,7 @@ class OCRProcessor:
                 y0 = rect.y0 + px_rect.y0 / scale
                 x1 = rect.x0 + px_rect.x1 / scale
                 y1 = rect.y0 + px_rect.y1 / scale
-                pdf_rect = fitz.Rect(x0, y0, x1, y1)
+                pdf_rect = Rect(x0, y0, x1, y1)
 
                 ocr_segments.append(OCRSegment(text=text, source="ocr", bbox=pdf_rect))
                 detections.append(OCRDetection(text=text, score=score, source="ocr", bbox=pdf_rect))
@@ -674,19 +607,18 @@ class OCRProcessor:
             detections=detections,
         )
 
-    def prepare_area(self, doc: fitz.Document, page_num: int, rect: fitz.Rect) -> PreparedPage:
+    def prepare_area(self, doc: Document, page_num: int, rect: Rect) -> PreparedPage:
         """Como :meth:`prepare_page`, pero solo el rectángulo ``rect`` (coordenadas de la
         página tal como se ve) y sin texto nativo: el OCR de un recorte."""
         page = doc[page_num]
-        clip = fitz.Rect(rect) & page.rect
-        regions: list[tuple[fitz.Rect, float, np.ndarray]] = []
+        clip = Rect(*rect) & page.rect
+        regions: list[tuple[Rect, float, np.ndarray]] = []
         if not clip.is_empty and clip.width >= 4 and clip.height >= 4:
             # Los recortes suelen ser pequeños: más resolución que una página entera.
             scale = min(2.5, max(1.5, 1600.0 / max(clip.width, clip.height)))
-            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=clip, alpha=False)
-            if pix.width and pix.height:
-                regions.append((clip, scale, self._pixmap_to_ndarray(pix)))
-            del pix
+            img = page.render(scale, clip=clip)
+            if img.size:
+                regions.append((clip, scale, img))
         return PreparedPage(
             page_kind=self.page_kind(page),
             doc_kind=self.get_doc_kind(doc),
@@ -695,7 +627,7 @@ class OCRProcessor:
             start=perf_counter(),
         )
 
-    def correction_angle(self, page: fitz.Page) -> int:
+    def correction_angle(self, page: Page) -> int:
         """Grados a sumar a la rotación de ``page`` para dejarla derecha (0, 90, 180 o 270).
 
         Si tiene texto nativo, por su dirección. Si es un escaneo, como el visor
@@ -705,11 +637,9 @@ class OCRProcessor:
         orientaciones (:meth:`score_orientation`), más lento pero fiable.
         """
         angle = self.detect_orientation_native(page)
-        if angle or len(page.get_text("text").strip()) >= 30:
+        if angle or len(page.text().strip()) >= 30:
             return angle % 360
-        pix = page.get_pixmap(matrix=fitz.Matrix(0.8, 0.8), alpha=False)
-        img = self._pixmap_to_ndarray(pix)
-        del pix
+        img = page.render(0.8)
         angle = self.score_orientation_fast(img)
         if angle:
             return angle % 360
@@ -720,7 +650,7 @@ class OCRProcessor:
             angle = self.score_orientation(self.render_orientation_probe(page.parent, page.number))
         return angle % 360
 
-    def process_page(self, doc: fitz.Document, page_num: int, force_ocr: bool = False) -> OCRPageResult:
+    def process_page(self, doc: Document, page_num: int, force_ocr: bool = False) -> OCRPageResult:
         """Conveniencia (todo en uno) para llamadores sin lock que liberar —
         p. ej. el extractor por lotes. El visor usa las dos fases por separado
         para no retener su ``_doc_lock`` durante la inferencia."""

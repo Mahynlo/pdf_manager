@@ -1,39 +1,20 @@
 # Project Guidelines
 
 ## Stack And Scope
-- This is a Python app built with Flet and PyMuPDF.
-- Keep changes focused on the existing app behavior: open PDFs in tabs, navigate pages, annotate, and save.
-- Preserve Spanish UI copy unless a task explicitly asks for another language.
+- Desktop app: Svelte 5 + TypeScript UI (`app/ui`) in a pywebview/WebView2 window, with a Python backend.
+- All PDF work uses PDFium: EmbedPDF (WebAssembly) in the window and `pypdfium2` in Python.
+- Do not add PyMuPDF or anything based on MuPDF: it is AGPL.
+- Preserve Spanish UI copy unless a task explicitly asks for another language. UI texts live in `app/ui/src/texts/es/`.
 
 ## Architecture
-- App entry point is `src/main.py` with `main(page: ft.Page)` and top-level tab/file-picker wiring.
-- One open PDF is represented by `PDFViewerTab` in `src/pdf_viewer/viewer.py`.
-- Annotation tool state and operations live in `src/pdf_viewer/annotations.py` (`AnnotationManager`, `Tool`).
-- Rendering and coordinate conversion live in `src/pdf_viewer/renderer.py` (`render_page`, `display_to_pdf`).
-- Keep module boundaries intact: avoid moving rendering logic into UI files or annotation logic into `main.py`.
+- `app/backend/services/`: services exposed to the UI as `"service.method"`, marked with `@exposed`.
+- `src/pdf_core/`: PDF logic without any interface. `pdf.py` is the only module that may touch `pypdfium2`:
+  PDFium is not thread-safe and everything goes through its lock.
+- What stock PDFium cannot do (redact, encrypt, write bookmarks) goes through `Host.run_engine`, which runs it in
+  EmbedPDF's engine in the window (`app/ui/src/lib/engine-tasks.ts`).
+- Details: `docs/web/arquitectura.md`, `docs/web/embedpdf.md` and `docs/web/modulos-python.md`.
 
 ## Build And Run
-- Preferred run command: `uv run flet run`
-- Web mode: `uv run flet run --web`
-- Alternative runner: `poetry run flet run`
-- Packaging commands are documented in `README.md` and `CLAUDE.md`.
-
-## Coding Conventions
-- Follow imperative Flet patterns already used in the repo:
-  - mutate control/state fields, then call `.update()` or `page.update()`.
-  - keep UI state in instance attributes and callback closures.
-- Keep existing naming style:
-  - internal helpers prefixed with `_`.
-  - module-level constants in upper snake case.
-- Avoid adding heavy abstractions unless requested; current design is class-based and direct.
-
-## PDF And Annotation Safety
-- Always convert UI pixel coordinates to PDF points with `display_to_pdf()` before applying PDF operations.
-- `PDFViewerTab` owns a `fitz.Document`; ensure `close()` is called when a tab is closed.
-- Respect `BASE_SCALE` and `ZOOM_LEVELS` from `src/pdf_viewer/renderer.py` when changing render/zoom behavior.
-- Keep undo/history behavior consistent with `AnnotationManager._history`.
-
-## Documentation Links
-- Use `CLAUDE.md` as the primary agent-oriented technical reference for this workspace.
-- Use `README.md` for run/build usage and packaging links.
-- Prefer linking to those docs instead of duplicating long instructions in code comments or new docs.
+- Run from the project root: `uv run python -m app.main` (add `--dev` for Vite with hot reload).
+- Tests: `uv run pytest tests`. In `app/ui`: `pnpm check` and `pnpm build`; run both, each catches different errors.
+- Installer: `.\installer\web\build.ps1`.

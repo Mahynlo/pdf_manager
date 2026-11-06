@@ -1,4 +1,4 @@
-"""Una sola ventana de la app (equivale a ``src_qt/core/single_instance.py``).
+"""Una sola ventana de la app.
 
 La primera instancia escucha en una tubería con nombre del usuario (``multiprocessing``,
 sin dependencias). Si se vuelve a lanzar la app —por ejemplo con «Abrir con» desde el

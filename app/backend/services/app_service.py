@@ -8,7 +8,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
-import fitz
+import pypdfium2
 
 from app import LOG_FILE
 from app.backend.host import Host
@@ -67,10 +67,15 @@ class AppService:
 
         return {
             "app": APP_VERSION,
-            "pymupdf": fitz.__version__,
+            "pdfium": str(pypdfium2.PDFIUM_INFO.build),
             "pywebview": _package_version("pywebview"),
             "python": platform.python_version(),
         }
+
+    @exposed
+    def engine_done(self, task_id: int, error: str | None = None) -> None:
+        """La ventana terminó una tarea de ``Host.run_engine``."""
+        self._host.engine_done(task_id, error)
 
     @exposed
     def diagnostics_log(self) -> str:

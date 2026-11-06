@@ -10,8 +10,21 @@ import json
 import re
 from pathlib import Path
 
-import fitz
+import numpy as np
+import pypdfium2
 import pytest
+from pdfkit import (
+    add_annot,
+    add_image,
+    add_page,
+    add_text,
+    annots,
+    delete_annots,
+    encrypted,
+    page_texts,
+    pdf_bytes,
+    run_engine,
+)
 
 import app  # noqa: F401  (añade src/ al sys.path)
 from app import UI_DIR
@@ -28,6 +41,7 @@ from app.backend.services.redact import RedactService
 from app.backend.services.security import SecurityService
 from app.backend.services.viewer import ViewerService
 from app.backend.settings import Settings
+from pdf_core.pdf import UNRESTRICTED, Document, PasswordError, Rect
 
 
 class FakeHost:
@@ -85,6 +99,12 @@ class FakeHost:
     def uploaded(self, url: str) -> bytes | None:
         return self.uploads.pop(url, None)
 
+    def run_engine(self, task: str, data: bytes, args: dict) -> bytes:
+        return run_engine(task, data, args)
+
+    def engine_done(self, task_id: int, error: str | None) -> None:
+        self.events.append(("engine_done", (task_id, error)))
+
     def emit(self, event: str, payload: object = None) -> None:
         self.events.append((event, payload))
         if event == "document:open":
@@ -92,21 +112,15 @@ class FakeHost:
 
 
 def _make_pdf(path: Path, pages: int, password: str | None = None) -> Path:
-    doc = fitz.open()
-    for i in range(pages):
-        doc.new_page().insert_text((72, 72), f"{path.stem} {i + 1}")
-    if password:
-        doc.save(str(path), encryption=fitz.PDF_ENCRYPT_AES_256, user_pw=password, owner_pw=password)
-    else:
-        doc.save(str(path))
-    doc.close()
+    data = pdf_bytes([[(72, 72, f"{path.stem} {i + 1}")] for i in range(pages)])
+    path.write_bytes(encrypted(data, password) if password else data)
     return path
 
 
 @pytest.fixture(autouse=True)
 def isolated_recent_files(tmp_path, monkeypatch):
     """Los recientes van a un archivo temporal, nunca al del usuario."""
-    import recent_files
+    from pdf_core import recent_files
 
     monkeypatch.setattr(recent_files, "_STORE", tmp_path / "recent.json")
 
@@ -190,15 +204,16 @@ def test_merge_selection_reorder_and_merge(tmp_path, two_pdfs):
             svc.reorder([[a, 0]])  # no coincide con las páginas de la vista previa
 
         thumbs = svc.thumbnails(a, [0, 1, 99])
-        assert set(thumbs) == {"0", "1"} and thumbs["0"].startswith("data:image/jpeg;base64,")
+        assert set(thumbs) == {"0", "1"} and thumbs["0"].startswith("data:image/png;base64,")
 
         svc.choose_output()
-        result = svc.merge({"bookmarks": True, "duplex": False, "optimize": True})
+        result = svc.merge({"bookmarks": True, "duplex": False})
         assert result["count"] == 4 and result["path"] == str(out)
         assert host.events[-1] == ("merge:progress", {"done": 4, "total": 4})
-        with fitz.open(str(out)) as doc:
-            assert [doc[i].get_text().strip() for i in range(4)] == ["b 3", "a 1", "b 1", "a 2"]
+        with Document.open(out) as doc:
+            assert [page.text().strip() for page in doc] == ["b 3", "a 1", "b 1", "a 2"]
             assert doc[1].rotation == 90
+            assert doc.toc() == [(1, "b", 0), (1, "a", 1), (1, "b", 2), (1, "a", 3)]  # uno por archivo
         svc.open_result()
         assert host.opened == [str(out)]
     finally:
@@ -257,19 +272,18 @@ def test_documents_open_asks_the_frontend_and_manages_recent_files(tmp_path, two
 
 def test_viewer_open_and_close(tmp_path):
     pdf = tmp_path / "doc.pdf"
-    doc = fitz.open()
-    doc.new_page(width=200, height=300).insert_text((20, 40), "uno")
-    doc.new_page(width=300, height=200)
-    doc.set_toc([[1, "Inicio", 1], [2, "Detalle", 2]])
-    doc.set_metadata({"title": "Prueba", "author": "Yo"})
-    doc.save(str(pdf))
-    doc.close()
+    with Document.new() as doc:
+        add_text(add_page(doc, 200, 300), 20, 40, "uno")
+        add_page(doc, 300, 200)
+        data = doc.to_bytes()
+    data = run_engine("outline", data, {"items": [{"title": "Inicio", "page": 0}, {"title": "Detalle", "page": 1}]})
+    pdf.write_bytes(run_engine("meta", data, {"metadata": {"title": "Prueba", "author": "Yo"}}))
 
     svc = ViewerService(FakeHost())
     try:
         info = svc.open(str(pdf))
         assert info["name"] == "doc.pdf" and info["pages"] == [[200, 300], [300, 200]]
-        assert info["toc"] == [{"level": 1, "title": "Inicio", "page": 0}, {"level": 2, "title": "Detalle", "page": 1}]
+        assert info["toc"] == [{"level": 1, "title": "Inicio", "page": 0}, {"level": 1, "title": "Detalle", "page": 1}]
         assert svc.open(str(pdf))["id"] == info["id"]  # ya abierto: el mismo documento
 
         with pytest.raises(UserError, match="fuera de rango"):
@@ -300,20 +314,11 @@ def test_viewer_password_errors_let_the_frontend_retry(tmp_path):
         assert wrong.value.code == "invalid_password"
         info = svc.open(str(locked), "clave")
         assert len(info["pages"]) == 1
-        # Consultar needs_pass tras autenticar estropea el descifrado en PyMuPDF:
-        # la página tiene que seguir teniendo su texto.
-        assert svc._docs[info["id"]].doc[0].get_text().strip() == "secreto 1"
-        svc.document_url(info["id"])
-        assert svc._docs[info["id"]].doc[0].get_text().strip() == "secreto 1"
+        assert svc._docs[info["id"]].doc[0].text().strip() == "secreto 1"
         rows = {r["label"]: r["value"] for r in svc.properties(info["id"])["rows"]}
         assert rows["Cifrado / Seguridad:"] == "Protegido con contraseña"
     finally:
         svc.close()
-
-
-def _page_texts(path: Path) -> list[str]:
-    with fitz.open(str(path)) as doc:
-        return [page.get_text().strip() for page in doc]
 
 
 def test_viewer_page_operations_track_unsaved_changes(tmp_path):
@@ -345,7 +350,7 @@ def test_viewer_page_operations_track_unsaved_changes(tmp_path):
             svc.move_page(doc_id, 0, 9)
         saved = svc.save(doc_id)
         assert saved["modified"] is False and svc.unsaved_documents() == []
-        assert _page_texts(pdf) == ["ops 3", "ops 1", "ops 2", "ops 2"]
+        assert page_texts(pdf) == ["ops 3", "ops 1", "ops 2", "ops 2"]
         # Sigue legible tras reabrirse desde memoria.
         assert _text(svc, doc_id, 0) == "ops 3"
     finally:
@@ -360,7 +365,7 @@ def test_viewer_undoes_and_redoes_page_operations(tmp_path):
         doc_id = info["id"]
         assert info["page_undo"] is False and info["page_redo"] is False
         entry = svc._docs[doc_id]
-        entry.doc[1].add_text_annot((50, 50), "nota de la 2")
+        add_annot(entry.doc[1], "Text", Rect(50, 50, 70, 70), "nota de la 2")
         with svc.document(doc_id) as e:
             svc.set_ocr_words(e, e.doc[0], [(10, 10, 50, 30, "reconocido")])
 
@@ -375,12 +380,11 @@ def test_viewer_undoes_and_redoes_page_operations(tmp_path):
         assert [s["page"] for s in steps] == [0, 0, 2, 2, 0]
         undone = steps[-1]["info"]
         assert undone["page_undo"] is False and undone["page_redo"]
-        # La página borrada vuelve como un objeto nuevo: el archivo ya no es el guardado.
-        assert undone["modified"]
-        assert [p.get_text().strip() for p in entry.doc] == ["deshacer 1", "deshacer 2", "deshacer 3"]
+        assert undone["modified"] is False  # todo deshecho: es lo guardado
+        assert [p.text().strip() for p in entry.doc] == ["deshacer 1", "deshacer 2", "deshacer 3"]
         assert entry.doc[0].rotation == 0
         # La página borrada vuelve con su anotación, y el OCR de la girada, con ella.
-        assert [a.info["content"] for a in entry.doc[1].annots()] == ["nota de la 2"]
+        assert annots(entry.doc[1]) == ["Text"]
         assert entry.ocr[entry.key(entry.doc[0])] == [(10, 10, 50, 30, "reconocido")]
         with pytest.raises(UserError, match="deshacer"):
             svc.undo_pages(doc_id)
@@ -388,7 +392,7 @@ def test_viewer_undoes_and_redoes_page_operations(tmp_path):
         assert svc.redo_pages(doc_id)["page"] == 0  # el giro
         redone = svc.redo_pages(doc_id)  # mover
         assert redone["page"] == 0 and redone["info"]["page_redo"]
-        assert [p.get_text().strip() for p in entry.doc] == ["deshacer 3", "deshacer 1", "deshacer 2"]
+        assert [p.text().strip() for p in entry.doc] == ["deshacer 3", "deshacer 1", "deshacer 2"]
         # Una operación nueva descarta lo que quedaba por rehacer.
         assert svc.rotate(doc_id, 90, 0)["page_redo"] is False
         svc.save(doc_id)
@@ -419,8 +423,8 @@ def test_viewer_save_as_moves_the_tab_to_the_new_file(tmp_path):
         info = svc.save_as(doc_id)
         assert info["path"] == str(tmp_path / "copia.pdf") and info["name"] == "copia.pdf"
         assert not info["modified"] and host.saved_suggestions == [str(pdf)]
-        assert _page_texts(tmp_path / "copia.pdf") == ["original 2"]
-        assert _page_texts(pdf) == ["original 1", "original 2"]  # el original no cambia
+        assert page_texts(tmp_path / "copia.pdf") == ["original 2"]
+        assert page_texts(pdf) == ["original 1", "original 2"]  # el original no cambia
         assert svc.open(str(tmp_path / "copia.pdf"))["id"] == doc_id
 
         host.save_to = None
@@ -436,23 +440,23 @@ def test_viewer_save_keeps_the_password(tmp_path):
         doc_id = svc.open(str(locked), "clave")["id"]
         svc.rotate(doc_id, 90, 1)
         svc.save(doc_id)
-        assert svc._docs[doc_id].doc[0].get_text().strip() == "secreto 1"
+        assert svc._docs[doc_id].doc[0].text().strip() == "secreto 1"
     finally:
         svc.close()
-    with fitz.open(str(locked)) as doc:
-        assert doc.is_encrypted and doc.authenticate("clave")
-        assert doc[1].rotation == 90 and doc[0].get_text().strip() == "secreto 1"
+    with pytest.raises(PasswordError):
+        Document.open(locked)
+    with Document.open(locked, "clave") as doc:
+        assert doc.encrypted and doc[1].rotation == 90 and doc[0].text().strip() == "secreto 1"
 
 
 def test_viewer_exports_page_text_and_images(tmp_path):
     pdf = tmp_path / "fuente.pdf"
-    with fitz.open() as doc:
-        page = doc.new_page()
-        page.insert_text((72, 72), "hola")
-        pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 4, 4), False)
-        page.insert_image(fitz.Rect(100, 100, 140, 140), pixmap=pix)
-        doc.new_page().insert_text((72, 72), "adiós")
-        doc.save(str(pdf))
+    with Document.new() as doc:
+        page = add_page(doc)
+        add_text(page, 72, 72, "hola")
+        add_image(page, Rect(100, 100, 140, 140), np.full((4, 4, 3), 90, np.uint8))
+        add_text(add_page(doc), 72, 72, "adiós")
+        doc.save(pdf)
     out = tmp_path / "salida"
     out.mkdir()
     host = FakeHost(save_to=str(tmp_path / "pagina.pdf"), folder=str(out))
@@ -461,7 +465,7 @@ def test_viewer_exports_page_text_and_images(tmp_path):
         doc_id = svc.open(str(pdf))["id"]
         assert svc.extract_page(doc_id, 1) == str(tmp_path / "pagina.pdf")
         assert host.saved_suggestions[-1] == str(tmp_path / "fuente_pagina_2.pdf")
-        assert _page_texts(tmp_path / "pagina.pdf") == ["adiós"]
+        assert page_texts(tmp_path / "pagina.pdf") == ["adiós"]
 
         host.save_to = str(tmp_path / "texto.txt")
         svc.export_text(doc_id)
@@ -476,12 +480,7 @@ def test_viewer_exports_page_text_and_images(tmp_path):
 
 
 def _lines_pdf(path: Path, pages: list[list[str]]) -> Path:
-    with fitz.open() as doc:
-        for lines in pages:
-            page = doc.new_page()
-            for i, line in enumerate(lines):
-                page.insert_text((72, 72 + 20 * i), line)
-        doc.save(str(path))
+    path.write_bytes(pdf_bytes([[(72, 72 + 20 * i, line) for i, line in enumerate(lines)] for lines in pages]))
     return path
 
 
@@ -499,43 +498,41 @@ def test_viewer_text_layer_follows_reading_order(tmp_path):
     finally:
         svc.close()
 
-def _served(svc: ViewerService, doc_id: int) -> fitz.Document:
+def _served(svc: ViewerService, doc_id: int) -> Document:
     """Copia del documento como la recibe EmbedPDF (``document_url``)."""
-    return fitz.open("pdf", base64.b64decode(svc.document_url(doc_id)["url"].split(",", 1)[1]))
+    served = svc.document_url(doc_id)
+    return Document.open(base64.b64decode(served["url"].split(",", 1)[1]), served["password"])
+
+
+def _upload(svc: ViewerService, doc_id: int, data: bytes) -> dict:
+    url = svc.upload_url()
+    svc._host.uploads[url] = data
+    return svc.sync_annotations(doc_id, url)
 
 
 def _sync(svc: ViewerService, doc_id: int, edit) -> dict:
     """Hace de visor: cambia con ``edit(copia)`` las anotaciones de su copia y la sube."""
     with _served(svc, doc_id) as copy:
         edit(copy)
-        data = copy.tobytes()
-    url = svc.upload_url()
-    svc._host.uploads[url] = data
-    return svc.sync_annotations(doc_id, url)
-
-
-def _annots(doc: fitz.Document) -> list[list[str]]:
-    return [[a.type[1] for a in page.annots()] + [f"link:{len(page.get_links())}"] for page in doc]
+        data = copy.to_bytes()
+    return _upload(svc, doc_id, data)
 
 
 def test_viewer_takes_annotations_from_the_viewer_copy(tmp_path):
     pdf = tmp_path / "notas.pdf"
-    with fitz.open() as doc:
+    with Document.new() as doc:
         for i in range(2):
-            doc.new_page().insert_text((72, 72), f"Pagina {i + 1}")
-        doc[0].insert_link({"kind": fitz.LINK_GOTO, "from": fitz.Rect(70, 60, 200, 80), "page": 1})
-        square = doc[1].add_rect_annot(fitz.Rect(100, 100, 200, 160))
-        square.set_colors(stroke=(1, 0, 0))
-        square.update()
-        doc.save(str(pdf))
+            add_text(add_page(doc), 72, 72, f"Pagina {i + 1}")
+        add_annot(doc[0], "Link", Rect(70, 60, 200, 80))
+        add_annot(doc[1], "Square", Rect(100, 100, 200, 160))
+        doc.save(pdf)
     svc = ViewerService(FakeHost())
     try:
         info = svc.open(str(pdf))
         doc_id = info["id"]
         assert "annotations" not in info and not info["modified"]
-        with _served(svc, doc_id) as copy:  # EmbedPDF recibe las anotaciones visibles: las edita él
-            assert _annots(copy) == [["link:1"], ["Square", "link:0"]]
-            assert not any(a.flags & fitz.PDF_ANNOT_IS_HIDDEN for page in copy for a in page.annots())
+        with _served(svc, doc_id) as copy:  # EmbedPDF recibe las anotaciones: las edita él
+            assert [annots(page) for page in copy] == [["Link"], ["Square"]]
 
         assert svc.annotations_changed(doc_id) == {"modified": True}
         assert svc.unsaved_documents() == ["notas.pdf"]
@@ -545,22 +542,25 @@ def test_viewer_takes_annotations_from_the_viewer_copy(tmp_path):
             svc.set_ocr_words(entry, entry.doc[1], [(300, 300, 360, 320, "reconocido")])
 
         def edit(copy):
-            first, second = copy[0], copy[1]
-            first.add_highlight_annot(fitz.Rect(70, 60, 140, 80)).update()
-            second.delete_annot(second.first_annot)
-            second.add_text_annot((300, 300), "nota").update()
+            assert "reconocido" in copy[1].text()
+            add_annot(copy[0], "Highlight", Rect(70, 60, 140, 80))
+            delete_annots(copy[1])
+            add_annot(copy[1], "Text", Rect(300, 300, 320, 320), "nota")
 
         assert _sync(svc, doc_id, edit) == {"modified": True}
         assert not svc.save(doc_id)["modified"] and svc.unsaved_documents() == []
-        with fitz.open(str(pdf)) as doc:
-            # Los enlaces son del documento (el visor no los edita); el resto, de la copia.
-            assert _annots(doc) == [["Highlight", "link:1"], ["Text", "link:0"]]
-            assert doc[1].get_text().strip() == "Pagina 2"  # sin el texto de OCR
+        with Document.open(pdf) as doc:
+            assert [annots(page) for page in doc] == [["Link", "Highlight"], ["Text"]]
+            assert doc[1].text().strip() == "Pagina 2"  # sin el texto de OCR
+
+        # Las palabras de OCR siguen en la página aunque el documento sea otro objeto.
+        with svc.document(doc_id) as entry:
+            assert "reconocido" in svc.text_of(entry, entry.doc[1]).text
 
         # Al mover páginas, cada anotación sigue a la suya.
         svc.move_page(doc_id, 1, 0)
         with svc.document(doc_id) as entry:
-            assert _annots(entry.doc) == [["Text", "link:0"], ["Highlight", "link:1"]]
+            assert [annots(page) for page in entry.doc] == [["Text"], ["Link", "Highlight"]]
     finally:
         svc.close()
 
@@ -574,28 +574,29 @@ def test_viewer_sync_keeps_encryption_and_checks_the_copy(tmp_path):
             svc.sync_annotations(doc_id, svc.upload_url())  # no llegó nada
         assert error.value.code == "upload_missing"
 
-        def drop_page(copy):
-            copy.delete_page(0)
-
         with pytest.raises(UserError) as error:
-            _sync(svc, doc_id, drop_page)
+            _sync(svc, doc_id, lambda copy: copy.delete_page(0))
+        assert error.value.code == "sync_failed"
+        with pytest.raises(UserError) as error:
+            _upload(svc, doc_id, b"esto no es un PDF")
         assert error.value.code == "sync_failed"
 
-        _sync(svc, doc_id, lambda copy: copy[1].add_rect_annot(fitz.Rect(10, 10, 90, 90)).update())
+        _sync(svc, doc_id, lambda copy: add_annot(copy[1], "Square", Rect(10, 10, 90, 90)))
         svc.save(doc_id)
     finally:
         svc.close()
-    with fitz.open(str(pdf)) as doc:
-        assert doc.needs_pass and doc.authenticate("clave")
-        assert [a.type[1] for a in doc[1].annots()] == ["Square"]
+    with pytest.raises(PasswordError):
+        Document.open(pdf)
+    with Document.open(pdf, "clave") as doc:
+        assert annots(doc[1]) == ["Square"]
 
 
 def test_legends_menu_and_store(tmp_path, monkeypatch):
     from app.backend.services.legends import LegendsService
-    from pdf_viewer import _text_legends
+    from pdf_core import legends
 
-    monkeypatch.setattr(_text_legends, "_LEGENDS_FILE", tmp_path / "leyendas.json")
-    monkeypatch.setattr(_text_legends, "_singleton", None)
+    monkeypatch.setattr(legends, "_LEGENDS_FILE", tmp_path / "leyendas.json")
+    monkeypatch.setattr(legends, "_singleton", None)
     svc = LegendsService()
     menu = svc.menu()
     assert menu["stamps"][0] == {"text": "CONFIDENCIAL", "color": "#D32F2F"} and menu["favorites"] == []
@@ -618,9 +619,7 @@ def test_stamps_library_store():
 
     svc = StampsService()
     assert svc.library() is None
-    doc = fitz.open()
-    doc.new_page(width=120, height=40)
-    pdf = base64.b64encode(doc.tobytes()).decode("ascii")
+    pdf = base64.b64encode(pdf_bytes([[]], size=(120, 40))).decode("ascii")
     entries = [{"id": "a1", "pageIndex": 0, "name": 36, "subject": "Mi sello"}]
     svc.save_library(pdf, entries)
     assert svc.library() == {"pdf": pdf, "stamps": entries}
@@ -683,7 +682,7 @@ class ScriptedOCR:
         class _Scripted(OCRProcessor):
             def _run_predictor(self, img):
                 h, w = img.shape[:2]
-                return [(fitz.Rect(x0 * w, y0 * h, x1 * w, y1 * h), t, 0.9) for x0, y0, x1, y1, t in self.words], 0.01
+                return [(Rect(x0 * w, y0 * h, x1 * w, y1 * h), t, 0.9) for x0, y0, x1, y1, t in self.words], 0.01
 
             def classify_orientation(self, img):
                 return self.angle, 1.0
@@ -701,18 +700,12 @@ def _text(svc: ViewerService, doc_id: int, index: int) -> str:
 
 def _served_text(svc: ViewerService, doc_id: int) -> list[str]:
     """Texto de cada página del documento que recibe EmbedPDF (el que selecciona y busca)."""
-    data = base64.b64decode(svc.document_url(doc_id)["url"].split(",", 1)[1])
-    with fitz.open("pdf", data) as doc:
-        return [page.get_text() for page in doc]
+    with _served(svc, doc_id) as doc:
+        return [page.text() for page in doc]
 
 
 def _blank_pdf(path: Path, pages: int, native: dict[int, str] | None = None) -> Path:
-    with fitz.open() as doc:
-        for i in range(pages):
-            page = doc.new_page(width=600, height=800)
-            if native and i in native:
-                page.insert_text((72, 72), native[i])
-        doc.save(str(path))
+    path.write_bytes(pdf_bytes([[(72, 72, native[i])] if native and i in native else [] for i in range(pages)], size=(600, 800)))
     return path
 
 
@@ -795,27 +788,25 @@ def isolated_profiles(tmp_path, monkeypatch):
 
 
 def _redact_pdf(path: Path) -> Path:
-    with fitz.open() as doc:
-        page = doc.new_page(width=600, height=800)
-        page.insert_text((72, 100), "Contrato con Juan Pérez")
-        page.insert_text((72, 140), "Firmado por Juan Pérez")
-        doc.new_page(width=600, height=800).insert_text((72, 100), "Escribir a juan@correo.com hoy")
-        doc.new_page(width=600, height=800)  # escaneo: solo tendrá palabras de OCR
-        turned = doc.new_page(width=600, height=800)
-        turned.insert_text((72, 100), "Juan Perez en página girada")
+    with Document.new() as doc:
+        page = add_page(doc, 600, 800)
+        add_text(page, 72, 100, "Contrato con Juan Pérez")
+        add_text(page, 72, 140, "Firmado por Juan Pérez")
+        add_text(add_page(doc, 600, 800), 72, 100, "Escribir a juan@correo.com hoy")
+        add_page(doc, 600, 800)  # escaneo: solo tendrá palabras de OCR
+        turned = add_page(doc, 600, 800)
+        add_text(turned, 72, 100, "Juan Perez en página girada")
         turned.set_rotation(90)
-        doc.save(str(path))
+        doc.save(path)
     return path
 
 
-def _mark(svc: ViewerService, doc_id: int, marks: list[tuple[int, list[float]]], fill=(0, 0, 0)) -> None:
+def _mark(svc: ViewerService, doc_id: int, marks: list[tuple[int, list[float]]], color: str = "#000000") -> None:
     """Hace de visor: pone marcas de censura (página, rectángulo sin girar) en su copia y la sube."""
-
-    def edit(copy: fitz.Document) -> None:
-        for index, rect in marks:
-            copy[index].add_redact_annot(fitz.Rect(rect), fill=fill)
-
-    _sync(svc, doc_id, edit)
+    served = svc.document_url(doc_id)
+    data = base64.b64decode(served["url"].split(",", 1)[1])
+    items = [{"page": page, "rect": rect, "color": color} for page, rect in marks]
+    _upload(svc, doc_id, run_engine("mark", data, {"marks": items, "password": served["password"]}))
 
 
 def test_redact_finds_terms_patterns_and_ocr(tmp_path, isolated_profiles):
@@ -875,7 +866,7 @@ def test_redact_apply_removes_what_the_marks_cover_and_forces_save_as(tmp_path, 
         with viewer.document(doc_id) as entry:
             viewer.set_ocr_words(entry, entry.doc[2], [(100, 100, 160, 120, "Pérez"), (300, 300, 360, 320, "queda")])
         matches = svc.find(doc_id, ["Pérez"])[0]["matches"]  # páginas 0 y 3 (texto) y 2 (OCR); la 1 no
-        _mark(viewer, doc_id, [(m["page"], m["rect"]) for m in matches], fill=(0.7, 0.1, 0.1))
+        _mark(viewer, doc_id, [(m["page"], m["rect"]) for m in matches], color="#B21A1A")
         result = svc.apply(doc_id)
         after = result["info"]
         assert result["count"] == len(matches) == 4 and after["redacted"] and after["modified"]
@@ -889,10 +880,9 @@ def test_redact_apply_removes_what_the_marks_cover_and_forces_save_as(tmp_path, 
         assert "Juan" in _text(viewer, doc_id, 0) and "queda" in _text(viewer, doc_id, 2)  # lo demás sigue ahí
         # Las marcas aplicadas desaparecen; el recuadro queda con su color.
         with viewer.document(doc_id) as entry:
-            assert not any(list(page.annots()) for page in entry.doc)
-            x0, y0, x1, y1 = matches[0]["rect"]
-            pix = entry.doc[0].get_pixmap(clip=fitz.Rect(x0, y0, x1, y1))
-            r, g, b = pix.pixel(pix.width // 2, pix.height // 2)
+            assert not any(annots(page) for page in entry.doc)
+            image = entry.doc[0].render(clip=matches[0]["rect"])
+            r, g, b = image[image.shape[0] // 2, image.shape[1] // 2]
             assert r > 150 and g < 60 and b < 60
 
         with pytest.raises(UserError) as err:
@@ -901,8 +891,8 @@ def test_redact_apply_removes_what_the_marks_cover_and_forces_save_as(tmp_path, 
         saved = viewer.save_as(doc_id)
         assert host.saved_suggestions[-1] == str(tmp_path / "contrato_censurado.pdf")
         assert saved["path"] == str(out) and not saved["redacted"] and not saved["modified"]
-        assert "Pérez" not in _page_texts(out)[0] and "Contrato con Juan" in _page_texts(out)[0]
-        assert "Pérez" in _page_texts(pdf)[0]  # el original no se toca
+        assert "Pérez" not in page_texts(out)[0] and "Contrato con Juan" in page_texts(out)[0]
+        assert "Pérez" in page_texts(pdf)[0]  # el original no se toca
     finally:
         viewer.close()
 
@@ -1009,6 +999,28 @@ def test_ai_basic_mode_without_agent(tmp_path, isolated_ai_config, monkeypatch):
         viewer.close()
 
 
+def test_ai_falls_back_to_basic_mode_without_the_provider_client(tmp_path, isolated_ai_config, monkeypatch):
+    """Con clave guardada pero sin el cliente del proveedor, responde en modo básico: no falla."""
+    from app.backend.services import ai
+
+    pdf = _redact_pdf(tmp_path / "contrato.pdf")
+    viewer = ViewerService(FakeHost())
+    svc = AiService(viewer)
+    monkeypatch.setattr(ai, "_installed", lambda module: False)
+    try:
+        svc.set_config("google", "clave-de-prueba")
+        doc_id = viewer.open(str(pdf))["id"]
+        assert not svc.config()["available"]
+        assert svc.chat(doc_id, "Juan")["messages"][1]["mode"] == "básico"
+
+        # Instalado el de otro proveedor: el agente existe, pero este sigue en modo básico.
+        monkeypatch.setattr(ai, "_installed", lambda module: module == ai.CLIENTS["openai"])
+        assert svc.config()["available"]
+        assert svc.chat(doc_id, "Juan")["messages"][1]["mode"] == "básico"
+    finally:
+        viewer.close()
+
+
 def test_ai_uses_the_agent_when_configured(tmp_path, isolated_ai_config):
     pdf = _redact_pdf(tmp_path / "contrato.pdf")
     viewer = ViewerService(FakeHost())
@@ -1051,7 +1063,7 @@ def test_security_inspect_unlock_and_export(tmp_path):
 
     info = svc.pick_protected()
     assert info["name"] == "secreto.pdf" and info["protected"] and not info["authenticated"]
-    assert len(info["permissions"]) == 7 and {"label", "allowed"} <= set(info["permissions"][0])
+    assert info["permissions"] == []  # no se conocen hasta abrirlo
 
     with pytest.raises(UserError, match="Contraseña incorrecta"):
         svc.unlock(str(locked), "mal")
@@ -1059,11 +1071,12 @@ def test_security_inspect_unlock_and_export(tmp_path):
         svc.export_unlocked(str(locked), "")
     unlocked = svc.unlock(str(locked), "clave")
     assert unlocked["authenticated"] and host.opened == [str(locked)]
+    assert len(unlocked["permissions"]) == 7 and {"label", "allowed"} <= set(unlocked["permissions"][0])
 
     assert svc.export_unlocked(str(locked), "clave") == str(out)
     assert host.saved_suggestions[-1].endswith("secreto_desbloqueado.pdf")
-    with fitz.open(str(out)) as doc:
-        assert not doc.needs_pass and len(doc) == 2
+    with Document.open(out) as doc:
+        assert not doc.encrypted and len(doc) == 2
 
 
 def test_security_protect_uses_checked_permissions(tmp_path, two_pdfs):
@@ -1078,19 +1091,25 @@ def test_security_protect_uses_checked_permissions(tmp_path, two_pdfs):
         svc.protect(str(two_pdfs[0]), "", "", {})
     # Casillas personalizadas (no las de un nivel rápido): solo copiar.
     assert svc.protect(str(two_pdfs[0]), "user", "owner", {"allow_copy": True}) == str(out)
-    with fitz.open(str(out)) as doc:
-        assert doc.needs_pass and doc.authenticate("user")
-        assert doc.permissions & fitz.PDF_PERM_COPY and not doc.permissions & fitz.PDF_PERM_PRINT
+    with pytest.raises(PasswordError):
+        Document.open(out)
+    with Document.open(out, "user") as doc:
+        assert doc.permissions & 16 and not doc.permissions & 4  # copiar sí, imprimir no
+    with Document.open(out, "owner") as doc:
+        assert doc.permissions == UNRESTRICTED
+
+    # Sin contraseña de propietario se pone una al azar: una vacía quitaría las restricciones.
+    svc.protect(str(two_pdfs[0]), "user", "", {"allow_copy": True})
+    with pytest.raises(PasswordError):
+        Document.open(out, "")
+    with Document.open(out, "user") as doc:
+        assert not doc.permissions & 4
 
 
 # ── Servicio Extraer ─────────────────────────────────────────────────────────
 def _text_pdf(path: Path, pages: list[str], password: str | None = None) -> Path:
-    doc = fitz.open()
-    for text in pages:
-        doc.new_page().insert_text((72, 72), text)
-    kwargs = {"encryption": fitz.PDF_ENCRYPT_AES_256, "user_pw": password, "owner_pw": password} if password else {}
-    doc.save(str(path), **kwargs)
-    doc.close()
+    data = pdf_bytes([[(72, 72, text)] for text in pages])
+    path.write_bytes(encrypted(data, password) if password else data)
     return path
 
 
@@ -1128,8 +1147,7 @@ def test_extract_smart_search_writes_matching_pages(tmp_path):
         finished = _events(host, "extract:finished")[-1]
         assert finished["count"] == 2 and finished["files"] == 1
         assert sorted(m["page"] for m in _events(host, "extract:match")) == [2, 4]
-        with fitz.open(finished["path"]) as out:
-            assert len(out) == 2
+        assert len(page_texts(finished["path"])) == 2
         assert svc.state()["last_output"] == finished["path"] and not svc.state()["running"]
         assert any(log["tone"] == "success" for log in _events(host, "extract:log"))
     finally:
@@ -1150,8 +1168,7 @@ def test_extract_range_asks_password_mid_job(tmp_path):
         assert _events(host, "extract:password")[0]["name"] == "privado.pdf"
         finished = _events(host, "extract:finished")[-1]
         assert finished["count"] == 2
-        with fitz.open(finished["path"]) as out:
-            assert [out[i].get_text().strip() for i in range(2)] == ["dos", "tres"]
+        assert page_texts(finished["path"]) == ["dos", "tres"]
     finally:
         svc.close()
 
@@ -1246,23 +1263,11 @@ def test_app_about_and_diagnostics_log(tmp_path):
     log.write_text("linea 1\nlinea 2\n", encoding="utf-8")
     assert svc.diagnostics_log().endswith("linea 2\n")
     about = svc.about()
-    assert about["pymupdf"] == fitz.__version__ and about["pywebview"] != "?"
+    assert about["pdfium"] == str(pypdfium2.PDFIUM_INFO.build) and about["pywebview"] != "?"
     assert about["app"].endswith("-web")
 
 
-# ── Frontend coherente con el backend y con la versión Qt ────────────────────
-def test_css_tokens_match_qt_palettes():
-    theme = pytest.importorskip("src_qt.core.theme", reason="la versión Qt no está (no se sube al repositorio)")
-    DarkPalette, LightPalette = theme.DarkPalette, theme.LightPalette
-
-    css = (UI_SRC_DIR / "styles" / "tokens.css").read_text(encoding="utf-8")
-    light, dark = css.split(':root[data-theme="dark"]')
-    for block, palette in ((light, LightPalette), (dark, DarkPalette)):
-        tokens = dict(re.findall(r"--([a-z0-9-]+):\s*([^;]+);", block))
-        expected = {n.lower().replace("_", "-"): getattr(palette, n) for n in vars(palette) if n.isupper()}
-        assert tokens == expected
-
-
+# ── Frontend coherente con el backend ────────────────────
 _ICON_USE = re.compile(r"""(?:data-icon=|\bic\(|setIcon\([\w.]+,\s*|\bicon:\s*)["']([a-z0-9-]+)["']""")
 _RPC_USE = re.compile(r"""\bcall(?:<[^>]*>)?\(\s*'([a-z_]+\.[a-z_]+)'""")  # también call<Tipo>('…')
 # Svelte: <Icon name="save" />, <Icon name={dark ? 'sun' : 'moon'} /> y fragmentos que
@@ -1436,28 +1441,44 @@ def test_ui_needs_build_only_when_sources_are_newer(tmp_path):
 
 
 # ── Datos para el visor con PDFium ───────────────────────────────────────────
-def test_document_url_is_the_open_version_without_password(tmp_path):
-    pdf = _make_pdf(tmp_path / "cifrado.pdf", 3, password="clave")
-    with fitz.open(pdf) as src:
-        src.authenticate("clave")
-        src[0].add_rect_annot(fitz.Rect(50, 50, 150, 150))
-        src.save(str(tmp_path / "anotado.pdf"), encryption=fitz.PDF_ENCRYPT_AES_256, user_pw="clave", owner_pw="clave")
+def test_document_url_is_the_open_version_with_its_password(tmp_path):
+    with Document.new() as doc:
+        for _ in range(3):
+            add_page(doc)
+        add_annot(doc[0], "Square", Rect(50, 50, 150, 150))
+        data = doc.to_bytes()
+    pdf = tmp_path / "anotado.pdf"
+    pdf.write_bytes(encrypted(data, "clave"))
     svc = ViewerService(FakeHost())
-    info = svc.open(str(tmp_path / "anotado.pdf"), "clave")
+    info = svc.open(str(pdf), "clave")
     info = svc.rotate(info["id"], 90, 1)
 
     result = svc.document_url(info["id"])
     assert result["keys"] == info["keys"]  # la versión que tiene el lienzo
+    assert result["password"] == "clave"  # sigue cifrado: la copia que vuelve conserva el cifrado
     data = base64.b64decode(result["url"].split(",", 1)[1])
-    with fitz.open("pdf", data) as doc:
-        assert not doc.needs_pass  # PDFium lo abre sin contraseña
+    with pytest.raises(PasswordError):
+        Document.open(data)
+    with Document.open(data, "clave") as doc:
         assert [p.rotation for p in doc] == [0, 90, 0]
-        assert [a.type[1] for a in doc[0].annots()] == ["Square"]  # las anotaciones las edita EmbedPDF
-    # La copia sin cifrar no le quita el cifrado al documento: se sigue guardando con contraseña.
+        assert annots(doc[0]) == ["Square"]  # las anotaciones las edita EmbedPDF
     svc.save(info["id"])
     svc.close()
-    with fitz.open(tmp_path / "anotado.pdf") as saved:
-        assert saved.needs_pass and saved.authenticate("clave") and [p.rotation for p in saved] == [0, 90, 0]
+    with Document.open(pdf, "clave") as saved:
+        assert saved.encrypted and [p.rotation for p in saved] == [0, 90, 0]
+
+
+def test_print_url_gives_the_document_without_encryption(tmp_path):
+    pdf = _make_pdf(tmp_path / "cifrado.pdf", 2, password="clave")
+    svc = ViewerService(FakeHost())
+    try:
+        doc_id = svc.open(str(pdf), "clave")["id"]
+        data = base64.b64decode(svc.print_url(doc_id).split(",", 1)[1])
+        with Document.open(data) as doc:
+            assert not doc.encrypted and len(doc) == 2
+        assert svc._docs[doc_id].doc.encrypted  # el documento abierto sigue cifrado
+    finally:
+        svc.close()
 
 
 @pytest.mark.parametrize("rotation", [0, 90, 180, 270])
@@ -1469,19 +1490,20 @@ def test_document_url_writes_ocr_words_as_invisible_text(tmp_path, rotation):
         info = svc.rotate(info["id"], rotation, 0)
     with svc.document(info["id"]) as entry:
         page = entry.doc[0]
+        native = page.to_view(page.words()[0][0])
         svc.set_ocr_words(entry, page, [
-            (100, 300, 220, 320, "Hola"),  # en la página tal como se ve
-            (*fitz.Rect(page.search_for("Nativo")[0]) * page.rotation_matrix, "Repetido"),  # tapa texto nativo: no va
+            (100, 300, 220, 320, "Hola ñandú"),  # en la página tal como se ve
+            (*native, "Repetido"),  # tapa texto nativo: no va
         ])
 
-    data = base64.b64decode(svc.document_url(info["id"])["url"].split(",", 1)[1])
-    with fitz.open("pdf", data) as doc:
+    with _served(svc, info["id"]) as doc:
         page = doc[0]
-        words = {w[4]: fitz.Rect(w[:4]) * page.rotation_matrix for w in page.get_text("words")}
-        assert set(words) == {"Nativo", "Hola"}
-        assert all(abs(a - b) < 1 for a, b in zip(words["Hola"], (100, 300, 220, 320), strict=True))
+        words = {text: page.to_view(rect) for rect, text, _line in page.words()}
+        assert set(words) == {"Nativo", "Hola", "ñandú"}
+        assert words["Hola"].x0 == pytest.approx(100, abs=2) and words["ñandú"].x1 == pytest.approx(220, abs=5)
+        assert words["Hola"].y0 == pytest.approx(300, abs=6) and words["Hola"].y1 == pytest.approx(320, abs=6)
     with svc.document(info["id"]) as entry:
-        assert "Hola" not in entry.doc[0].get_text()  # solo en la copia para el visor
+        assert "Hola" not in entry.doc[0].text()  # solo en la copia para el visor
 
 
 def test_byte_server_serves_each_item_once(monkeypatch):

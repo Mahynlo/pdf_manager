@@ -1,7 +1,7 @@
 """Agente de IA para documentos PDF (Gemini u OpenAI): chat con búsqueda semántica,
 resumen, datos clave y sugerencias de censura.
 
-Sus dependencias (``google-genai``, ``langchain-*``, ``pymupdf4llm``) son opcionales:
+Sus dependencias (``google-genai``, ``langchain-*``) son opcionales:
 ``config`` se puede usar sin ellas y ``PDFAgent`` se importa al pedirlo.
 """
 

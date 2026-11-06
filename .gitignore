@@ -177,5 +177,3 @@ app/ui/dist/
 
 # Versión Qt (PySide6): se conserva en local y en la rama feature/pyside-migration, pero no
 # se sube (la app es la versión web, app/). Solo afecta a archivos que no estén ya versionados.
-src_qt/
-tests/test_qt_*.py

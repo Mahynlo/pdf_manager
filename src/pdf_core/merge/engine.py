@@ -1,9 +1,8 @@
-"""PDF logic for the merge feature — uses PyMuPDF (`fitz`), never Flet.
+"""PDF logic for the merge feature — uses PDFium (`pdf_core.pdf`).
 
 Everything that touches documents on disk lives here: authenticating
 encrypted PDFs, checking assembly permissions, rendering thumbnails, and the
-page-by-page merge itself. The UI layer ([tab.py]) drives these functions and
-turns their results / exceptions into Flet widgets.
+page-by-page merge itself.
 """
 from __future__ import annotations
 
@@ -12,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-import fitz
+from pdf_core.pdf import UNRESTRICTED, Document, PasswordError, png
 
 from .model import MergePage, MergeSource, PDFEntry
 
@@ -46,35 +45,30 @@ def normalize_path(path: str) -> str:
 
 def can_assemble_permissions(permissions: int) -> bool:
     """Return True when permissions include assembly, or are unrestricted."""
-    if permissions < 0:
-        return True
-    return bool(permissions & _PDF_PERM_ASSEMBLY)
+    return permissions == UNRESTRICTED or bool(permissions & _PDF_PERM_ASSEMBLY)
 
 
 def open_source_doc(
     path: str,
     password: str | None = None,
     enforce_permissions: bool = True,
-) -> fitz.Document:
+) -> Document:
     """Open a source document for merge/preview, authenticating if needed.
 
     Raises `MergePasswordRequiredError` / `MergeInvalidPasswordError` /
     `MergePermissionDeniedError` as appropriate. The returned document is the
     caller's to close.
     """
-    doc = fitz.open(path)
     try:
-        if doc.is_encrypted:
-            if not password:
-                raise MergePasswordRequiredError("PDF protegido requiere contraseña")
-            if not doc.authenticate(password):
-                raise MergeInvalidPasswordError("Contraseña incorrecta")
-            if enforce_permissions and not can_assemble_permissions(doc.permissions):
-                raise MergePermissionDeniedError("El PDF no permite ensamblaje")
-        return doc
-    except Exception:
+        doc = Document.open(path, password)
+    except PasswordError as ex:
+        if not password:
+            raise MergePasswordRequiredError("PDF protegido requiere contraseña") from ex
+        raise MergeInvalidPasswordError("Contraseña incorrecta") from ex
+    if enforce_permissions and not can_assemble_permissions(doc.permissions):
         doc.close()
-        raise
+        raise MergePermissionDeniedError("El PDF no permite ensamblaje")
+    return doc
 
 
 def open_entry(path: str, password: str | None = None) -> PDFEntry:
@@ -100,8 +94,7 @@ def render_thumbnail(
         with open_source_doc(path, password=password, enforce_permissions=False) as doc:
             if page >= len(doc):
                 return None
-            pix = doc[page].get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
-            return base64.b64encode(pix.tobytes("png")).decode()
+            return base64.b64encode(png(doc[page].render(scale))).decode()
     except Exception:
         return None
 
@@ -124,12 +117,10 @@ def render_thumbnails_batch(
     try:
         with open_source_doc(path, password=password, enforce_permissions=False) as doc:
             n = len(doc)
-            mat = fitz.Matrix(scale, scale)
             for pg in pages:
                 if 0 <= pg < n:
                     try:
-                        pix = doc[pg].get_pixmap(matrix=mat, alpha=False)
-                        out[pg] = base64.b64encode(pix.tobytes("png")).decode()
+                        out[pg] = base64.b64encode(png(doc[pg].render(scale))).decode()
                     except Exception:
                         pass
     except Exception:
@@ -140,6 +131,7 @@ def render_thumbnails_batch(
 # ── merge operation ───────────────────────────────────────────────────────────
 
 ProgressFn = Callable[[int, int], None]
+OutlineFn = Callable[[bytes, list[dict]], bytes]  # escribe los marcadores: los hace el motor de EmbedPDF
 
 
 @dataclass(frozen=True)
@@ -147,7 +139,6 @@ class MergeOptions:
     """Opciones del documento combinado."""
     bookmarks: bool = False  # un marcador por cada archivo de origen
     duplex: bool = False     # hoja en blanco para que cada archivo empiece en página impar
-    optimize: bool = True    # garbage collection + compresión al guardar
 
 
 DEFAULT_MERGE = MergeOptions()
@@ -160,40 +151,42 @@ def merge_pages(
     passwords: dict[str, str | None] | None = None,
     options: MergeOptions = DEFAULT_MERGE,
     progress: ProgressFn | None = None,
+    outline: OutlineFn | None = None,
 ) -> int:
     """Combina ``pages`` (en ese orden, pueden alternar archivos) en *out_path*.
 
     Cada archivo de origen se abre una sola vez. Llama a ``progress(done, total)``
     tras cada página y devuelve el total de páginas escritas (incluidas las
-    hojas en blanco del modo dúplex).
+    hojas en blanco del modo dúplex). ``outline`` escribe los marcadores de ``options.bookmarks``.
     """
     passwords = passwords or {}
-    out_doc = fitz.open()
-    opened: dict[str, fitz.Document] = {}
-    toc: list[list] = []
+    out_doc = Document.new()
+    opened: dict[str, Document] = {}
+    toc: list[dict] = []
     current_path: str | None = None
     try:
         for done, item in enumerate(pages, start=1):
             if item.path != current_path:
                 # Dúplex: el archivo nuevo debe empezar en página impar.
                 if options.duplex and current_path is not None and len(out_doc) % 2:
-                    out_doc.new_page(width=_BLANK_SIZE[0], height=_BLANK_SIZE[1])
+                    out_doc.new_page(len(out_doc), *_BLANK_SIZE)
                 if options.bookmarks:
-                    toc.append([1, Path(item.path).stem, len(out_doc) + 1])
+                    toc.append({"title": Path(item.path).stem, "page": len(out_doc)})
                 current_path = item.path
             src = opened.get(item.path)
             if src is None:
                 src = open_source_doc(item.path, password=passwords.get(item.path), enforce_permissions=True)
                 opened[item.path] = src
-            out_doc.insert_pdf(src, from_page=item.page, to_page=item.page, rotate=item.rotation)
+            out_doc.insert_pages(src, [item.page])
+            if item.rotation:
+                added = out_doc[len(out_doc) - 1]
+                added.set_rotation(added.rotation + item.rotation)
             if progress is not None:
                 progress(done, len(pages))
-        if toc:
-            out_doc.set_toc(toc)
-        if options.optimize:
-            out_doc.save(out_path, garbage=4, deflate=True)
-        else:
-            out_doc.save(out_path)
+        data = out_doc.to_bytes()
+        if toc and outline is not None:
+            data = outline(data, toc)
+        Path(out_path).write_bytes(data)
         return len(out_doc)
     finally:
         out_doc.close()

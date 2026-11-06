@@ -1,5 +1,5 @@
 <!--
-  Pestaña de visor PDF (equivale a src_qt/ui/viewer/pdf_viewer.py): compone las barras
+  Pestaña de visor PDF: compone las barras
   de herramientas, las miniaturas, el lienzo (con la selección de texto y las
   anotaciones) y el panel lateral (índice, OCR, censura, IA y búsqueda).
 
@@ -211,7 +211,7 @@
   async function print() {
     setStatus(T.print.preparing);
     try {
-      await printPdf(await annotations.exportCopy());
+      await printPdf(await annotations.printCopy());
     } catch (err) {
       toast(T.print.error((err as Error).message), 'danger');
     }

@@ -1,5 +1,5 @@
 <!--
-  Icono vectorial del mismo juego que el resto de la app (icons.json, el de Qt).
+  Icono vectorial del mismo juego que el resto de la app (icons.json).
   Usa stroke="currentColor": toma el color del texto y sigue el tema.
     <Icon name="save" />  <Icon name="plus" size={18} />
 -->

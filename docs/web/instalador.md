@@ -13,7 +13,7 @@
    - No usa archivo `.spec` (están en `.gitignore`): las opciones están en el propio script.
 3. **Inno Setup 6** compila `installer\web\setup.iss` en `dist\ExtraerPDFs_Web_Setup_<versión>.exe`.
    - La versión es `APP_VERSION` de `app\__init__.py` (también se ve en Ajustes). Va aparte de
-     `pyproject.toml`, que lleva la de Flet y solo admite versiones PEP 440 (`0.1.29-web` no lo es).
+     `pyproject.toml`, que solo admite versiones PEP 440 (`0.1.29-web` no lo es).
    - Si Inno Setup no está instalado, el script indica el comando para compilarlo después.
 
 `build\` y `dist\` están en `.gitignore`.
@@ -33,9 +33,9 @@ puede escribir. Por eso lo que se escribe va siempre a la carpeta del usuario:
 - recientes, leyendas y perfiles en `~/.extraer_pdfs_*.json`;
 - la carpeta de destino de «Extraer», que si no puede crear `storage\temp` usa «Documentos».
 
-El ejecutable ocupa unos 189 MB. Lo que más pesa:
+El ejecutable ocupa unos 158 MB. Lo que más pesa:
 - los modelos de OCR (37 MB) y onnxruntime (32 MB);
-- MuPDF (25 MB + 12 MB de PyMuPDF);
+- PDFium para Python (`pypdfium2`, unos 7 MB);
 - la interfaz (5,6 MB), casi toda el motor PDFium del visor (`pdfium.wasm`, ver [embedpdf.md](embedpdf.md));
 - NumPy con su OpenBLAS, que PyInstaller copia dos veces (en la raíz y en `numpy.libs`, 20 MB cada una):
   quitar el duplicado ahorraría otros 20 MB.
@@ -45,7 +45,7 @@ Antes ocupaba 420 MB: onnxtr arrastraba OpenCV (99 MB) y SciPy (~89 MB). El OCR 
 
 ## «Abrir con» e instancia única
 
-No hace falta el `launcher.exe` de la versión Flet: el ejecutable recibe las rutas como argumentos.
+El ejecutable recibe las rutas como argumentos.
 Las lee `pdf_core.launch_args`, que también acepta la variable `EXTRAR_PDF_PATH` del launcher.
 
 Si ya hay una ventana abierta, `app/single_instance.py` le pasa los PDF por una tubería con nombre del
@@ -65,18 +65,13 @@ se instala):
   una Release marcada como prerelease. El tag tiene que coincidir con `APP_VERSION`, si no falla;
 - **Actions → Run workflow**: solo el artefacto, sin Release.
 
-El workflow de Flet (`build.yml`) sigue con los tags `vX.Y.Z` y no se dispara con los `-web`.
-
-La versión Qt (`src_qt\`, `tests\test_qt_*.py`) no se sube: está en `.gitignore` y en la rama local
-`feature/pyside-migration`. Las pruebas compartidas que la usan se saltan si no está.
-
 ## Convivencia con la versión Flet
 
 El instalador web tiene otro `AppId`, otra carpeta (`Extraer PDFs Web`) y otro ProgID, así las dos
 versiones se pueden instalar a la vez. Flet ya no tendrá versiones nuevas (la 0.1.28 fue la última).
 
 Para que la web reemplace una instalación de Flet hay dos opciones:
-- usar en `installer\web\setup.iss` el `AppId` de `installer\setup.iss`, para que instalar la web actualice la instalación existente;
+- usar en `installer\web\setup.iss` su `AppId` (`{A3F2C1D0-8B4E-4F9A-B6C2-1D3E5F7A9B0C}`), para que instalar la web actualice la instalación existente;
 - desinstalar antes la versión Flet.
 
 ## Comprobado

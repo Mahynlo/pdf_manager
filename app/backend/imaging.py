@@ -4,20 +4,13 @@ from __future__ import annotations
 
 import base64
 
-import fitz
+from pdf_core.pdf import Page, png
 
 
-def page_data_url(
-    page: fitz.Page, scale: float, rotation: int = 0, quality: int = 80, annots: bool = True
-) -> str:
-    """Rasteriza ``page`` (1.0 = 72 DPI), girada ``rotation`` grados, como data URL JPEG.
+def page_data_url(page: Page, scale: float, rotation: int = 0, annots: bool = True) -> str:
+    """Rasteriza ``page`` (1.0 = 72 DPI), girada ``rotation`` grados, como data URL PNG.
 
-    JPEG en vez de PNG: las miniaturas pesan ~5× menos y viajan como texto por el puente.
     ``annots=False`` omite las anotaciones (el visor dibuja encima las editables).
     """
-    matrix = fitz.Matrix(scale, scale)
-    if rotation:
-        matrix = matrix.prerotate(rotation)
-    pix = page.get_pixmap(matrix=matrix, alpha=False, annots=annots)
-    data = base64.b64encode(pix.tobytes("jpg", jpg_quality=quality)).decode("ascii")
-    return f"data:image/jpeg;base64,{data}"
+    data = base64.b64encode(png(page.render(scale, rotation=rotation, annots=annots))).decode("ascii")
+    return f"data:image/png;base64,{data}"

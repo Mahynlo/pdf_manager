@@ -1,7 +1,6 @@
 """Servicio ``legends``: sellos rápidos y leyendas guardadas (menú «Sellos» del visor).
 
-Usa el mismo almacén que Qt y Flet (``pdf_core.legends``), así las tres
-versiones comparten las leyendas. Equivale a ``legends_dialog.py`` en Qt.
+Las guarda ``pdf_core.legends``.
 """
 
 from __future__ import annotations
