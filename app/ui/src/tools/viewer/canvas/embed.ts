@@ -141,7 +141,7 @@ function plugins() {
     createPluginRegistration(RenderPluginPackage, {
       withAnnotations: false, withForms: true, defaultImageType: IMAGE.type, defaultImageQuality: IMAGE.quality,
     }),
-    createPluginRegistration(TilingPluginPackage, { tileSize: 768, overlapPx: 2.5, extraRings: 0, defaultImageType: IMAGE.type }),
+    createPluginRegistration(ViewerTilingPackage, { tileSize: 768, overlapPx: 2.5, extraRings: 0, defaultImageType: IMAGE.type }),
     createPluginRegistration(ZoomPluginPackage, {
       defaultZoomLevel: UNIT, minZoom: ZOOM_MIN * UNIT, maxZoom: ZOOM_MAX * UNIT,
     }),
@@ -194,6 +194,41 @@ export class ViewerScrollPlugin extends ScrollBase {
     this.refreshDocumentLayout(documentId);
   }
 }
+
+/** Lo que se usa del estado de plugin-tiling. */
+interface TilingState {
+  documents: Record<string, { visibleTiles: Record<number, { id: string; isFallback: boolean }[]> }>;
+}
+
+/**
+ * Quita los mosaicos repetidos: entre uno de respaldo y uno nuevo, se queda el nuevo. Al cambiar de
+ * zoom, plugin-tiling (2.15.1) conserva los mosaicos anteriores de respaldo; si se vuelve a ese zoom
+ * antes de que acaben los del otro, crea unos con el mismo id, y la lista de Svelte, cuya clave es
+ * ese id, falla y deja el visor sin responder. Hay que revisarlo al actualizar EmbedPDF.
+ */
+function withoutRepeatedTiles<S extends TilingState>(state: S): S {
+  let documents = state.documents;
+  for (const [id, doc] of Object.entries(state.documents)) {
+    for (const [page, tiles] of Object.entries(doc.visibleTiles)) {
+      const unique = new Map<string, (typeof tiles)[number]>();
+      for (const tile of tiles) {
+        if (!tile.isFallback || !unique.has(tile.id)) unique.set(tile.id, tile);
+      }
+      if (unique.size === tiles.length) continue;
+      const current = documents[id];
+      documents = { ...documents, [id]: { ...current, visibleTiles: { ...current.visibleTiles, [page]: [...unique.values()] } } };
+    }
+  }
+  return documents === state.documents ? state : { ...state, documents };
+}
+
+const ViewerTilingPackage = {
+  ...TilingPluginPackage,
+  reducer: ((state, action) => {
+    const next = TilingPluginPackage.reducer(state, action);
+    return next === state ? state : withoutRepeatedTiles(next);
+  }) as typeof TilingPluginPackage.reducer,
+};
 
 const ViewerScrollPackage = {
   ...ScrollPluginPackage,

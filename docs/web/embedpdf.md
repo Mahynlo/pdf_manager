@@ -603,3 +603,9 @@ Las miniaturas salen de `render` (`canvas.thumbnails`), no del complemento `thum
 el panel lateral ya tiene su propia lista virtual y sus tarjetas.
 
 La interfaz compilada crece unos 5,4 MB: `pdfium.wasm` (4,6 MB) y el *worker* (0,7 MB).
+
+## Fallos de EmbedPDF que se esquivan
+
+- **Mosaicos repetidos (`plugin-tiling` 2.15.1):** al volver a un zoom antes de que acaben los mosaicos del otro, crea
+  unos con el mismo id que los de respaldo. La lista de Svelte falla con `each_key_duplicate` y el visor deja de
+  responder. `ViewerTilingPackage` (`canvas/embed.ts`) los quita; hay que revisarlo al actualizar EmbedPDF.
