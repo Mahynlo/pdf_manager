@@ -447,6 +447,15 @@ export class PageCanvas {
     if (interaction.getActiveMode() !== mode) interaction.activate(mode);
   }
 
+  /**
+   * Hace del documento a la vista el activo de EmbedPDF. Se abren sin activarlos (cada visor usa
+   * `forDocument`), pero plugin-stamp y plugin-signature ponen su herramienta en el activo, sea
+   * cual sea el documento que se les pida: sin esto iba al primero que se abrió.
+   */
+  activate(): void {
+    this._plugin<DocumentManagerPlugin>('document-manager').provides().setActiveDocument(this.shown!);
+  }
+
   /** Centra en la vista el rectángulo `[x0, y0, x1, y1]` (puntos) de la página `index`. */
   scrollToRect(index: number, [x0, y0, x1, y1]: Box): void {
     if (!this._live()) {

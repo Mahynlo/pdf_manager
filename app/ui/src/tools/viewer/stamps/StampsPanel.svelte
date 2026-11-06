@@ -67,6 +67,7 @@
     if (!canvas.shown) return;
     setTool(TOOLS.PLACE);
     try {
+      canvas.activate();
       await activate();
     } catch (err) {
       setTool(TOOLS.SELECT);
