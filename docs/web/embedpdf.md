@@ -13,18 +13,20 @@ Cada paso deja el visor completo y funcionando. Lo que aún no se migró sigue c
 | 1. Render | PDFium (el motor de EmbedPDF) dibuja las páginas y las miniaturas en el navegador | Hecho |
 | 2. Desplazamiento y zoom | `Viewport`, `Scroller`, Zoom, Tiling y Spread de EmbedPDF colocan y dibujan las páginas; nuestras capas (marcas, anotaciones) viven dentro de cada página | Hecho |
 | 3. Selección de texto | Complemento Selection, con nuestra barra flotante (copiar, resaltar, censurar, explicar con IA) | Hecho |
-| 4. Herramientas | Una a una: búsqueda (hecha), anotaciones (hechas), sellos y firmas (hechos), deshacer las operaciones de página (hecho; las hace Python), censura (hecha) e imprimir (hecho) | Hecho |
+| 4. Herramientas | Una a una: búsqueda (hecha), anotaciones (hechas), sellos y firmas (hechos), deshacer las operaciones de página (hecho), censura (hecha) e imprimir (hecho) | Hecho |
+| 5. EmbedPDF, dueño del documento | Ver «EmbedPDF, dueño del documento del visor»: etapa 1 (operaciones de página en EmbedPDF) hecha | En curso |
 
-Al empezar cada paso hay que decidir qué hace Python y qué hace el navegador. Desde las anotaciones
-el reparto es: **EmbedPDF edita el contenido del documento abierto** (por ahora, las anotaciones) y
-**Python guarda el archivo** y hace lo pesado (OCR, censura por patrones, IA, combinar, seguridad).
-En la censura, EmbedPDF pone las marcas y Python las aplica (ver «Censura»). Las operaciones de
-página se quedan en Python: EmbedPDF no las tiene (ver «Operaciones de página»).
+Al empezar cada paso hay que decidir qué hace Python y qué hace el navegador. El reparto (decidido
+el 2026-11-10, para que la app gaste menos en escritorio y en el navegador): **EmbedPDF es el dueño
+del documento abierto en el visor** (anotaciones, operaciones de página y, en las etapas siguientes,
+guardar y el texto del OCR) y **Python hace lo que EmbedPDF no sabe**: OCR, IA, orientación automática,
+censura por patrones y las herramientas de archivos (Unir, Extraer, Dividir, Seguridad). En la censura,
+EmbedPDF pone las marcas y Python las aplica (ver «Censura»).
 
 ## Cómo se carga el documento (pasos 1 y 2)
 
-Python es el dueño de las páginas y del archivo: abrir, guardar, censura, OCR y operaciones de
-página. Las anotaciones las edita EmbedPDF en su copia (ver «Anotaciones», en el paso 4).
+Python abre el archivo y da al visor su versión. Desde ahí, EmbedPDF edita el documento abierto
+(anotaciones y páginas); lo que cambia Python (censura, OCR) vuelve a abrirse en EmbedPDF.
 
 1. `viewer.document_url` serializa el documento abierto:
    - con sus anotaciones (las dibuja y edita la capa de anotaciones de EmbedPDF);
@@ -37,8 +39,9 @@ página. Las anotaciones las edita EmbedPDF en su copia (ver «Anotaciones», en
    - solo escucha en 127.0.0.1;
    - cada dato lleva un código aleatorio y caduca al primer uso o a los 2 minutos.
 3. `canvas.ts` los abre en EmbedPDF con su gestor de documentos (`openDocumentBuffer`). Cuando
-   cambian las claves de página (girar, mover, insertar, censurar), abre la versión nueva y, en
-   cuanto está lista, la pone a la vista y cierra la anterior. Mientras tanto se sigue viendo la anterior.
+   Python cambia las páginas (censura, OCR), abre la versión nueva y, en cuanto está lista, la pone
+   a la vista y cierra la anterior. Mientras tanto se sigue viendo la anterior. Las operaciones de
+   página no vuelven a abrirlo (ver «EmbedPDF, dueño del documento del visor»).
 
 **Sin conexión a internet:**
 - `pdfium.wasm` va dentro de la app (`import … from '@embedpdf/pdfium/pdfium.wasm?url'`, en `embed.ts`);
@@ -389,32 +392,15 @@ dibujo); Esc cancela; sellos propios desde PNG
 quitarlos; firma dibujada (guardada) y escrita (solo en la sesión); y Ctrl+S guarda sellos y firmas
 con su dibujo.
 
-### Operaciones de página (las hace Python, ahora con deshacer)
+### Operaciones de página (las hace EmbedPDF, con deshacer)
 
-El plan era pasarlas a PDFium para que fueran instantáneas. **EmbedPDF 2.15.1 no lo permite:** el
-motor solo expone borrar e importar páginas (no girar, mover ni crear), ningún complemento las
-gestiona (la acción `SET_PAGES` del núcleo no la usa nadie) y la versión 3 (prerelease) tampoco las
-trae. Hacerlas por nuestra cuenta en el worker de PDFium sería frágil: las anotaciones de EmbedPDF
-van por número de página y se descolocarían al mover páginas.
-
-Así que siguen en Python (girar, insertar en blanco, duplicar, borrar, mover, corregir la
-orientación) y ahora **se pueden deshacer y rehacer**:
-- cada operación guarda su inversa (`_PageStep` en `services/viewer.py`): girar al revés, devolver
-  la página a su sitio, quitar la insertada; la página borrada se guarda aparte, con sus
-  anotaciones, para devolverla. Hasta 30 pasos;
-- `viewer.undo_pages` / `viewer.redo_pages` devuelven el documento y a qué página ir; `_info` dice
-  si hay algo que deshacer o rehacer (`page_undo`, `page_redo`);
-- al deshacer un giro vuelven las palabras de OCR de esa página (al girarla se pierden);
-- una página borrada y devuelta es un objeto nuevo del PDF: el documento sigue con cambios sin
-  guardar aunque se deshaga todo. Deshacer un giro o un movimiento sí vuelve a lo guardado.
+Girar, insertar en blanco, duplicar, borrar y mover se hacen en el documento abierto en EmbedPDF,
+sin volver a abrirlo, y se pueden deshacer. Cómo funciona: «EmbedPDF, dueño del documento del visor».
 
 **Un solo Ctrl+Z** (y el botón «Deshacer»): primero deshace lo de EmbedPDF (anotaciones) y, cuando
-no queda nada, la última operación de página. Tras una operación de página EmbedPDF empieza un
-historial nuevo, así que el orden se respeta: lo hecho después de girar se deshace antes que el giro.
-Lo que se pierde: lo que quedaba por rehacer en las anotaciones al deshacer una operación de página.
-
-**Comprobado** (`annot_e2e`, ahora 53 comprobaciones): girar, Ctrl+Z, Ctrl+Y y Ctrl+Z otra vez, con las
-anotaciones de la página en su sitio. En Python, `test_viewer_undoes_and_redoes_page_operations`.
+no queda nada, la última operación de página. Tras una operación de página el historial de EmbedPDF
+empieza de nuevo, así que el orden se respeta: lo hecho después de girar se deshace antes que el giro.
+Lo que se pierde: lo que quedaba por rehacer en las anotaciones al hacer una operación de página.
 
 ### Censura (hecha): EmbedPDF marca, Python aplica
 
@@ -500,16 +486,78 @@ con el PDF de 120 páginas.
 **Retirado:** `PrintDialog.svelte`, `canvas.pageImages`, la capa `#print-root` y sus estilos de
 impresión, y `viewer.print_selection` (Python; `pdf_core.page_ranges` sigue para el OCR por lotes).
 
+## EmbedPDF, dueño del documento del visor
+
+Decidido el 2026-11-10. El documento del visor estaba dos veces (en Python y en EmbedPDF; en el
+navegador, tres, con la copia de `/files`) y cada operación de página lo serializaba entero en Python
+y lo volvía a abrir en EmbedPDF. Ahora el dueño es EmbedPDF, por etapas que dejan la app funcionando:
+
+| Etapa | Qué pasa a EmbedPDF | Estado |
+|---|---|---|
+| 1 | Operaciones de página y su deshacer | Hecha |
+| 2 | Guardar, guardar como, propiedades y exportar (Python solo escribe los bytes) | Pendiente |
+| 3 | El texto del OCR y la orientación (Python recibe imágenes de página) | Pendiente |
+| 4 | Quitar el documento del visor de Python (en el navegador, sin copia en `/files`) | Pendiente |
+| 5 | La IA lee el texto a través de EmbedPDF | Pendiente |
+
+### El motor de la app (`lib/pdf-engine/`)
+
+El motor de EmbedPDF no sabe cambiar las páginas de un documento abierto, pero su PDFium trae todas
+las funciones. `createPdfiumEngine` crea su worker desde un `blob:` y no deja añadirle métodos, así que
+la app tiene el suyo, con el mismo protocolo (su `PdfEngine` funciona igual encima):
+
+| Archivo | Qué hace |
+|---|---|
+| `native.ts` | `AppNative`, el `PdfiumNative` de EmbedPDF con lo que le falta: girar (en el archivo), mover, borrar, insertar en blanco, duplicar y guardar una página aparte para devolverla. Lo prueba también Python con el motor real (`tests/engine_task.mjs`, tarea `pages`) |
+| `worker.ts` | El worker: atiende las llamadas por el nombre del método, como el de EmbedPDF |
+| `index.ts` | `createAppEngine`: el worker, el ejecutor que le pasa las llamadas y `PageStructure`, las operaciones nuevas con sus tipos |
+| `encoder.ts`, `encoder-worker.ts` | Codifican en workers las imágenes que dibuja el motor (EmbedPDF no publica el suyo) |
+| `protocol.ts` | Los mensajes entre la ventana y el worker |
+
+Usa partes privadas de `PdfiumNative` 2.15.1 (la caché de documentos, el módulo de PDFium): revisarlas
+al actualizar EmbedPDF. Al cambiar el orden de las páginas hay que vaciar su caché de páginas, que va
+por número de página (el `deletePage` de EmbedPDF no lo hace).
+
+### Cómo se cambian las páginas
+
+- `document/pages.ts` (`PageEditor`) hace cada operación en el motor, lleva las claves de página, el
+  deshacer y rehacer (30 pasos; la página borrada se guarda aparte con sus anotaciones) y sabe si la
+  estructura es la guardada. `document/operations.ts` decide a qué página ir, como antes.
+- `canvas.showPages` muestra la lista nueva sin volver a abrir el documento (`showPageList` en
+  `embed.ts`): la acción `SET_PAGES` del núcleo, `REFRESH_PAGES` para redibujar, reagrupar las páginas
+  (doble página), recolocarlas y volver a leer las anotaciones. Cada página se vuelve a montar al
+  cambiar su contenido (`{#key}` en `PdfPages.svelte`).
+- **Claves de página** `uid:giro:revisión`: el `uid` lo da el visor a las páginas nuevas y sigue a
+  cada página aunque cambie de sitio. Con él Python guarda las palabras del OCR, que vuelven si se
+  deshace el giro o el borrado de su página.
+- **Python recibe la estructura** con la copia del documento (`viewer.sync_annotations(id, url,
+  uids)`), antes de lo que lee el documento: guardar, censurar, exportar, propiedades, OCR, IA y la
+  búsqueda de la censura (`syncDocument` en `Viewer.svelte`, en la cola del documento). Si nada
+  cambió, no se sube nada.
+- **Orientación automática:** Python solo dice cuántos grados girar (`ocr.orientation`); gira el
+  visor, y se deshace como cualquier giro.
+- **Cambios sin guardar:** anotaciones o censura (lo dice Python, `annotated` y `redacted`) o una
+  estructura distinta de la guardada (`PageEditor.changedWith`). Deshacerlo todo vuelve a «sin cambios».
+
+**Medido** (PDF de 47 MB y 250 páginas, versión web): mover una página tarda 38–54 ms desde el clic
+en el menú; antes, solo serializar, transferir y volver a abrir costaba 330–550 ms, sin contar volver
+a dibujar. Y ya no se crea una copia entera del PDF en cada operación.
+
+**Comprobado:** en Python, `test_engine_*` (`tests/test_pdf.py`, el motor real) y
+`test_viewer_takes_the_pages_from_the_viewer_copy` y `test_viewer_keeps_ocr_words_while_their_page_moves_or_turns`;
+en la app, scratchpad `pages_e2e.py` (16 comprobaciones: cada operación, la nota de una página
+duplicada, deshacer y rehacer, y que Python lee las páginas al día, sin volver a abrir el documento).
+
 ## Un solo motor
 
 Todo usa PDFium: el de EmbedPDF en la ventana y `pypdfium2` en Python (`pdf_core/pdf.py`). Antes Python
 usaba PyMuPDF, con licencia AGPL, y había dos motores. Se retiró en la 0.1.29-web.
 
 **Reparto:**
-- **Python tiene el documento** (`entry.doc`, un `pdf_core.pdf.Document`): cambia páginas, extrae texto,
+- **Python tiene una copia del documento** (`entry.doc`, un `pdf_core.pdf.Document`): extrae texto,
   dibuja para el OCR, guarda. Se lee a memoria: así se puede sobrescribir el archivo abierto.
-- **EmbedPDF edita las anotaciones** en su copia y, cuando hace falta, esa copia pasa a ser el documento
-  (`viewer.sync_annotations`). No hay que copiar anotaciones entre dos documentos: es el mismo archivo.
+- **EmbedPDF edita el documento** (anotaciones y páginas) y, cuando hace falta, su copia pasa a ser el
+  documento de Python (`viewer.sync_annotations`). No hay que copiar cambios entre dos documentos: es el mismo archivo.
 - **Lo que el PDFium normal no sabe hacer** lo hace el de EmbedPDF, que tiene funciones propias:
 
   | Tarea (`lib/engine-tasks.ts`) | Quién la pide | Función de EmbedPDF |
@@ -523,8 +571,9 @@ usaba PyMuPDF, con licencia AGPL, y había dos motores. Se retiró en la 0.1.29-
   en el motor, sin tocar los del visor.
 
 **Identidad de las páginas.** PDFium no da el número de objeto de una página, así que `Document.uids`
-lleva un identificador por página que siguen mover, borrar y restaurar. La clave de página es
-`id:rotación:revisión`, y sobrevive a que la copia del visor sustituya al documento (`adopt_uids`).
+lleva un identificador por página. La clave de página es `id:rotación:revisión`. Los da el visor,
+que es quien mueve las páginas, y llegan con su copia (`Document.set_uids`); la censura conserva los
+de antes (`adopt_uids`).
 
 **PDF cifrados.** El visor abre el PDF cifrado con su contraseña (`document_url` la devuelve), y por eso
 su copia conserva el cifrado y las dos contraseñas sin conocer la de propietario. Los permisos no se
@@ -568,12 +617,10 @@ de Python y de los procesos de WebView2 de la app, por tipo).
   máximo que alcanzó la memoria de PDFium (WebAssembly no la devuelve).
 
 **Cambios:**
-- **Girar sin recargar** (`canvas._turnInPlace`): antes cada giro mandaba y cargaba otra vez el
-  documento entero (en EmbedPDF, tres copias del PDF a la vez hasta que se recogían) y crecía ~45 MB
-  por giro. EmbedPDF abre los documentos con el giro «normalizado» (todo en la página sin girar; el
-  giro solo para mostrarla), así que basta con cambiar `page.rotation` en su estado, avisar con
-  `refreshPages` (no hay acción para girar una página) y recolocar (`refreshDocumentLayout`). El
-  historial de EmbedPDF se vacía, como al recargar, para que Ctrl+Z siga el orden de siempre.
+- **Girar sin recargar** (2026-10-30): antes cada giro mandaba y cargaba otra vez el documento
+  entero (en EmbedPDF, tres copias del PDF a la vez hasta que se recogían) y crecía ~45 MB por giro.
+  Desde el 2026-11-10 todas las operaciones de página se hacen así, en el documento abierto (ver
+  «EmbedPDF, dueño del documento del visor»).
 - **Miniaturas**: al llegar la versión nueva de una página (cambiaron sus anotaciones), se libera
   la anterior (antes se quedaban hasta llenar la caché de 600).
 - **Ventana minimizada**: se pide a WebView2 que use poca memoria
@@ -602,10 +649,30 @@ Y `svelte` fijado en 5.51.0 (ver «Anotaciones y sellos»).
 Las miniaturas salen de `render` (`canvas.thumbnails`), no del complemento `thumbnail`, que se quitó:
 el panel lateral ya tiene su propia lista virtual y sus tarjetas.
 
-La interfaz compilada crece unos 5,4 MB: `pdfium.wasm` (4,6 MB) y el *worker* (0,7 MB).
+La interfaz compilada crece unos 5 MB: `pdfium.wasm` (4,6 MB) y el *worker* del motor (0,33 MB,
+`lib/pdf-engine`; el de EmbedPDF ocupaba 0,7 MB). `@embedpdf/engines` no declara que sus módulos no
+tienen efectos al importarlos: `vite.config.ts` se lo indica, o la ventana cargaría también su motor
+PDFium entero (unos 140 KB), que solo usa el worker.
 
 ## Fallos de EmbedPDF que se esquivan
 
 - **Mosaicos repetidos (`plugin-tiling` 2.15.1):** al volver a un zoom antes de que acaben los mosaicos del otro, crea
   unos con el mismo id que los de respaldo. La lista de Svelte falla con `each_key_duplicate` y el visor deja de
   responder. `ViewerTilingPackage` (`canvas/embed.ts`) los quita; hay que revisarlo al actualizar EmbedPDF.
+
+Al cambiar las páginas de un documento abierto (operaciones de página), que EmbedPDF 2.15.1 no contempla:
+
+- **`SET_PAGES` sin atender (`core`):** el núcleo declara la acción, pero su reductor no la procesa.
+  `acceptPageLists` (`embed.ts`) envuelve el reductor del núcleo para que la atienda.
+- **`SET_ANNOTATIONS` pierde anotaciones (`plugin-annotation`):** al recargarlas borra las que antes
+  estaban en el mismo número de página, aunque acabe de ponerlas en otra; la capa fallaba con
+  `Cannot read properties of undefined (reading 'object')`. `ViewerAnnotationPackage` la sustituye.
+- **Imágenes de las anotaciones por número de página (`plugin-annotation`):** su caché y la capa de cada
+  página no se vuelven a pedir si solo cambia el contenido; la nota de una página duplicada no se veía.
+  Se vacía la caché (`showPageList`) y la página se vuelve a montar (`{#key}` en `PdfPages.svelte`).
+- **Agrupación de páginas (`plugin-spread`):** solo se calcula al abrir; `showPageList` la vuelve a pedir.
+- **Anotaciones de una copia con el mismo `/NM`:** EmbedPDF identifica cada anotación por él; al
+  duplicar una página, `AppNative` les da uno nuevo.
+- **El giro de una página cargada vale 0:** con la rotación normalizada, `FPDFPage_GetRotation` no da el
+  giro real; `AppNative` lo lee del diccionario de la página (`EPDF_GetPageRotationByIndex`).
+- **`extractText` de una página vacía** devuelve caracteres sin sentido (en el motor de EmbedPDF).

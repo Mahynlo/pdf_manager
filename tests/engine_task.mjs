@@ -4,7 +4,8 @@
 //   node engine_task.mjs <tarea> <args JSON> <entrada.pdf> <salida.pdf>
 //
 // Además de las de engine-tasks.ts tiene las que en la app hace el visor: poner marcas de censura
-// (como redaction.ts) y escribir metadatos.
+// (como redaction.ts), escribir metadatos y cambiar las páginas (como document/pages.ts, con el
+// mismo motor: lib/pdf-engine/native.ts).
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -16,7 +17,7 @@ const modules = path.join(ui, 'node_modules', '@embedpdf');
 const url = (file) => pathToFileURL(file).href;
 
 const { init } = await import(url(path.join(modules, 'pdfium', 'dist', 'index.js')));
-const { PdfiumNative } = await import(url(path.join(modules, 'engines', 'dist', 'lib', 'pdfium', 'index.js')));
+const { AppNative } = await import(url(path.join(ui, 'src', 'lib', 'pdf-engine', 'native.ts')));
 const { PdfAnnotationSubtype } = await import(url(path.join(modules, 'models', 'dist', 'index.js')));
 const { runTask } = await import(url(path.join(ui, 'src', 'lib', 'engine-tasks.ts')));
 
@@ -25,7 +26,7 @@ const args = JSON.parse(rawArgs);
 const wasm = fs.readFileSync(path.join(modules, 'pdfium', 'dist', 'pdfium.wasm'));
 const pdfium = await init({ wasmBinary: wasm.buffer.slice(wasm.byteOffset, wasm.byteOffset + wasm.byteLength) });
 pdfium.PDFiumExt_Init();
-const engine = new PdfiumNative(pdfium);
+const engine = new AppNative(pdfium);
 
 const file = fs.readFileSync(input);
 const buffer = file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength);
@@ -54,6 +55,24 @@ if (task === 'mark') {
   });
 } else if (task === 'meta') {
   result = await edit((doc) => engine.setMetadata(doc, args.metadata).toPromise());
+} else if (task === 'pages') {
+  // args.ops: [operación, ...argumentos] en orden; 'remove-restore' borra una página y la
+  // devuelve desde su copia guardada (deshacer un borrado).
+  result = await edit((doc) => {
+    for (const [op, ...rest] of args.ops) {
+      if (op === 'rotate') engine.rotatePages(doc, ...rest);
+      else if (op === 'move') engine.movePage(doc, ...rest);
+      else if (op === 'remove') engine.removePage(doc, ...rest);
+      else if (op === 'blank') engine.insertBlankPage(doc, ...rest);
+      else if (op === 'duplicate') engine.duplicatePage(doc, ...rest);
+      else if (op === 'remove-restore') {
+        const stash = engine.stashPage(doc, rest[0]);
+        engine.removePage(doc, rest[0]);
+        engine.restorePages(doc, stash, rest[0]);
+        engine.dropStash(stash);
+      } else throw new Error(`Operación desconocida: ${op}`);
+    }
+  });
 } else {
   result = await runTask(engine, task, buffer, args);
 }

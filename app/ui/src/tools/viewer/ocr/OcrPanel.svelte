@@ -23,9 +23,11 @@
    * texto de cada página); `changed(index)`: el texto de la página cambió (selección y
    * búsqueda lo releen); `orient()`: corregir la orientación de la página actual.
    */
-  let { canvas, docId, page, active, close, setTool, changed, orient }: {
+  let { canvas, docId, page, active, close, setTool, changed, orient, syncDocument }: {
     canvas: PageCanvas;
     docId: number;
+    /** Python recibe el documento al día (páginas y anotaciones) antes de leerlo. */
+    syncDocument: () => Promise<unknown>;
     page: number;
     active: boolean;
     close: () => void;
@@ -70,6 +72,7 @@
   async function load(index = page) {
     const mine = ++run;
     try {
+      await syncDocument();
       const result = await call<PageText>('ocr.page_text', docId, index);
       if (mine !== run) return;
       kind = result.kind;
@@ -111,6 +114,7 @@
   function runPage() {
     const index = page;
     withBusy(T.processing, async () => {
+      await syncDocument();
       const result = await call<OcrResult>('ocr.page', docId, index);
       showResult(result, T.modeOf(result.mode ?? ''));
       kind = result.kind ?? '-';
@@ -177,6 +181,7 @@
       const rect = rectOf(done);
       if (rect[2] - rect[0] < MIN_AREA || rect[3] - rect[1] < MIN_AREA) return;
       withBusy(T.areaMode, async () => {
+        await syncDocument();
         const result = await call<OcrResult>('ocr.area', docId, done.index, rect);
         showResult(result, T.areaDone);
         text = result.text.trim() ? result.text : T.areaEmpty;
@@ -202,6 +207,7 @@
   // ── Lotes ──────────────────────────────────────────────────────────────
   async function openBatch() {
     if (busy) return;
+    await syncDocument(); // mientras está abierto, las páginas no cambian
     const result = await openModal<string>(OcrBatchDialog, {
       docId,
       total: canvas.pageCount,

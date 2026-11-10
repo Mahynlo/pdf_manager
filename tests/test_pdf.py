@@ -7,7 +7,7 @@ import zlib
 
 import numpy as np
 import pytest
-from pdfkit import add_annot, add_image, add_page, add_text, annots, encrypted, pdf_bytes, run_engine
+from pdfkit import add_annot, add_image, add_page, add_text, annot_names, annots, encrypted, pdf_bytes, run_engine
 
 from pdf_core import page_ops, redaction
 from pdf_core.pdf import UNRESTRICTED, Document, PasswordError, PdfError, Rect, png
@@ -162,12 +162,12 @@ def test_page_operations_keep_identity_and_annotations():
         assert [p.text().strip() for p in doc] == ["pagina 1", "pagina 2", "pagina 0"]
         doc.move_page(2, 0)
 
-        page_ops.duplicate_page(doc, 1)
+        doc.insert_pages(doc, [1], 2)
         assert annots(doc[2]) == ["Square"] and doc[2].text().strip() == "pagina 1"
         assert doc.uids[1] == second and doc.uids[2] not in (first, second, third)
         doc.delete_page(2)
 
-        page_ops.insert_blank_page(doc, 0)
+        doc.new_page(1, doc[0].rect.width, doc[0].rect.height)
         assert tuple(doc[1].rect) == tuple(doc[0].rect) and doc[1].text() == ""
         doc.delete_page(1)
 
@@ -181,6 +181,64 @@ def test_page_operations_keep_identity_and_annotations():
             assert [p.text().strip() for p in saved] == ["pagina 0", "pagina 1", "pagina 2"]
             saved.adopt_uids(doc)
             assert saved.uids == doc.uids
+
+
+# ── Páginas en el motor del visor (lib/pdf-engine/native.ts) ─────────────────
+def _engine_pages(data: bytes, ops: list[list], password: str | None = None) -> bytes:
+    """Lo que hace el visor con las páginas (document/pages.ts), con el motor de EmbedPDF."""
+    return run_engine("pages", data, {"ops": ops, "password": password})
+
+
+def _three_pages(note_on: int) -> bytes:
+    with Document.open(pdf_bytes([[(72, 72, f"pagina {i}")] for i in range(3)])) as doc:
+        add_annot(doc[note_on], "Square", Rect(10, 10, 50, 50), name="nota")
+        return doc.to_bytes()
+
+
+def test_engine_changes_pages_with_their_annotations():
+    ops = [
+        ["rotate", [0], 1],  # [0↻, 1, 2]
+        ["blank", 1, 300, 200],  # [0↻, B, 1, 2]
+        ["duplicate", 2, 3],  # [0↻, B, 1, 1', 2]
+        ["move", 4, 0],  # [2, 0↻, B, 1, 1']
+        ["remove", 4],  # [2, 0↻, B, 1]
+    ]
+    with Document.open(_engine_pages(_three_pages(note_on=1), ops)) as doc:
+        assert [p.text().strip() for p in doc] == ["pagina 2", "pagina 0", "", "pagina 1"]
+        assert [p.rotation for p in doc] == [0, 90, 0, 0]  # el giro queda en el archivo
+        assert [annots(p) for p in doc] == [[], [], [], ["Square"]]  # cada anotación va con su página
+        assert (doc[2].rect.width, doc[2].rect.height) == (300, 200)
+
+
+def test_engine_turns_pages_that_were_already_turned():
+    with Document.open(pdf_bytes([[(72, 72, "girada")]])) as doc:
+        doc[0].set_rotation(90)
+        data = doc.to_bytes()
+    with Document.open(_engine_pages(data, [["rotate", [0], -1]])) as doc:
+        assert doc[0].rotation == 0
+    with Document.open(_engine_pages(data, [["rotate", [0], 2]])) as doc:
+        assert doc[0].rotation == 270
+
+
+def test_engine_gives_the_copy_of_a_page_new_annotation_ids():
+    with Document.open(_engine_pages(_three_pages(note_on=0), [["duplicate", 0, 1]])) as doc:
+        original, (copy,) = annot_names(doc[0]), annot_names(doc[1])
+        assert original == ["nota"] and copy and copy != "nota"  # EmbedPDF las distingue por /NM
+
+
+def test_engine_gives_back_a_removed_page_with_its_annotations():
+    with Document.open(_engine_pages(_three_pages(note_on=1), [["remove-restore", 1]])) as doc:
+        assert [p.text().strip() for p in doc] == ["pagina 0", "pagina 1", "pagina 2"]
+        assert annot_names(doc[1]) == ["nota"]
+
+
+def test_engine_page_changes_keep_the_encryption():
+    data = encrypted(pdf_bytes([[(72, 72, "secreto")], [(72, 72, "otra")]]), "clave")
+    done = _engine_pages(data, [["rotate", [1], -1]], password="clave")
+    with pytest.raises(PasswordError):
+        Document.open(done)
+    with Document.open(done, "clave") as doc:
+        assert doc.encrypted and [p.rotation for p in doc] == [0, 270]
 
 
 def test_extract_pages_makes_an_unencrypted_pdf():

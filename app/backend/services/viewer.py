@@ -5,20 +5,16 @@ EmbedPDF a partir de :meth:`ViewerService.document_url`. pywebview atiende cada 
 hilo propio, así que todo acceso a los documentos pasa por un único candado.
 
 Las operaciones que cambian el documento devuelven su información actualizada
-(``_info``): tamaños y claves de página, índice y si hay cambios sin guardar. La clave de cada
-página (``id:rotación:revisión``) cambia cuando cambia su imagen (al girarla o censurarla): el
-visor vuelve a cargar el documento cuando cambian, así nunca muestra una imagen anterior a la
-censura.
+(``_info``): tamaños y claves de página, índice y cambios sin guardar. La clave de cada página
+(``id:rotación:revisión``) cambia cuando cambia su imagen (al girarla o censurarla): el visor
+vuelve a cargar el documento cuando cambian, así nunca muestra una imagen anterior a la censura.
 
-Las anotaciones las edita el visor con EmbedPDF sobre su copia del documento. Antes de
-que Python necesite el documento al día (guardar, exportar una página, cambiar las páginas o
-censurar), el visor sube su copia (:meth:`ViewerService.sync_annotations`), que pasa a ser el
-documento. Mientras tanto, :meth:`ViewerService.annotations_changed` avisa de que hay cambios
-sin guardar.
-
-Las operaciones de página (girar, insertar, duplicar, borrar, mover) se pueden deshacer y
-rehacer (:meth:`ViewerService.undo_pages`): cada una guarda su inversa; la página borrada se
-guarda aparte para devolverla.
+El dueño del documento abierto es el visor: EmbedPDF edita las anotaciones y hace las
+operaciones de página (girar, insertar, duplicar, borrar, mover y deshacerlas), y da el ``id`` de
+cada página. Antes de que Python necesite el documento al día (guardar, exportar una página,
+censurar, la orientación), el visor sube su copia con esos ``id``
+(:meth:`ViewerService.sync_annotations`), que pasa a ser el documento. Mientras tanto,
+:meth:`ViewerService.annotations_changed` avisa de que hay anotaciones sin guardar.
 
 Las palabras reconocidas por OCR (servicio ``ocr``) se guardan por clave de página.
 Entran en la capa de texto (``text_of``: asistente IA, panel de OCR) y van como texto
@@ -34,7 +30,7 @@ from __future__ import annotations
 import itertools
 import logging
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,30 +46,6 @@ from pdf_core.text_layer import TextLayer, build_text_layer, embed_ocr_words
 
 log = logging.getLogger(__name__)
 
-PAGE_UNDO_LIMIT = 30  # operaciones de página que se pueden deshacer
-
-
-@dataclass
-class _PageStep:
-    """Una operación de página que se puede deshacer.
-
-    ``redo`` la hace y ``undo`` la deshace; ``page`` y ``undo_page`` son la página a la que ir
-    después de cada una (``None``: la actual). ``ocr`` son las palabras de OCR de cada página
-    (por posición) antes de la operación: al girar una página se pierden y al deshacer vuelven.
-    """
-
-    redo: Callable[[Document], Any]
-    undo: Callable[[Document], Any]
-    page: int | None
-    undo_page: int | None
-    copy: Document | None = None  # la página borrada, para devolverla
-    ocr: dict[int, list[tuple]] = field(default_factory=dict)
-
-    def close(self) -> None:
-        if self.copy is not None:
-            self.copy.close()
-
-
 @dataclass
 class _OpenDocument:
     doc: Document
@@ -87,8 +59,6 @@ class _OpenDocument:
     redacted: bool = False  # censura aplicada sin guardar: solo se guarda como copia
     annotated: bool = False  # anotaciones cambiadas en el visor sin guardar
     extras: dict[str, Any] = field(default_factory=dict)  # estado de otros servicios (p. ej. la censura en curso)
-    undo: list[_PageStep] = field(default_factory=list)  # operaciones de página hechas
-    redo: list[_PageStep] = field(default_factory=list)  # y deshechas
 
     def key(self, page: Page) -> str:
         """Identifica la imagen de la página: cambia al girarla o al cambiar su contenido."""
@@ -173,8 +143,6 @@ class ViewerService:
 
     @staticmethod
     def _close(entry: _OpenDocument) -> None:
-        for step in (*entry.undo, *entry.redo):
-            step.close()
         try:
             entry.doc.close()
         except Exception:
@@ -246,124 +214,6 @@ class ViewerService:
         """Capa de texto de ``page``: texto nativo más el de OCR."""
         return self._layer(entry, page)
 
-    # ── Operaciones de página ────────────────────────────────────────────
-    @exposed
-    def rotate(self, doc_id: int, angle: int, index: int | None = None) -> dict[str, Any]:
-        """Gira la página ``index`` (o todas si es ``None``) ``angle`` grados."""
-        if angle % 90:
-            raise UserError("El giro debe ser múltiplo de 90°.", "bad_angle")
-
-        def step(doc: Document) -> _PageStep:
-            pages = range(len(doc)) if index is None else [index]
-            return _PageStep(
-                redo=lambda d: page_ops.rotate_pages(d, pages, angle),
-                undo=lambda d: page_ops.rotate_pages(d, pages, -angle),
-                page=index,
-                undo_page=index,
-            )
-
-        return self._modify(doc_id, step, index)
-
-    @exposed
-    def insert_blank(self, doc_id: int, after: int) -> dict[str, Any]:
-        def step(doc: Document) -> _PageStep:
-            return _PageStep(
-                redo=lambda d: page_ops.insert_blank_page(d, after),
-                undo=lambda d: d.delete_page(after + 1),
-                page=after + 1,
-                undo_page=after,
-            )
-
-        return self._modify(doc_id, step, after)
-
-    @exposed
-    def duplicate(self, doc_id: int, index: int) -> dict[str, Any]:
-        def step(doc: Document) -> _PageStep:
-            return _PageStep(
-                redo=lambda d: page_ops.duplicate_page(d, index),
-                undo=lambda d: d.delete_page(index + 1),
-                page=index + 1,
-                undo_page=index,
-            )
-
-        return self._modify(doc_id, step, index)
-
-    @exposed
-    def delete_page(self, doc_id: int, index: int) -> dict[str, Any]:
-        def step(doc: Document) -> _PageStep:
-            if len(doc) <= 1:
-                raise UserError("No se puede eliminar la única página del documento.", "last_page")
-            copy = Document.new()
-            copy.insert_pages(doc, [index], uids=[doc[index].uid])  # con sus anotaciones
-            return _PageStep(
-                redo=lambda d: d.delete_page(index),
-                undo=lambda d: d.insert_pages(copy, [0], index, uids=copy.uids),
-                page=max(0, index - 1),
-                undo_page=index,
-                copy=copy,
-            )
-
-        return self._modify(doc_id, step, index)
-
-    @exposed
-    def move_page(self, doc_id: int, src: int, dst: int) -> dict[str, Any]:
-        """Mueve ``src`` a la posición final ``dst`` (botones o arrastrar miniaturas)."""
-
-        def step(doc: Document) -> _PageStep:
-            self._check_index(doc, dst)
-            return _PageStep(
-                redo=lambda d: d.move_page(src, dst),
-                undo=lambda d: d.move_page(dst, src),
-                page=dst,
-                undo_page=src,
-            )
-
-        return self._modify(doc_id, step, src)
-
-    @exposed
-    def undo_pages(self, doc_id: int) -> dict[str, Any]:
-        """Deshace la última operación de página. Devuelve ``{info, page}`` (``page``: a cuál ir, o ``None``)."""
-        with self._lock:
-            entry = self._doc(doc_id)
-            if not entry.undo:
-                raise UserError("No hay operaciones de página que deshacer.", "nothing_to_undo")
-            step = entry.undo.pop()
-            step.undo(entry.doc)
-            # Vuelven las palabras de OCR que se perdieron (sin pisar las reconocidas después).
-            for index, words in step.ocr.items():
-                entry.ocr.setdefault(entry.key(entry.doc[index]), words)
-            entry.redo.append(step)
-            return {"info": self._info(doc_id), "page": step.undo_page}
-
-    @exposed
-    def redo_pages(self, doc_id: int) -> dict[str, Any]:
-        """Rehace la última operación de página deshecha. Devuelve ``{info, page}``."""
-        with self._lock:
-            entry = self._doc(doc_id)
-            if not entry.redo:
-                raise UserError("No hay operaciones de página que rehacer.", "nothing_to_redo")
-            step = entry.redo.pop()
-            step.redo(entry.doc)
-            entry.undo.append(step)
-            return {"info": self._info(doc_id), "page": step.page}
-
-    def _modify(self, doc_id: int, make_step: Callable[[Document], _PageStep], index: int | None) -> dict[str, Any]:
-        """Hace la operación que da ``make_step(doc)`` y la apunta para deshacerla."""
-        with self._lock:
-            entry = self._doc(doc_id)
-            doc = entry.doc
-            if index is not None:
-                self._check_index(doc, index)
-            step = make_step(doc)
-            step.ocr = {i: entry.ocr[k] for i, page in enumerate(doc) if (k := entry.key(page)) in entry.ocr}
-            step.redo(doc)  # las anotaciones van con su página (el visor las sincronizó antes)
-            entry.undo.append(step)
-            for old in (*entry.redo, *entry.undo[:-PAGE_UNDO_LIMIT]):
-                old.close()
-            entry.redo.clear()
-            del entry.undo[:-PAGE_UNDO_LIMIT]
-            return self._info(doc_id)
-
     # ── Censura (la usa el servicio ``redact``) ──────────────────────────
     def apply_redaction_marks(self, doc_id: int) -> tuple[dict[str, Any], int]:
         """Aplica las marcas de censura del documento (las pone el visor y llegan con
@@ -406,11 +256,13 @@ class ViewerService:
         return self._host.upload_url()
 
     @exposed
-    def sync_annotations(self, doc_id: int, upload: str) -> dict[str, Any]:
+    def sync_annotations(self, doc_id: int, upload: str, uids: list[int] | None = None) -> dict[str, Any]:
         """La copia del visor, subida a ``upload`` (de :meth:`upload_url`), pasa a ser el documento.
 
-        Se llama antes de todo lo que necesita el documento al día. El texto de OCR que lleva
-        como texto invisible no pasa al documento. Devuelve ``{modified}``.
+        Se llama antes de todo lo que necesita el documento al día. ``uids``: el ``id`` de cada
+        página de la copia (el visor las gira, mueve, añade y borra); sin ellos, son las mismas
+        páginas que ya tenía. El texto de OCR que lleva como texto invisible no pasa al
+        documento. Devuelve ``{modified}``.
         """
         data = self._host.uploaded(upload)
         if data is None:
@@ -422,13 +274,19 @@ class ViewerService:
             except PdfError as ex:
                 log.exception("No se pudo leer la copia del visor")
                 raise UserError(f"No se pudieron pasar las anotaciones al documento: {ex}", "sync_failed") from ex
-            if len(copy) != len(entry.doc):
+            try:
+                copy.set_uids(entry.doc.uids if uids is None else uids)
+            except ValueError as ex:
                 copy.close()
-                raise UserError("La copia del visor no coincide con el documento.", "sync_failed")
+                raise UserError("La copia del visor no coincide con el documento.", "sync_failed") from ex
+            # El texto de OCR va en las páginas que lo tenían al dárselas a EmbedPDF, aunque
+            # después se hayan girado: se quita de todas las que tienen palabras de OCR.
+            with_words = {key.split(":", 1)[0] for key in entry.ocr}
             for page in copy:
-                if entry.ocr.get(entry.key(entry.doc[page.number])):
+                if str(page.uid) in with_words:
                     page.remove_invisible_text()
-            self._replace(entry, copy)
+            old, entry.doc = entry.doc, copy
+            old.close()
             entry.annotated = True
             return {"modified": entry.modified}
 
@@ -628,7 +486,8 @@ class ViewerService:
         keys = [entry.key(p) for p in pages]
         alive = set(keys)
         entry.layers = {k: v for k, v in entry.layers.items() if k in alive}
-        entry.ocr = {k: v for k, v in entry.ocr.items() if k in alive}  # al girar una página su OCR ya no vale
+        # Las palabras de OCR se conservan aunque su página se gire o se borre: si se deshace
+        # en el visor, la página vuelve con la misma clave y con ellas.
         return {
             "id": doc_id,
             "path": entry.path,
@@ -637,9 +496,8 @@ class ViewerService:
             "keys": keys,
             "toc": [{"level": lvl, "title": title, "page": page or 0} for lvl, title, page in doc.toc()],
             "modified": entry.modified,
+            "annotated": entry.annotated,
             "redacted": entry.redacted,
-            "page_undo": bool(entry.undo),  # hay operaciones de página que deshacer / rehacer
-            "page_redo": bool(entry.redo),
         }
 
 

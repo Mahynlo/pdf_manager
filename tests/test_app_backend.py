@@ -289,9 +289,6 @@ def test_viewer_open_and_close(tmp_path):
         assert info["toc"] == [{"level": 1, "title": "Inicio", "page": 0}, {"level": 1, "title": "Detalle", "page": 1}]
         assert svc.open(str(pdf))["id"] == info["id"]  # ya abierto: el mismo documento
 
-        with pytest.raises(UserError, match="fuera de rango"):
-            svc.rotate(info["id"], 90, 5)
-
         rows = {r["label"]: r["value"] for r in svc.properties(info["id"])["rows"]}
         assert rows["Título:"] == "Prueba" and rows["Páginas:"] == "2 página(s)"
         assert rows["Asunto:"] == "(No especificado)" and rows["Cifrado / Seguridad:"] == "Sin cifrado"
@@ -324,93 +321,44 @@ def test_viewer_password_errors_let_the_frontend_retry(tmp_path):
         svc.close()
 
 
-def test_viewer_page_operations_track_unsaved_changes(tmp_path):
+def test_viewer_takes_the_pages_from_the_viewer_copy(tmp_path):
     pdf = _make_pdf(tmp_path / "ops.pdf", 3)
     svc = ViewerService(FakeHost())
     try:
         info = svc.open(str(pdf))
         doc_id = info["id"]
-        assert info["modified"] is False and len(info["keys"]) == 3
-
-        rotated = svc.rotate(doc_id, 90, 0)
-        assert rotated["modified"] and rotated["pages"][0] == [842.0, 595.0]
-        assert rotated["keys"][0] != info["keys"][0] and rotated["keys"][1:] == info["keys"][1:]
-        # Deshacer el giro a mano vuelve al estado guardado (como en Qt).
-        assert svc.rotate(doc_id, -90, 0)["modified"] is False
-        assert all(p == [842.0, 595.0] for p in svc.rotate(doc_id, 90)["pages"])
-        svc.rotate(doc_id, -90)
-
-        assert len(svc.insert_blank(doc_id, 0)["pages"]) == 4
-        assert len(svc.duplicate(doc_id, 2)["pages"]) == 5  # [1, blanco, 2, 2, 3]
-        moved = svc.move_page(doc_id, 4, 0)  # [3, 1, blanco, 2, 2]
+        assert info["modified"] is False and info["keys"] == ["1:0:0", "2:0:0", "3:0:0"]
+        ops = [["rotate", [0], 1], ["blank", 1, 595, 842], ["duplicate", 2, 3], ["move", 4, 0], ["remove", 2]]
+        # [3, 1↻, 2, 2'], con los id que da el visor (4 era la blanca, ya borrada; 5 es la copia).
+        state = _reshape(svc, doc_id, ops, [3, 1, 2, 5])
+        assert state["keys"] == ["3:0:0", "1:90:0", "2:0:0", "5:0:0"]
+        assert state["pages"][1] == [842.0, 595.0] and state["modified"]
         assert svc.unsaved_documents() == ["ops.pdf"]
-        assert svc.delete_page(doc_id, 2)["modified"]  # [3, 1, 2, 2]
-        assert len(moved["keys"]) == 5
 
-        with pytest.raises(UserError, match="múltiplo"):
-            svc.rotate(doc_id, 45, 0)
-        with pytest.raises(UserError, match="fuera de rango"):
-            svc.move_page(doc_id, 0, 9)
         saved = svc.save(doc_id)
-        assert saved["modified"] is False and svc.unsaved_documents() == []
+        assert saved["modified"] is False and saved["annotated"] is False and svc.unsaved_documents() == []
         assert page_texts(pdf) == ["ops 3", "ops 1", "ops 2", "ops 2"]
-        # Sigue legible tras reabrirse desde memoria.
-        assert _text(svc, doc_id, 0) == "ops 3"
+        assert _text(svc, doc_id, 0) == "ops 3"  # sigue legible tras reabrirse desde memoria
+        with pytest.raises(UserError, match="no coincide"):
+            _reshape(svc, doc_id, [], [3, 1])  # un id por página
     finally:
         svc.close()
 
 
-def test_viewer_undoes_and_redoes_page_operations(tmp_path):
-    pdf = _make_pdf(tmp_path / "deshacer.pdf", 3)
+def test_viewer_keeps_ocr_words_while_their_page_moves_or_turns(tmp_path):
+    pdf = _make_pdf(tmp_path / "ocr.pdf", 2)
     svc = ViewerService(FakeHost())
     try:
-        info = svc.open(str(pdf))
-        doc_id = info["id"]
-        assert info["page_undo"] is False and info["page_redo"] is False
-        entry = svc._docs[doc_id]
-        add_annot(entry.doc[1], "Text", Rect(50, 50, 70, 70), "nota de la 2")
-        with svc.document(doc_id) as e:
-            svc.set_ocr_words(e, e.doc[0], [(10, 10, 50, 30, "reconocido")])
-
-        svc.rotate(doc_id, 90, 0)  # [1↻, 2, 3]: el OCR de la 1 se pierde al girarla
-        svc.move_page(doc_id, 2, 0)  # [3, 1↻, 2]
-        svc.delete_page(doc_id, 2)  # [3, 1↻]
-        svc.insert_blank(doc_id, 0)  # [3, blanco, 1↻]
-        state = svc.duplicate(doc_id, 0)  # [3, 3, blanco, 1↻]
-        assert state["page_undo"] and len(state["pages"]) == 4
-
-        steps = [svc.undo_pages(doc_id) for _ in range(5)]
-        assert [s["page"] for s in steps] == [0, 0, 2, 2, 0]
-        undone = steps[-1]["info"]
-        assert undone["page_undo"] is False and undone["page_redo"]
-        assert undone["modified"] is False  # todo deshecho: es lo guardado
-        assert [p.text().strip() for p in entry.doc] == ["deshacer 1", "deshacer 2", "deshacer 3"]
-        assert entry.doc[0].rotation == 0
-        # La página borrada vuelve con su anotación, y el OCR de la girada, con ella.
-        assert annots(entry.doc[1]) == ["Text"]
-        assert entry.ocr[entry.key(entry.doc[0])] == [(10, 10, 50, 30, "reconocido")]
-        with pytest.raises(UserError, match="deshacer"):
-            svc.undo_pages(doc_id)
-
-        assert svc.redo_pages(doc_id)["page"] == 0  # el giro
-        redone = svc.redo_pages(doc_id)  # mover
-        assert redone["page"] == 0 and redone["info"]["page_redo"]
-        assert [p.text().strip() for p in entry.doc] == ["deshacer 3", "deshacer 1", "deshacer 2"]
-        # Una operación nueva descarta lo que quedaba por rehacer.
-        assert svc.rotate(doc_id, 90, 0)["page_redo"] is False
-        svc.save(doc_id)
-        svc.move_page(doc_id, 0, 1)
-        assert svc.undo_pages(doc_id)["info"]["modified"] is False  # vuelve a lo guardado
-    finally:
-        svc.close()
-
-
-def test_viewer_cannot_delete_the_last_page(tmp_path):
-    svc = ViewerService(FakeHost())
-    try:
-        doc_id = svc.open(str(_make_pdf(tmp_path / "una.pdf", 1)))["id"]
-        with pytest.raises(UserError, match="única página"):
-            svc.delete_page(doc_id, 0)
+        doc_id = svc.open(str(pdf))["id"]
+        with svc.document(doc_id) as entry:
+            svc.set_ocr_words(entry, entry.doc[0], [(100, 300, 220, 320, "reconocido")])
+        # El visor la lleva al final y la gira: su copia trae el texto de OCR invisible.
+        _reshape(svc, doc_id, [["move", 0, 1], ["rotate", [1], 1]], [2, 1])
+        assert "reconocido" not in svc._docs[doc_id].doc[1].text()  # no pasa al documento
+        assert "reconocido" not in _text(svc, doc_id, 1)  # girada, esas palabras ya no valen
+        # Se deshace el giro en el visor: la página vuelve con su clave y con sus palabras.
+        _reshape(svc, doc_id, [["rotate", [1], -1]], [2, 1])
+        assert "reconocido" in _text(svc, doc_id, 1)
     finally:
         svc.close()
 
@@ -422,7 +370,7 @@ def test_viewer_save_as_moves_the_tab_to_the_new_file(tmp_path):
     svc = ViewerService(host)
     try:
         doc_id = svc.open(str(pdf))["id"]
-        svc.delete_page(doc_id, 0)
+        _reshape(svc, doc_id, [["remove", 0]], [2])
         info = svc.save_as(doc_id)
         assert info["path"] == str(tmp_path / "copia.pdf") and info["name"] == "copia.pdf"
         assert not info["modified"] and host.saved_suggestions == [str(pdf)]
@@ -441,7 +389,7 @@ def test_viewer_save_keeps_the_password(tmp_path):
     svc = ViewerService(FakeHost())
     try:
         doc_id = svc.open(str(locked), "clave")["id"]
-        svc.rotate(doc_id, 90, 1)
+        _reshape(svc, doc_id, [["rotate", [1], 1]], [1, 2])
         svc.save(doc_id)
         assert svc._docs[doc_id].doc[0].text().strip() == "secreto 1"
     finally:
@@ -493,7 +441,7 @@ def test_viewer_text_layer_follows_reading_order(tmp_path):
     try:
         info = svc.open(str(pdf))
         assert _text(svc, info["id"], 0) == "Hola mundo\nsegunda linea"
-        svc.rotate(info["id"], 90, 0)
+        _reshape(svc, info["id"], [["rotate", [0], 1]], [1])
         # Girada se lee igual; los rectángulos ya están en la página girada (apaisada).
         assert _text(svc, info["id"], 0).startswith("Hola mundo")
         with svc.document(info["id"]) as entry:
@@ -507,10 +455,19 @@ def _served(svc: ViewerService, doc_id: int) -> Document:
     return Document.open(base64.b64decode(served["url"].split(",", 1)[1]), served["password"])
 
 
-def _upload(svc: ViewerService, doc_id: int, data: bytes) -> dict:
+def _upload(svc: ViewerService, doc_id: int, data: bytes, uids: list[int] | None = None) -> dict:
     url = svc.upload_url()
     svc._host.uploads[url] = data
-    return svc.sync_annotations(doc_id, url)
+    return svc.sync_annotations(doc_id, url, uids)
+
+
+def _reshape(svc: ViewerService, doc_id: int, ops: list[list], uids: list[int]) -> dict:
+    """Hace de visor: cambia las páginas de su copia con el motor de EmbedPDF (``ops``, como en
+    tests/engine_task.mjs) y la sube con el id de cada página. Devuelve la información nueva."""
+    served = svc.document_url(doc_id)
+    data = base64.b64decode(served["url"].split(",", 1)[1])
+    _upload(svc, doc_id, run_engine("pages", data, {"ops": ops, "password": served["password"]}), uids)
+    return svc._info(doc_id)
 
 
 def _sync(svc: ViewerService, doc_id: int, edit) -> dict:
@@ -560,10 +517,11 @@ def test_viewer_takes_annotations_from_the_viewer_copy(tmp_path):
         with svc.document(doc_id) as entry:
             assert "reconocido" in svc.text_of(entry, entry.doc[1]).text
 
-        # Al mover páginas, cada anotación sigue a la suya.
-        svc.move_page(doc_id, 1, 0)
+        # Al mover páginas en el visor, cada anotación sigue a la suya, y el OCR también.
+        _reshape(svc, doc_id, [["move", 1, 0]], [2, 1])
         with svc.document(doc_id) as entry:
             assert [annots(page) for page in entry.doc] == [["Text"], ["Link", "Highlight"]]
+            assert "reconocido" in svc.text_of(entry, entry.doc[0]).text
     finally:
         svc.close()
 
@@ -740,8 +698,8 @@ def test_ocr_words_join_the_text_layer_search_and_export(tmp_path):
         assert area["text"] == "recorte" and area["boxes"] == [[100, 100, 200, 150]]
         assert len(ocr.area(doc_id, 1, [300, 300, 400, 350])["boxes"]) == 2
 
-        # Al girar la página, sus palabras ya no coinciden con lo que se ve: se descartan.
-        viewer.rotate(doc_id, 90, 0)
+        # Al girar la página en el visor, sus palabras ya no coinciden con lo que se ve: no cuentan.
+        _reshape(viewer, doc_id, [["rotate", [0], 1]], [1, 2])
         assert not ocr.page_text(doc_id, 0)["ocr"] and ocr.page_text(doc_id, 1)["ocr"]
 
         assert ocr.save_text(doc_id, "texto reconocido") == str(tmp_path / "texto.txt")
@@ -771,9 +729,9 @@ def test_ocr_batch_pages_and_orientation(tmp_path):
             ocr.batch_pages(doc_id, "todas", "")
 
         # Texto nativo derecho: no se toca. Escaneo: el clasificador pide girar 90°.
-        assert ocr.orientation(doc_id, 0) == {"angle": 0, "info": None}
-        turned = ocr.orientation(doc_id, 1)
-        assert turned["angle"] == 90 and turned["info"]["pages"][1] == [800, 600] and turned["info"]["modified"]
+        assert ocr.orientation(doc_id, 0) == {"angle": 0}
+        assert ocr.orientation(doc_id, 1) == {"angle": 90}  # lo gira el visor
+        assert viewer._info(doc_id)["modified"] is False
     finally:
         ocr.close()
         viewer.close()
@@ -1454,7 +1412,7 @@ def test_document_url_is_the_open_version_with_its_password(tmp_path):
     pdf.write_bytes(encrypted(data, "clave"))
     svc = ViewerService(FakeHost())
     info = svc.open(str(pdf), "clave")
-    info = svc.rotate(info["id"], 90, 1)
+    info = _reshape(svc, info["id"], [["rotate", [1], 1]], [1, 2, 3])
 
     result = svc.document_url(info["id"])
     assert result["keys"] == info["keys"]  # la versión que tiene el lienzo
@@ -1490,7 +1448,7 @@ def test_document_url_writes_ocr_words_as_invisible_text(tmp_path, rotation):
     svc = ViewerService(FakeHost())
     info = svc.open(str(pdf))
     if rotation:
-        info = svc.rotate(info["id"], rotation, 0)
+        info = _reshape(svc, info["id"], [["rotate", [0], rotation // 90]], [1])
     with svc.document(info["id"]) as entry:
         page = entry.doc[0]
         native = page.to_view(page.words()[0][0])

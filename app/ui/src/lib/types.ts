@@ -30,8 +30,7 @@ export interface DocumentInfo {
   pages: [number, number][]; // [ancho, alto] de cada página, en puntos
   keys: string[]; // identifica la imagen de cada página: cambia al girarla o editarla
   toc: TocEntry[];
-  modified: boolean;
+  modified: boolean; // cambios sin guardar (en el visor lo calcula operations.ts)
+  annotated: boolean; // anotaciones cambiadas sin guardar
   redacted: boolean; // con censura aplicada: solo se guarda como copia
-  page_undo: boolean; // hay operaciones de página que deshacer
-  page_redo: boolean;
 }

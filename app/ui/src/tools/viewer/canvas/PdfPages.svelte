@@ -41,7 +41,12 @@
   <ZoomGestureWrapper {documentId} class="pdf-canvas__inner" enableWheel={false}>
     <Scroller {documentId}>
       {#snippet renderPage(page)}
-        <PdfPage documentId={documentId!} pageIndex={page.pageIndex} {baseScale} {overlay} />
+        <!-- Cuando cambia lo que hay en esa posición (al mover, insertar o borrar páginas sube su
+             versión), la página se monta de nuevo: sus capas de EmbedPDF no vuelven a pedir las
+             imágenes de las anotaciones si solo cambia el contenido. -->
+        {#key docState.current?.pageRefreshVersions?.[page.pageIndex] ?? 0}
+          <PdfPage documentId={documentId!} pageIndex={page.pageIndex} {baseScale} {overlay} />
+        {/key}
       {/snippet}
     </Scroller>
   </ZoomGestureWrapper>

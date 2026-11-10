@@ -1,15 +1,17 @@
-// EmbedPDF para el visor (pasos 2 a 4 de docs/web/embedpdf.md): el registro de toda la app
-// con el motor PDFium, el gestor de documentos, la vista con scroll, el zoom, el mosaico, la
-// doble página, la selección de texto, la búsqueda, las anotaciones (con su historial para
-// deshacer y la exportación de la copia que se pasa a Python), las marcas de censura, los
-// sellos y las firmas (sus bibliotecas: stamps/).
+// EmbedPDF para el visor (docs/web/embedpdf.md): el registro de toda la app con el motor PDFium
+// (lib/pdf-engine), el gestor de documentos, la vista con scroll, el zoom, el mosaico, la doble
+// página, la selección de texto, la búsqueda, las anotaciones (con su historial para deshacer y la
+// exportación de la copia que se pasa a Python), las marcas de censura, los sellos y las firmas
+// (sus bibliotecas: stamps/). También lo que hace falta para cambiar las páginas de un documento
+// abierto (`showPageList`), que EmbedPDF 2.15.1 no contempla.
 //
 // EmbedPDF solo sabe desplazarse por todo el documento. Para los modos «Una página» y
 // «Doble página» (paginados, como en Qt) el complemento de scroll lleva una estrategia
 // más: `paged`, que muestra solo una fila (una página o un par) y deja cambiar de fila
 // con `showRow`.
 import { mount } from 'svelte';
-import { createPluginRegistration, type PluginRegistry } from '@embedpdf/core';
+import { createPluginRegistration, refreshPages, type PluginRegistry } from '@embedpdf/core';
+import type { PdfPageObject } from '@embedpdf/models';
 import { AnnotationPluginPackage, LockModeType } from '@embedpdf/plugin-annotation';
 import { DocumentManagerPluginPackage } from '@embedpdf/plugin-document-manager';
 import { ExportPluginPackage } from '@embedpdf/plugin-export';
@@ -28,6 +30,7 @@ import { TilingPluginPackage } from '@embedpdf/plugin-tiling';
 import { ViewportPluginPackage } from '@embedpdf/plugin-viewport';
 import { ZoomPluginPackage } from '@embedpdf/plugin-zoom';
 import wasmUrl from '@embedpdf/pdfium/pdfium.wasm?url';
+import { createAppEngine, type PageStructure } from '$lib/pdf-engine/index.ts';
 import { STANDARD_LIBRARY } from '../stamps/standard.ts';
 import { t } from '$texts';
 import { DEFAULT_STYLE as STYLE, PRESET_COLORS } from '../annotations/palette.ts';
@@ -80,6 +83,7 @@ const ANNOTATION_TOOLS = [
 ];
 
 let registryPromise: Promise<PluginRegistry> | null = null;
+let pageStructure: PageStructure | null = null;
 
 /**
  * El registro de EmbedPDF, uno para toda la app: cada visor abre en él su documento con
@@ -89,14 +93,14 @@ let registryPromise: Promise<PluginRegistry> | null = null;
  */
 export function registry(): Promise<PluginRegistry> {
   registryPromise ??= (async () => {
-    // El motor PDFium corre en un worker. El WASM va dentro de la app: sin internet. Su
-    // URL va absoluta: el worker nace de un blob: y no resolvería una relativa (en
-    // desarrollo Vite la da como /node_modules/…, y el motor se quedaba esperando).
-    const { createPdfiumEngine } = await import('@embedpdf/engines/pdfium-worker-engine');
-    const engine = await createPdfiumEngine(new URL(wasmUrl, location.href).href, { fontFallback: null });
+    // El motor PDFium corre en un worker (lib/pdf-engine). El WASM va dentro de la app: sin
+    // internet. Su URL va absoluta: en desarrollo Vite la da como /node_modules/….
+    const { engine, structure } = createAppEngine(new URL(wasmUrl, location.href).href);
+    pageStructure = structure;
     const embed = await new Promise<PluginRegistry>((resolve) => {
       mount(EmbedRoot, { target: document.createElement('div'), props: { engine, plugins: plugins(), onReady: resolve } });
     });
+    acceptPageLists(embed);
     // Sin `wantsRawTouch`, el dedo desplaza las páginas. En una pantalla táctil, salvo con las
     // herramientas de texto: ahí arrastrar selecciona (para desplazar está la mano).
     const interaction = embed.getPlugin<InteractionManagerPlugin>('interaction-manager')!.provides();
@@ -108,6 +112,110 @@ export function registry(): Promise<PluginRegistry> {
   })();
   return registryPromise;
 }
+
+/** Las operaciones del motor que cambian las páginas de un documento abierto (lib/pdf-engine). */
+export async function structure(): Promise<PageStructure> {
+  await registry();
+  return pageStructure!;
+}
+
+// ── Cambiar las páginas de un documento abierto ──────────────────────────────
+// EmbedPDF 2.15.1 no lo contempla: solo carga las páginas al abrir el documento. Lo que sigue
+// usa partes internas de su núcleo y de sus complementos: revisarlo al actualizar EmbedPDF.
+
+const SET_PAGES = 'SET_PAGES'; // la declara el núcleo, pero su reductor no la atiende
+const SET_PAGE_GROUPING = 'SPREAD/SET_PAGE_GROUPING';
+
+type Action = { type: string; payload?: unknown };
+
+/** Lo que se usa del estado del núcleo de EmbedPDF. */
+interface CoreState {
+  documents: Record<string, { document: { pages: PdfPageObject[]; pageCount: number } | null } | undefined>;
+}
+
+/** Lo que se usa del store de EmbedPDF (su reductor del núcleo es una propiedad pública). */
+interface CoreStore {
+  coreReducer: (state: CoreState, action: Action) => CoreState;
+  getState(): { core: CoreState };
+  dispatchToCore(action: Action): unknown;
+}
+
+/** Lo interno de SpreadPlugin: agrupa las páginas (una o dos por fila) solo al abrir. */
+interface SpreadInternals {
+  calculatePageGrouping(documentId: string, pageCount: number): number[][];
+  dispatch(action: Action): void;
+}
+
+/** Lo interno de AnnotationPlugin: carga las anotaciones de todo el documento. */
+interface AnnotationInternals {
+  getAllAnnotations(documentId: string, document: unknown): void;
+  appearanceCache: Map<string, unknown>; // imágenes de las anotaciones, por documento y número de página
+}
+
+/** Hace que el núcleo atienda SET_PAGES: el documento pasa a tener esas páginas. */
+function acceptPageLists(embed: PluginRegistry): void {
+  const store = embed.getStore() as unknown as CoreStore;
+  const reducer = store.coreReducer;
+  store.coreReducer = (state, action) => {
+    if (action.type !== SET_PAGES) return reducer(state, action);
+    const { documentId, pages } = action.payload as { documentId: string; pages: PdfPageObject[] };
+    const docState = state.documents[documentId];
+    if (!docState?.document) return state;
+    // Un documento nuevo en el estado: así los complementos ven el cambio.
+    const document = { ...docState.document, pages, pageCount: pages.length };
+    return { ...state, documents: { ...state.documents, [documentId]: { ...docState, document } } };
+  };
+}
+
+/**
+ * Muestra `pages`, las páginas que tiene ahora en el motor el documento abierto `documentId`:
+ * todas se vuelven a dibujar (su número ya no dice qué página es), se agrupan y colocan de
+ * nuevo, y se vuelven a leer sus anotaciones y sus imágenes.
+ */
+export function showPageList(embed: PluginRegistry, documentId: string, pages: PdfPageObject[]): void {
+  const store = embed.getStore() as unknown as CoreStore;
+  store.dispatchToCore({ type: SET_PAGES, payload: { documentId, pages } });
+  store.dispatchToCore(refreshPages(documentId, pages.map((page) => page.index)));
+  const spread = embed.getPlugin('spread') as unknown as SpreadInternals;
+  spread.dispatch({ type: SET_PAGE_GROUPING, payload: { documentId, grouping: spread.calculatePageGrouping(documentId, pages.length) } });
+  (embed.getPlugin('scroll') as unknown as ViewerScroll).refreshDocumentLayout(documentId);
+  const annotations = embed.getPlugin('annotation') as unknown as AnnotationInternals;
+  annotations.appearanceCache.delete(documentId);
+  annotations.getAllAnnotations(documentId, store.getState().core.documents[documentId]!.document);
+}
+
+/** Lo que se usa del estado de plugin-annotation. */
+interface AnnotationState {
+  documents: Record<string, { pages: Record<number, string[]>; byUid: Record<string, unknown> } | undefined>;
+}
+
+/**
+ * SET_ANNOTATIONS sustituye todas las anotaciones del documento. La de plugin-annotation 2.15.1
+ * borra además las que antes estaban en el mismo número de página, aunque acabe de ponerlas en
+ * otra: al mover páginas, las anotaciones se quedaban sin datos y su capa fallaba.
+ */
+function setAllAnnotations(state: AnnotationState, action: Action): AnnotationState {
+  const { documentId, annotations } = action.payload as { documentId: string; annotations: Record<number, { id: string }[]> };
+  const docState = state.documents[documentId];
+  if (!docState) return state;
+  const pages: Record<number, string[]> = {};
+  const byUid: Record<string, unknown> = {};
+  for (const [page, list] of Object.entries(annotations)) {
+    pages[Number(page)] = list.map((object) => {
+      byUid[object.id] = { commitState: 'synced', object };
+      return object.id;
+    });
+  }
+  return { ...state, documents: { ...state.documents, [documentId]: { ...docState, pages, byUid } } };
+}
+
+const ViewerAnnotationPackage = {
+  ...AnnotationPluginPackage,
+  reducer: ((state, action) =>
+    action.type === 'ANNOTATION/SET_ANNOTATIONS'
+      ? setAllAnnotations(state as unknown as AnnotationState, action)
+      : AnnotationPluginPackage.reducer(state, action)) as typeof AnnotationPluginPackage.reducer,
+};
 
 function plugins() {
   return [
@@ -124,7 +232,7 @@ function plugins() {
     createPluginRegistration(HistoryPluginPackage),
     // Las anotaciones las dibuja y edita su capa (PdfPage.svelte); los enlaces quedan bloqueados:
     // son del documento.
-    createPluginRegistration(AnnotationPluginPackage, {
+    createPluginRegistration(ViewerAnnotationPackage, {
       tools: ANNOTATION_TOOLS,
       colorPresets: PRESET_COLORS.map(([color]) => color),
       locked: { type: LockModeType.Include, categories: ['link'] },

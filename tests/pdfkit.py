@@ -82,15 +82,17 @@ def add_image(page: Page, rect: Rect, image: np.ndarray) -> None:
     bitmap.close()
 
 
-def add_annot(page: Page, kind: str, rect: Rect, contents: str = "") -> None:
+def add_annot(page: Page, kind: str, rect: Rect, contents: str = "", name: str = "") -> None:
+    """Anotación ``kind`` en ``rect``; ``name``: su identificador (/NM), con el que la reconoce EmbedPDF."""
     with page._opened() as opened:
         annot = raw.FPDFPage_CreateAnnot(opened, ANNOT_KINDS[kind])
         height = opened.get_size()[1]
         box = raw.FS_RECTF(rect.x0, height - rect.y0, rect.x1, height - rect.y1)
         raw.FPDFAnnot_SetRect(annot, box)
-        if contents:
-            value = (contents + "\0").encode("utf-16-le")
-            raw.FPDFAnnot_SetStringValue(annot, b"Contents", ctypes.cast(value, ctypes.POINTER(raw.FPDF_WCHAR)))
+        for key, text in ((b"Contents", contents), (b"NM", name)):
+            if text:
+                value = (text + "\0").encode("utf-16-le")
+                raw.FPDFAnnot_SetStringValue(annot, key, ctypes.cast(value, ctypes.POINTER(raw.FPDF_WCHAR)))
         raw.FPDFPage_CloseAnnot(annot)
 
 
@@ -104,6 +106,20 @@ def annots(page: Page) -> list[str]:
             kinds.append(ANNOT_NAMES.get(kind, str(kind)))
             raw.FPDFPage_CloseAnnot(annot)
         return kinds
+
+
+def annot_names(page: Page) -> list[str]:
+    """El identificador (/NM) de cada anotación de ``page``, en orden ("" si no tiene)."""
+    with page._opened() as opened:
+        names = []
+        for i in range(raw.FPDFPage_GetAnnotCount(opened)):
+            annot = raw.FPDFPage_GetAnnot(opened, i)
+            size = raw.FPDFAnnot_GetStringValue(annot, b"NM", None, 0)
+            buffer = ctypes.create_string_buffer(size)
+            raw.FPDFAnnot_GetStringValue(annot, b"NM", ctypes.cast(buffer, ctypes.POINTER(raw.FPDF_WCHAR)), size)
+            names.append(buffer.raw[: max(0, size - 2)].decode("utf-16-le"))
+            raw.FPDFPage_CloseAnnot(annot)
+        return names
 
 
 def delete_annots(page: Page) -> None:

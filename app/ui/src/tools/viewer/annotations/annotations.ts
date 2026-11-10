@@ -33,6 +33,7 @@ import { call, upload } from '$lib/api.ts';
 import { askText } from '$lib/ui.ts';
 import { t } from '$texts';
 import { ANNOTATION_TOOL, TOOLS, type PageCanvas } from '../canvas/canvas.ts';
+import { pageUids } from '../document/pages.ts';
 import { KINDS, MANUAL_LABEL, type SelectionPart } from '../redact/redaction.ts';
 import { TEXT_STAMP, textStampSize, type TextStamp } from '../stamps/stamp-pdf.ts';
 import { DEFAULT_STYLE, type AnnotationStyle } from './palette.ts';
@@ -160,6 +161,11 @@ export class Annotations {
   watch(fn: () => void): () => void {
     this.watchers.add(fn);
     return () => this.watchers.delete(fn);
+  }
+
+  /** El documento a la vista cambió fuera de las anotaciones (sus páginas): Python aún no lo tiene. */
+  markChanged(): void {
+    this.version++;
   }
 
   /** Lo llama el lienzo al poner a la vista una versión nueva (viene de Python: ya la tiene). */
@@ -566,9 +572,10 @@ export class Annotations {
 
   // ── Python ─────────────────────────────────────────────────────────────
   /**
-   * Pasa a Python las anotaciones si cambiaron desde la última vez: sube la copia del
-   * documento de EmbedPDF, que pasa a ser el documento en Python. Llamarlo antes de todo lo
-   * que necesita el documento al día en Python. Resuelve `{ modified }` o null si no hacía falta.
+   * Pasa a Python el documento si cambió desde la última vez (anotaciones o páginas): sube la
+   * copia del documento de EmbedPDF, que pasa a ser el documento en Python, con el `uid` de cada
+   * página. Llamarlo antes de todo lo que necesita el documento al día en Python. Resuelve
+   * `{ modified }` o null si no hacía falta.
    */
   async sync(): Promise<{ modified: boolean } | null> {
     this.canvas.finishEditing(); // el texto que se está escribiendo también cuenta
@@ -580,7 +587,7 @@ export class Annotations {
     const url = await call<string>('viewer.upload_url');
     const response = await upload(url, buffer);
     if (!response.ok) throw new Error(TX.syncError(response.status));
-    const result = await call<{ modified: boolean }>('viewer.sync_annotations', this.docId, url);
+    const result = await call<{ modified: boolean }>('viewer.sync_annotations', this.docId, url, pageUids(this.canvas.keys));
     if (documentId === this.canvas.shown) this.synced = Math.max(this.synced, version);
     return result;
   }

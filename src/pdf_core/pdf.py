@@ -520,6 +520,13 @@ class Document:
         self.uids = list(other.uids)
         self._next_uid = other._next_uid
 
+    def set_uids(self, uids: Sequence[int]) -> None:
+        """Pone a las páginas los identificadores ``uids``, uno por página y en orden."""
+        if len(uids) != len(self.uids):
+            raise ValueError(f"{len(uids)} identificadores para {len(self.uids)} páginas")
+        self.uids = list(uids)
+        self._next_uid = max(self._next_uid, max(uids, default=0) + 1)
+
     def _take_uid(self) -> int:
         self._next_uid += 1
         return self._next_uid - 1

@@ -23,7 +23,13 @@ export default defineConfig(({ mode }) => {
   // Rutas desde la raíz de app/ui (Vite las resuelve allí); las mismas que en tsconfig.json.
   resolve: { alias: { $lib: '/src/lib', $texts: '/src/texts' } },
   base: './', // rutas relativas: pywebview sirve dist/ como raíz
-  build: { outDir: browser ? 'dist-web' : 'dist', emptyOutDir: true },
+  build: {
+    outDir: browser ? 'dist-web' : 'dist',
+    emptyOutDir: true,
+    // @embedpdf/engines no declara que sus módulos no tienen efectos al importarlos: sin esto, la
+    // ventana cargaría también su motor PDFium entero, que solo usa el worker (lib/pdf-engine).
+    rollupOptions: { treeshake: { moduleSideEffects: (id: string) => !id.includes('@embedpdf/engines') } },
+  },
   publicDir: browser ? 'public-web' : 'public',
   worker: { format: 'es' as const },
   server: {

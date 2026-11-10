@@ -44,8 +44,10 @@
   }
 
   /** `active`: la pestaña está a la vista; `redact([{ texto, tipo }])`: enviar a «Censura». */
-  let { docId, active, close, redact }: {
+  let { docId, active, close, redact, syncDocument }: {
     docId: number;
+    /** Python recibe el documento al día (páginas y anotaciones) antes de leerlo. */
+    syncDocument: () => Promise<unknown>;
     active: boolean;
     close: () => void;
     redact: (items: Suggestion[]) => void;
@@ -93,7 +95,7 @@
     const message = question.trim();
     if (!message || busy) return;
     question = '';
-    runRequest(call<AiResult>('ai.chat', docId, message), message);
+    runRequest(syncDocument().then(() => call<AiResult>('ai.chat', docId, message)), message);
   }
 
   async function scrollDown() {
@@ -238,7 +240,7 @@
 
 {#snippet actions()}
   <div class="ai-actions">
-    {@render action('file-text', T.summary, () => runRequest(call<AiResult>('ai.summary', docId)))}
+    {@render action('file-text', T.summary, () => runRequest(syncDocument().then(() => call<AiResult>('ai.summary', docId))))}
     {@render action('bar-chart', T.keyData, () => runRequest(call<AiResult>('ai.key_data', docId)))}
     <label class="field">
       <span class="caption">{T.sensitivity}</span>

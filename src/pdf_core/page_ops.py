@@ -1,7 +1,7 @@
-"""Operaciones de página y exportaciones sobre un :class:`pdf_core.pdf.Document` abierto.
+"""Exportaciones de un :class:`pdf_core.pdf.Document` abierto: páginas, texto e imágenes.
 
-Independientes de la interfaz. Los índices son 0-based; quien llama valida el rango y decide
-qué página mostrar después.
+Independientes de la interfaz. Los índices son 0-based; quien llama valida el rango. Las
+operaciones de página del visor las hace el motor de EmbedPDF (app/ui/src/lib/pdf-engine).
 """
 
 from __future__ import annotations
@@ -10,26 +10,6 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from pdf_core.pdf import Document
-
-
-def rotate_pages(doc: Document, pages: Iterable[int], angle: int) -> None:
-    """Suma ``angle`` (múltiplo de 90, negativo = antihorario) a la rotación de ``pages``."""
-    for index in pages:
-        page = doc[index]
-        page.set_rotation((page.rotation + angle) % 360)
-
-
-def insert_blank_page(doc: Document, after: int) -> int:
-    """Inserta una página en blanco del tamaño de ``after`` justo detrás; devuelve su índice."""
-    ref = doc[after].rect
-    doc.new_page(after + 1, ref.width, ref.height)
-    return after + 1
-
-
-def duplicate_page(doc: Document, index: int) -> int:
-    """Inserta una copia de ``index`` justo detrás; devuelve el índice de la copia."""
-    doc.insert_pages(doc, [index], index + 1)
-    return index + 1
 
 
 def extract_pages(doc: Document, pages: Iterable[int]) -> bytes:

@@ -4,10 +4,11 @@
 // clase da al resto del visor la misma API que antes. El registro de EmbedPDF es uno para
 // toda la app: cada visor abre en él su documento y solo atiende los avisos de ese documento.
 //
-// - Python es el dueño de las páginas: cuando cambian (girar, mover, insertar, censurar…) se
-//   vuelve a abrir en EmbedPDF la versión que él tiene (`viewer.document_url`). Mientras se
-//   carga, la vista sigue con la anterior. Las anotaciones, en cambio, las edita EmbedPDF en
-//   su copia (annotations.ts las pasa a Python antes de cada operación).
+// - Las operaciones de página (girar, mover, insertar, duplicar, borrar) las hace el motor de
+//   EmbedPDF en el documento abierto (document/pages.ts) y `showPages` las muestra sin volver a
+//   abrirlo. Lo que cambia Python (censurar, OCR) se vuelve a abrir en EmbedPDF con la versión
+//   que él tiene (`viewer.document_url`); mientras se carga, la vista sigue con la anterior.
+//   annotations.ts le pasa a Python la copia de EmbedPDF antes de lo que la necesita.
 // - Cada página tiene una capa del visor (`slots[i]`) donde otros módulos dibujan en
 //   porcentaje de la página las marcas (`marks(i)`) de selección, búsqueda, OCR o censura.
 //   Las capas existen siempre, aunque EmbedPDF solo monte las páginas a la vista; se
@@ -17,8 +18,8 @@
 //   herramientas de texto (modo TEXT_MODE del gestor de interacción). Las de dibujo, texto
 //   libre y notas activan su herramienta de anotación de EmbedPDF (ANNOTATION_TOOL).
 import { flushSync, mount, unmount } from 'svelte';
-import { refreshPages, type IPlugin, type PluginRegistry } from '@embedpdf/core';
-import { transformRect, type Rect, type Rotation, type Size } from '@embedpdf/models';
+import type { IPlugin, PluginRegistry } from '@embedpdf/core';
+import { transformRect, type PdfDocumentObject, type PdfPageObject, type Rect, type Rotation, type Size } from '@embedpdf/models';
 import type { AnnotationPlugin } from '@embedpdf/plugin-annotation';
 import type { DocumentManagerPlugin } from '@embedpdf/plugin-document-manager';
 import type { HistoryPlugin } from '@embedpdf/plugin-history';
@@ -31,7 +32,9 @@ import { ZoomMode, type ZoomLevel, type ZoomPlugin } from '@embedpdf/plugin-zoom
 import { call } from '$lib/api.ts';
 import { h } from '$lib/dom.ts';
 import { t } from '$texts';
-import { OTHER_MODE, PAGED, registry, TEXT_MODE, UNIT, VIEWPORT_GAP, ZOOM_MAX, ZOOM_MIN, type ViewerScroll } from './embed.ts';
+import {
+  OTHER_MODE, PAGED, registry, showPageList, TEXT_MODE, UNIT, VIEWPORT_GAP, ZOOM_MAX, ZOOM_MIN, type ViewerScroll,
+} from './embed.ts';
 import { MODES, pageStep, type Mode } from './layout.ts';
 import PdfPages from './PdfPages.svelte';
 
@@ -121,6 +124,12 @@ const ANNOTATION_LAYER = '#annotation-layer'; // capa de anotaciones de EmbedPDF
 const ANNOTATION = `${ANNOTATION_LAYER} > *`; // sus elementos
 const sameKeys = (a: string[] | null, b: string[]) => a?.length === b.length && a.every((key, i) => key === b[i]);
 
+/** Tamaño de la página tal como se ve, en puntos (EmbedPDF lo da sin girar). */
+export function shownSize({ size, rotation }: PdfPageObject): [number, number] {
+  const round = (value: number) => Math.round(value * 100) / 100;
+  return rotation % 2 ? [round(size.height), round(size.width)] : [round(size.width), round(size.height)];
+}
+
 /** Rectángulo `[x0, y0, x1, y1]` en puntos de la página tal como se ve. */
 export type Box = [number, number, number, number];
 
@@ -205,43 +214,41 @@ export class PageCanvas {
     return this.registry!.getPlugin('scroll') as unknown as ViewerScroll;
   }
 
-  /** Nuevas páginas tras una operación (rotar, insertar, mover…); el llamador elige a cuál ir. */
+  /**
+   * Páginas de una versión del documento que da Python (`keys`: la clave de cada una). Si no es
+   * la que se ve (la cambió Python: censura, OCR), se vuelve a abrir en EmbedPDF.
+   */
   setPages(sizes: [number, number][], keys: string[]): void {
-    if (this._turnInPlace(sizes, keys)) return;
+    if (sameKeys(this.keys, keys) && sameKeys(this.shownKeys, keys)) {
+      this.sizes = sizes;
+      return;
+    }
     this._setSlots(sizes, keys);
     this.current = Math.min(this.current, this.pageCount - 1);
     if (this.registry && !sameKeys(this.shownKeys, keys)) this.loading = this._load().catch((err) => this._fail(err));
   }
 
-  /**
-   * Si solo cambió el giro de algunas páginas (la clave `xref:giro:revisión`), se giran sin
-   * volver a cargar el documento en EmbedPDF, que costaba casi un segundo y una copia más del
-   * PDF en memoria. EmbedPDF abre los documentos con el giro aparte («normalizado»): todo lo
-   * calcula en la página sin girar y el giro solo lo usa para mostrarla, así que basta con
-   * cambiarlo en su estado, redibujar esas páginas y recolocar las demás. Devuelve si lo hizo.
-   */
-  _turnInPlace(sizes: [number, number][], keys: string[]): boolean {
+  /** El documento a la vista tal como lo tiene EmbedPDF (para las operaciones del motor). */
+  get documentObject(): PdfDocumentObject | null {
     const id = this.shown;
-    if (!id || !this.registry || !sameKeys(this.shownKeys, this.keys) || keys.length !== this.keys.length) return false;
-    const turns = new Map<number, Rotation>();
-    for (const [i, key] of keys.entries()) {
-      const [xref, rotation, revision] = key.split(':');
-      const [oldXref, oldRotation, oldRevision] = this.keys[i].split(':');
-      if (xref !== oldXref || revision !== oldRevision) return false;
-      if (rotation !== oldRotation) turns.set(i, ((Number(rotation) / 90) % 4) as Rotation);
-    }
-    const store = this.registry.getStore();
-    const pages = store.getState().core.documents[id]?.document?.pages;
-    if (!turns.size || !pages) return false;
-    // EmbedPDF no tiene una acción para girar una página: se cambia en su estado y se avisa.
-    for (const [i, rotation] of turns) pages[i].rotation = rotation;
-    store.dispatchToCore(refreshPages(id, [...turns.keys()]));
-    this._scrollPlugin().refreshDocumentLayout(id);
-    // Como al volver a cargarlo, el historial de EmbedPDF empieza de nuevo: Ctrl+Z deshace
+    if (!id || !this.registry) return null;
+    return this.registry.getStore().getState().core.documents[id]?.document ?? null;
+  }
+
+  /**
+   * Muestra `pages`, las páginas que tiene ahora en el motor el documento a la vista (tras
+   * girar, mover, insertar…: document/pages.ts), sin volver a abrirlo. `keys`: la clave de cada una.
+   */
+  showPages(pages: PdfPageObject[], keys: string[]): void {
+    const id = this.shown!;
+    showPageList(this.registry!, id, pages);
+    // Como al volver a abrirlo, el historial de EmbedPDF empieza de nuevo: Ctrl+Z deshace
     // primero lo que hay en él y después las operaciones de página (ver Viewer.svelte).
     this._plugin<HistoryPlugin>('history').provides().forDocument(id).purgeByMetadata(() => true);
-    Object.assign(this, { sizes, keys, shownKeys: keys });
-    return true;
+    // Las capas de cada página se conservan (son por posición; las vuelve a dibujar cada módulo).
+    const slots = pages.map((_, i) => this.slots[i] ?? h('div', { class: 'pdf-page__layers' }));
+    Object.assign(this, { sizes: pages.map(shownSize), keys, shownKeys: keys, slots });
+    this.current = Math.min(this.current, this.pageCount - 1);
   }
 
   /**

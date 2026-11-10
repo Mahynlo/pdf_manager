@@ -40,8 +40,10 @@
    * `fn(página)` → [info, página] en la cola de cambios del documento (antes, las marcas
    * pasan a Python con las anotaciones).
    */
-  let { docId, marks, tool, setTool, close, show, commit }: {
+  let { docId, marks, tool, setTool, close, show, commit, syncDocument }: {
     docId: number;
+    /** Python recibe el documento al día (páginas y anotaciones) antes de leerlo. */
+    syncDocument: () => Promise<unknown>;
     marks: RedactionMarks;
     tool: string;
     setTool: (tool: string) => void;
@@ -82,6 +84,7 @@
   /** Marca dónde aparece una frase o patrón (también desde la búsqueda y la IA). */
   export async function addTerm(value: string) {
     await run(async () => {
+      await syncDocument();
       const results = await call<FindResult[]>('redact.find', docId, [value]);
       const found = results.reduce((n, r) => n + r.matches.length, 0);
       if (!found) toast(T.notFound(value), 'info');
@@ -104,6 +107,7 @@
 
   /** Busca de nuevo los términos de la lista (cambiaron las opciones o el perfil). */
   async function findAgain(terms: string[], replace = terms) {
+    if (terms.length) await syncDocument();
     marks.addMatches(terms.length ? await call<FindResult[]>('redact.find', docId, terms) : [], replace);
   }
 

@@ -161,7 +161,10 @@ class OcrService:
     # ── Orientación ──────────────────────────────────────────────────────
     @exposed
     def orientation(self, doc_id: int, index: int) -> dict[str, Any]:
-        """Detecta la orientación de la página y la corrige. ``{angle, info}``: ``info`` solo si se giró."""
+        """Detecta la orientación de la página: ``{angle}``, los grados que hay que girarla (0: está bien).
+
+        La gira el visor (es el dueño de las páginas), así se puede deshacer como cualquier giro.
+        """
         with self._busy, self._viewer.document(doc_id) as entry:
             self._cancel_release()
             try:
@@ -173,9 +176,7 @@ class OcrService:
                 raise UserError(f"No se pudo clasificar la orientación: {ex}", "orientation_failed") from ex
             finally:
                 self._schedule_release()
-        if not angle:
-            return {"angle": 0, "info": None}
-        return {"angle": angle, "info": self._viewer.rotate(doc_id, angle, index)}
+        return {"angle": angle or 0}
 
     # ── Memoria del modelo ───────────────────────────────────────────────
     def _schedule_release(self) -> None:

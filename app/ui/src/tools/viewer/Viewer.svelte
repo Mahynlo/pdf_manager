@@ -29,6 +29,7 @@
   import { MODES, type Mode } from './canvas/layout.ts';
   import OcrPanel from './ocr/OcrPanel.svelte';
   import { DocumentActions } from './document/operations.ts';
+  import { PageEditor } from './document/pages.ts';
   import { printPdf, release as releasePrint } from './document/print.ts';
   import PropertiesDialog from './document/PropertiesDialog.svelte';
   import RedactPanel from './redact/RedactPanel.svelte';
@@ -126,6 +127,8 @@
   const actions = new DocumentActions(doc, {
     page: () => canvas.current,
     sync: () => annotations.sync(),
+    commit: () => annotations.commit(),
+    pagesChanged: () => annotations.markChanged(),
     apply(next, page) {
       canvas.setPages(next.pages, next.keys);
       selection.reset();
@@ -139,10 +142,10 @@
       update(next);
       showHistory();
     },
-  });
+  }, new PageEditor(canvas));
 
   // Deshacer y rehacer: primero lo de EmbedPDF (anotaciones); si no queda, las operaciones de
-  // página (Python). Tras una operación de página EmbedPDF empieza un historial nuevo, así que
+  // página (pages.ts). Tras una operación de página EmbedPDF empieza un historial nuevo, así que
   // el orden se respeta: lo hecho después de girar o mover se deshace antes que eso.
   let history = { canUndo: false, canRedo: false }; // el de EmbedPDF
   function showHistory() {
@@ -184,6 +187,9 @@
   });
 
   const editor = new AnnotationEditor(canvas, annotations);
+  // Python recibe el documento al día antes de leerlo (las páginas las cambia EmbedPDF). En la cola
+  // del documento: espera a las operaciones de página pendientes.
+  const syncDocument = () => actions.run(() => annotations.sync());
   const marks = new RedactionMarks(annotations);
 
   /** Va a una marca de censura y la selecciona (para moverla o borrarla). */
@@ -228,6 +234,7 @@
 
   async function showProperties() {
     try {
+      await syncDocument();
       openModal(PropertiesDialog, await call('viewer.properties', docId));
     } catch (err) {
       toast((err as Error).message, 'danger');
@@ -443,6 +450,7 @@
   onDestroy(() => {
     clearTimeout(thumbsTimer);
     releasePrint();
+    actions.pages.dispose();
     canvas.destroy();
     call('viewer.close_document', docId).catch(() => {});
   });
@@ -471,18 +479,18 @@
           <TocTree {toc} onSelect={(index) => { leavePanel(); goTo(index); }} />
         </div>
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'ocr'}>
-          <OcrPanel bind:this={ocr} {canvas} {docId} page={view.page} active={view.dock && dockTab === 'ocr'}
+          <OcrPanel bind:this={ocr} {canvas} {docId} {syncDocument} page={view.page} active={view.dock && dockTab === 'ocr'}
                     close={() => (view.dock = false)} {setTool} orient={() => actions.fixOrientation()}
                     changed={async () => {
                       // EmbedPDF recibe el texto nuevo (invisible) para seleccionarlo; antes,
                       // Python recibe las anotaciones (se reabre su versión).
-                      await actions.run(() => annotations.sync());
+                      await syncDocument();
                       canvas.reload();
                       search!.refresh();
                     }} />
         </div>
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'redact'}>
-          <RedactPanel bind:this={redact} {docId} {marks} {tool} {setTool} close={() => (view.dock = false)}
+          <RedactPanel bind:this={redact} {docId} {syncDocument} {marks} {tool} {setTool} close={() => (view.dock = false)}
                        show={showMark} commit={(fn) => actions.change(fn)} />
         </div>
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'stamps'}>
@@ -490,7 +498,7 @@
                        close={() => (view.dock = false)} />
         </div>
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'ai'}>
-          <AiPanel bind:this={ai} {docId} active={view.dock && dockTab === 'ai'} close={() => (view.dock = false)}
+          <AiPanel bind:this={ai} {docId} {syncDocument} active={view.dock && dockTab === 'ai'} close={() => (view.dock = false)}
                    redact={async (items) => {
                      openDockTab('redact');
                      for (const item of items) await redact!.addTerm(item.texto);
