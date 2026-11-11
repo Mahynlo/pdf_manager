@@ -28,6 +28,7 @@
   import { AnnotationEditor } from './annotations/editing.ts';
   import { MODES, type Mode } from './canvas/layout.ts';
   import OcrPanel from './ocr/OcrPanel.svelte';
+  import { PageRecognizer } from './ocr/recognize.ts';
   import { DocumentCopy } from './document/copy.ts';
   import { DocumentActions } from './document/operations.ts';
   import { PageEditor } from './document/pages.ts';
@@ -106,6 +107,8 @@
   });
   // La copia del documento que sale del visor: a Python, a un archivo o a la impresora.
   const copy = new DocumentCopy(canvas, docId, () => annotations.commit());
+  // El OCR y la orientación: el motor dibuja las páginas y Python las reconoce.
+  const recognizer = new PageRecognizer(canvas, docId);
   if (viewport.narrow || viewport.reading) canvas.fitWidth(); // al 100 % no se vería la página entera
   const total = () => canvas.pageCount;
   const goTo = (index: number) => canvas.scrollToPage(Math.max(0, Math.min(total() - 1, index)));
@@ -147,7 +150,7 @@
       update(next);
       showHistory();
     },
-  }, new PageEditor(canvas), copy);
+  }, new PageEditor(canvas), copy, recognizer);
 
   // Deshacer y rehacer: primero lo de EmbedPDF (anotaciones); si no queda, las operaciones de
   // página (pages.ts). Tras una operación de página EmbedPDF empieza un historial nuevo, así que
@@ -485,15 +488,9 @@
           <TocTree {toc} onSelect={(index) => { leavePanel(); goTo(index); }} />
         </div>
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'ocr'}>
-          <OcrPanel bind:this={ocr} {canvas} {docId} {syncDocument} page={view.page} active={view.dock && dockTab === 'ocr'}
-                    close={() => (view.dock = false)} {setTool} orient={() => actions.fixOrientation()}
-                    changed={async () => {
-                      // EmbedPDF recibe el texto nuevo (invisible) para seleccionarlo; antes,
-                      // Python recibe las anotaciones (se reabre su versión).
-                      await syncDocument();
-                      canvas.reload();
-                      search!.refresh();
-                    }} />
+          <OcrPanel bind:this={ocr} {canvas} {docId} {recognizer} {syncDocument} page={view.page}
+                    active={view.dock && dockTab === 'ocr'} close={() => (view.dock = false)} {setTool}
+                    orient={() => actions.fixOrientation()} changed={() => search!.refresh()} />
         </div>
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'redact'}>
           <RedactPanel bind:this={redact} {docId} {syncDocument} {marks} {tool} {setTool} close={() => (view.dock = false)}

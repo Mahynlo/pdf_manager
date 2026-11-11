@@ -14,6 +14,7 @@ from pdf_core.pdf import Document, Page, Rect
 _SCALE_FOR_OCR = 2.0
 _MAX_OCR_PX = 2000  # cap longest edge to avoid huge pixmaps on large pages
 _CLASSIFIER_SURE = 0.90  # por debajo, un «0°» del clasificador se comprueba con OCR
+_SMALL_SCALE = 0.8  # píxeles por punto de la imagen con la que se clasifica la orientación
 
 
 @dataclass
@@ -476,22 +477,8 @@ class OCRProcessor:
         return kind
 
     def page_kind(self, page: Page) -> str:
-        """"
-        Clasificar la página como 'nativa', 'escaneada' o 'híbrida' según su contenido.
-         - 'nativa' si tiene texto extraíble pero no imágenes.
-         - 'escaneada' si tiene imágenes pero no texto extraíble.
-         - 'híbrida' si tiene tanto texto extraíble como imágenes.
-         - Si no tiene texto ni imágenes, se clasifica como 'escaneada' por defecto.
-        """
-        has_text = bool(page.text().strip())
-        has_images = page.has_images()
-        if has_text and not has_images:
-            return "native"
-        if has_images and not has_text:
-            return "scanned"
-        if has_images and has_text:
-            return "hybrid"
-        return "scanned" if not has_text else "native"
+        """Clasificar la página según su contenido (ver :func:`kind_of`)."""
+        return kind_of(bool(page.text().strip()), page.has_images())
 
     def page_needs_ocr(self, page: Page) -> bool:
         """Return True only when the page lacks extractable native text."""
@@ -561,40 +548,35 @@ class OCRProcessor:
             start=start,
         )
 
+    def recognize_regions(self, regions: list[tuple[Rect, float, np.ndarray]]) -> tuple[list[OCRDetection], float]:
+        """Inferencia del modelo sobre imágenes ya dibujadas — los segundos lentos del OCR.
+
+        Cada región es ``(rect, escala, imagen)``: la imagen de ``rect`` (coordenadas de vista) a
+        ``escala`` píxeles por punto. Devuelve las palabras en coordenadas de vista y los segundos
+        de inferencia. No toca ningún documento: el visor le pasa las imágenes que dibuja su motor.
+        """
+        detections: list[OCRDetection] = []
+        elapsed = 0.0
+        for rect, scale, img in regions:
+            words, seconds = self._run_predictor(img)
+            elapsed += seconds
+            for px_rect, text, score in words:
+                bbox = Rect(rect.x0 + px_rect.x0 / scale, rect.y0 + px_rect.y0 / scale,
+                            rect.x0 + px_rect.x1 / scale, rect.y0 + px_rect.y1 / scale)
+                detections.append(OCRDetection(text=text, score=score, source="ocr", bbox=bbox))
+        return detections, elapsed
+
     def recognize_page(self, prep: PreparedPage) -> OCRPageResult:
         """Fase 2 (SIN lock): inferencia del modelo sobre las imágenes ya
         rasterizadas — los segundos lentos del OCR. No toca el documento."""
-        ocr_segments: list[OCRSegment] = []
-        detections: list[OCRDetection] = []
-        ocr_elapsed = 0.0
-
-        for rect, scale, img in prep.regions:
-            words, elapsed = self._run_predictor(img)
-            ocr_elapsed += elapsed
-            for px_rect, text, score in words:
-                x0 = rect.x0 + px_rect.x0 / scale
-                y0 = rect.y0 + px_rect.y0 / scale
-                x1 = rect.x0 + px_rect.x1 / scale
-                y1 = rect.y0 + px_rect.y1 / scale
-                pdf_rect = Rect(x0, y0, x1, y1)
-
-                ocr_segments.append(OCRSegment(text=text, source="ocr", bbox=pdf_rect))
-                detections.append(OCRDetection(text=text, score=score, source="ocr", bbox=pdf_rect))
+        detections, ocr_elapsed = self.recognize_regions(prep.regions)
         prep.regions.clear()  # liberar las imágenes rasterizadas cuanto antes
+        ocr_segments = [OCRSegment(text=d.text, source="ocr", bbox=d.bbox) for d in detections]
 
         segments = [*prep.native_segments, *ocr_segments]
         segments.sort(key=lambda s: (s.bbox.y0, s.bbox.x0))
 
-        # Tipo de página: Nativo, Escaneado o Híbrido
-        if prep.native_segments and ocr_segments:
-            mode = "Hibrido"
-        elif prep.native_segments:
-            mode = "Nativo"
-        elif ocr_segments:
-            mode = "OCR"
-        else:
-            mode = "Sin texto"
-
+        mode = mode_of(bool(prep.native_segments), bool(ocr_segments))
         wall_elapsed = perf_counter() - prep.start
         elapsed_ms = max(wall_elapsed, ocr_elapsed) * 1000
 
@@ -639,15 +621,25 @@ class OCRProcessor:
         angle = self.detect_orientation_native(page)
         if angle or len(page.text().strip()) >= 30:
             return angle % 360
-        img = page.render(0.8)
-        angle = self.score_orientation_fast(img)
+        return self.image_correction(page.render(_SMALL_SCALE), self.render_orientation_probe(page.parent, page.number))
+
+    def image_correction(self, small: np.ndarray, probe: np.ndarray) -> int:
+        """Grados a sumar a la rotación de una página escaneada para dejarla derecha, por su imagen.
+
+        ``small`` es la página a :data:`_SMALL_SCALE` píxeles por punto y ``probe``, la sonda (ver
+        :meth:`render_orientation_probe`): primero la varianza de perfiles (90°/270°, sin
+        modelo) y después el clasificador; si dice «derecha» sin estar seguro (p. ej. una página
+        con poco texto), decide el OCR en las cuatro orientaciones sobre la sonda
+        (:meth:`score_orientation`), más lento pero fiable.
+        """
+        angle = self.score_orientation_fast(small)
         if angle:
             return angle % 360
-        angle, conf = self.classify_orientation(img)
+        angle, conf = self.classify_orientation(small)
         if conf < 0.50:
             angle = 0
         if angle == 0 and conf < _CLASSIFIER_SURE:
-            angle = self.score_orientation(self.render_orientation_probe(page.parent, page.number))
+            angle = self.score_orientation(probe)
         return angle % 360
 
     def process_page(self, doc: Document, page_num: int, force_ocr: bool = False) -> OCRPageResult:
@@ -655,3 +647,20 @@ class OCRProcessor:
         p. ej. el extractor por lotes. El visor usa las dos fases por separado
         para no retener su ``_doc_lock`` durante la inferencia."""
         return self.recognize_page(self.prepare_page(doc, page_num, force_ocr))
+
+
+def kind_of(has_text: bool, has_images: bool) -> str:
+    """Tipo de página por su contenido: ``native`` (solo texto extraíble), ``scanned`` (solo
+    imágenes, o nada) o ``hybrid`` (las dos cosas)."""
+    if has_text:
+        return "hybrid" if has_images else "native"
+    return "scanned"
+
+
+def mode_of(native_text: bool, recognized: bool) -> str:
+    """Cómo se obtuvo el texto de una página: ``Hibrido``, ``Nativo``, ``OCR`` o ``Sin texto``."""
+    if native_text and recognized:
+        return "Hibrido"
+    if native_text:
+        return "Nativo"
+    return "OCR" if recognized else "Sin texto"

@@ -23,9 +23,9 @@ en la ventana. Antes el backend usaba PyMuPDF, que es AGPL.
 
 | Módulo | Qué hace | Lo usa en la web |
 |---|---|---|
-| `pdf.py` | Capa sobre PDFium: documentos, páginas, texto, imágenes, texto invisible de OCR. Coordenadas (`Rect`, de página y de vista) | Todos los que tocan un PDF |
+| `pdf.py` | Capa sobre PDFium: documentos, páginas, texto, imágenes. Coordenadas (`Rect`, de página y de vista) | Todos los que tocan un PDF |
 | `page_ops.py` | Rotar, insertar, duplicar, mover y extraer páginas; exportar texto e imágenes | `services/viewer.py` |
-| `text_layer.py` + `reading_order.py` | Capa de texto en orden de lectura (también con palabras de OCR); escribe el texto de OCR como texto invisible para EmbedPDF | `services/viewer.py`, `services/ocr.py` |
+| `text_layer.py` + `reading_order.py` | Capa de texto en orden de lectura (también con palabras de OCR; el texto invisible para EmbedPDF lo escribe el visor) | `services/viewer.py`, `services/ocr.py` |
 | `stamps.py` | Sellos predeterminados y conversión de colores | `services/legends.py` |
 | `legends.py` | Leyendas guardadas (`~/.extraer_pdfs_legends.json`) | `services/legends.py` |
 | `recent_files.py` | Archivos recientes (`~/.extraer_pdfs_recent.json`) | `services/documents.py`, `services/viewer.py` |

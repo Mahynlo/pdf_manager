@@ -11,7 +11,8 @@ import type { MenuItem } from '$lib/menu.svelte.ts';
 import type { DocumentInfo } from '$lib/types.ts';
 import { askChoice, confirmDialog, progressDialog, setStatus, toast } from '$lib/ui.ts';
 import { t, tip } from '$texts';
-import type { DocumentCopy } from './copy.ts';
+import type { PageRecognizer } from '../ocr/recognize.ts';
+import { send, type DocumentCopy } from './copy.ts';
 import type { PageEditor } from './pages.ts';
 
 const T = t.viewer.document;
@@ -34,12 +35,14 @@ export class DocumentActions {
   view: DocumentView;
   pages: PageEditor;
   copy: DocumentCopy;
+  recognizer: PageRecognizer;
   queue: Promise<unknown> = Promise.resolve(); // las operaciones se encadenan: cada una ve el resultado de la anterior
 
-  constructor(info: DocumentInfo, view: DocumentView, pages: PageEditor, copy: DocumentCopy) {
+  constructor(info: DocumentInfo, view: DocumentView, pages: PageEditor, copy: DocumentCopy, recognizer: PageRecognizer) {
     this.view = view;
     this.pages = pages;
     this.copy = copy;
+    this.recognizer = recognizer;
     this.info = this._withState(info);
   }
 
@@ -107,8 +110,7 @@ export class DocumentActions {
   /** Detecta la orientación de la página actual (escaneo o texto girado) y la corrige. */
   fixOrientation() {
     return this._pages(async (page) => {
-      await this.copy.sync(); // Python mira la página tal como está
-      const { angle } = await call<{ angle: number }>('ocr.orientation', this.info.id, page);
+      const angle = await this.recognizer.orientation(page);
       if (!angle) {
         toast(T.orientationOk, 'info');
         return null;
@@ -121,14 +123,13 @@ export class DocumentActions {
   /** Corrige la orientación de todas las páginas, con progreso y «Cancelar». */
   fixOrientationAll() {
     return this._pages(async (page) => {
-      await this.copy.sync();
       const total = this.pageCount;
       const progress = progressDialog(T.orientationTitle, T.orientationAnalyzing);
       const turns: [number, number][] = []; // [página, ángulo]
       try {
         for (let index = 0; index < total && !progress.cancelled; index++) {
           progress.update(index, total, T.orientationProgress(index + 1, total));
-          const { angle } = await call<{ angle: number }>('ocr.orientation', this.info.id, index);
+          const angle = await this.recognizer.orientation(index);
           if (angle) turns.push([index, angle]);
         }
       } finally {
@@ -279,7 +280,7 @@ export class DocumentActions {
   extractPage() {
     return this._file(async () => {
       const page = this.view.page();
-      const url = await this.copy.send(await this.copy.page(page));
+      const url = await send(await this.copy.page(page));
       const path = await call<string | null>('viewer.extract_page', this.info.id, page, url);
       if (path) setStatus(T.pageExtracted(page + 1, fileName(path)));
     });

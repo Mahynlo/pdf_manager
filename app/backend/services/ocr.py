@@ -1,12 +1,14 @@
 """Servicio ``ocr``: reconocimiento de texto y orientación en el visor.
 
-Trabaja sobre los documentos abiertos del servicio ``viewer``. Las palabras
-reconocidas se guardan en el documento abierto (``ViewerService.set_ocr_words``) y
-pasan a formar parte de su capa de texto: se pueden seleccionar, buscar y exportar.
+Las imágenes las dibuja el visor con su motor (el dueño del documento) y las sube como en
+:meth:`ViewerService.upload_url`: aquí solo se reconocen. Las palabras reconocidas se guardan en
+el documento abierto del servicio ``viewer`` (``ViewerService.set_ocr_words``) y pasan a su capa
+de texto (asistente IA, panel de OCR, exportar texto); el visor las escribe en su documento como
+texto invisible, para seleccionarlas y buscarlas.
 
-Cada página es una llamada: el frontend recorre las páginas de un lote y puede
-cancelarlo entre una y otra. La página se rasteriza con el candado del visor y la
-inferencia (lo lento) corre sin él, así el visor sigue respondiendo.
+Cada página es una llamada: el frontend recorre las páginas de un lote y puede cancelarlo entre
+una y otra. La inferencia (lo lento) corre sin el candado del visor, así el visor sigue
+respondiendo.
 """
 
 from __future__ import annotations
@@ -17,10 +19,13 @@ import threading
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from app import PROJECT_ROOT
 from app.backend.host import Host
 from app.backend.rpc import UserError, exposed
 from app.backend.services.viewer import ViewerService
+from pdf_core.ocr import kind_of, mode_of
 from pdf_core.page_ranges import select_pages
 from pdf_core.pdf import Page, Rect
 from pdf_core.text_layer import words_text
@@ -34,6 +39,22 @@ MODE_LABELS = {"Hibrido": "Híbrido"}
 
 def _rect(r: Rect) -> list[float]:
     return [round(v, 2) for v in r]
+
+
+def _images(data: bytes, shapes: list[dict[str, Any]]) -> list[np.ndarray]:
+    """Las imágenes RGB que subió el visor, una tras otra; ``shapes``: ``width`` y ``height`` de cada una."""
+    images: list[np.ndarray] = []
+    offset = 0
+    for shape in shapes:
+        width, height = int(shape["width"]), int(shape["height"])
+        size = width * height * 3
+        if width <= 0 or height <= 0 or offset + size > len(data):
+            raise UserError("Las imágenes de la página no llegaron completas.", "bad_images")
+        images.append(np.frombuffer(data, np.uint8, size, offset).reshape(height, width, 3))
+        offset += size
+    if offset != len(data):
+        raise UserError("Las imágenes de la página no llegaron completas.", "bad_images")
+    return images
 
 
 class OcrService:
@@ -73,34 +94,42 @@ class OcrService:
             }
 
     @exposed
-    def page(self, doc_id: int, index: int) -> dict[str, Any]:
-        """OCR de la página ``index`` (botón «Procesar Página Actual» y cada página de un lote)."""
+    def page(self, doc_id: int, index: int, upload: str, regions: list[dict[str, Any]], facts: dict[str, Any]) -> dict[str, Any]:
+        """OCR de la página ``index`` (botón «Procesar Página Actual» y cada página de un lote).
+
+        El visor sube a ``upload`` las imágenes de ``regions`` (``rect`` de vista, ``scale`` en
+        píxeles por punto, ``width`` y ``height``): las de la página o, si no tiene, la página
+        entera. ``facts``, de su motor: ``lines`` (líneas de texto nativo) e ``images`` (si tiene
+        imágenes). Devuelve también ``words``: las palabras, que el visor escribe en su documento.
+        """
+        found = self._read(upload, regions)
         with self._viewer.document(doc_id) as entry:
             key = self._viewer.page_key(entry, self._viewer.page(entry, index))
-            prepared = self.processor.prepare_page(entry.doc, index, force_ocr=True)
-        result = self._recognize(prepared)
-        words = [(*_rect(s.bbox), s.text) for s in result.segments if s.source == "ocr"]
+        words, elapsed_ms = self._recognize(found)
         with self._viewer.document(doc_id) as entry:
             page = self._current_page(entry, index, key)
             layer = self._viewer.set_ocr_words(entry, page, words)
+        lines = int(facts.get("lines", 0))
+        mode = mode_of(lines > 0, bool(words))
         return {
             "page": index,
             "text": layer.text,
-            "segments": len(result.segments),
+            "segments": lines + len(words),
             "boxes": [list(w[:4]) for w in words],
-            "elapsed_ms": round(result.elapsed_ms),
-            "mode": MODE_LABELS.get(result.mode_label, result.mode_label),
-            "kind": PAGE_KINDS.get(result.page_kind, "-"),
+            "words": words,
+            "elapsed_ms": elapsed_ms,
+            "mode": MODE_LABELS.get(mode, mode),
+            "kind": PAGE_KINDS[kind_of(lines > 0, bool(facts.get("images")))],
         }
 
     @exposed
-    def area(self, doc_id: int, index: int, rect: list[float]) -> dict[str, Any]:
-        """OCR del rectángulo ``rect`` (puntos de la página vista); sus palabras se suman a las de la página."""
+    def area(self, doc_id: int, index: int, upload: str, region: dict[str, Any]) -> dict[str, Any]:
+        """OCR de un recorte de la página ``index``: la imagen de ``region`` (como en :meth:`page`).
+        Sus palabras se suman a las de la página; ``words`` son las nuevas."""
+        found = self._read(upload, [region])
         with self._viewer.document(doc_id) as entry:
             key = self._viewer.page_key(entry, self._viewer.page(entry, index))
-            prepared = self.processor.prepare_area(entry.doc, index, Rect(*rect))
-        result = self._recognize(prepared)
-        words = [(*_rect(s.bbox), s.text) for s in result.segments]
+        words, elapsed_ms = self._recognize(found)
         with self._viewer.document(doc_id) as entry:
             page = self._current_page(entry, index, key)
             self._viewer.set_ocr_words(entry, page, words, merge=True)
@@ -111,15 +140,23 @@ class OcrService:
             "text": text,
             "segments": len(words),
             "boxes": boxes,
-            "elapsed_ms": round(result.elapsed_ms),
+            "words": words,
+            "elapsed_ms": elapsed_ms,
         }
 
-    def _recognize(self, prepared: Any) -> Any:
-        """Inferencia sin el candado del visor; una a la vez."""
+    def _read(self, upload: str, regions: list[dict[str, Any]]) -> list[tuple[Rect, float, np.ndarray]]:
+        """Las regiones con sus imágenes, subidas por el visor."""
+        images = _images(self._viewer.received(upload), regions)
+        return [(Rect(*region["rect"]), float(region["scale"]), image) for region, image in zip(regions, images, strict=True)]
+
+    def _recognize(self, regions: list[tuple[Rect, float, np.ndarray]]) -> tuple[list[tuple], int]:
+        """Inferencia sin el candado del visor; una a la vez. Devuelve las palabras
+        ``(x0, y0, x1, y1, texto)`` y los milisegundos que tardó."""
         with self._busy:
             self._cancel_release()
             try:
-                return self.processor.recognize_page(prepared)
+                found, seconds = self.processor.recognize_regions(regions)
+                return [(*_rect(d.bbox), d.text) for d in found], round(seconds * 1000)
             except Exception as ex:
                 log.exception("Fallo del OCR")
                 raise UserError(f"Error al procesar OCR: {ex}", "ocr_failed") from ex
@@ -160,23 +197,26 @@ class OcrService:
 
     # ── Orientación ──────────────────────────────────────────────────────
     @exposed
-    def orientation(self, doc_id: int, index: int) -> dict[str, Any]:
-        """Detecta la orientación de la página: ``{angle}``, los grados que hay que girarla (0: está bien).
+    def orientation(self, upload: str, images: list[dict[str, Any]]) -> dict[str, Any]:
+        """Orientación de una página escaneada por sus imágenes: ``{angle}``, los grados que hay
+        que girarla (0: está bien).
 
-        La gira el visor (es el dueño de las páginas), así se puede deshacer como cualquier giro.
+        El visor sube a ``upload`` dos imágenes de la página (``width`` y ``height`` de cada una):
+        a 0,8 píxeles por punto y la sonda (ver ``OCRProcessor.image_correction``). Si la página
+        tiene texto, la orientación la dice su sentido y no hace falta llamar aquí. La gira el
+        visor (es el dueño de las páginas), así se puede deshacer como cualquier giro.
         """
-        with self._busy, self._viewer.document(doc_id) as entry:
+        small, probe = _images(self._viewer.received(upload), images)
+        with self._busy:
             self._cancel_release()
             try:
-                angle = self.processor.correction_angle(self._viewer.page(entry, index))
-            except UserError:
-                raise
+                angle = self.processor.image_correction(small, probe)
             except Exception as ex:
                 log.exception("No se pudo detectar la orientación")
                 raise UserError(f"No se pudo clasificar la orientación: {ex}", "orientation_failed") from ex
             finally:
                 self._schedule_release()
-        return {"angle": angle or 0}
+        return {"angle": angle}
 
     # ── Memoria del modelo ───────────────────────────────────────────────
     def _schedule_release(self) -> None:

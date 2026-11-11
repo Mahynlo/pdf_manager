@@ -5,8 +5,8 @@ tapen texto nativo) ordenados por columnas y líneas. ``TextLayer`` añade el se
 delante de cada carácter (``""``, espacio o salto de línea) y el texto completo, que usan el
 asistente IA y el panel de OCR (la selección y la búsqueda del visor son de EmbedPDF).
 
-``embed_ocr_words`` escribe en la página las palabras de OCR como texto invisible,
-para que un lector de PDF (el visor con EmbedPDF) las seleccione como texto nativo.
+Las palabras de OCR las escribe el visor en su documento como texto invisible, para que
+EmbedPDF las seleccione como texto nativo (``app/ui/src/lib/pdf-engine/page-ocr.ts``).
 
 Las coordenadas son las de la página tal como se ve (ya girada), en puntos.
 """
@@ -113,21 +113,6 @@ def page_words(page: Page, ocr_words: list[tuple] | None = None) -> list[Word]:
         return sort_words_clustered(words, page_width, groups=gids)
     words = sort_words_column_aware(words, page_width, groups=gids)
     return assign_line_indices(words)
-
-
-def embed_ocr_words(page: Page, ocr_words: list[tuple]) -> int:
-    """Escribe en ``page`` como texto invisible las palabras de OCR que no tapan texto nativo.
-
-    Cada palabra ocupa su rectángulo (en la página tal como se ve) y se lee en el sentido en
-    que se ve la página. Devuelve cuántas escribió.
-    """
-    covered_by_native = _coverage([page.to_view(c.box) for c in page.chars() if c.text.strip()])
-    words = []
-    for word in ocr_words:
-        rect, text = _ocr_word(word)
-        if text and not rect.is_empty and not covered_by_native(rect):
-            words.append((rect, text))
-    return page.add_invisible_text(words)
 
 
 @dataclass

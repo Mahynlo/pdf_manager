@@ -21,6 +21,14 @@ export interface Uploaded {
   adopted(): void;
 }
 
+/** Sube `data` (un PDF o imágenes de página) para un servicio de Python; devuelve su URL. */
+export async function send(data: ArrayBuffer): Promise<string> {
+  const url = await call<string>('viewer.upload_url');
+  const response = await upload(url, data);
+  if (!response.ok) throw new Error(t.viewer.document.uploadError(response.status));
+  return url;
+}
+
 export class DocumentCopy {
   private version = 0; // cambios hechos en el documento a la vista
   private synced = 0; // `version` que ya tiene Python
@@ -59,7 +67,7 @@ export class DocumentCopy {
     await this.canvas.loading; // la copia tiene que ser de la versión que tiene Python
     const documentId = this.canvas.shown;
     const version = this.version;
-    const url = await this.send(await this.pdf());
+    const url = await send(await this.pdf());
     return {
       url,
       uids: pageUids(this.canvas.keys),
@@ -67,14 +75,6 @@ export class DocumentCopy {
         if (documentId === this.canvas.shown) this.synced = Math.max(this.synced, version);
       },
     };
-  }
-
-  /** Sube `data` (un PDF) para un servicio de Python; devuelve su URL. */
-  async send(data: ArrayBuffer): Promise<string> {
-    const url = await call<string>('viewer.upload_url');
-    const response = await upload(url, data);
-    if (!response.ok) throw new Error(t.viewer.document.uploadError(response.status));
-    return url;
   }
 
   /**

@@ -1,6 +1,6 @@
 // El motor PDFium de la app: el PdfEngine de EmbedPDF sobre nuestro worker (worker.ts), que
-// añade lo que le falta para cambiar las páginas de un documento abierto y sacar copias de él
-// (native.ts).
+// añade lo que le falta para cambiar las páginas de un documento abierto, sacar copias de él y
+// leer y escribir lo que necesita el OCR (native.ts).
 //
 // Sustituye a createPdfiumEngine de EmbedPDF, que crea su worker desde un blob y no deja
 // añadirle métodos. Este hace lo mismo: el worker, el ejecutor que le pasa las llamadas por su
@@ -8,7 +8,8 @@
 import { PdfEngine, createHybridImageConverter } from '@embedpdf/engines';
 import { Task, type IPdfiumExecutor, type PdfDocumentObject, type PdfPageObject } from '@embedpdf/models';
 import { ImageEncoderPool } from './encoder.ts';
-import type { CopyMethod, CopyOptions, DocumentFacts, StructureMethod } from './native.ts';
+import type { CopyMethod, CopyOptions, DocumentFacts, OcrMethod, StructureMethod } from './native.ts';
+import type { Box, OcrText, PageFacts, PageImage } from './page-ocr.ts';
 import { READY_ID, type FromEngine, type ToEngine } from './protocol.ts';
 
 const ENCODERS = 2; // workers que codifican imágenes (los mismos que EmbedPDF)
@@ -136,10 +137,33 @@ export class DocumentCopies {
   }
 }
 
+/** Lo que necesita el OCR del documento abierto: leer y dibujar una página y escribir su texto (page-ocr.ts). */
+export class PageReading {
+  constructor(private executor: WorkerExecutor) {}
+
+  private call<R>(method: OcrMethod, ...args: unknown[]): Promise<R> {
+    return this.executor.send<R>(method, args).toPromise();
+  }
+
+  pageFacts(doc: PdfDocumentObject, index: number): Promise<PageFacts> {
+    return this.call('pageFacts', doc, index);
+  }
+
+  pageImage(doc: PdfDocumentObject, index: number, scale: number, clip?: Box): Promise<PageImage> {
+    return this.call('pageImage', doc, index, scale, clip);
+  }
+
+  /** Devuelve las páginas que cambiaron (las que hay que volver a leer en EmbedPDF). */
+  writeOcrText(doc: PdfDocumentObject, pages: OcrText[]): Promise<number[]> {
+    return this.call('writeOcrText', doc, pages);
+  }
+}
+
 export interface AppEngine {
   engine: PdfEngine<Blob>; // el que usan EmbedPDF y las tareas de Python (engine-tasks.ts)
   structure: PageStructure;
   copies: DocumentCopies;
+  reading: PageReading;
 }
 
 /** Arranca el motor con el wasm de `wasmUrl` (URL absoluta). */
@@ -151,5 +175,12 @@ export function createAppEngine(wasmUrl: string): AppEngine {
       name in target ? Reflect.get(target, name, receiver) : (...args: unknown[]) => target.send(String(name), args),
   }) as unknown as IPdfiumExecutor;
   const engine = new PdfEngine<Blob>(remote, { imageConverter: createHybridImageConverter(new ImageEncoderPool(ENCODERS) as never) });
-  return { engine, structure: new PageStructure(executor), copies: new DocumentCopies(executor) };
+  return {
+    engine,
+    structure: new PageStructure(executor),
+    copies: new DocumentCopies(executor),
+    reading: new PageReading(executor),
+  };
 }
+
+export type { Box, OcrText, OcrWord, PageFacts, PageImage } from './page-ocr.ts';

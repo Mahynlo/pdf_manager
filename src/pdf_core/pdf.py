@@ -22,7 +22,7 @@ import math
 import struct
 import threading
 import zlib
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import wraps
@@ -36,8 +36,6 @@ import pypdfium2.raw as raw
 
 LOCK = threading.RLock()
 UNRESTRICTED = -1  # permisos de un PDF sin cifrar o abierto como propietario
-OCR_MARK = b"ExtraerPDFsOCR"  # marca del texto invisible (el visor la busca para quitarlo)
-_OCR_FONT = b"Helvetica"
 _META_KEYS = {
     "Title": "title", "Author": "author", "Subject": "subject", "Keywords": "keywords",
     "Creator": "creator", "Producer": "producer", "CreationDate": "creationDate", "ModDate": "modDate",
@@ -369,60 +367,6 @@ class Page:
                 finally:
                     raw.FPDFPage_CloseAnnot(annot)
         return rects
-
-    # ── Texto invisible (OCR) ────────────────────────────────────────────
-    @locked
-    def add_invisible_text(self, words: Iterable[tuple[Rect, str]]) -> int:
-        """Escribe cada palabra (rectángulo de vista, texto) como texto invisible; devuelve cuántas.
-
-        Cada palabra ocupa su rectángulo y se lee en el sentido en que se ve la página. Lleva la
-        marca :data:`OCR_MARK`: el motor del visor la quita de las copias que salen de él
-        (``app/ui/src/lib/pdf-engine/native.ts``), así el texto reconocido no pasa al archivo.
-        """
-        written = 0
-        doc = self.parent.raw
-        font = raw.FPDFText_LoadStandardFont(doc, _OCR_FONT)
-        with self._opened() as page:
-            for rect, text in words:
-                obj = raw.FPDFPageObj_CreateTextObj(doc, font, 12.0)
-                encoded = (text + "\0").encode("utf-16-le")
-                raw.FPDFText_SetText(obj, ctypes.cast(encoded, ctypes.POINTER(raw.FPDF_WCHAR)))
-                raw.FPDFTextObj_SetTextRenderMode(obj, raw.FPDF_TEXTRENDERMODE_INVISIBLE)
-                raw.FPDFPageObj_AddMark(obj, OCR_MARK)
-                box = [ctypes.c_float() for _ in range(4)]
-                raw.FPDFPageObj_GetBounds(obj, *[ctypes.byref(v) for v in box])
-                left, bottom, right, top = (v.value for v in box)
-                if right <= left or top <= bottom:
-                    raw.FPDFPageObj_Destroy(obj)
-                    continue
-                raw.FPDFPageObj_Transform(obj, *self._fit(rect, left, bottom, right - left, top - bottom))
-                raw.FPDFPage_InsertObject(page, obj)
-                written += 1
-            if written:
-                raw.FPDFPage_GenerateContent(page)
-        self._chars = self._text = None
-        return written
-
-    def _fit(self, rect: Rect, left: float, bottom: float, width: float, height: float) -> tuple[float, ...]:
-        """Matriz que lleva la caja de un texto recién creado al rectángulo de vista ``rect``.
-
-        Se pasa por un espacio con ``y`` hacia arriba alineado con la vista; desde ahí a la
-        página según su giro (inverso del /Rotate) y a la caja visible de la página.
-        """
-        meta = self._meta
-        sx, sy = rect.width / width, rect.height / height
-        # En ese espacio: u = sx (x - left) + u0 ; v = sy (y - bottom) + v0
-        u0, v0 = rect.x0 - sx * left, self.rect.height - rect.y1 - sy * bottom
-        w, h = meta.width, meta.height
-        if meta.rotation == 90:  # x = w - v ; y = u
-            a, b, c, d, e, f = 0, sx, -sy, 0, w - v0, u0
-        elif meta.rotation == 180:  # x = w - u ; y = h - v
-            a, b, c, d, e, f = -sx, 0, 0, -sy, w - u0, h - v0
-        elif meta.rotation == 270:  # x = v ; y = h - u
-            a, b, c, d, e, f = 0, -sx, sy, 0, v0, h - u0
-        else:
-            a, b, c, d, e, f = sx, 0, 0, sy, u0, v0
-        return float(a), float(b), float(c), float(d), float(e + meta.left), float(f + meta.top - meta.height)
 
 
 class Document:

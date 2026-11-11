@@ -4,8 +4,9 @@
 //   node engine_task.mjs <tarea> <args JSON> <entrada.pdf> <salida.pdf>
 //
 // Además de las de engine-tasks.ts tiene las que en la app hace el visor: poner marcas de censura
-// (como redaction.ts), escribir metadatos y cambiar las páginas (como document/pages.ts, con el
-// mismo motor: lib/pdf-engine/native.ts).
+// (como redaction.ts), escribir metadatos, cambiar las páginas (como document/pages.ts), sacar
+// copias (document/copy.ts) y lo que necesita el OCR (ocr/recognize.ts), con el mismo motor:
+// lib/pdf-engine/native.ts. Las que no devuelven un PDF escriben un JSON.
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -31,14 +32,23 @@ const engine = new AppNative(pdfium);
 const file = fs.readFileSync(input);
 const buffer = file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength);
 
-/** Las tareas que aquí hace el visor: abrir, cambiar y guardar. */
-async function edit(change) {
+/** Abre el PDF como el visor, hace `use(doc)` y lo cierra; devuelve lo que devuelve `use`. */
+async function opened(use) {
   const doc = await engine.openDocumentBuffer({ id: 'test', content: buffer }, { password: args.password ?? undefined, normalizeRotation: true }).toPromise();
-  await change(doc);
-  const saved = await engine.saveAsCopy(doc).toPromise();
-  await engine.closeDocument(doc).toPromise();
-  return saved;
+  try {
+    return await use(doc);
+  } finally {
+    await engine.closeDocument(doc).toPromise();
+  }
 }
+
+/** Las tareas que aquí hace el visor: abrir, cambiar y guardar. */
+const edit = (change) => opened(async (doc) => {
+  await change(doc);
+  return engine.saveAsCopy(doc).toPromise();
+});
+
+const json = (value) => new TextEncoder().encode(JSON.stringify(value));
 
 function mark(doc, { page, rect: [x0, y0, x1, y1], color }, index) {
   const box = { origin: { x: x0, y: y0 }, size: { width: x1 - x0, height: y1 - y0 } };
@@ -76,15 +86,22 @@ if (task === 'mark') {
 } else if (task === 'copy' || task === 'extract') {
   // Las copias que saca el visor (como document/copy.ts): args.withoutText, args.decrypt y,
   // para extraer, args.indices.
-  const doc = await engine.openDocumentBuffer({ id: 'test', content: buffer }, { password: args.password ?? undefined, normalizeRotation: true }).toPromise();
-  result = task === 'copy'
+  result = await opened((doc) => task === 'copy'
     ? engine.saveCopy(doc, { withoutText: args.withoutText, decrypt: args.decrypt, password: args.password })
-    : engine.extractCopy(doc, args.indices, args.withoutText);
-  await engine.closeDocument(doc).toPromise();
+    : engine.extractCopy(doc, args.indices, args.withoutText));
 } else if (task === 'facts') {
-  const doc = await engine.openDocumentBuffer({ id: 'test', content: buffer }, { password: args.password ?? undefined }).toPromise();
-  result = new TextEncoder().encode(JSON.stringify(engine.documentFacts(doc)));
-  await engine.closeDocument(doc).toPromise();
+  result = await opened((doc) => json(engine.documentFacts(doc)));
+} else if (task === 'ocr-write') {
+  // Las palabras del OCR como texto invisible (como canvas.writeOcrText): args.pages.
+  result = await edit((doc) => engine.writeOcrText(doc, args.pages));
+} else if (task === 'ocr-facts') {
+  result = await opened((doc) => json(engine.pageFacts(doc, args.index)));
+} else if (task === 'ocr-image') {
+  // Una imagen para el OCR: {width, height, data} con los píxeles RGB en base64.
+  result = await opened((doc) => {
+    const { width, height, data } = engine.pageImage(doc, args.index, args.scale, args.clip);
+    return json({ width, height, data: Buffer.from(data).toString('base64') });
+  });
 } else {
   result = await runTask(engine, task, buffer, args);
 }

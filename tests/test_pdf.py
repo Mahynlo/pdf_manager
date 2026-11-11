@@ -1,6 +1,7 @@
 """Capa de PDFium (``pdf_core.pdf``), texto y lo que no puede fallar al censurar."""
 from __future__ import annotations
 
+import base64
 import json
 import re
 import threading
@@ -13,7 +14,7 @@ from pdfkit import add_annot, add_image, add_page, add_text, annot_names, annots
 from pdf_core import redaction
 from pdf_core.pdf import UNRESTRICTED, Document, PasswordError, PdfError, Rect, png
 from pdf_core.reading_order import sort_words_clustered, sort_words_column_aware
-from pdf_core.text_layer import build_text_layer, embed_ocr_words, page_words
+from pdf_core.text_layer import build_text_layer, page_words
 
 ROTATIONS = [0, 90, 180, 270]
 
@@ -243,13 +244,19 @@ def test_engine_page_changes_keep_the_encryption():
 
 
 # ── Copias en el motor del visor (guardar, imprimir, extraer: document/copy.ts) ─
+def _with_ocr(data: bytes, pages: dict[int, list[list]], replace: bool = False, password: str | None = None) -> bytes:
+    """Lo que hace el visor tras un OCR (canvas.writeOcrText): ``pages``, palabras
+    ``[x0, y0, x1, y1, texto]`` (de vista) por página, escritas como texto invisible."""
+    items = [{"index": index, "words": words, "replace": replace} for index, words in pages.items()]
+    return run_engine("ocr-write", data, {"pages": items, "password": password})
+
+
 def _recognized(password: str | None = None) -> bytes:
     """Dos páginas con texto nativo y el de un OCR como texto invisible; una nota en la primera."""
     with Document.open(pdf_bytes([[(72, 72, "uno")], [(72, 72, "dos")]])) as doc:
-        for page in doc:
-            page.add_invisible_text([(Rect(40, 240, 140, 260), "reconocido")])
         add_annot(doc[0], "Square", Rect(10, 10, 50, 50), name="nota")
         data = doc.to_bytes()
+    data = _with_ocr(data, {i: [[40, 240, 140, 260, "reconocido"]] for i in range(2)})
     return encrypted(data, password) if password else data
 
 
@@ -308,38 +315,64 @@ def test_threads_do_not_crash_the_engine():
     assert not errors
 
 
-# ── Texto invisible del OCR ──────────────────────────────────────────────────
+# ── El OCR en el motor del visor (lib/pdf-engine/page-ocr.ts) ────────────────
 @pytest.mark.parametrize("rotation", ROTATIONS)
-def test_invisible_text_lands_on_its_rectangle(rotation):
+def test_engine_writes_ocr_words_on_their_rectangle(rotation):
     with _doc(rotation) as doc:
+        data = doc.to_bytes()
+        before = doc[0].render(1)
+    with Document.open(_with_ocr(data, {0: [[40, 240, 140, 260, "cañón"]]})) as doc:
         page = doc[0]
-        want = Rect(40, 240, 140, 260)
-        assert page.add_invisible_text([(want, "cañón")]) == 1
         ((rect, text),) = [(r, t) for r, t, _line in page.words() if "ca" in t]
         assert text == "cañón"
         got = page.to_view(rect)
-        assert abs(got.x0 - want.x0) < 5 and abs(got.x1 - want.x1) < 5 and abs(got.y0 - want.y0) < 8
-        # Es invisible: la imagen de la página no cambia.
-        with Document.open(doc.to_bytes()) as saved:
-            before = _doc(rotation)[0].render(1)
-            assert np.array_equal(saved[0].render(1), before)
+        assert abs(got.x0 - 40) < 5 and abs(got.x1 - 140) < 5 and abs(got.y0 - 240) < 8
+        assert np.array_equal(page.render(1), before)  # es invisible: la página se ve igual
 
 
-def test_invisible_text_survives_saving():
-    """Lo quita el motor del visor de las copias que salen de él (test_engine_copy_*)."""
+def test_engine_ocr_words_replace_the_previous_ones_and_skip_native_text():
     with _doc() as doc:
-        doc[0].add_invisible_text([(Rect(40, 240, 140, 260), "reconocido")])
+        native = doc[0].to_view(doc[0].words()[0][0])
         data = doc.to_bytes()
-    with Document.open(data) as doc:
-        assert "reconocido" in doc[0].text() and "Hola mundo" in doc[0].text()
+    first = _with_ocr(data, {0: [[40, 300, 100, 320, "Primera"]]})
+    words = [[*native, "Repetido"], [40, 400, 100, 420, "Nueva"], [10, 10, 10, 10, "vacia"]]
+    with Document.open(_with_ocr(first, {0: words}, replace=True)) as doc:
+        text = doc[0].text()
+        assert "Nueva" in text and "Hola mundo" in text  # el texto nativo no se toca
+        assert "Primera" not in text and "Repetido" not in text and "vacia" not in text
+    with Document.open(_with_ocr(first, {0: [[40, 400, 100, 420, "Nueva"]]})) as doc:
+        assert "Primera" in doc[0].text() and "Nueva" in doc[0].text()  # un recorte se suma
 
 
-def test_ocr_words_that_cover_native_text_are_not_embedded():
+@pytest.mark.parametrize("rotation", ROTATIONS)
+def test_engine_reads_page_facts_without_the_ocr_text(rotation):
     with _doc() as doc:
-        page = doc[0]
-        native = page.to_view(page.words()[0][0])
-        assert embed_ocr_words(page, [(*native, "Repetido"), (40, 400, 100, 420, "Nueva"), (10, 10, 10, 10, "vacia")]) == 1
-        assert "Nueva" in page.text() and "Repetido" not in page.text()
+        add_image(doc[0], Rect(100, 300, 300, 400), np.full((20, 40, 3), 128, np.uint8))
+        if rotation:
+            doc[0].set_rotation(rotation)
+        images = doc[0].image_rects()
+        data = _with_ocr(doc.to_bytes(), {0: [[40, 500, 140, 520, "reconocido"]]})
+    facts = json.loads(run_engine("ocr-facts", data, {"index": 0}))
+    assert facts["chars"] == len("Holamundo" "Segundalinea") and facts["lines"] == 2
+    assert [pytest.approx(list(r), abs=0.5) for r in images] == facts["images"]
+    wx, wy = facts["direction"]  # el texto se ve girado como la página
+    want = {0: (1, 0), 90: (0, 1), 180: (-1, 0), 270: (0, -1)}[rotation]
+    assert (round(wx / facts["chars"]), round(wy / facts["chars"])) == want
+
+
+@pytest.mark.parametrize("rotation", [0, 90])
+def test_engine_draws_the_page_as_seen_for_the_ocr(rotation):
+    with _doc(rotation) as doc:
+        clip = Rect(20, 60, 220, 240)
+        want = doc[0].render(2, clip=clip)
+        whole = doc[0].render(0.5)
+        data = doc.to_bytes()
+    image = json.loads(run_engine("ocr-image", data, {"index": 0, "scale": 2, "clip": list(clip)}))
+    got = np.frombuffer(base64.b64decode(image["data"]), np.uint8).reshape(image["height"], image["width"], 3)
+    assert got.shape == want.shape
+    assert np.abs(got.astype(int) - want).mean() < 3  # el mismo PDFium, otra compilación
+    image = json.loads(run_engine("ocr-image", data, {"index": 0, "scale": 0.5}))
+    assert (image["height"], image["width"]) == whole.shape[:2]
 
 
 # ── Capa de texto y orden de lectura ─────────────────────────────────────────

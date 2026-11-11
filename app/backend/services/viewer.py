@@ -13,16 +13,17 @@ El dueño del documento abierto es el visor: EmbedPDF edita las anotaciones y ha
 operaciones de página (girar, insertar, duplicar, borrar, mover y deshacerlas), y da el ``id`` de
 cada página. Al guardar, el visor sube su copia y Python la escribe tal cual en el archivo
 (:meth:`ViewerService.save`); al extraer una página, sube ese PDF
-(:meth:`ViewerService.extract_page`). Antes de que Python lea el documento (censurar, la
-orientación, OCR, IA, exportar texto o imágenes), el visor sube su copia con esos ``id``
+(:meth:`ViewerService.extract_page`). Antes de que Python lea el documento (censurar, el texto
+del panel de OCR, IA, exportar texto o imágenes), el visor sube su copia con esos ``id``
 (:meth:`ViewerService.sync_annotations`), que pasa a ser el documento. Mientras tanto,
 :meth:`ViewerService.annotations_changed` avisa de que hay anotaciones sin guardar.
 
 Las palabras reconocidas por OCR (servicio ``ocr``) se guardan por clave de página.
-Entran en la capa de texto (``text_of``: asistente IA, panel de OCR) y van como texto
-invisible en el documento que recibe EmbedPDF, que las selecciona y las busca como el
-texto nativo. Llevan una marca propia, con la que el visor las quita de las copias que salen
-de él: el texto reconocido no pasa al archivo ni a Python.
+Entran en la capa de texto (``text_of``: asistente IA, panel de OCR, exportar texto) y el
+visor las escribe en su documento como texto invisible, que EmbedPDF selecciona y busca como el
+texto nativo: las de un OCR nuevo, al recibirlas, y las demás, al abrir una versión
+(``document_url``). Llevan una marca propia, con la que el visor las quita de las copias que
+salen de él: el texto reconocido no pasa al archivo ni a Python.
 
 Censurar lo hace el motor de EmbedPDF (``Host.run_engine``): el PDFium de Python no sabe.
 """
@@ -44,7 +45,7 @@ from app.backend.services.documents import RECENT_CHANGED
 from pdf_core import page_ops, recent_files
 from pdf_core.pdf import Document, Page, PdfError, Rect
 from pdf_core.security import PDFInvalidPasswordError, PDFPasswordRequiredError, PDFSecurityManager
-from pdf_core.text_layer import TextLayer, build_text_layer, embed_ocr_words
+from pdf_core.text_layer import TextLayer, build_text_layer
 
 log = logging.getLogger(__name__)
 
@@ -154,26 +155,22 @@ class ViewerService:
     def document_url(self, doc_id: int) -> dict[str, Any]:
         """URL de un solo uso con el documento tal como está abierto, para dibujarlo con PDFium.
 
-        Con la censura aplicada, las páginas giradas o movidas, las anotaciones (las edita
-        EmbedPDF) y el texto reconocido por OCR escrito como texto invisible (así EmbedPDF lo
-        selecciona como el nativo; ``ocr`` es el ``id`` de esas páginas, de las que el visor lo
-        quita en las copias que salen de él). Un PDF cifrado sigue cifrado, para que la copia que
-        vuelve conserve el cifrado: ``password`` es la contraseña con la que abrirlo. Viaja en
-        binario por ``host.share_bytes``: por el puente, en base64, un PDF grande tardaría
-        segundos. ``keys`` son las claves de página de esta versión: si cambian, el visor lo
-        vuelve a pedir.
+        Con la censura aplicada, las páginas giradas o movidas y las anotaciones (las edita
+        EmbedPDF). Un PDF cifrado sigue cifrado, para que la copia que vuelve conserve el
+        cifrado: ``password`` es la contraseña con la que abrirlo. Viaja en binario por
+        ``host.share_bytes``: por el puente, en base64, un PDF grande tardaría segundos.
+        ``keys`` son las claves de página de esta versión: si cambian, el visor lo vuelve a
+        pedir. ``ocr``: las palabras reconocidas de cada página que las tiene (``{index,
+        words}``), que el visor escribe en el documento como texto invisible.
         """
         with self._lock:
             entry = self._doc(doc_id)
             data = entry.doc.to_bytes()
             keys = [entry.key(page) for page in entry.doc]
-            ocr = {i: list(entry.ocr[key]) for i, key in enumerate(keys) if entry.ocr.get(key)}
-            uids = [entry.doc.uids[i] for i in ocr]
+            ocr = [{"index": i, "words": list(entry.ocr[key])} for i, key in enumerate(keys) if entry.ocr.get(key)]
             password = entry.password
-            if ocr:
-                data = _with_ocr_text(data, ocr, password)
         url = self._host.share_bytes(data, "application/pdf")
-        return {"url": url, "keys": keys, "password": password, "ocr": uids}
+        return {"url": url, "keys": keys, "password": password, "ocr": ocr}
 
     # ── Texto ────────────────────────────────────────────────────────────
     @staticmethod
@@ -249,7 +246,8 @@ class ViewerService:
     # ── Anotaciones (las edita el visor con EmbedPDF) ────────────────────
     @exposed
     def upload_url(self) -> str:
-        """URL a la que el visor sube su copia del documento (ver :meth:`sync_annotations`)."""
+        """URL a la que el visor sube su copia del documento (ver :meth:`sync_annotations`) o
+        imágenes de página (servicio ``ocr``)."""
         return self._host.upload_url()
 
     @exposed
@@ -260,15 +258,16 @@ class ViewerService:
         copia (el visor las gira, mueve, añade y borra); sin ellos, son las mismas páginas que ya
         tenía. Devuelve ``{modified}``.
         """
-        data = self._received(upload)
+        data = self.received(upload)
         with self._lock:
             entry = self._doc(doc_id)
             self._adopt(entry, data, uids)
             entry.annotated = True
             return {"modified": entry.modified}
 
-    def _received(self, upload: str) -> bytes:
-        """Lo que subió el visor a ``upload``."""
+    def received(self, upload: str) -> bytes:
+        """Lo que subió el visor a ``upload`` (de :meth:`upload_url`): su copia del documento o,
+        para el servicio ``ocr``, imágenes de página."""
         data = self._host.uploaded(upload)
         if data is None:
             raise UserError("No llegó la copia del documento.", "upload_missing")
@@ -309,7 +308,7 @@ class ViewerService:
         aplicada no se sobrescribe el original); en los dos últimos el frontend ofrece «Guardar
         como».
         """
-        data = self._received(upload)
+        data = self.received(upload)
         with self._lock:
             entry = self._doc(doc_id)
             self._check_can_save(entry)
@@ -335,7 +334,7 @@ class ViewerService:
     def save_as(self, doc_id: int, upload: str, uids: list[int] | None = None) -> dict[str, Any] | None:
         """Guarda la copia del visor (como en :meth:`save`) donde elija el usuario; la pestaña
         pasa a ser ese archivo. ``None`` si se cancela."""
-        data = self._received(upload)
+        data = self.received(upload)
         with self._lock:
             entry = self._doc(doc_id)
             self._check_can_save(entry)
@@ -380,7 +379,7 @@ class ViewerService:
     def extract_page(self, doc_id: int, index: int, upload: str) -> str | None:
         """Guarda como un PDF nuevo la página ``index``, que el visor subió a ``upload`` (con sus
         anotaciones: la saca su motor). Devuelve su ruta (``None`` si se cancela)."""
-        data = self._received(upload)
+        data = self.received(upload)
         with self._lock:
             source = Path(self._doc(doc_id).path)
         dest = self._host.save_pdf(str(source.with_name(f"{source.stem}_pagina_{index + 1}.pdf")))
@@ -482,10 +481,3 @@ class ViewerService:
             "redacted": entry.redacted,
         }
 
-
-def _with_ocr_text(data: bytes, ocr: dict[int, list[tuple]], password: str | None) -> bytes:
-    """Copia del PDF ``data`` con las palabras de OCR de cada página como texto invisible."""
-    with Document.open(data, password) as doc:
-        for index, words in ocr.items():
-            embed_ocr_words(doc[index], words)
-        return doc.to_bytes()

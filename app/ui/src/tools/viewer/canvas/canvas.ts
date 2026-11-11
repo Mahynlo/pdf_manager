@@ -6,9 +6,12 @@
 //
 // - Las operaciones de página (girar, mover, insertar, duplicar, borrar) las hace el motor de
 //   EmbedPDF en el documento abierto (document/pages.ts) y `showPages` las muestra sin volver a
-//   abrirlo. Lo que cambia Python (censurar, OCR) se vuelve a abrir en EmbedPDF con la versión
+//   abrirlo. Lo que cambia Python (censurar) se vuelve a abrir en EmbedPDF con la versión
 //   que él tiene (`viewer.document_url`); mientras se carga, la vista sigue con la anterior.
-//   annotations.ts le pasa a Python la copia de EmbedPDF antes de lo que la necesita.
+//   document/copy.ts le pasa a Python la copia de EmbedPDF antes de lo que la necesita.
+// - El texto reconocido por OCR lo escribe el motor en el documento abierto como texto invisible
+//   (`writeOcrText`), que EmbedPDF selecciona y busca como el nativo: al abrir una versión, el
+//   que guarda Python, y tras cada OCR, el nuevo.
 // - Cada página tiene una capa del visor (`slots[i]`) donde otros módulos dibujan en
 //   porcentaje de la página las marcas (`marks(i)`) de selección, búsqueda, OCR o censura.
 //   Las capas existen siempre, aunque EmbedPDF solo monte las páginas a la vista; se
@@ -31,10 +34,13 @@ import type { ViewportPlugin } from '@embedpdf/plugin-viewport';
 import { ZoomMode, type ZoomLevel, type ZoomPlugin } from '@embedpdf/plugin-zoom';
 import { call } from '$lib/api.ts';
 import { h } from '$lib/dom.ts';
+import type { OcrText, OcrWord } from '$lib/pdf-engine/index.ts';
 import { t } from '$texts';
 import {
-  OTHER_MODE, PAGED, registry, showPageList, TEXT_MODE, UNIT, VIEWPORT_GAP, ZOOM_MAX, ZOOM_MIN, type ViewerScroll,
+  OTHER_MODE, PAGED, reading, refreshPageText, registry, showPageList, TEXT_MODE, UNIT, VIEWPORT_GAP, ZOOM_MAX, ZOOM_MIN,
+  type ViewerScroll,
 } from './embed.ts';
+import { pageUids } from '../document/pages.ts';
 import { MODES, pageStep, type Mode } from './layout.ts';
 import PdfPages from './PdfPages.svelte';
 
@@ -159,7 +165,7 @@ interface DocumentVersion {
   url: string;
   keys: string[]; // la clave de cada página
   password: string | null;
-  ocr: number[]; // `uid` de las páginas con el texto del OCR escrito como texto invisible
+  ocr: { index: number; words: OcrWord[] }[]; // las palabras del OCR de cada página que las tiene
 }
 
 /** Al montarse una página: (página, documento) → lo que se llama al desmontarla. */
@@ -184,7 +190,7 @@ export class PageCanvas {
   shown: string | null = null; // id en EmbedPDF del documento a la vista
   shownKeys: string[] | null = null; // claves de página de esa versión
   password: string | null = null; // la de esa versión, si está cifrada
-  ocrPages = new Set<number>(); // `uid` de las páginas que llevan el texto del OCR (invisible) en esa versión
+  ocrPages = new Set<number>(); // `uid` de las páginas que llevan el texto del OCR (invisible)
   ready = false; // EmbedPDF ya colocó sus páginas
   target = { index: 0, atBottom: false }; // adónde ir en cuanto se pueda
   mounted = new Map<number, HTMLElement>(); // página -> capa enganchada a una página montada
@@ -239,9 +245,11 @@ export class PageCanvas {
 
   /** El documento a la vista tal como lo tiene EmbedPDF (para las operaciones del motor). */
   get documentObject(): PdfDocumentObject | null {
-    const id = this.shown;
-    if (!id || !this.registry) return null;
-    return this.registry.getStore().getState().core.documents[id]?.document ?? null;
+    return this.shown ? this._documentOf(this.shown) : null;
+  }
+
+  _documentOf(documentId: string): PdfDocumentObject | null {
+    return this.registry?.getStore().getState().core.documents[documentId]?.document ?? null;
   }
 
   /** Como `documentObject`, pero falla si aún no hay ninguno a la vista. */
@@ -268,11 +276,23 @@ export class PageCanvas {
   }
 
   /**
-   * Vuelve a abrir el documento aunque no cambien las páginas (el OCR añadió texto). Las
-   * anotaciones tienen que estar ya en Python (annotations.ts `sync`): se reabre su versión.
+   * Escribe en el documento a la vista las palabras del OCR (texto invisible, para seleccionarlas
+   * y buscarlas) y hace que EmbedPDF vuelva a leer esas páginas.
    */
-  reload(): void {
-    if (this.registry) this.loading = this._load().catch((err) => this._fail(err));
+  async writeOcrText(pages: OcrText[]): Promise<void> {
+    const id = this.shown;
+    const changed = await (await reading()).writeOcrText(this.shownDocument(), pages);
+    if (id !== this.shown) return; // llegó otra versión, que ya trae ese texto de Python
+    this._addOcrPages(pages, this.keys);
+    if (changed.length) refreshPageText(this.registry!, id!, changed);
+  }
+
+  /** Apunta qué páginas llevan el texto del OCR (las copias que salen del visor se lo quitan). */
+  _addOcrPages(pages: OcrText[], keys: string[]): void {
+    const uids = pageUids(keys);
+    for (const { index, words } of pages) {
+      if (words.length) this.ocrPages.add(uids[index]);
+    }
   }
 
   /**
@@ -655,7 +675,6 @@ export class PageCanvas {
     const buffer = await response.arrayBuffer();
     if (this.closed || seq !== this.seq) return; // llegó otra versión más nueva
     this.password = password;
-    this.ocrPages = new Set(ocr);
     const docs = this._plugin<DocumentManagerPlugin>('document-manager').provides();
     const { documentId, task } = await docs.openDocumentBuffer({
       buffer, name: `documento-${this.docId}.pdf`, documentId: `viewer-${this.docId}-${seq}`, autoActivate: false,
@@ -664,6 +683,13 @@ export class PageCanvas {
       permissions: { enforceDocumentPermissions: false },
     }).toPromise();
     await task.toPromise();
+    // El texto del OCR que guarda Python, antes de que EmbedPDF lea las páginas. Si fallara, el
+    // documento se ve igual (sin poder seleccionar ese texto).
+    const text: OcrText[] = ocr.map(({ index, words }) => ({ index, words, replace: false }));
+    const opened = this._documentOf(documentId);
+    if (text.length && opened && !this.closed && seq === this.seq) {
+      await (await reading()).writeOcrText(opened, text).catch((err) => console.error('No se pudo escribir el texto del OCR', err));
+    }
     if (this.closed || seq !== this.seq) {
       docs.closeDocument(documentId);
       return;
@@ -671,7 +697,8 @@ export class PageCanvas {
     if (this._live()) this.target = { index: this.current, atBottom: false };
     const previous = this.shown;
     this.finishEditing(); // mientras el documento anterior sigue abierto
-    Object.assign(this, { shown: documentId, shownKeys: keys, ready: false });
+    Object.assign(this, { shown: documentId, shownKeys: keys, ready: false, ocrPages: new Set<number>() });
+    this._addOcrPages(text, keys);
     this._applyMode(documentId);
     this._applyTool(documentId);
     this.pages!.show(documentId);

@@ -21,9 +21,15 @@ interface TaskLike {
 
 const isTask = (value: unknown): value is TaskLike => typeof value === 'object' && value !== null && 'wait' in value;
 
-/** Entrega el resultado: un PDF (ArrayBuffer) pasa a la ventana sin copiarlo. */
-const reply = (id: string, data: unknown): void =>
-  scope.postMessage({ type: 'result', id, data }, data instanceof ArrayBuffer ? [data] : []);
+/** Los datos binarios del resultado: un PDF (ArrayBuffer) o una imagen (`{ data: ArrayBuffer }`). */
+function transferables(data: unknown): Transferable[] {
+  if (data instanceof ArrayBuffer) return [data];
+  const inner = (data as { data?: unknown } | null)?.data;
+  return inner instanceof ArrayBuffer ? [inner] : [];
+}
+
+/** Entrega el resultado: sus datos binarios pasan a la ventana sin copiarlos. */
+const reply = (id: string, data: unknown): void => scope.postMessage({ type: 'result', id, data }, transferables(data));
 
 const failure = (id: string, err: unknown): FromEngine => ({
   type: 'error', id, error: { type: 'reject', reason: { code: UNKNOWN, message: (err as Error)?.message ?? String(err) } },

@@ -1,75 +1,15 @@
 // El motor PDFium de EmbedPDF con lo que le falta para ser el dueño del documento del visor:
-// cambiar sus páginas sin volver a abrirlo y sacar copias del documento (para guardarlo,
-// imprimirlo o extraer una página) sin el texto del OCR. Corre en el worker (worker.ts); lo prueba
-// también Python con el motor real (tests/engine_task.mjs), por eso no depende de nada de la app.
+// cambiar sus páginas sin volver a abrirlo, sacar copias del documento (para guardarlo,
+// imprimirlo o extraer una página) sin el texto del OCR, y leer, dibujar y escribir lo que
+// necesita el OCR (page-ocr.ts). Corre en el worker (worker.ts); lo prueba también Python con el
+// motor real (tests/engine_task.mjs), por eso no depende de nada de la app.
 //
-// Usa partes privadas de PdfiumNative 2.15.1 (`Internals`): revisarlas al actualizar EmbedPDF.
+// Usa partes privadas de PdfiumNative 2.15.1 (`Internals`, en pdfium.ts): revisarlas al
+// actualizar EmbedPDF.
 import { PdfiumNative } from '@embedpdf/engines/pdfium';
 import type { PdfDocumentObject, PdfPageObject } from '@embedpdf/models';
-
-/** Lo privado de PdfiumNative que se usa aquí. */
-interface Internals {
-  cache: { getContext(id: string): DocumentContext | undefined };
-  pdfiumModule: Pdfium;
-  memoryManager: { malloc(size: number): number; free(ptr: number): void };
-  withWString<T>(value: string, fn: (ptr: number) => T): T;
-}
-
-interface DocumentContext {
-  docPtr: number;
-  normalizeRotation: boolean;
-  pageCache: { forceReleaseAll(): void };
-  borrowPage<T>(index: number, fn: (page: { pagePtr: number }) => T): T;
-}
-
-/** Las funciones de PDFium que se llaman directamente (todas existen en el wasm de EmbedPDF). */
-interface Pdfium {
-  pdfium: {
-    HEAPU8: Uint8Array;
-    getValue(ptr: number, type: string): number;
-    setValue(ptr: number, value: number, type: string): void;
-    UTF16ToString(ptr: number): string;
-  };
-  PDFiumExt_OpenFileWriter(): number;
-  PDFiumExt_SaveAsCopy(doc: number, writer: number): boolean;
-  PDFiumExt_GetFileWriterSize(writer: number): number;
-  PDFiumExt_GetFileWriterData(writer: number, data: number, size: number): number;
-  PDFiumExt_CloseFileWriter(writer: number): void;
-  FPDF_LoadMemDocument(data: number, size: number, password: string): number;
-  FPDF_GetFileVersion(doc: number, version: number): boolean;
-  EPDF_IsEncrypted(doc: number): boolean;
-  EPDF_RemoveEncryption(doc: number): boolean;
-  FPDF_LoadPage(doc: number, index: number): number;
-  FPDFPage_CountObjects(page: number): number;
-  FPDFPage_GetObject(page: number, index: number): number;
-  FPDFPage_RemoveObject(page: number, obj: number): boolean;
-  FPDFPage_GenerateContent(page: number): boolean;
-  FPDFPageObj_Destroy(obj: number): void;
-  FPDFPageObj_CountMarks(obj: number): number;
-  FPDFPageObj_GetMark(obj: number, index: number): number;
-  FPDFPageObjMark_GetName(mark: number, buffer: number, size: number, length: number): boolean;
-  FPDF_GetPageCount(doc: number): number;
-  FPDF_GetPageSizeByIndexF(doc: number, index: number, size: number): boolean;
-  EPDF_GetPageSizeByIndexNormalized(doc: number, index: number, size: number): boolean;
-  EPDF_GetPageRotationByIndex(doc: number, index: number): number;
-  EPDFDoc_GetPageObjectNumberByIndex(doc: number, index: number): number;
-  FPDFPage_SetRotation(page: number, rotation: number): void;
-  FPDF_MovePages(doc: number, indices: number, count: number, dest: number): boolean;
-  FPDFPage_Delete(doc: number, index: number): void;
-  FPDFPage_New(doc: number, index: number, width: number, height: number): number;
-  FPDF_ClosePage(page: number): void;
-  FPDF_ImportPagesByIndex(dest: number, src: number, indices: number, count: number, at: number): boolean;
-  FPDF_CreateNewDocument(): number;
-  FPDF_CloseDocument(doc: number): void;
-  FPDFPage_GetAnnotCount(page: number): number;
-  FPDFPage_GetAnnot(page: number, index: number): number;
-  FPDFPage_CloseAnnot(annot: number): void;
-  FPDFAnnot_SetStringValue(annot: number, key: string, value: number): boolean;
-}
-
-/** Marca del texto invisible con las palabras del OCR (OCR_MARK en pdf_core/pdf.py). */
-const OCR_MARK = 'ExtraerPDFsOCR';
-const MARK_NAME_BYTES = 128; // sitio para leer el nombre de una marca (UTF-16)
+import { PageOcr, type OcrText, type PageFacts, type PageImage, type Box } from './page-ocr.ts';
+import type { DocumentContext, Internals } from './pdfium.ts';
 
 /** Cómo sacar una copia del documento (`saveCopy`). */
 export interface CopyOptions {
@@ -100,9 +40,17 @@ interface Stash {
 export class AppNative extends PdfiumNative {
   private stashes = new Map<string, Stash>();
   private stashCount = 0;
+  private pageOcr: PageOcr | null = null;
 
   private get internals(): Internals {
     return this as unknown as Internals;
+  }
+
+  /** Se crea al usarlo: el módulo de PDFium lo pone el constructor de PdfiumNative. */
+  private get ocr(): PageOcr {
+    const { pdfiumModule, memoryManager } = this.internals;
+    this.pageOcr ??= new PageOcr(pdfiumModule, memoryManager, (value, fn) => this.internals.withWString(value, fn));
+    return this.pageOcr;
   }
 
   private context(doc: PdfDocumentObject): DocumentContext {
@@ -111,7 +59,10 @@ export class AppNative extends PdfiumNative {
     return ctx;
   }
 
-  /** Antes de cambiar el orden: la caché de páginas va por número de página, que cambia. */
+  /**
+   * Antes de cambiar el orden (la caché de páginas va por número de página, que cambia) y después
+   * de cambiar una página aparte (la que tiene abierta EmbedPDF ya no vale).
+   */
   private forgetPages(ctx: DocumentContext): void {
     ctx.pageCache.forceReleaseAll();
   }
@@ -252,7 +203,7 @@ export class AppNative extends PdfiumNative {
     if (!withoutText.length && !decrypting) return data;
     // Se cambia una copia abierta aparte: el documento a la vista conserva el texto del OCR.
     return this.changedCopy(data, password, (copy) => {
-      this.removeOcrText(copy, withoutText);
+      this.ocr.removeText(copy, withoutText);
       if (decrypting) m.EPDF_RemoveEncryption(copy);
     });
   }
@@ -270,7 +221,7 @@ export class AppNative extends PdfiumNative {
       if (!this.withIndices(indices, (ptr) => m.FPDF_ImportPagesByIndex(copy, ctx.docPtr, ptr, indices.length, 0))) {
         throw new Error('No se pudieron copiar las páginas');
       }
-      this.removeOcrText(copy, indices.flatMap((index, at) => (withoutText.includes(index) ? [at] : [])));
+      this.ocr.removeText(copy, indices.flatMap((index, at) => (withoutText.includes(index) ? [at] : [])));
       return this.saveDocument(copy);
     } finally {
       m.FPDF_CloseDocument(copy);
@@ -311,42 +262,24 @@ export class AppNative extends PdfiumNative {
     }
   }
 
-  /** Quita de las páginas `indices` de `docPtr` el texto invisible del OCR (el que lleva OCR_MARK). */
-  private removeOcrText(docPtr: number, indices: number[]): void {
-    const m = this.internals.pdfiumModule;
-    for (const index of indices) {
-      const page = m.FPDF_LoadPage(docPtr, index);
-      if (!page) continue;
-      try {
-        let removed = 0;
-        for (let i = m.FPDFPage_CountObjects(page) - 1; i >= 0; i--) {
-          const obj = m.FPDFPage_GetObject(page, i);
-          if (!this.hasOcrMark(obj) || !m.FPDFPage_RemoveObject(page, obj)) continue;
-          m.FPDFPageObj_Destroy(obj);
-          removed++;
-        }
-        if (removed) m.FPDFPage_GenerateContent(page);
-      } finally {
-        m.FPDF_ClosePage(page);
-      }
-    }
+  // ── OCR ────────────────────────────────────────────────────────────────
+  /** El texto de la página `index` (sin el del OCR) y dónde tiene imágenes. */
+  pageFacts(doc: PdfDocumentObject, index: number): PageFacts {
+    return this.ocr.facts(this.context(doc).docPtr, index);
   }
 
-  private hasOcrMark(obj: number): boolean {
-    const { pdfiumModule: m, memoryManager } = this.internals;
-    const name = memoryManager.malloc(MARK_NAME_BYTES);
-    const length = memoryManager.malloc(4);
-    try {
-      for (let i = 0; i < m.FPDFPageObj_CountMarks(obj); i++) {
-        const mark = m.FPDFPageObj_GetMark(obj, i);
-        if (!mark || !m.FPDFPageObjMark_GetName(mark, name, MARK_NAME_BYTES, length)) continue;
-        if (m.pdfium.UTF16ToString(name) === OCR_MARK) return true;
-      }
-      return false;
-    } finally {
-      memoryManager.free(name);
-      memoryManager.free(length);
-    }
+  /** La página `index` tal como se ve, a `scale` píxeles por punto; `clip`: solo ese trozo. */
+  pageImage(doc: PdfDocumentObject, index: number, scale: number, clip?: Box): PageImage {
+    return this.ocr.image(this.context(doc).docPtr, index, scale, clip);
+  }
+
+  /** Escribe en el documento las palabras del OCR (texto invisible); devuelve las páginas que cambiaron. */
+  writeOcrText(doc: PdfDocumentObject, pages: OcrText[]): number[] {
+    const ctx = this.context(doc);
+    const changed = pages.filter((page) => this.ocr.write(ctx.docPtr, page)).map((page) => page.index);
+    // Las páginas que tiene abiertas EmbedPDF (y su texto) son anteriores al cambio.
+    if (changed.length) this.forgetPages(ctx);
+    return changed;
   }
 
   // ── Páginas guardadas aparte ───────────────────────────────────────────
@@ -393,3 +326,4 @@ export class AppNative extends PdfiumNative {
 export type StructureMethod = 'pageList' | 'rotatePages' | 'movePage' | 'removePage' | 'insertBlankPage' | 'duplicatePage'
   | 'stashPage' | 'restorePages' | 'dropStash';
 export type CopyMethod = 'saveCopy' | 'extractCopy' | 'documentFacts';
+export type OcrMethod = 'pageFacts' | 'pageImage' | 'writeOcrText';

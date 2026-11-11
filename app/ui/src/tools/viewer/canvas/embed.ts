@@ -3,8 +3,9 @@
 // página, la selección de texto, la búsqueda, las anotaciones (con su historial para deshacer),
 // las marcas de censura, los sellos y las firmas (sus bibliotecas: stamps/). También lo que hace
 // falta para cambiar las páginas de un documento abierto (`showPageList`), que EmbedPDF 2.15.1 no
-// contempla. Las copias del documento (guardar, imprimir, pasarlo a Python) las saca el motor de
-// la app (`copies`), no el complemento de exportación.
+// contempla, y volver a leer el texto de una página que cambió (`refreshPageText`: el del OCR). Las
+// copias del documento (guardar, imprimir, pasarlo a Python) las saca el motor de la app
+// (`copies`), no el complemento de exportación; lo que necesita el OCR, también (`reading`).
 //
 // EmbedPDF solo sabe desplazarse por todo el documento. Para los modos «Una página» y
 // «Doble página» (paginados, como en Qt) el complemento de scroll lleva una estrategia
@@ -30,7 +31,7 @@ import { TilingPluginPackage } from '@embedpdf/plugin-tiling';
 import { ViewportPluginPackage } from '@embedpdf/plugin-viewport';
 import { ZoomPluginPackage } from '@embedpdf/plugin-zoom';
 import wasmUrl from '@embedpdf/pdfium/pdfium.wasm?url';
-import { createAppEngine, type AppEngine, type DocumentCopies, type PageStructure } from '$lib/pdf-engine/index.ts';
+import { createAppEngine, type AppEngine, type DocumentCopies, type PageReading, type PageStructure } from '$lib/pdf-engine/index.ts';
 import { STANDARD_LIBRARY } from '../stamps/standard.ts';
 import { t } from '$texts';
 import { DEFAULT_STYLE as STYLE, PRESET_COLORS } from '../annotations/palette.ts';
@@ -123,6 +124,17 @@ export async function structure(): Promise<PageStructure> {
 export async function copies(): Promise<DocumentCopies> {
   await registry();
   return appEngine!.copies;
+}
+
+/** Lo que necesita el OCR del documento abierto: leer y dibujar páginas y escribir su texto (lib/pdf-engine). */
+export async function reading(): Promise<PageReading> {
+  await registry();
+  return appEngine!.reading;
+}
+
+/** Cambió el texto de las páginas `indices` (el del OCR): EmbedPDF las vuelve a leer y a dibujar. */
+export function refreshPageText(embed: PluginRegistry, documentId: string, indices: number[]): void {
+  (embed.getStore() as unknown as CoreStore).dispatchToCore(refreshPages(documentId, indices));
 }
 
 // ── Cambiar las páginas de un documento abierto ──────────────────────────────

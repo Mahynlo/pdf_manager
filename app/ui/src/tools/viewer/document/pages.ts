@@ -1,7 +1,7 @@
 // Las páginas del documento del visor: girar, insertar, duplicar, borrar y mover, y deshacerlo.
 // Las hace el motor de EmbedPDF en el documento abierto (lib/pdf-engine) y el lienzo las muestra
 // sin volver a abrirlo (canvas.showPages). Python recibe la nueva estructura con la copia del
-// documento (annotations.ts `sync`) antes de lo que la necesita.
+// documento (copy.ts `sync`) antes de lo que la necesita.
 //
 // Cada página tiene una clave `uid:giro:revisión`: `uid` la identifica aunque cambie de sitio
 // (los da este módulo a las páginas nuevas; con él Python guarda el texto del OCR de cada

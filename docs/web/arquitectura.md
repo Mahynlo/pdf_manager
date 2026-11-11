@@ -104,9 +104,8 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
   cargar el documento en EmbedPDF.
 - **Texto del visor**:
   - la selección es del complemento Selection de EmbedPDF, con el texto que PDFium lee del
-    documento. El texto reconocido por OCR va en el documento que recibe EmbedPDF como texto
-    invisible (`viewer.document_url`), así que se selecciona igual; tras un OCR el lienzo recarga
-    el documento (`canvas.reload`);
+    documento. El texto reconocido por OCR lo escribe el visor en su documento como texto invisible
+    (`canvas.writeOcrText`), así que se selecciona igual, sin volver a abrir el documento;
   - la búsqueda también es de EmbedPDF (complemento Search, en `SearchPanel.svelte`), sobre ese
     mismo documento;
   - el asistente IA y el panel de OCR leen la capa de texto del backend (`pdf_core/text_layer.py`,
@@ -127,11 +126,14 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
   WebView2 podría seguir usando JS/CSS de una versión anterior aunque se reinicie la app. Al
   arrancar, `app/webview_cache.py` compara una huella de la interfaz (`app/ui/dist`) con la del arranque
   anterior y, si cambió, borra la caché HTTP de WebView2 (no las preferencias).
-- **OCR**: el servicio `ocr` rasteriza la página con el candado del visor y hace la inferencia sin él
-  (el lienzo sigue respondiendo); una inferencia a la vez y el modelo se libera tras 12 s sin uso. Las
-  palabras se guardan en el documento abierto por clave de página (`ViewerService.set_ocr_words`) y
-  entran en su capa de texto: selección, búsqueda y exportar texto las ven sin cambios. Los lotes los
-  recorre el frontend página a página (`ocr.page`), así se puede cancelar entre una y otra.
+- **OCR**: el visor dibuja con su motor lo que hay que reconocer y lo sube (`ocr/recognize.ts`); el
+  servicio `ocr` solo hace la inferencia, sin el candado del visor (el lienzo sigue respondiendo). Una
+  inferencia a la vez y el modelo se libera tras 12 s sin uso. Las palabras se guardan en el
+  documento abierto por clave de página (`ViewerService.set_ocr_words`), entran en su capa de texto
+  (IA, exportar texto) y el visor las escribe en su documento: selección y búsqueda las ven sin
+  cambios. Los lotes los recorre el frontend página a página (`ocr.page`), así se puede cancelar
+  entre una y otra. La orientación la dice el texto de la página o, en un escaneo, el clasificador
+  de Python con dos imágenes de ella. Ver [embedpdf.md](embedpdf.md), etapa 3.
 - **Censura**: lo que se censura son las marcas de EmbedPDF (anotaciones `Redact`, ver
   `redaction.ts`), que se revisan en la página. El servicio `redact` busca dónde aparece cada término
   (`find`) y guarda las opciones, el color y el perfil activo en el propio documento abierto
