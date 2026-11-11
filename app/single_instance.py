@@ -4,12 +4,19 @@ La primera instancia escucha en una tubería con nombre del usuario (``multiproc
 sin dependencias). Si se vuelve a lanzar la app —por ejemplo con «Abrir con» desde el
 Explorador— la nueva instancia envía sus PDF a la primera y sale; la primera los abre
 y pasa al frente. Una lista vacía significa «el usuario volvió a abrir la app».
+
+Seguridad (docs/web/seguridad.md): la tubería es del usuario (otro usuario del equipo no puede
+escribir en ella) y el mensaje es una lista de rutas en JSON, de tamaño limitado. Nunca se usa
+``Connection.recv``, que deserializa con ``pickle``: quien conectara podría ejecutar código. La
+clave de la conexión no es secreta (la deduce cualquier programa del usuario): solo evita hablar
+con la tubería de otro programa.
 """
 
 from __future__ import annotations
 
 import getpass
 import hashlib
+import json
 import logging
 import os
 import threading
@@ -21,14 +28,18 @@ log = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT = 0.5  # s que espera la secundaria a la principal
 MAX_PATHS = 200
+MAX_MESSAGE_BYTES = 256 * 1024  # de sobra para MAX_PATHS rutas
 
 
 def _address(name: str) -> tuple[str, str]:
     """Dirección y familia de la tubería: única por usuario."""
-    user = hashlib.sha1(getpass.getuser().encode("utf-8")).hexdigest()[:12]
+    user = hashlib.sha1(getpass.getuser().encode("utf-8"), usedforsecurity=False).hexdigest()[:12]  # solo un nombre
     if os.name == "nt":
         return rf"\\.\pipe\{name}_{user}", "AF_PIPE"
-    return str(Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / f"{name}_{user}.sock"), "AF_UNIX"
+    # La carpeta de ejecución del usuario (solo suya) o, si no hay, su carpeta personal: nunca /tmp,
+    # donde otro usuario podría crear el socket antes y recibir las rutas.
+    folder = Path(os.environ.get("XDG_RUNTIME_DIR") or Path.home())
+    return str(folder / f".{name}_{user}.sock"), "AF_UNIX"
 
 
 class SingleInstance:
@@ -69,8 +80,9 @@ class SingleInstance:
 
             ctypes.windll.user32.AllowSetForegroundWindow(-1)
         try:
+            message = json.dumps(list(paths)[:MAX_PATHS], ensure_ascii=False).encode("utf-8")
             with Client(self._address, self._family, authkey=self._authkey) as conn:
-                conn.send(list(paths)[:MAX_PATHS])
+                conn.send_bytes(message[:MAX_MESSAGE_BYTES])
             return True
         except (OSError, EOFError):
             return False
@@ -108,12 +120,13 @@ class SingleInstance:
     def _receive(conn: Connection, on_paths: Callable[[list[str]], None]) -> None:
         with conn:
             try:
-                data = conn.recv()
-            except (OSError, EOFError):
+                data = json.loads(conn.recv_bytes(MAX_MESSAGE_BYTES).decode("utf-8"))
+            except (OSError, EOFError, ValueError):  # ValueError: JSON inválido o más largo del límite
+                log.warning("Mensaje no válido de otra instancia")
                 return
         if not isinstance(data, list):
             return
-        paths = [str(Path(p).resolve()) for p in data if isinstance(p, str) and p.strip() and Path(p).is_file()]
+        paths = [str(Path(p).resolve()) for p in data[:MAX_PATHS] if isinstance(p, str) and p.strip() and Path(p).is_file()]
         try:
             on_paths(paths)
         except Exception:

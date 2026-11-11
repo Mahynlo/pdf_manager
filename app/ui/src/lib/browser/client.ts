@@ -104,7 +104,7 @@ function receive(message: FromWorker): void {
       break;
     case 'emit': {
       const payload = JSON.parse(message.json);
-      if (message.event === 'browser:open-url') window.open(payload, '_blank', 'noopener');
+      if (message.event === 'browser:open-url') window.open(payload, '_blank', 'noopener,noreferrer');
       else window.pdfm.emit(message.event, payload);
       break;
     }

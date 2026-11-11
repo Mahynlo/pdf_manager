@@ -1,0 +1,52 @@
+name: Security audit
+
+# Busca vulnerabilidades conocidas en las dependencias (Python y la interfaz). Ver docs/web/seguridad.md.
+#
+# Dispara el workflow:
+#   - En cada pull request y en cada push a main
+#   - Cada lunes (aparecen avisos nuevos aunque el código no cambie)
+#   - Manualmente desde la UI de GitHub (Actions → Run workflow)
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Python: las versiones de uv.lock contra la base de avisos de PyPI ──
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Audit Python dependencies
+        run: |
+          uv export --frozen --no-hashes --no-dev --no-emit-project > "$RUNNER_TEMP/requirements.txt"
+          uvx pip-audit --requirement "$RUNNER_TEMP/requirements.txt" --no-deps --disable-pip
+
+      # ── Interfaz: pnpm-lock.yaml contra los avisos de npm ──────────────────
+      # Solo falla con avisos altos o críticos: los de Svelte 5.51 (fijado por EmbedPDF) son de
+      # renderizado en servidor, que la app no usa (docs/web/seguridad.md, «Riesgos aceptados»).
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.22.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Audit interface dependencies
+        working-directory: app/ui
+        run: pnpm audit --audit-level high

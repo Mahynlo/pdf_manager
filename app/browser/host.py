@@ -18,6 +18,7 @@ import json
 from pathlib import Path
 from typing import Any, Protocol
 
+from app.backend.host import is_external_url
 from app.browser import background
 from app.browser.files import Files
 
@@ -153,8 +154,8 @@ class BrowserHost:
 
     # ── Ventana ──────────────────────────────────────────────────────────────
     def open_url(self, url: str) -> None:
-        if url.startswith(("http://", "https://", "mailto:")):
-            self.emit("browser:open-url", url)
+        if is_external_url(url):
+            self.emit("browser:open-url", url.strip())
 
     def emit(self, event: str, payload: Any = None) -> None:
         self._channel.emit(event, json.dumps(payload))

@@ -154,8 +154,10 @@ class AiService:
                 reply, suggestions = reply
             answer = {"role": "assistant", "text": reply, "html": self._html(reply), "mode": mode, "suggestions": suggestions}
         except Exception as ex:  # el proveedor puede fallar por red, cuota o clave
-            log.exception("Fallo del asistente IA")
-            answer = {"role": "error", "text": f"{ex}\n(Verifica tu clave de API y la conexión a Internet.)", "mode": "ia"}
+            # Algunos clientes ponen la clave en la URL de sus errores: no llega al registro ni a la ventana.
+            message = _without_key(str(ex), agent_config.get_api_key(agent_config.get_provider()))
+            log.error("Fallo del asistente IA: %s: %s", type(ex).__name__, message)
+            answer = {"role": "error", "text": f"{message}\n(Verifica tu clave de API y la conexión a Internet.)", "mode": "ia"}
         with self._lock:
             session.messages += [user, answer]
             if answer["role"] == "assistant":
@@ -289,3 +291,8 @@ def _suggestions_text(suggestions: list[dict]) -> str:
         return "No se detectaron datos sensibles."
     lines = [f"- **{s['categoria']}:** {s['texto']}" for s in suggestions]
     return f"Se detectaron {len(suggestions)} dato(s) que convendría censurar:\n\n" + "\n".join(lines)
+
+
+def _without_key(text: str, key: str) -> str:
+    """``text`` sin la clave de API (si aparece), para mostrarlo o registrarlo."""
+    return text.replace(key, "•••") if key else text

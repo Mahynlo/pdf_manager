@@ -19,6 +19,7 @@ from typing import Any
 import webview
 from webview.dom import DOMEventHandler
 
+from app.backend.host import is_external_url
 from app.backend.services.app_service import QUIT_REQUESTED
 from app.byte_server import ByteServer
 
@@ -172,13 +173,17 @@ class WebviewHost:
     def reveal_file(self, path: str) -> None:
         file = Path(path)
         if os.name == "nt" and file.exists():
-            subprocess.Popen(["explorer", "/select,", os.path.normpath(file)])
+            # Con la ruta completa: sin ella, Windows buscaría también un explorer.exe en la carpeta actual.
+            explorer = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "explorer.exe"
+            subprocess.Popen([str(explorer), "/select,", os.path.normpath(file)])  # noqa: S603
         else:
             self.open_folder(str(file.parent))
 
     def open_url(self, url: str) -> None:
-        if url.startswith(("http://", "https://", "mailto:")):
-            webbrowser.open(url)
+        if is_external_url(url):
+            webbrowser.open(url.strip())
+        else:
+            log.warning("Enlace no permitido: %.80r", url)
 
     # ── Ventana ──────────────────────────────────────────────────────────────
     def show(self) -> None:

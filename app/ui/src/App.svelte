@@ -11,6 +11,7 @@
   import { theme } from '$lib/theme.svelte.ts';
   import { enableFileDrop } from './shell/dropzone.ts';
   import Home from './shell/Home.svelte';
+  import { guardNavigation } from './shell/navigation.ts';
   import { HOME, shell } from './shell/shell.svelte.ts';
   import TabStrip from './shell/TabStrip.svelte';
   import type { Tone } from '$lib/ui.ts';
@@ -22,6 +23,7 @@
 
   shell.start(theme.toggle);
   enableFileDrop();
+  guardNavigation();
 </script>
 
 <svelte:document onkeydown={(ev) => shell.onKey(ev)} />

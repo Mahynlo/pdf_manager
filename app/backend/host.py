@@ -11,6 +11,24 @@ navegador esos archivos los tiene la ventana y Python no guarda copia.
 from __future__ import annotations
 
 from typing import Any, Protocol
+from urllib.parse import urlsplit
+
+EXTERNAL_SCHEMES = {"http", "https", "mailto"}
+
+
+def is_external_url(url: str) -> bool:
+    """Si ``url`` se puede abrir en el navegador del sistema (:meth:`Host.open_url`): http(s) con
+    servidor, o mailto, y sin caracteres de control. Nada de ``file:``, ``javascript:`` ni rutas o
+    programas locales, que un PDF o una respuesta de la IA podrían colar en un enlace."""
+    if not isinstance(url, str) or len(url) > 2048 or any(ord(c) < 0x20 or ord(c) == 0x7F for c in url):
+        return False
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return False
+    if parts.scheme.lower() not in EXTERNAL_SCHEMES:
+        return False
+    return parts.scheme.lower() == "mailto" or bool(parts.hostname)
 
 
 class Host(Protocol):
@@ -65,7 +83,7 @@ class Host(Protocol):
         """Abre la carpeta del archivo con el archivo seleccionado."""
 
     def open_url(self, url: str) -> None:
-        """Abre un enlace externo en el navegador predeterminado."""
+        """Abre un enlace externo en el navegador predeterminado; solo si :func:`is_external_url`."""
 
     def show(self) -> None:
         """Muestra la ventana (se crea oculta hasta que el frontend está listo)."""

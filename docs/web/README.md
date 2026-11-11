@@ -23,6 +23,7 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
 | [embedpdf.md](embedpdf.md) | Migración del visor a EmbedPDF paso a paso: plan, estado y cómo está hecho cada paso |
 | [navegador.md](navegador.md) | La app en un navegador: el mismo Python en wasm (Pyodide) |
 | [responsive.md](responsive.md) | Adaptación a cada pantalla: cortes, reglas y cómo comprobarlo |
+| [seguridad.md](seguridad.md) | Seguridad: amenazas, medidas (CSP, servidor local, clave de la IA…), riesgos aceptados y cómo comprobarlo |
 
 ## Estado
 

@@ -1232,7 +1232,8 @@ def test_ai_uses_the_agent_when_configured(tmp_path, isolated_ai_config):
             svc.set_config("anthropic")
         config = svc.set_config("openai", "  sk-123  ", "gpt-4o-mini")
         assert config["provider"] == "openai" and config["has_key"] and config["model"] == "gpt-4o-mini"
-        assert '"openai_api_key": "sk-123"' in isolated_ai_config.read_text(encoding="utf-8")
+        stored = isolated_ai_config.read_text(encoding="utf-8")
+        assert "sk-123" not in stored and '"openai_api_key_secret"' in stored  # cifrada, nunca en claro
 
         first = svc.chat(doc_id, "Hola")["messages"][1]
         assert first["mode"] == "ia" and "0 mensajes previos" in first["text"]
@@ -1250,6 +1251,48 @@ def test_ai_uses_the_agent_when_configured(tmp_path, isolated_ai_config):
         svc.set_config("openai", None, "gpt-4.1")  # al cambiar la configuración se rehace el agente
         svc.chat(doc_id, "De nuevo")
         assert len(FakeAgent.created) == 2 and FakeAgent.created[1].args[3] == "gpt-4.1"
+    finally:
+        viewer.close()
+
+
+def test_ai_keys_are_stored_encrypted_and_old_plain_keys_are_migrated(isolated_ai_config):
+    import json
+    import os
+
+    from pdf_core.agent import config as agent_config
+    from pdf_core.agent import keystore
+
+    isolated_ai_config.write_text(json.dumps({"google_api_key": "AIza-antigua", "provider": "google"}), encoding="utf-8")
+    assert agent_config.get_api_key("google") == "AIza-antigua"  # una de una versión anterior, en claro
+    data = json.loads(isolated_ai_config.read_text(encoding="utf-8"))
+    assert "google_api_key" not in data and "AIza-antigua" not in isolated_ai_config.read_text(encoding="utf-8")
+    assert keystore.is_protected(data["google_api_key_secret"]) == (os.name == "nt")  # DPAPI en Windows
+    assert agent_config.get_api_key("google") == "AIza-antigua"
+    agent_config.set_api_key("google", "")
+    assert agent_config.get_api_key("google") == "" and "google_api_key_secret" not in json.loads(isolated_ai_config.read_text(encoding="utf-8"))
+    # Lo cifrado en otra cuenta u otro equipo no se descifra: se pide de nuevo, sin romper nada.
+    isolated_ai_config.write_text(json.dumps({"google_api_key_secret": "dpapi:AAAA"}), encoding="utf-8")
+    assert agent_config.get_api_key("google") == ""
+
+
+def test_ai_errors_never_show_the_api_key(tmp_path, isolated_ai_config, caplog):
+    class LeakyAgent:
+        def __init__(self, *args, **kw):
+            self.key = kw["api_key"]
+
+        def summarize(self):
+            raise RuntimeError(f"400 Bad Request for url https://api.example/v1?key={self.key}")
+
+    pdf = _redact_pdf(tmp_path / "contrato.pdf")
+    viewer = ViewerService(FakeHost())
+    svc = AiService(viewer, agent_factory=LeakyAgent)
+    try:
+        doc_id = viewer.open(str(pdf))["id"]
+        FakeViewer(viewer, doc_id).sync()
+        svc.set_config("openai", "sk-secreta-123", "gpt-4o-mini")
+        error = svc.summary(doc_id)["messages"][1]
+        assert error["role"] == "error" and "400 Bad Request" in error["text"]
+        assert "sk-secreta-123" not in error["text"] and "sk-secreta-123" not in caplog.text
     finally:
         viewer.close()
 
@@ -1588,6 +1631,37 @@ def test_single_instance_forwards_pdfs_to_the_first_window(tmp_path):
     assert SingleInstance(name).acquire([])  # cerrada la primera, otra puede ser la principal
 
 
+def test_single_instance_never_unpickles_what_it_receives(tmp_path):
+    """Lo que llega por la tubería es JSON: un objeto de pickle no se ejecuta, se descarta."""
+    import pickle
+    import threading
+    import uuid
+    from multiprocessing.connection import Client
+
+    from app.single_instance import SingleInstance
+
+    class Boom:
+        def __reduce__(self):
+            return (open, (str(tmp_path / "ejecutado.txt"), "w"))
+
+    name = f"pdfm_test_{uuid.uuid4().hex[:8]}"
+    first = SingleInstance(name)
+    received: list[list[str]] = []
+    done = threading.Event()
+    try:
+        assert first.acquire([])
+        first.listen(lambda paths: (received.append(paths), done.set()))
+        with Client(first._address, first._family, authkey=first._authkey) as conn:
+            conn.send_bytes(pickle.dumps([Boom()]))
+        with pytest.raises(OSError), Client(first._address, first._family, authkey=first._authkey) as conn:
+            conn.send_bytes(b"[" * (300 * 1024))  # más largo que el límite: corta la conexión
+        assert not SingleInstance(name).acquire([])  # y después, una instancia normal
+        assert done.wait(5) and received == [[]]
+        assert not (tmp_path / "ejecutado.txt").exists()
+    finally:
+        first.close()
+
+
 def test_app_runs_ready_callbacks_once(tmp_path):
     host = FakeHost()
     svc = AppService(host, Settings(tmp_path / "s.json"))
@@ -1708,3 +1782,52 @@ def test_byte_server_serves_each_item_once(monkeypatch):
             opener.open(stale, timeout=5)
     finally:
         server.close()
+
+
+def test_byte_server_only_answers_its_own_address_and_limits_uploads(monkeypatch):
+    import http.client
+
+    from app import byte_server
+
+    server = byte_server.ByteServer()
+    try:
+        url = server.share(b"secreto", "application/pdf")
+        port, token = int(url.split(":")[2].split("/")[0]), url.rsplit("/", 1)[1]
+
+        def request(method: str, path: str, host: str, body: bytes | None = None, length: str | None = None):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.putrequest(method, path, skip_host=True)
+            conn.putheader("Host", host)
+            if body is not None or length is not None:
+                conn.putheader("Content-Length", length or str(len(body or b"")))
+            conn.endheaders(body)
+            response = conn.getresponse()
+            data = response.read()
+            conn.close()
+            return response, data
+
+        # Una web cuyo dominio apunta a 127.0.0.1 (DNS rebinding) no recibe el dato, ni lo gasta.
+        assert request("GET", f"/{token}", "malo.example:80")[0].status == 403
+        response, data = request("GET", f"/{token}", f"127.0.0.1:{port}")
+        assert response.status == 200 and data == b"secreto" and response.headers["X-Content-Type-Options"] == "nosniff"
+
+        upload = server.expect().rsplit("/", 1)[1]
+        assert request("POST", f"/up/{upload}", "malo.example:80", b"x")[0].status == 403
+        monkeypatch.setattr(byte_server, "MAX_UPLOAD", 4)
+        assert request("POST", f"/up/{upload}", f"127.0.0.1:{port}", length="999")[0].status == 413
+        assert request("POST", f"/up/{upload}", f"127.0.0.1:{port}", length="no")[0].status == 400
+        assert request("POST", f"/up/{upload}", f"127.0.0.1:{port}", b"pdf")[0].status == 204
+        assert server.received(f"http://127.0.0.1:{port}/up/{upload}") == b"pdf"
+    finally:
+        server.close()
+
+
+def test_only_web_and_mail_links_open_outside():
+    from app.backend.host import is_external_url
+
+    for url in ["https://example.com/a?b=1", "http://localhost:8000", "mailto:soporte@example.com", " https://x.org "]:
+        assert is_external_url(url), url
+    for url in ["javascript:alert(1)", "file:///C:/Windows/System32/calc.exe", r"C:\Windows\notepad.exe", "https://",
+                "data:text/html,<script>", "ms-settings:", "https://ok.com/\r\nX", r"\\servidor\recurso", 42,
+                "https://" + "a" * 3000]:
+        assert not is_external_url(url), url
