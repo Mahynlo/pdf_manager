@@ -289,9 +289,7 @@ def test_viewer_open_and_close(tmp_path):
         assert info["toc"] == [{"level": 1, "title": "Inicio", "page": 0}, {"level": 1, "title": "Detalle", "page": 1}]
         assert svc.open(str(pdf))["id"] == info["id"]  # ya abierto: el mismo documento
 
-        rows = {r["label"]: r["value"] for r in svc.properties(info["id"])["rows"]}
-        assert rows["Título:"] == "Prueba" and rows["Páginas:"] == "2 página(s)"
-        assert rows["Asunto:"] == "(No especificado)" and rows["Cifrado / Seguridad:"] == "Sin cifrado"
+        assert svc.file_size(info["id"]) == pdf.stat().st_size  # lo demás de las propiedades, del visor
 
         svc.close_document(info["id"])
         with pytest.raises(UserError, match="ya no está abierto"):
@@ -315,8 +313,6 @@ def test_viewer_password_errors_let_the_frontend_retry(tmp_path):
         info = svc.open(str(locked), "clave")
         assert len(info["pages"]) == 1
         assert svc._docs[info["id"]].doc[0].text().strip() == "secreto 1"
-        rows = {r["label"]: r["value"] for r in svc.properties(info["id"])["rows"]}
-        assert rows["Cifrado / Seguridad:"] == "Protegido con contraseña"
     finally:
         svc.close()
 
@@ -335,7 +331,7 @@ def test_viewer_takes_the_pages_from_the_viewer_copy(tmp_path):
         assert state["pages"][1] == [842.0, 595.0] and state["modified"]
         assert svc.unsaved_documents() == ["ops.pdf"]
 
-        saved = svc.save(doc_id)
+        saved = _save(svc, doc_id)
         assert saved["modified"] is False and saved["annotated"] is False and svc.unsaved_documents() == []
         assert page_texts(pdf) == ["ops 3", "ops 1", "ops 2", "ops 2"]
         assert _text(svc, doc_id, 0) == "ops 3"  # sigue legible tras reabrirse desde memoria
@@ -371,7 +367,7 @@ def test_viewer_save_as_moves_the_tab_to_the_new_file(tmp_path):
     try:
         doc_id = svc.open(str(pdf))["id"]
         _reshape(svc, doc_id, [["remove", 0]], [2])
-        info = svc.save_as(doc_id)
+        info = _save(svc, doc_id, "save_as")
         assert info["path"] == str(tmp_path / "copia.pdf") and info["name"] == "copia.pdf"
         assert not info["modified"] and host.saved_suggestions == [str(pdf)]
         assert page_texts(tmp_path / "copia.pdf") == ["original 2"]
@@ -379,7 +375,28 @@ def test_viewer_save_as_moves_the_tab_to_the_new_file(tmp_path):
         assert svc.open(str(tmp_path / "copia.pdf"))["id"] == doc_id
 
         host.save_to = None
-        assert svc.save_as(doc_id) is None  # cancelado
+        assert _save(svc, doc_id, "save_as") is None  # cancelado
+    finally:
+        svc.close()
+
+
+def test_viewer_save_writes_the_viewer_copy_as_is(tmp_path):
+    pdf = _make_pdf(tmp_path / "tal_cual.pdf", 2)
+    svc = ViewerService(FakeHost())
+    try:
+        doc_id = svc.open(str(pdf))["id"]
+        served, data, uids = _served_bytes(svc, doc_id)
+        copy = run_engine("pages", data, {"ops": [["move", 1, 0]]})
+        assert not svc.save(doc_id, _put(svc, copy), [2, 1])["modified"]
+        assert pdf.read_bytes() == copy  # sin volver a generarla en Python
+        assert _text(svc, doc_id, 0) == "tal_cual 2"  # y es el documento abierto
+
+        with pytest.raises(UserError) as error:
+            svc.save(doc_id, _put(svc, b"esto no es un PDF"), [2, 1])
+        assert error.value.code == "sync_failed" and pdf.read_bytes() == copy  # no se escribe
+        with pytest.raises(UserError) as error:
+            svc.save(doc_id, svc.upload_url())  # no llegó nada
+        assert error.value.code == "upload_missing"
     finally:
         svc.close()
 
@@ -390,7 +407,7 @@ def test_viewer_save_keeps_the_password(tmp_path):
     try:
         doc_id = svc.open(str(locked), "clave")["id"]
         _reshape(svc, doc_id, [["rotate", [1], 1]], [1, 2])
-        svc.save(doc_id)
+        _save(svc, doc_id)
         assert svc._docs[doc_id].doc[0].text().strip() == "secreto 1"
     finally:
         svc.close()
@@ -414,7 +431,9 @@ def test_viewer_exports_page_text_and_images(tmp_path):
     svc = ViewerService(host)
     try:
         doc_id = svc.open(str(pdf))["id"]
-        assert svc.extract_page(doc_id, 1) == str(tmp_path / "pagina.pdf")
+        _, data, _ = _served_bytes(svc, doc_id)
+        page = run_engine("extract", data, {"indices": [1], "withoutText": []})  # la saca el visor
+        assert svc.extract_page(doc_id, 1, _put(svc, page)) == str(tmp_path / "pagina.pdf")
         assert host.saved_suggestions[-1] == str(tmp_path / "fuente_pagina_2.pdf")
         assert page_texts(tmp_path / "pagina.pdf") == ["adiós"]
 
@@ -455,27 +474,55 @@ def _served(svc: ViewerService, doc_id: int) -> Document:
     return Document.open(base64.b64decode(served["url"].split(",", 1)[1]), served["password"])
 
 
-def _upload(svc: ViewerService, doc_id: int, data: bytes, uids: list[int] | None = None) -> dict:
+def _put(svc: ViewerService, data: bytes) -> str:
+    """Hace de visor: sube ``data``; devuelve la URL que se pasa al servicio."""
     url = svc.upload_url()
     svc._host.uploads[url] = data
-    return svc.sync_annotations(doc_id, url, uids)
+    return url
+
+
+def _upload(svc: ViewerService, doc_id: int, data: bytes, uids: list[int] | None = None) -> dict:
+    return svc.sync_annotations(doc_id, _put(svc, data), uids)
+
+
+def _viewer_copy(served: dict, data: bytes, uids: list[int]) -> bytes:
+    """La copia como la saca el motor del visor (document/copy.ts): sin el texto del OCR, que va
+    en las páginas cuyo id dio ``document_url``; ``uids``, el id de cada página de ``data``."""
+    without = [i for i, uid in enumerate(uids) if uid in served["ocr"]]
+    if not without:
+        return data
+    return run_engine("copy", data, {"withoutText": without, "password": served["password"]})
+
+
+def _served_bytes(svc: ViewerService, doc_id: int) -> tuple[dict, bytes, list[int]]:
+    """Lo que recibe EmbedPDF (``document_url``): la respuesta, el PDF y el id de cada página."""
+    served = svc.document_url(doc_id)
+    uids = [int(key.split(":", 1)[0]) for key in served["keys"]]
+    return served, base64.b64decode(served["url"].split(",", 1)[1]), uids
 
 
 def _reshape(svc: ViewerService, doc_id: int, ops: list[list], uids: list[int]) -> dict:
     """Hace de visor: cambia las páginas de su copia con el motor de EmbedPDF (``ops``, como en
     tests/engine_task.mjs) y la sube con el id de cada página. Devuelve la información nueva."""
-    served = svc.document_url(doc_id)
-    data = base64.b64decode(served["url"].split(",", 1)[1])
-    _upload(svc, doc_id, run_engine("pages", data, {"ops": ops, "password": served["password"]}), uids)
+    served, data, _ = _served_bytes(svc, doc_id)
+    changed = run_engine("pages", data, {"ops": ops, "password": served["password"]})
+    _upload(svc, doc_id, _viewer_copy(served, changed, uids), uids)
     return svc._info(doc_id)
 
 
 def _sync(svc: ViewerService, doc_id: int, edit) -> dict:
     """Hace de visor: cambia con ``edit(copia)`` las anotaciones de su copia y la sube."""
-    with _served(svc, doc_id) as copy:
+    served, data, uids = _served_bytes(svc, doc_id)
+    with Document.open(data, served["password"]) as copy:
         edit(copy)
         data = copy.to_bytes()
-    return _upload(svc, doc_id, data)
+    return _upload(svc, doc_id, _viewer_copy(served, data, uids))
+
+
+def _save(svc: ViewerService, doc_id: int, method: str = "save") -> dict | None:
+    """Hace de visor al guardar (``save`` o ``save_as``): sube su copia del documento."""
+    served, data, uids = _served_bytes(svc, doc_id)
+    return getattr(svc, method)(doc_id, _put(svc, _viewer_copy(served, data, uids)), uids)
 
 
 def test_viewer_takes_annotations_from_the_viewer_copy(tmp_path):
@@ -508,7 +555,7 @@ def test_viewer_takes_annotations_from_the_viewer_copy(tmp_path):
             add_annot(copy[1], "Text", Rect(300, 300, 320, 320), "nota")
 
         assert _sync(svc, doc_id, edit) == {"modified": True}
-        assert not svc.save(doc_id)["modified"] and svc.unsaved_documents() == []
+        assert not _save(svc, doc_id)["modified"] and svc.unsaved_documents() == []
         with Document.open(pdf) as doc:
             assert [annots(page) for page in doc] == [["Link", "Highlight"], ["Text"]]
             assert doc[1].text().strip() == "Pagina 2"  # sin el texto de OCR
@@ -543,7 +590,7 @@ def test_viewer_sync_keeps_encryption_and_checks_the_copy(tmp_path):
         assert error.value.code == "sync_failed"
 
         _sync(svc, doc_id, lambda copy: add_annot(copy[1], "Square", Rect(10, 10, 90, 90)))
-        svc.save(doc_id)
+        _save(svc, doc_id)
     finally:
         svc.close()
     with pytest.raises(PasswordError):
@@ -847,9 +894,9 @@ def test_redact_apply_removes_what_the_marks_cover_and_forces_save_as(tmp_path, 
             assert r > 150 and g < 60 and b < 60
 
         with pytest.raises(UserError) as err:
-            viewer.save(doc_id)
+            _save(viewer, doc_id)
         assert err.value.code == "redacted"
-        saved = viewer.save_as(doc_id)
+        saved = _save(viewer, doc_id, "save_as")
         assert host.saved_suggestions[-1] == str(tmp_path / "contrato_censurado.pdf")
         assert saved["path"] == str(out) and not saved["redacted"] and not saved["modified"]
         assert "Pérez" not in page_texts(out)[0] and "Contrato con Juan" in page_texts(out)[0]
@@ -1423,23 +1470,10 @@ def test_document_url_is_the_open_version_with_its_password(tmp_path):
     with Document.open(data, "clave") as doc:
         assert [p.rotation for p in doc] == [0, 90, 0]
         assert annots(doc[0]) == ["Square"]  # las anotaciones las edita EmbedPDF
-    svc.save(info["id"])
+    _save(svc, info["id"])
     svc.close()
     with Document.open(pdf, "clave") as saved:
         assert saved.encrypted and [p.rotation for p in saved] == [0, 90, 0]
-
-
-def test_print_url_gives_the_document_without_encryption(tmp_path):
-    pdf = _make_pdf(tmp_path / "cifrado.pdf", 2, password="clave")
-    svc = ViewerService(FakeHost())
-    try:
-        doc_id = svc.open(str(pdf), "clave")["id"]
-        data = base64.b64decode(svc.print_url(doc_id).split(",", 1)[1])
-        with Document.open(data) as doc:
-            assert not doc.encrypted and len(doc) == 2
-        assert svc._docs[doc_id].doc.encrypted  # el documento abierto sigue cifrado
-    finally:
-        svc.close()
 
 
 @pytest.mark.parametrize("rotation", [0, 90, 180, 270])
@@ -1465,6 +1499,7 @@ def test_document_url_writes_ocr_words_as_invisible_text(tmp_path, rotation):
         assert words["Hola"].y0 == pytest.approx(300, abs=6) and words["Hola"].y1 == pytest.approx(320, abs=6)
     with svc.document(info["id"]) as entry:
         assert "Hola" not in entry.doc[0].text()  # solo en la copia para el visor
+    assert svc.document_url(info["id"])["ocr"] == [1]  # de qué páginas lo quita el visor
 
 
 def test_byte_server_serves_each_item_once(monkeypatch):

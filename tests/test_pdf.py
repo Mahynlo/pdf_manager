@@ -1,6 +1,7 @@
 """Capa de PDFium (``pdf_core.pdf``), texto y lo que no puede fallar al censurar."""
 from __future__ import annotations
 
+import json
 import re
 import threading
 import zlib
@@ -9,7 +10,7 @@ import numpy as np
 import pytest
 from pdfkit import add_annot, add_image, add_page, add_text, annot_names, annots, encrypted, pdf_bytes, run_engine
 
-from pdf_core import page_ops, redaction
+from pdf_core import redaction
 from pdf_core.pdf import UNRESTRICTED, Document, PasswordError, PdfError, Rect, png
 from pdf_core.reading_order import sort_words_clustered, sort_words_column_aware
 from pdf_core.text_layer import build_text_layer, embed_ocr_words, page_words
@@ -241,12 +242,47 @@ def test_engine_page_changes_keep_the_encryption():
         assert doc.encrypted and [p.rotation for p in doc] == [0, 270]
 
 
-def test_extract_pages_makes_an_unencrypted_pdf():
-    data = encrypted(pdf_bytes([[(72, 72, "uno")], [(72, 72, "dos")]]), "clave")
-    with Document.open(data, "clave") as doc:
-        extracted = page_ops.extract_pages(doc, [1])
-    with Document.open(extracted) as out:
-        assert not out.encrypted and [p.text().strip() for p in out] == ["dos"]
+# ── Copias en el motor del visor (guardar, imprimir, extraer: document/copy.ts) ─
+def _recognized(password: str | None = None) -> bytes:
+    """Dos páginas con texto nativo y el de un OCR como texto invisible; una nota en la primera."""
+    with Document.open(pdf_bytes([[(72, 72, "uno")], [(72, 72, "dos")]])) as doc:
+        for page in doc:
+            page.add_invisible_text([(Rect(40, 240, 140, 260), "reconocido")])
+        add_annot(doc[0], "Square", Rect(10, 10, 50, 50), name="nota")
+        data = doc.to_bytes()
+    return encrypted(data, password) if password else data
+
+
+def test_engine_copy_leaves_out_the_ocr_text_of_the_given_pages():
+    with Document.open(run_engine("copy", _recognized(), {"withoutText": [0]})) as doc:
+        assert "reconocido" not in doc[0].text() and "uno" in doc[0].text()
+        assert annot_names(doc[0]) == ["nota"]  # lo demás de la página sigue
+        assert "reconocido" in doc[1].text()  # la otra página no se toca
+
+
+def test_engine_copy_keeps_the_encryption_unless_it_is_for_printing():
+    data = _recognized("clave")
+    kept = run_engine("copy", data, {"withoutText": [0, 1], "password": "clave"})
+    with pytest.raises(PasswordError):
+        Document.open(kept)
+    with Document.open(kept, "clave") as doc:
+        assert doc.encrypted and all("reconocido" not in p.text() for p in doc)
+    with Document.open(run_engine("copy", data, {"decrypt": True, "password": "clave"})) as doc:
+        assert not doc.encrypted and [p.text().count("uno") for p in doc] == [1, 0]
+
+
+def test_engine_extracts_pages_without_ocr_text_or_encryption():
+    out = run_engine("extract", _recognized("clave"), {"indices": [1, 0], "withoutText": [0], "password": "clave"})
+    with Document.open(out) as doc:
+        assert not doc.encrypted
+        assert "dos" in doc[0].text() and "reconocido" in doc[0].text()
+        assert "uno" in doc[1].text() and "reconocido" not in doc[1].text()
+        assert annot_names(doc[1]) == ["nota"]
+
+
+def test_engine_tells_the_pdf_version_and_encryption():
+    assert json.loads(run_engine("facts", _recognized("clave"), {"password": "clave"})) == {"version": "1.7", "encrypted": True}
+    assert json.loads(run_engine("facts", _recognized(), {}))["encrypted"] is False
 
 
 def test_threads_do_not_crash_the_engine():
@@ -289,15 +325,13 @@ def test_invisible_text_lands_on_its_rectangle(rotation):
             assert np.array_equal(saved[0].render(1), before)
 
 
-def test_invisible_text_survives_saving_and_is_removed_exactly():
+def test_invisible_text_survives_saving():
+    """Lo quita el motor del visor de las copias que salen de él (test_engine_copy_*)."""
     with _doc() as doc:
         doc[0].add_invisible_text([(Rect(40, 240, 140, 260), "reconocido")])
         data = doc.to_bytes()
     with Document.open(data) as doc:
-        assert "reconocido" in doc[0].text()
-        assert doc[0].remove_invisible_text() == 1
-        assert doc[0].remove_invisible_text() == 0
-        assert doc[0].text().split("\n") == ["Hola mundo", "Segunda linea"]  # lo demás sigue
+        assert "reconocido" in doc[0].text() and "Hola mundo" in doc[0].text()
 
 
 def test_ocr_words_that_cover_native_text_are_not_embedded():

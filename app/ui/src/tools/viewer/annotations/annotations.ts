@@ -13,9 +13,8 @@
 //   · juntar en un solo paso de deshacer lo que se crea a la vez (`batch`: p. ej. las marcas de
 //     censura de un término, ver redaction.ts);
 //   · traer al frente y enviar al fondo (`reorder`), que EmbedPDF no sabe hacer;
-//   · pasar las anotaciones a Python (`sync`) antes de guardar, imprimir o cambiar las
-//     páginas: se sube la copia de EmbedPDF y Python toma de ella las anotaciones
-//     (viewer.sync_annotations). Y avisarle de que hay cambios sin guardar.
+//   · avisar de cada cambio (`onChanged`): hay cambios sin guardar y Python aún no los tiene (la
+//     copia que se le pasa es la de document/copy.ts).
 //
 // Las coordenadas de EmbedPDF son de la página sin girar (canvas.toView / toPage las pasan
 // a las de la página tal como se ve).
@@ -27,13 +26,10 @@ import type { PluginRegistry } from '@embedpdf/core';
 import {
   applyInsertUpright, type AnnotationEvent, type AnnotationPlugin, type AnnotationScope,
 } from '@embedpdf/plugin-annotation';
-import type { ExportPlugin } from '@embedpdf/plugin-export';
 import type { Command, HistoryPlugin, HistoryScope } from '@embedpdf/plugin-history';
-import { call, upload } from '$lib/api.ts';
 import { askText } from '$lib/ui.ts';
 import { t } from '$texts';
 import { ANNOTATION_TOOL, TOOLS, type PageCanvas } from '../canvas/canvas.ts';
-import { pageUids } from '../document/pages.ts';
 import { KINDS, MANUAL_LABEL, type SelectionPart } from '../redact/redaction.ts';
 import { TEXT_STAMP, textStampSize, type TextStamp } from '../stamps/stamp-pdf.ts';
 import { DEFAULT_STYLE, type AnnotationStyle } from './palette.ts';
@@ -56,7 +52,7 @@ export interface HistoryFlags {
 /** Lo que el visor (Viewer.svelte) hace con los avisos de las anotaciones. */
 export interface AnnotationsHost {
   onHistory(state: HistoryFlags): void;
-  /** Hay cambios sin guardar. */
+  /** Cambiaron las anotaciones: hay cambios sin guardar y Python aún no los tiene. */
   onChanged(): void;
   /** Cambió la selección (anotaciones de EmbedPDF). */
   onSelect(items: Annot[]): void;
@@ -140,19 +136,15 @@ function toolDefaults(tool: string, style: AnnotationStyle): Record<string, unkn
 
 export class Annotations {
   canvas: PageCanvas;
-  docId: number;
   host: AnnotationsHost;
   style: AnnotationStyle = { ...DEFAULT_STYLE };
-  version = 0; // cambios hechos en el documento a la vista
-  synced = 0; // `version` que ya tiene Python
   seen = new Set<string>(); // anotaciones ya creadas (rehacer no vuelve a pedir el texto de la nota)
   watchers = new Set<() => void>(); // avisar de cualquier cambio en las anotaciones (`watch`)
   measure: CanvasRenderingContext2D | null = null; // para medir el texto libre (_fitText)
 
-  /** `docId`: documento del servicio "viewer"; `host`: lo que el visor hace con los avisos. */
-  constructor(canvas: PageCanvas, docId: number, host: AnnotationsHost) {
+  /** `host`: lo que el visor hace con los avisos. */
+  constructor(canvas: PageCanvas, host: AnnotationsHost) {
     this.canvas = canvas;
-    this.docId = docId;
     this.host = host;
     canvas.loading.then(() => this._connect());
   }
@@ -163,15 +155,8 @@ export class Annotations {
     return () => this.watchers.delete(fn);
   }
 
-  /** El documento a la vista cambió fuera de las anotaciones (sus páginas): Python aún no lo tiene. */
-  markChanged(): void {
-    this.version++;
-  }
-
-  /** Lo llama el lienzo al poner a la vista una versión nueva (viene de Python: ya la tiene). */
+  /** Lo llama el lienzo al poner a la vista una versión nueva del documento (empieza sin historial). */
   documentShown(): void {
-    this.version = 0;
-    this.synced = 0;
     this.seen.clear();
     this.host.onHistory({ canUndo: false, canRedo: false });
     this.host.onSelect([]);
@@ -249,7 +234,6 @@ export class Annotations {
       this.host.onRendered([event.pageIndex]);
       return;
     }
-    this.version++;
     this.host.onChanged();
     if (event.type === 'update' && 'contents' in event.patch && event.annotation.type === T.FREETEXT) {
       this._fitText(event.pageIndex, event.annotation.id);
@@ -548,48 +532,13 @@ export class Annotations {
     if (this.canvas.shown) this._history().redo();
   }
 
-  /** Escribe en el PDF de EmbedPDF lo pendiente (para dibujar las páginas con las anotaciones al día). */
+  /**
+   * Escribe en el PDF de EmbedPDF lo pendiente (para dibujar las páginas con las anotaciones al
+   * día y antes de sacar una copia: document/copy.ts).
+   */
   async commit(): Promise<void> {
     this.canvas.finishEditing(); // el texto que se está escribiendo también cuenta
     await this.scope()?.commit().toPromise();
-  }
-
-  /** Copia para imprimir. La de un PDF cifrado la da Python sin cifrar, o el visor de PDF del
-   * diálogo pediría la contraseña. */
-  async printCopy(): Promise<ArrayBuffer> {
-    if (!this.canvas.password) return this.exportCopy();
-    await this.sync();
-    const response = await fetch(await call<string>('viewer.print_url', this.docId));
-    if (!response.ok) throw new Error(TX.syncError(response.status));
-    return response.arrayBuffer();
-  }
-
-  /** Copia del PDF de EmbedPDF con las anotaciones al día (para Python y para imprimir). */
-  async exportCopy(): Promise<ArrayBuffer> {
-    await this.commit(); // lo pendiente, ya escrito en el PDF de EmbedPDF
-    return this._registry().getPlugin<ExportPlugin>('export')!.provides().forDocument(this.canvas.shown!).saveAsCopy().toPromise();
-  }
-
-  // ── Python ─────────────────────────────────────────────────────────────
-  /**
-   * Pasa a Python el documento si cambió desde la última vez (anotaciones o páginas): sube la
-   * copia del documento de EmbedPDF, que pasa a ser el documento en Python, con el `uid` de cada
-   * página. Llamarlo antes de todo lo que necesita el documento al día en Python. Resuelve
-   * `{ modified }` o null si no hacía falta.
-   */
-  async sync(): Promise<{ modified: boolean } | null> {
-    this.canvas.finishEditing(); // el texto que se está escribiendo también cuenta
-    await this.canvas.loading; // la copia tiene que ser de la versión que tiene Python
-    const documentId: string | null = this.canvas.shown;
-    const version = this.version;
-    if (!documentId || version === this.synced) return null;
-    const buffer = await this.exportCopy();
-    const url = await call<string>('viewer.upload_url');
-    const response = await upload(url, buffer);
-    if (!response.ok) throw new Error(TX.syncError(response.status));
-    const result = await call<{ modified: boolean }>('viewer.sync_annotations', this.docId, url, pageUids(this.canvas.keys));
-    if (documentId === this.canvas.shown) this.synced = Math.max(this.synced, version);
-    return result;
   }
 }
 

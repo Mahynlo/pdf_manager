@@ -7,7 +7,7 @@ import { READY_ID, type EngineError, type FromEngine, type ToEngine } from './pr
 const UNKNOWN = 0; // PdfErrorCode.Unknown
 
 const scope = self as unknown as {
-  postMessage(message: FromEngine): void;
+  postMessage(message: FromEngine, transfer?: Transferable[]): void;
   onmessage: ((event: MessageEvent<ToEngine>) => void) | null;
 };
 
@@ -20,6 +20,10 @@ interface TaskLike {
 }
 
 const isTask = (value: unknown): value is TaskLike => typeof value === 'object' && value !== null && 'wait' in value;
+
+/** Entrega el resultado: un PDF (ArrayBuffer) pasa a la ventana sin copiarlo. */
+const reply = (id: string, data: unknown): void =>
+  scope.postMessage({ type: 'result', id, data }, data instanceof ArrayBuffer ? [data] : []);
 
 const failure = (id: string, err: unknown): FromEngine => ({
   type: 'error', id, error: { type: 'reject', reason: { code: UNKNOWN, message: (err as Error)?.message ?? String(err) } },
@@ -45,12 +49,12 @@ function execute(id: string, method: string, args: unknown[]): void {
   try {
     const result = fn.apply(native, args);
     if (!isTask(result)) {
-      scope.postMessage({ type: 'result', id, data: result });
+      reply(id, result);
       return;
     }
     result.onProgress((progress) => scope.postMessage({ type: 'progress', id, progress }));
     result.wait(
-      (data) => scope.postMessage({ type: 'result', id, data }),
+      (data) => reply(id, data),
       (error) => scope.postMessage({ type: 'error', id, error }),
     );
   } catch (err) {

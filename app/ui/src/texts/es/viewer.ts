@@ -103,15 +103,40 @@ export default {
     textExported: (name: string) => `Texto exportado en ${name}`,
     imagesExported: (count: number, folder: string) => `Se extrajeron ${count} imágenes en ${folder}`,
     noImages: 'No se encontraron imágenes incrustadas en el documento.',
+    uploadError: (status: number) => `No se pudo pasar el documento a Python (${status})`,
+    notShown: 'El documento aún no se ha abierto en el visor',
   },
   /** Imprimir (document/print.ts): el diálogo es el de WebView2. */
   print: {
     preparing: 'Preparando la impresión…',
     error: (message: string) => `No se pudo imprimir: ${message}`,
   },
-  /** Diálogo de propiedades (document/PropertiesDialog.svelte). */
+  /** Diálogo de propiedades (document/properties.ts y PropertiesDialog.svelte). */
   properties: {
     accept: 'Aceptar',
+    location: 'Ubicación:',
+    size: 'Tamaño:',
+    sizeValue: (mb: string, bytes: string) => `${mb} MB (${bytes} bytes)`,
+    unknown: 'Desconocido',
+    pages: 'Páginas:',
+    pagesValue: (count: number) => `${count} página(s)`,
+    firstPage: 'Dimensiones pág. 1:',
+    firstPageValue: (mm: string, inches: string, points: string) => `${mm} mm  (${inches} in / ${points} pt)`,
+    rotation: 'Rotación inicial:',
+    title: 'Título:',
+    author: 'Autor:',
+    subject: 'Asunto:',
+    keywords: 'Palabras clave:',
+    creator: 'Creador:',
+    producer: 'Productor:',
+    created: 'Fecha de creación:',
+    modified: 'Fecha de modificación:',
+    version: 'Versión PDF:',
+    versionValue: (version: string) => `PDF ${version}`,
+    security: 'Cifrado / Seguridad:',
+    encrypted: 'Protegido con contraseña',
+    notEncrypted: 'Sin cifrado',
+    missing: '(No especificado)',
   },
   /** Índice (panels/TocTree.svelte). */
   toc: {
@@ -335,7 +360,6 @@ export default {
     editTextTitle: 'Editar texto',
     editTextLabel: 'Texto:',
     editNoteTitle: 'Editar nota',
-    syncError: (status: number) => `No se pudo pasar el documento a Python (${status})`,
     /** Barra de propiedades de la selección (editing.ts). */
     bar: {
       width: 'Grosor del trazo',

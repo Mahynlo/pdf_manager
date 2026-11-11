@@ -29,6 +29,9 @@ const formatKey = ({ uid, rotation, revision }: PageKey) => `${uid}:${rotation}:
 /** El `uid` de cada página (Python los necesita con la copia del documento). */
 export const pageUids = (keys: string[]) => keys.map((key) => parseKey(key).uid);
 
+/** El giro de la página de clave `key`, en grados. */
+export const pageRotation = (key: string) => parseKey(key).rotation;
+
 /** Lo que dice si la estructura cambió: qué página va en cada sitio y con qué giro. */
 const layoutOf = (keys: string[]) => keys.map((key) => key.split(':').slice(0, 2).join(':')).join(',');
 
@@ -111,9 +114,13 @@ export class PageEditor {
     });
   }
 
-  /** Copia de `index` (con sus anotaciones) justo detrás. */
+  /** Copia de `index` (con sus anotaciones y el texto del OCR) justo detrás. */
   duplicate(index: number): Promise<number> {
-    const key = formatKey({ uid: this.takeUid(), rotation: parseKey(this.canvas.keys[index]).rotation, revision: 0 });
+    const source = parseKey(this.canvas.keys[index]);
+    const uid = this.takeUid();
+    const key = formatKey({ uid, rotation: source.rotation, revision: 0 });
+    // La copia lleva también el texto del OCR: tampoco va al archivo (document/copy.ts).
+    if (this.canvas.ocrPages.has(source.uid)) this.canvas.ocrPages.add(uid);
     return this.record({
       redo: () => this.change((engine, doc) => engine.duplicatePage(doc, index, index + 1), inserting(index + 1, key)),
       undo: () => this.change((engine, doc) => engine.removePage(doc, index + 1), removing(index + 1)),
@@ -125,7 +132,7 @@ export class PageEditor {
   /** Borra `index`; se guarda una copia (con sus anotaciones) para poder devolverla. */
   async remove(index: number): Promise<number> {
     const engine = await structure();
-    const stash = await engine.stashPage(this.document(), index);
+    const stash = await engine.stashPage(this.canvas.shownDocument(), index);
     const key = this.canvas.keys[index];
     const dispose = () => void engine.dropStash(stash);
     try {
@@ -172,7 +179,7 @@ export class PageEditor {
   /** Marcadores del documento tal como está ahora (cambian de página al mover las páginas). */
   async toc(): Promise<TocEntry[]> {
     const engine = (await registry()).getEngine();
-    const { bookmarks } = await engine.getBookmarks(this.document()).toPromise();
+    const { bookmarks } = await engine.getBookmarks(this.canvas.shownDocument()).toPromise();
     return flattenBookmarks(bookmarks);
   }
 
@@ -188,12 +195,6 @@ export class PageEditor {
     return this.nextUid++;
   }
 
-  private document(): PdfDocumentObject {
-    const doc = this.canvas.documentObject;
-    if (!doc) throw new Error('El documento aún no se ha abierto en el visor');
-    return doc;
-  }
-
   /** Hace `step` y lo apunta para deshacerlo (lo deshecho ya no se puede rehacer). */
   private async record(step: Step): Promise<number> {
     await step.redo();
@@ -206,7 +207,7 @@ export class PageEditor {
 
   /** Cambia el documento en el motor y lo muestra; `keys` da las claves nuevas a partir de las de ahora. */
   private async change(fn: EngineChange, keys: (current: string[]) => string[]): Promise<void> {
-    const pages = await fn(await structure(), this.document());
+    const pages = await fn(await structure(), this.canvas.shownDocument());
     this.canvas.showPages(pages, keys(this.canvas.keys));
   }
 }

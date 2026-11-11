@@ -1,22 +1,14 @@
-"""Exportaciones de un :class:`pdf_core.pdf.Document` abierto: páginas, texto e imágenes.
+"""Exportaciones de un :class:`pdf_core.pdf.Document` abierto: texto e imágenes.
 
-Independientes de la interfaz. Los índices son 0-based; quien llama valida el rango. Las
-operaciones de página del visor las hace el motor de EmbedPDF (app/ui/src/lib/pdf-engine).
+Independientes de la interfaz. Las operaciones de página del visor y la extracción de una
+página las hace el motor de EmbedPDF (app/ui/src/lib/pdf-engine).
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from pathlib import Path
 
 from pdf_core.pdf import Document
-
-
-def extract_pages(doc: Document, pages: Iterable[int]) -> bytes:
-    """Las páginas indicadas (con sus anotaciones) como un PDF nuevo sin cifrar."""
-    with Document.new() as out:
-        out.insert_pages(doc, list(pages))
-        return out.to_bytes()
 
 
 def document_text(doc: Document, ocr_text: dict[int, str] | None = None) -> str:

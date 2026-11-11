@@ -113,11 +113,12 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
     `viewer.text_of`): el texto en orden de lectura, con el nativo y el de OCR;
   - lo que se dibuja sobre una página (selección, coincidencias) va en su capa de marcas
     (`canvas.addMark`), en puntos de la página tal como se ve y medido en porcentaje.
-- **Anotaciones**: las dibuja y edita EmbedPDF (complementos Annotation y History) en su copia del
-  documento, con deshacer y rehacer en el navegador. Antes de lo que necesita el documento al día en
-  Python (guardar, exportar una página, cambiar páginas, censurar, OCR), el visor sube su
-  copia (`viewer.sync_annotations`, por el servidor local de datos), que pasa a ser el documento en
-  Python; el texto de OCR que lleva como texto invisible se quita. Ver [embedpdf.md](embedpdf.md).
+- **Anotaciones y páginas**: las edita EmbedPDF (complementos Annotation y History, y el motor de la
+  app para las páginas) en su copia del documento, con deshacer y rehacer en el navegador. Las copias
+  que salen del visor las saca su motor sin el texto del OCR (`document/copy.ts`): al guardar o
+  extraer una página Python las escribe tal cual, y antes de lo que lee el documento en Python
+  (censurar, OCR, IA) el visor sube su copia (`viewer.sync_annotations`, por el servidor local de
+  datos), que pasa a ser el documento en Python. Ver [embedpdf.md](embedpdf.md).
 - **Ratón en el lienzo**: cada página va en un `PagePointerProvider` de EmbedPDF, que pasa el ratón
   a la selección de texto (solo con las herramientas de texto, por los modos del gestor de
   interacción) y a las anotaciones (seleccionar, mover, dibujar con su herramienta activa). Los

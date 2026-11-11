@@ -11,16 +11,18 @@ vuelve a cargar el documento cuando cambian, así nunca muestra una imagen anter
 
 El dueño del documento abierto es el visor: EmbedPDF edita las anotaciones y hace las
 operaciones de página (girar, insertar, duplicar, borrar, mover y deshacerlas), y da el ``id`` de
-cada página. Antes de que Python necesite el documento al día (guardar, exportar una página,
-censurar, la orientación), el visor sube su copia con esos ``id``
+cada página. Al guardar, el visor sube su copia y Python la escribe tal cual en el archivo
+(:meth:`ViewerService.save`); al extraer una página, sube ese PDF
+(:meth:`ViewerService.extract_page`). Antes de que Python lea el documento (censurar, la
+orientación, OCR, IA, exportar texto o imágenes), el visor sube su copia con esos ``id``
 (:meth:`ViewerService.sync_annotations`), que pasa a ser el documento. Mientras tanto,
 :meth:`ViewerService.annotations_changed` avisa de que hay anotaciones sin guardar.
 
 Las palabras reconocidas por OCR (servicio ``ocr``) se guardan por clave de página.
 Entran en la capa de texto (``text_of``: asistente IA, panel de OCR) y van como texto
 invisible en el documento que recibe EmbedPDF, que las selecciona y las busca como el
-texto nativo. Llevan una marca propia: al volver la copia se quitan, así el texto reconocido
-no pasa al archivo.
+texto nativo. Llevan una marca propia, con la que el visor las quita de las copias que salen
+de él: el texto reconocido no pasa al archivo ni a Python.
 
 Censurar lo hace el motor de EmbedPDF (``Host.run_engine``): el PDFium de Python no sabe.
 """
@@ -51,7 +53,6 @@ class _OpenDocument:
     doc: Document
     path: str
     password: str | None
-    protected: bool  # cifrado con contraseña
     baseline: tuple = field(default=())  # huella de la estructura al abrir o guardar
     layers: dict[str, TextLayer] = field(default_factory=dict)  # capas de texto por clave de página
     ocr: dict[str, list[tuple]] = field(default_factory=dict)  # palabras de OCR (x0, y0, x1, y1, texto) por clave
@@ -115,7 +116,7 @@ class ViewerService:
                 log.exception("No se pudo abrir %s", path)
                 raise UserError(f"No se pudo abrir {resolved.name}: {ex}", "open_failed") from ex
             doc_id = next(self._ids)
-            entry = _OpenDocument(doc, path, password or None, doc.encrypted)
+            entry = _OpenDocument(doc, path, password or None)
             entry.mark_saved()
             self._docs[doc_id] = entry
             info = self._info(doc_id)
@@ -155,28 +156,24 @@ class ViewerService:
 
         Con la censura aplicada, las páginas giradas o movidas, las anotaciones (las edita
         EmbedPDF) y el texto reconocido por OCR escrito como texto invisible (así EmbedPDF lo
-        selecciona como el nativo; no pasa al documento: ver :meth:`sync_annotations`). Un PDF
-        cifrado sigue cifrado, para que la copia que vuelve conserve el cifrado: ``password`` es
-        la contraseña con la que abrirlo. Viaja en binario por ``host.share_bytes``: por el
-        puente, en base64, un PDF grande tardaría segundos. ``keys`` son las claves de página de
-        esta versión: si cambian, el visor lo vuelve a pedir.
+        selecciona como el nativo; ``ocr`` es el ``id`` de esas páginas, de las que el visor lo
+        quita en las copias que salen de él). Un PDF cifrado sigue cifrado, para que la copia que
+        vuelve conserve el cifrado: ``password`` es la contraseña con la que abrirlo. Viaja en
+        binario por ``host.share_bytes``: por el puente, en base64, un PDF grande tardaría
+        segundos. ``keys`` son las claves de página de esta versión: si cambian, el visor lo
+        vuelve a pedir.
         """
         with self._lock:
             entry = self._doc(doc_id)
             data = entry.doc.to_bytes()
             keys = [entry.key(page) for page in entry.doc]
             ocr = {i: list(entry.ocr[key]) for i, key in enumerate(keys) if entry.ocr.get(key)}
+            uids = [entry.doc.uids[i] for i in ocr]
             password = entry.password
             if ocr:
                 data = _with_ocr_text(data, ocr, password)
-        return {"url": self._host.share_bytes(data, "application/pdf"), "keys": keys, "password": password}
-
-    @exposed
-    def print_url(self, doc_id: int) -> str:
-        """URL de un solo uso con el documento sin cifrar, para imprimir un PDF cifrado."""
-        with self._lock:
-            data = self._doc(doc_id).doc.to_bytes(decrypt=True)
-        return self._host.share_bytes(data, "application/pdf")
+        url = self._host.share_bytes(data, "application/pdf")
+        return {"url": url, "keys": keys, "password": password, "ocr": uids}
 
     # ── Texto ────────────────────────────────────────────────────────────
     @staticmethod
@@ -259,36 +256,39 @@ class ViewerService:
     def sync_annotations(self, doc_id: int, upload: str, uids: list[int] | None = None) -> dict[str, Any]:
         """La copia del visor, subida a ``upload`` (de :meth:`upload_url`), pasa a ser el documento.
 
-        Se llama antes de todo lo que necesita el documento al día. ``uids``: el ``id`` de cada
-        página de la copia (el visor las gira, mueve, añade y borra); sin ellos, son las mismas
-        páginas que ya tenía. El texto de OCR que lleva como texto invisible no pasa al
-        documento. Devuelve ``{modified}``.
+        Se llama antes de todo lo que lee el documento. ``uids``: el ``id`` de cada página de la
+        copia (el visor las gira, mueve, añade y borra); sin ellos, son las mismas páginas que ya
+        tenía. Devuelve ``{modified}``.
         """
-        data = self._host.uploaded(upload)
-        if data is None:
-            raise UserError("No llegó la copia del documento con las anotaciones.", "upload_missing")
+        data = self._received(upload)
         with self._lock:
             entry = self._doc(doc_id)
-            try:
-                copy = Document.open(data, entry.password)
-            except PdfError as ex:
-                log.exception("No se pudo leer la copia del visor")
-                raise UserError(f"No se pudieron pasar las anotaciones al documento: {ex}", "sync_failed") from ex
-            try:
-                copy.set_uids(entry.doc.uids if uids is None else uids)
-            except ValueError as ex:
-                copy.close()
-                raise UserError("La copia del visor no coincide con el documento.", "sync_failed") from ex
-            # El texto de OCR va en las páginas que lo tenían al dárselas a EmbedPDF, aunque
-            # después se hayan girado: se quita de todas las que tienen palabras de OCR.
-            with_words = {key.split(":", 1)[0] for key in entry.ocr}
-            for page in copy:
-                if str(page.uid) in with_words:
-                    page.remove_invisible_text()
-            old, entry.doc = entry.doc, copy
-            old.close()
+            self._adopt(entry, data, uids)
             entry.annotated = True
             return {"modified": entry.modified}
+
+    def _received(self, upload: str) -> bytes:
+        """Lo que subió el visor a ``upload``."""
+        data = self._host.uploaded(upload)
+        if data is None:
+            raise UserError("No llegó la copia del documento.", "upload_missing")
+        return data
+
+    @staticmethod
+    def _adopt(entry: _OpenDocument, data: bytes, uids: list[int] | None) -> None:
+        """La copia del visor ``data`` (sin el texto del OCR: lo quita el visor) pasa a ser el documento."""
+        try:
+            copy = Document.open(data, entry.password)
+        except PdfError as ex:
+            log.exception("No se pudo leer la copia del visor")
+            raise UserError(f"No se pudo leer la copia del documento: {ex}", "sync_failed") from ex
+        try:
+            copy.set_uids(entry.doc.uids if uids is None else uids)
+        except ValueError as ex:
+            copy.close()
+            raise UserError("La copia del visor no coincide con el documento.", "sync_failed") from ex
+        old, entry.doc = entry.doc, copy
+        old.close()
 
     @exposed
     def annotations_changed(self, doc_id: int) -> dict[str, Any]:
@@ -300,13 +300,16 @@ class ViewerService:
 
     # ── Guardar ──────────────────────────────────────────────────────────
     @exposed
-    def save(self, doc_id: int) -> dict[str, Any]:
-        """Guarda sobre el archivo original (Ctrl+S).
+    def save(self, doc_id: int, upload: str, uids: list[int] | None = None) -> dict[str, Any]:
+        """Guarda sobre el archivo original (Ctrl+S) la copia del visor subida a ``upload``.
 
-        Errores: ``save_not_allowed`` (permisos del PDF), ``permission_denied`` (no se
-        puede escribir el archivo) y ``redacted`` (con censura aplicada no se sobrescribe
-        el original); en los dos últimos el frontend ofrece «Guardar como».
+        La copia se escribe tal cual (la saca el motor del visor) y pasa a ser el documento;
+        ``uids`` como en :meth:`sync_annotations`. Errores: ``save_not_allowed`` (permisos del
+        PDF), ``permission_denied`` (no se puede escribir el archivo) y ``redacted`` (con censura
+        aplicada no se sobrescribe el original); en los dos últimos el frontend ofrece «Guardar
+        como».
         """
+        data = self._received(upload)
         with self._lock:
             entry = self._doc(doc_id)
             self._check_can_save(entry)
@@ -316,7 +319,7 @@ class ViewerService:
                     "redacted",
                 )
             try:
-                Path(entry.path).write_bytes(entry.doc.to_bytes())
+                self._save_copy(entry, data, uids, Path(entry.path))
             except PermissionError as ex:
                 raise UserError(
                     "No hay permiso para sobrescribir el archivo original. Selecciona otra ubicación.",
@@ -324,14 +327,15 @@ class ViewerService:
                 ) from ex
             except OSError as ex:
                 raise UserError(f"No se pudo guardar el archivo: {ex}", "save_failed") from ex
-            entry.mark_saved()
             info = self._info(doc_id)
         self._push_recent(info["path"])
         return info
 
     @exposed
-    def save_as(self, doc_id: int) -> dict[str, Any] | None:
-        """Guarda una copia donde elija el usuario; la pestaña pasa a ser ese archivo. ``None`` si se cancela."""
+    def save_as(self, doc_id: int, upload: str, uids: list[int] | None = None) -> dict[str, Any] | None:
+        """Guarda la copia del visor (como en :meth:`save`) donde elija el usuario; la pestaña
+        pasa a ser ese archivo. ``None`` si se cancela."""
+        data = self._received(upload)
         with self._lock:
             entry = self._doc(doc_id)
             self._check_can_save(entry)
@@ -348,14 +352,23 @@ class ViewerService:
         with self._lock:
             entry = self._doc(doc_id)
             try:
-                target.write_bytes(entry.doc.to_bytes())
+                self._save_copy(entry, data, uids, target)
             except OSError as ex:
                 raise UserError(f"No se pudo guardar el archivo: {ex}", "save_failed") from ex
             entry.path = str(target)
-            entry.mark_saved()
             info = self._info(doc_id)
         self._push_recent(info["path"])
         return info
+
+    def _save_copy(self, entry: _OpenDocument, data: bytes, uids: list[int] | None, target: Path) -> None:
+        """La copia del visor ``data`` pasa a ser el documento y se escribe tal cual en ``target``.
+
+        Se abre antes de escribirla: nunca se escribe una copia que no se pueda leer.
+        """
+        self._adopt(entry, data, uids)
+        entry.annotated = True  # hasta que esté escrita
+        target.write_bytes(data)
+        entry.mark_saved()
 
     @staticmethod
     def _check_can_save(entry: _OpenDocument) -> None:
@@ -364,18 +377,16 @@ class ViewerService:
 
     # ── Exportar ─────────────────────────────────────────────────────────
     @exposed
-    def extract_page(self, doc_id: int, index: int) -> str | None:
-        """Guarda la página ``index`` como un PDF nuevo; devuelve su ruta (``None`` si se cancela)."""
+    def extract_page(self, doc_id: int, index: int, upload: str) -> str | None:
+        """Guarda como un PDF nuevo la página ``index``, que el visor subió a ``upload`` (con sus
+        anotaciones: la saca su motor). Devuelve su ruta (``None`` si se cancela)."""
+        data = self._received(upload)
         with self._lock:
-            entry = self._doc(doc_id)
-            self._check_index(entry.doc, index)
-            source = Path(entry.path)
+            source = Path(self._doc(doc_id).path)
         dest = self._host.save_pdf(str(source.with_name(f"{source.stem}_pagina_{index + 1}.pdf")))
         if not dest:
             return None
         target = dest if dest.lower().endswith(".pdf") else f"{dest}.pdf"
-        with self._lock:
-            data = page_ops.extract_pages(self._doc(doc_id).doc, [index])  # con sus anotaciones
         self._write(target, data)
         self._push_recent(target)
         return target
@@ -422,40 +433,11 @@ class ViewerService:
 
     # ── Propiedades ──────────────────────────────────────────────────────
     @exposed
-    def properties(self, doc_id: int) -> dict[str, Any]:
-        """Metadatos, tamaño y seguridad (diálogo «Propiedades del documento»)."""
+    def file_size(self, doc_id: int) -> int | None:
+        """Tamaño del archivo en disco, en bytes (diálogo de propiedades; lo demás lo da el visor)."""
         with self._lock:
-            entry = self._doc(doc_id)
-            doc, path = entry.doc, Path(entry.path)
-            meta = doc.metadata or {}
-            size = path.stat().st_size if path.is_file() else None
-            rows = [
-                ("Ubicación:", str(path)),
-                ("Tamaño:", f"{size / (1024 * 1024):.2f} MB ({size:,} bytes)" if size is not None else "Desconocido"),
-                ("Páginas:", f"{len(doc)} página(s)"),
-            ]
-            if len(doc):
-                first = doc[0]
-                w, h = first.rect.width, first.rect.height
-                rows += [
-                    (
-                        "Dimensiones pág. 1:",
-                        f"{w * 0.352778:.1f} × {h * 0.352778:.1f} mm  "
-                        f"({w / 72:.2f} × {h / 72:.2f} in / {w:.0f} × {h:.0f} pt)",
-                    ),
-                    ("Rotación inicial:", f"{first.rotation}°"),
-                ]
-            labels = {
-                "title": "Título:", "author": "Autor:", "subject": "Asunto:", "keywords": "Palabras clave:",
-                "creator": "Creador:", "producer": "Productor:", "creationDate": "Fecha de creación:",
-                "modDate": "Fecha de modificación:",
-            }
-            rows += [(label, meta.get(key) or "") for key, label in labels.items()]
-            rows += [
-                ("Versión PDF:", f"PDF {doc.version or '1.7'}"),
-                ("Cifrado / Seguridad:", "Protegido con contraseña" if entry.protected else "Sin cifrado"),
-            ]
-            return {"title": path.name, "rows": [{"label": k, "value": v or "(No especificado)"} for k, v in rows]}
+            path = Path(self._doc(doc_id).path)
+        return path.stat().st_size if path.is_file() else None
 
     # ── Auxiliares ───────────────────────────────────────────────────────
     def _doc(self, doc_id: int) -> _OpenDocument:

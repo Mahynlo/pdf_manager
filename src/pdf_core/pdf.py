@@ -36,7 +36,7 @@ import pypdfium2.raw as raw
 
 LOCK = threading.RLock()
 UNRESTRICTED = -1  # permisos de un PDF sin cifrar o abierto como propietario
-OCR_MARK = b"ExtraerPDFsOCR"  # marca del texto invisible, para poder quitarlo después
+OCR_MARK = b"ExtraerPDFsOCR"  # marca del texto invisible (el visor la busca para quitarlo)
 _OCR_FONT = b"Helvetica"
 _META_KEYS = {
     "Title": "title", "Author": "author", "Subject": "subject", "Keywords": "keywords",
@@ -376,7 +376,8 @@ class Page:
         """Escribe cada palabra (rectángulo de vista, texto) como texto invisible; devuelve cuántas.
 
         Cada palabra ocupa su rectángulo y se lee en el sentido en que se ve la página. Lleva la
-        marca :data:`OCR_MARK`, con la que :meth:`remove_invisible_text` la encuentra.
+        marca :data:`OCR_MARK`: el motor del visor la quita de las copias que salen de él
+        (``app/ui/src/lib/pdf-engine/native.ts``), así el texto reconocido no pasa al archivo.
         """
         written = 0
         doc = self.parent.raw
@@ -422,22 +423,6 @@ class Page:
         else:
             a, b, c, d, e, f = sx, 0, 0, sy, u0, v0
         return float(a), float(b), float(c), float(d), float(e + meta.left), float(f + meta.top - meta.height)
-
-    @locked
-    def remove_invisible_text(self) -> int:
-        """Quita el texto de :meth:`add_invisible_text`; devuelve cuántos objetos quitó."""
-        removed = 0
-        with self._opened() as page:
-            for i in reversed(range(raw.FPDFPage_CountObjects(page))):
-                obj = raw.FPDFPage_GetObject(page, i)
-                if _has_ocr_mark(obj):
-                    raw.FPDFPage_RemoveObject(page, obj)
-                    raw.FPDFPageObj_Destroy(obj)
-                    removed += 1
-            if removed:
-                raw.FPDFPage_GenerateContent(page)
-        self._chars = self._text = None
-        return removed
 
 
 class Document:
@@ -651,18 +636,6 @@ def _walk_images(count: int, get: Any, parent: tuple[float, ...]) -> Iterator[tu
             yield from _walk_images(
                 raw.FPDFFormObj_CountObjects(obj), lambda k, form=obj: raw.FPDFFormObj_GetObject(form, k), matrix
             )
-
-
-def _has_ocr_mark(obj: Any) -> bool:
-    name = OCR_MARK.decode()
-    buffer = (ctypes.c_ubyte * 128)()
-    length = ctypes.c_ulong()
-    for i in range(raw.FPDFPageObj_CountMarks(obj)):
-        mark = raw.FPDFPageObj_GetMark(obj, i)
-        if raw.FPDFPageObjMark_GetName(mark, ctypes.cast(buffer, ctypes.POINTER(raw.FPDF_WCHAR)), 128, ctypes.byref(length)):
-            if bytes(buffer)[:length.value].decode("utf-16-le").rstrip("\0") == name:
-                return True
-    return False
 
 
 def _image_bytes(obj: Any) -> tuple[str, bytes] | None:

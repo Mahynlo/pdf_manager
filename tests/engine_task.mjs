@@ -73,6 +73,18 @@ if (task === 'mark') {
       } else throw new Error(`Operación desconocida: ${op}`);
     }
   });
+} else if (task === 'copy' || task === 'extract') {
+  // Las copias que saca el visor (como document/copy.ts): args.withoutText, args.decrypt y,
+  // para extraer, args.indices.
+  const doc = await engine.openDocumentBuffer({ id: 'test', content: buffer }, { password: args.password ?? undefined, normalizeRotation: true }).toPromise();
+  result = task === 'copy'
+    ? engine.saveCopy(doc, { withoutText: args.withoutText, decrypt: args.decrypt, password: args.password })
+    : engine.extractCopy(doc, args.indices, args.withoutText);
+  await engine.closeDocument(doc).toPromise();
+} else if (task === 'facts') {
+  const doc = await engine.openDocumentBuffer({ id: 'test', content: buffer }, { password: args.password ?? undefined }).toPromise();
+  result = new TextEncoder().encode(JSON.stringify(engine.documentFacts(doc)));
+  await engine.closeDocument(doc).toPromise();
 } else {
   result = await runTask(engine, task, buffer, args);
 }

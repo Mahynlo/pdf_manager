@@ -1,9 +1,10 @@
 // EmbedPDF para el visor (docs/web/embedpdf.md): el registro de toda la app con el motor PDFium
 // (lib/pdf-engine), el gestor de documentos, la vista con scroll, el zoom, el mosaico, la doble
-// página, la selección de texto, la búsqueda, las anotaciones (con su historial para deshacer y la
-// exportación de la copia que se pasa a Python), las marcas de censura, los sellos y las firmas
-// (sus bibliotecas: stamps/). También lo que hace falta para cambiar las páginas de un documento
-// abierto (`showPageList`), que EmbedPDF 2.15.1 no contempla.
+// página, la selección de texto, la búsqueda, las anotaciones (con su historial para deshacer),
+// las marcas de censura, los sellos y las firmas (sus bibliotecas: stamps/). También lo que hace
+// falta para cambiar las páginas de un documento abierto (`showPageList`), que EmbedPDF 2.15.1 no
+// contempla. Las copias del documento (guardar, imprimir, pasarlo a Python) las saca el motor de
+// la app (`copies`), no el complemento de exportación.
 //
 // EmbedPDF solo sabe desplazarse por todo el documento. Para los modos «Una página» y
 // «Doble página» (paginados, como en Qt) el complemento de scroll lleva una estrategia
@@ -14,7 +15,6 @@ import { createPluginRegistration, refreshPages, type PluginRegistry } from '@em
 import type { PdfPageObject } from '@embedpdf/models';
 import { AnnotationPluginPackage, LockModeType } from '@embedpdf/plugin-annotation';
 import { DocumentManagerPluginPackage } from '@embedpdf/plugin-document-manager';
-import { ExportPluginPackage } from '@embedpdf/plugin-export';
 import { HistoryPluginPackage } from '@embedpdf/plugin-history';
 import { InteractionManagerPluginPackage, type InteractionManagerPlugin } from '@embedpdf/plugin-interaction-manager';
 import { RedactionPluginPackage } from '@embedpdf/plugin-redaction';
@@ -30,7 +30,7 @@ import { TilingPluginPackage } from '@embedpdf/plugin-tiling';
 import { ViewportPluginPackage } from '@embedpdf/plugin-viewport';
 import { ZoomPluginPackage } from '@embedpdf/plugin-zoom';
 import wasmUrl from '@embedpdf/pdfium/pdfium.wasm?url';
-import { createAppEngine, type PageStructure } from '$lib/pdf-engine/index.ts';
+import { createAppEngine, type AppEngine, type DocumentCopies, type PageStructure } from '$lib/pdf-engine/index.ts';
 import { STANDARD_LIBRARY } from '../stamps/standard.ts';
 import { t } from '$texts';
 import { DEFAULT_STYLE as STYLE, PRESET_COLORS } from '../annotations/palette.ts';
@@ -83,7 +83,7 @@ const ANNOTATION_TOOLS = [
 ];
 
 let registryPromise: Promise<PluginRegistry> | null = null;
-let pageStructure: PageStructure | null = null;
+let appEngine: AppEngine | null = null; // el motor (lib/pdf-engine), creado con el registro
 
 /**
  * El registro de EmbedPDF, uno para toda la app: cada visor abre en él su documento con
@@ -95,8 +95,8 @@ export function registry(): Promise<PluginRegistry> {
   registryPromise ??= (async () => {
     // El motor PDFium corre en un worker (lib/pdf-engine). El WASM va dentro de la app: sin
     // internet. Su URL va absoluta: en desarrollo Vite la da como /node_modules/….
-    const { engine, structure } = createAppEngine(new URL(wasmUrl, location.href).href);
-    pageStructure = structure;
+    appEngine = createAppEngine(new URL(wasmUrl, location.href).href);
+    const { engine } = appEngine;
     const embed = await new Promise<PluginRegistry>((resolve) => {
       mount(EmbedRoot, { target: document.createElement('div'), props: { engine, plugins: plugins(), onReady: resolve } });
     });
@@ -116,7 +116,13 @@ export function registry(): Promise<PluginRegistry> {
 /** Las operaciones del motor que cambian las páginas de un documento abierto (lib/pdf-engine). */
 export async function structure(): Promise<PageStructure> {
   await registry();
-  return pageStructure!;
+  return appEngine!.structure;
+}
+
+/** Las copias del documento abierto que salen del visor (lib/pdf-engine). */
+export async function copies(): Promise<DocumentCopies> {
+  await registry();
+  return appEngine!.copies;
 }
 
 // ── Cambiar las páginas de un documento abierto ──────────────────────────────
@@ -244,7 +250,6 @@ function plugins() {
     // defecto); los de texto y los propios los carga stamps/library.svelte.ts.
     createPluginRegistration(StampPluginPackage, { libraries: [STANDARD_LIBRARY], manifests: [], defaultLibrary: false }),
     createPluginRegistration(SignaturePluginPackage, { mode: SignatureMode.SignatureAndInitials }),
-    createPluginRegistration(ExportPluginPackage, { defaultFileName: 'documento.pdf' }),
     // Sin las anotaciones: las dibuja su capa encima (si no, saldrían dos veces).
     createPluginRegistration(RenderPluginPackage, {
       withAnnotations: false, withForms: true, defaultImageType: IMAGE.type, defaultImageQuality: IMAGE.quality,

@@ -1,5 +1,6 @@
 // El motor PDFium de la app: el PdfEngine de EmbedPDF sobre nuestro worker (worker.ts), que
-// añade lo que le falta para cambiar las páginas de un documento abierto (native.ts).
+// añade lo que le falta para cambiar las páginas de un documento abierto y sacar copias de él
+// (native.ts).
 //
 // Sustituye a createPdfiumEngine de EmbedPDF, que crea su worker desde un blob y no deja
 // añadirle métodos. Este hace lo mismo: el worker, el ejecutor que le pasa las llamadas por su
@@ -7,7 +8,7 @@
 import { PdfEngine, createHybridImageConverter } from '@embedpdf/engines';
 import { Task, type IPdfiumExecutor, type PdfDocumentObject, type PdfPageObject } from '@embedpdf/models';
 import { ImageEncoderPool } from './encoder.ts';
-import type { StructureMethod } from './native.ts';
+import type { CopyMethod, CopyOptions, DocumentFacts, StructureMethod } from './native.ts';
 import { READY_ID, type FromEngine, type ToEngine } from './protocol.ts';
 
 const ENCODERS = 2; // workers que codifican imágenes (los mismos que EmbedPDF)
@@ -114,9 +115,31 @@ export class PageStructure {
   }
 }
 
+/** Copias del documento abierto que salen del visor: a disco, a Python o a la impresora (native.ts). */
+export class DocumentCopies {
+  constructor(private executor: WorkerExecutor) {}
+
+  private call<R>(method: CopyMethod, ...args: unknown[]): Promise<R> {
+    return this.executor.send<R>(method, args).toPromise();
+  }
+
+  saveCopy(doc: PdfDocumentObject, options: CopyOptions): Promise<ArrayBuffer> {
+    return this.call('saveCopy', doc, options);
+  }
+
+  extractCopy(doc: PdfDocumentObject, indices: number[], withoutText: number[]): Promise<ArrayBuffer> {
+    return this.call('extractCopy', doc, indices, withoutText);
+  }
+
+  documentFacts(doc: PdfDocumentObject): Promise<DocumentFacts> {
+    return this.call('documentFacts', doc);
+  }
+}
+
 export interface AppEngine {
   engine: PdfEngine<Blob>; // el que usan EmbedPDF y las tareas de Python (engine-tasks.ts)
   structure: PageStructure;
+  copies: DocumentCopies;
 }
 
 /** Arranca el motor con el wasm de `wasmUrl` (URL absoluta). */
@@ -128,5 +151,5 @@ export function createAppEngine(wasmUrl: string): AppEngine {
       name in target ? Reflect.get(target, name, receiver) : (...args: unknown[]) => target.send(String(name), args),
   }) as unknown as IPdfiumExecutor;
   const engine = new PdfEngine<Blob>(remote, { imageConverter: createHybridImageConverter(new ImageEncoderPool(ENCODERS) as never) });
-  return { engine, structure: new PageStructure(executor) };
+  return { engine, structure: new PageStructure(executor), copies: new DocumentCopies(executor) };
 }

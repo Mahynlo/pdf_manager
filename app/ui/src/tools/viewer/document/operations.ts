@@ -2,15 +2,16 @@
 // eliminar, mover y exportar (equivale a _page_ops_mixin.py y _file_ops_mixin.py en
 // Qt). Aquí se decide a qué página ir después de cada una, como hace Qt.
 //
-// Las de página las hace el motor de EmbedPDF en el documento abierto (pages.ts). Las demás,
-// Python: antes de cada una que necesita el documento al día (guardar, censurar, exportar una
-// página, la orientación) se le pasa la copia de EmbedPDF (`sync`).
+// El documento es de EmbedPDF: las operaciones de página las hace su motor en el documento abierto
+// (pages.ts), y al guardar o extraer una página Python escribe tal cual la copia que saca el motor
+// (copy.ts). Lo demás lo hace Python con el documento al día: antes se le pasa la copia (`sync`).
 import { call, type ApiError } from '$lib/api.ts';
 import { fileName } from '$lib/dom.ts';
 import type { MenuItem } from '$lib/menu.svelte.ts';
 import type { DocumentInfo } from '$lib/types.ts';
 import { askChoice, confirmDialog, progressDialog, setStatus, toast } from '$lib/ui.ts';
 import { t, tip } from '$texts';
+import type { DocumentCopy } from './copy.ts';
 import type { PageEditor } from './pages.ts';
 
 const T = t.viewer.document;
@@ -19,12 +20,8 @@ const T = t.viewer.document;
 export interface DocumentView {
   /** Página actual. */
   page(): number;
-  /** Pasa a Python la copia del documento de EmbedPDF, si cambió. */
-  sync(): Promise<unknown>;
   /** Escribe en el documento de EmbedPDF las anotaciones pendientes (antes de cambiar páginas). */
   commit(): Promise<void>;
-  /** Cambiaron las páginas en EmbedPDF: Python tiene que recibirlas en el próximo `sync`. */
-  pagesChanged(): void;
   /** Muestra el documento actualizado e ir a `page`. */
   apply(info: DocumentInfo, page: number): void;
 }
@@ -36,11 +33,13 @@ export class DocumentActions {
   info: DocumentInfo;
   view: DocumentView;
   pages: PageEditor;
+  copy: DocumentCopy;
   queue: Promise<unknown> = Promise.resolve(); // las operaciones se encadenan: cada una ve el resultado de la anterior
 
-  constructor(info: DocumentInfo, view: DocumentView, pages: PageEditor) {
+  constructor(info: DocumentInfo, view: DocumentView, pages: PageEditor, copy: DocumentCopy) {
     this.view = view;
     this.pages = pages;
+    this.copy = copy;
     this.info = this._withState(info);
   }
 
@@ -108,7 +107,7 @@ export class DocumentActions {
   /** Detecta la orientación de la página actual (escaneo o texto girado) y la corrige. */
   fixOrientation() {
     return this._pages(async (page) => {
-      await this.view.sync(); // Python mira la página tal como está
+      await this.copy.sync(); // Python mira la página tal como está
       const { angle } = await call<{ angle: number }>('ocr.orientation', this.info.id, page);
       if (!angle) {
         toast(T.orientationOk, 'info');
@@ -122,7 +121,7 @@ export class DocumentActions {
   /** Corrige la orientación de todas las páginas, con progreso y «Cancelar». */
   fixOrientationAll() {
     return this._pages(async (page) => {
-      await this.view.sync();
+      await this.copy.sync();
       const total = this.pageCount;
       const progress = progressDialog(T.orientationTitle, T.orientationAnalyzing);
       const turns: [number, number][] = []; // [página, ángulo]
@@ -152,7 +151,7 @@ export class DocumentActions {
         await this.view.commit(); // las anotaciones van con su página
         const target = await fn(this.view.page());
         if (target === null) return;
-        this.view.pagesChanged();
+        this.copy.changed(); // Python recibe las páginas nuevas en el próximo `sync`
         const info = { ...this.info, pages: this.pages.sizes, keys: this.pages.keys, toc: await this.pages.toc() };
         this._apply(info, target);
       } catch (err) {
@@ -172,7 +171,7 @@ export class DocumentActions {
   _change(fn: (page: number) => Promise<Change>): Promise<void> {
     const task = this.queue.then(async () => {
       try {
-        await this.view.sync();
+        await this.copy.sync();
         const result = await fn(this.view.page());
         if (result) this._apply(...result);
       } catch (err) {
@@ -200,40 +199,39 @@ export class DocumentActions {
   /** Guarda sobre el original (Ctrl+S). Resuelve true si se guardó. */
   save(): Promise<boolean> {
     return this._file(async () => {
-      await this.view.sync();
       try {
-        return this._saved(await call<DocumentInfo>('viewer.save', this.info.id));
+        return await this._write('viewer.save');
       } catch (err) {
         // Sin permiso de escritura, o con censura aplicada (nunca se sobrescribe el original).
         const { code, message } = err as ApiError;
         if (code !== 'permission_denied' && code !== 'redacted') throw err;
         toast(message, code === 'redacted' ? 'info' : 'warning');
-        return this._saveAs();
+        return this._write('viewer.save_as');
       }
     });
   }
 
   /** Guarda una copia en otra ruta (Ctrl+Shift+S); la pestaña pasa a ser ese archivo. */
   saveAs(): Promise<boolean> {
-    return this._file(async () => {
-      await this.view.sync();
-      return this._saveAs();
-    });
+    return this._file(() => this._write('viewer.save_as'));
   }
 
-  async _saveAs(): Promise<boolean> {
-    const info = await call<DocumentInfo | null>('viewer.save_as', this.info.id);
-    return info ? this._saved(info) : false;
-  }
-
-  _saved(info: DocumentInfo): boolean {
+  /**
+   * Sube la copia del documento y Python la escribe en el archivo con `method`; también pasa a
+   * ser su documento. Resuelve false si se canceló el diálogo de «Guardar como».
+   */
+  async _write(method: 'viewer.save' | 'viewer.save_as'): Promise<boolean> {
+    const copy = await this.copy.upload();
+    const info = await call<DocumentInfo | null>(method, this.info.id, copy.url, copy.uids);
+    if (!info) return false;
+    copy.adopted();
     this.pages.markSaved();
     this._apply(info, this.view.page());
     setStatus(T.saved(info.name));
     return true;
   }
 
-  /** Ejecuta `fn` en la cola del documento (p. ej. pasar las anotaciones), avisando de los errores. */
+  /** Ejecuta `fn` en la cola del documento (p. ej. pasar el documento a Python), avisando de los errores. */
   run<R>(fn: () => Promise<R>): Promise<R | false> {
     return this._file(fn);
   }
@@ -277,18 +275,19 @@ export class DocumentActions {
   }
 
   // ── Exportar ───────────────────────────────────────────────────────────
+  /** Guarda la página actual (con sus anotaciones) como un PDF nuevo: lo saca el motor y Python lo escribe. */
   extractPage() {
     return this._file(async () => {
-      await this.view.sync(); // la página extraída lleva sus anotaciones
       const page = this.view.page();
-      const path = await call<string | null>('viewer.extract_page', this.info.id, page);
+      const url = await this.copy.send(await this.copy.page(page));
+      const path = await call<string | null>('viewer.extract_page', this.info.id, page, url);
       if (path) setStatus(T.pageExtracted(page + 1, fileName(path)));
     });
   }
 
   exportText() {
     return this._file(async () => {
-      await this.view.sync(); // las páginas como están ahora
+      await this.copy.sync(); // las páginas como están ahora
       const path = await call<string | null>('viewer.export_text', this.info.id);
       if (path) setStatus(T.textExported(fileName(path)));
     });
@@ -296,7 +295,7 @@ export class DocumentActions {
 
   exportImages() {
     return this._file(async () => {
-      await this.view.sync();
+      await this.copy.sync();
       const result = await call<{ folder: string; count: number } | null>('viewer.export_images', this.info.id);
       if (!result) return;
       if (result.count) setStatus(T.imagesExported(result.count, result.folder));

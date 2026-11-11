@@ -28,9 +28,11 @@
   import { AnnotationEditor } from './annotations/editing.ts';
   import { MODES, type Mode } from './canvas/layout.ts';
   import OcrPanel from './ocr/OcrPanel.svelte';
+  import { DocumentCopy } from './document/copy.ts';
   import { DocumentActions } from './document/operations.ts';
   import { PageEditor } from './document/pages.ts';
   import { printPdf, release as releasePrint } from './document/print.ts';
+  import { documentProperties } from './document/properties.ts';
   import PropertiesDialog from './document/PropertiesDialog.svelte';
   import RedactPanel from './redact/RedactPanel.svelte';
   import { RedactionMarks } from './redact/redaction.ts';
@@ -97,8 +99,13 @@
     },
     onMode: (m) => (view.mode = m),
     onTool: (t) => annotations.applyStyle(t),
-    onDocument: () => annotations.documentShown(),
+    onDocument: () => {
+      copy.shown();
+      annotations.documentShown();
+    },
   });
+  // La copia del documento que sale del visor: a Python, a un archivo o a la impresora.
+  const copy = new DocumentCopy(canvas, docId, () => annotations.commit());
   if (viewport.narrow || viewport.reading) canvas.fitWidth(); // al 100 % no se vería la página entera
   const total = () => canvas.pageCount;
   const goTo = (index: number) => canvas.scrollToPage(Math.max(0, Math.min(total() - 1, index)));
@@ -126,9 +133,7 @@
 
   const actions = new DocumentActions(doc, {
     page: () => canvas.current,
-    sync: () => annotations.sync(),
     commit: () => annotations.commit(),
-    pagesChanged: () => annotations.markChanged(),
     apply(next, page) {
       canvas.setPages(next.pages, next.keys);
       selection.reset();
@@ -142,7 +147,7 @@
       update(next);
       showHistory();
     },
-  }, new PageEditor(canvas));
+  }, new PageEditor(canvas), copy);
 
   // Deshacer y rehacer: primero lo de EmbedPDF (anotaciones); si no queda, las operaciones de
   // página (pages.ts). Tras una operación de página EmbedPDF empieza un historial nuevo, así que
@@ -175,12 +180,15 @@
     }, THUMBS_DELAY);
   }
 
-  const annotations = new Annotations(canvas, docId, {
+  const annotations = new Annotations(canvas, {
     onHistory: ({ canUndo, canRedo }) => {
       history = { canUndo, canRedo };
       showHistory();
     },
-    onChanged: () => actions.annotationsChanged().then(() => update(actions.info)),
+    onChanged: () => {
+      copy.changed();
+      actions.annotationsChanged().then(() => update(actions.info));
+    },
     onSelect: (items) => editor.setSelection(items),
     onRendered: refreshThumbs,
     setTool: (t) => setTool(t),
@@ -189,7 +197,7 @@
   const editor = new AnnotationEditor(canvas, annotations);
   // Python recibe el documento al día antes de leerlo (las páginas las cambia EmbedPDF). En la cola
   // del documento: espera a las operaciones de página pendientes.
-  const syncDocument = () => actions.run(() => annotations.sync());
+  const syncDocument = () => actions.run(() => copy.sync());
   const marks = new RedactionMarks(annotations);
 
   /** Va a una marca de censura y la selecciona (para moverla o borrarla). */
@@ -226,19 +234,17 @@
   async function print() {
     setStatus(T.print.preparing);
     try {
-      await printPdf(await annotations.printCopy());
+      // Sin cifrado: el visor de PDF del diálogo pediría la contraseña.
+      await printPdf(await copy.pdf({ decrypt: true }));
     } catch (err) {
       toast(T.print.error((err as Error).message), 'danger');
     }
   }
 
+  /** Propiedades del documento tal como está en el visor (en la cola: tras las operaciones pendientes). */
   async function showProperties() {
-    try {
-      await syncDocument();
-      openModal(PropertiesDialog, await call('viewer.properties', docId));
-    } catch (err) {
-      toast((err as Error).message, 'danger');
-    }
+    const properties = await actions.run(() => documentProperties(canvas, actions.info));
+    if (properties) openModal(PropertiesDialog, properties);
   }
 
   /** En el móvil el panel tapa la página: se cierra al ir a ella. */

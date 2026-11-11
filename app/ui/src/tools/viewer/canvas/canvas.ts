@@ -154,6 +154,14 @@ export interface CanvasEvents {
   onDocument?(documentId: string): void;
 }
 
+/** Una versión del documento que da Python para abrirla en EmbedPDF (viewer.document_url). */
+interface DocumentVersion {
+  url: string;
+  keys: string[]; // la clave de cada página
+  password: string | null;
+  ocr: number[]; // `uid` de las páginas con el texto del OCR escrito como texto invisible
+}
+
 /** Al montarse una página: (página, documento) → lo que se llama al desmontarla. */
 type MountHook = (index: number, documentId: string | null) => (() => void) | undefined | void;
 
@@ -176,6 +184,7 @@ export class PageCanvas {
   shown: string | null = null; // id en EmbedPDF del documento a la vista
   shownKeys: string[] | null = null; // claves de página de esa versión
   password: string | null = null; // la de esa versión, si está cifrada
+  ocrPages = new Set<number>(); // `uid` de las páginas que llevan el texto del OCR (invisible) en esa versión
   ready = false; // EmbedPDF ya colocó sus páginas
   target = { index: 0, atBottom: false }; // adónde ir en cuanto se pueda
   mounted = new Map<number, HTMLElement>(); // página -> capa enganchada a una página montada
@@ -233,6 +242,13 @@ export class PageCanvas {
     const id = this.shown;
     if (!id || !this.registry) return null;
     return this.registry.getStore().getState().core.documents[id]?.document ?? null;
+  }
+
+  /** Como `documentObject`, pero falla si aún no hay ninguno a la vista. */
+  shownDocument(): PdfDocumentObject {
+    const doc = this.documentObject;
+    if (!doc) throw new Error(t.viewer.document.notShown);
+    return doc;
   }
 
   /**
@@ -633,12 +649,13 @@ export class PageCanvas {
   /** Abre en EmbedPDF la versión del documento que tiene Python y la pone a la vista. */
   async _load(): Promise<void> {
     const seq = ++this.seq;
-    const { url, keys, password } = await call<{ url: string; keys: string[]; password: string | null }>('viewer.document_url', this.docId);
+    const { url, keys, password, ocr } = await call<DocumentVersion>('viewer.document_url', this.docId);
     const response = await fetch(url);
     if (!response.ok) throw new Error(t.viewer.canvas.downloadError(response.status));
     const buffer = await response.arrayBuffer();
     if (this.closed || seq !== this.seq) return; // llegó otra versión más nueva
     this.password = password;
+    this.ocrPages = new Set(ocr);
     const docs = this._plugin<DocumentManagerPlugin>('document-manager').provides();
     const { documentId, task } = await docs.openDocumentBuffer({
       buffer, name: `documento-${this.docId}.pdf`, documentId: `viewer-${this.docId}-${seq}`, autoActivate: false,

@@ -14,12 +14,13 @@ Cada paso deja el visor completo y funcionando. Lo que aún no se migró sigue c
 | 2. Desplazamiento y zoom | `Viewport`, `Scroller`, Zoom, Tiling y Spread de EmbedPDF colocan y dibujan las páginas; nuestras capas (marcas, anotaciones) viven dentro de cada página | Hecho |
 | 3. Selección de texto | Complemento Selection, con nuestra barra flotante (copiar, resaltar, censurar, explicar con IA) | Hecho |
 | 4. Herramientas | Una a una: búsqueda (hecha), anotaciones (hechas), sellos y firmas (hechos), deshacer las operaciones de página (hecho), censura (hecha) e imprimir (hecho) | Hecho |
-| 5. EmbedPDF, dueño del documento | Ver «EmbedPDF, dueño del documento del visor»: etapa 1 (operaciones de página en EmbedPDF) hecha | En curso |
+| 5. EmbedPDF, dueño del documento | Ver «EmbedPDF, dueño del documento del visor»: etapas 1 (operaciones de página) y 2 (guardar, extraer una página, propiedades e imprimir) hechas | En curso |
 
 Al empezar cada paso hay que decidir qué hace Python y qué hace el navegador. El reparto (decidido
 el 2026-11-10, para que la app gaste menos en escritorio y en el navegador): **EmbedPDF es el dueño
-del documento abierto en el visor** (anotaciones, operaciones de página y, en las etapas siguientes,
-guardar y el texto del OCR) y **Python hace lo que EmbedPDF no sabe**: OCR, IA, orientación automática,
+del documento abierto en el visor** (anotaciones, operaciones de página, las copias que salen del
+visor al guardar, extraer una página o imprimir y, en la etapa siguiente, el texto del OCR) y
+**Python hace lo que EmbedPDF no sabe**: OCR, IA, orientación automática,
 censura por patrones y las herramientas de archivos (Unir, Extraer, Dividir, Seguridad). En la censura,
 EmbedPDF pone las marcas y Python las aplica (ver «Censura»).
 
@@ -282,13 +283,13 @@ La barra de propiedades va debajo de la selección, centrada (encima si no cabe,
 tirador de giro de EmbedPDF), y encima mientras se escribe un texto libre.
 
 **Reparto con Python:**
-- EmbedPDF las edita en su copia del documento. Antes de lo que necesita el documento al día en
-  Python (guardar, «Guardar como», exportar una página, cambiar páginas, censurar, OCR),
-  `annotations.ts` (`sync`) sube la copia (`saveAsCopy`) por el servidor local
-  (`ByteServer.expect`, `POST`, `Host.upload_url`) y con `viewer.sync_annotations` esa copia pasa a
-  ser el documento en Python. Espera antes a que termine de cargar la última versión
-  (`canvas.loading`): una copia anterior desharía lo último que hizo Python. El texto de OCR que
-  lleva como texto invisible se quita (ver «Un solo motor»), así no pasa al archivo.
+- EmbedPDF las edita en su copia del documento. Antes de lo que lee el documento en Python
+  (censurar, OCR, IA, exportar texto o imágenes), `document/copy.ts` (`sync`) sube la copia que saca
+  el motor (`saveCopy`, sin el texto del OCR) por el servidor local (`ByteServer.expect`, `POST`,
+  `Host.upload_url`) y con `viewer.sync_annotations` esa copia pasa a ser el documento en Python.
+  Espera antes a que termine de cargar la última versión (`canvas.loading`): una copia anterior
+  desharía lo último que hizo Python. Al guardar, la misma copia se escribe tal cual (ver «Guardar,
+  extraer, propiedades e imprimir»).
 - Los enlaces siguen bloqueados en EmbedPDF: son del documento.
 - `viewer.annotations_changed` avisa del primer cambio: así Python sabe que hay cambios sin guardar
   (aviso al cerrar la pestaña o la app).
@@ -464,8 +465,8 @@ En Python, las pruebas `test_redact_*` (las marcas las pone la prueba en la copi
 Ctrl+P (o «Imprimir documento» en el menú ⋮) abre directamente el diálogo de impresión de
 WebView2, el de Edge: vista previa, impresora, copias, páginas (todas, pares, impares o un rango),
 orientación, color, márgenes, escala, páginas por hoja y doble cara. `document/print.ts` abre en un
-iframe oculto la copia del PDF de EmbedPDF con las anotaciones al día (`Annotations.exportCopy`, la
-misma que recibe Python) y llama a `print()` de su visor de PDF. Se imprime el PDF tal cual:
+iframe oculto la copia del PDF de EmbedPDF con las anotaciones al día (`DocumentCopy.pdf`, la misma
+que se guarda, sin cifrar) y llama a `print()` de su visor de PDF. Se imprime el PDF tal cual:
 vectorial (el texto sale nítido) y sin dibujar antes cada página como imagen (con el PDF de 43 MB y
 120 páginas el diálogo se abre en menos de un segundo). La copia va siempre sin cifrar, así que el
 visor de PDF no pide contraseña.
@@ -476,7 +477,7 @@ diálogos seguidos. Del propio solo se pierden el orden inverso y la orientació
 por página; lo demás lo trae el de WebView2.
 
 El complemento `print` de EmbedPDF hace lo mismo (el PDF en un iframe oculto); no se usa porque
-`print.ts` son unas líneas y usa la copia que ya se exporta para Python.
+`print.ts` son unas líneas y usa la copia que ya saca el motor para guardar.
 
 **Comprobado** (`annot_e2e`, sustituyendo la ventana del iframe: el `print()` del visor de PDF no
 se puede cambiar): Ctrl+P abre el diálogo con un PDF con las tres páginas y sus anotaciones. Y en la
@@ -495,7 +496,7 @@ y lo volvía a abrir en EmbedPDF. Ahora el dueño es EmbedPDF, por etapas que de
 | Etapa | Qué pasa a EmbedPDF | Estado |
 |---|---|---|
 | 1 | Operaciones de página y su deshacer | Hecha |
-| 2 | Guardar, guardar como, propiedades y exportar (Python solo escribe los bytes) | Pendiente |
+| 2 | Guardar, guardar como, extraer una página, propiedades e imprimir (Python solo escribe los bytes) | Hecha |
 | 3 | El texto del OCR y la orientación (Python recibe imágenes de página) | Pendiente |
 | 4 | Quitar el documento del visor de Python (en el navegador, sin copia en `/files`) | Pendiente |
 | 5 | La IA lee el texto a través de EmbedPDF | Pendiente |
@@ -508,9 +509,9 @@ la app tiene el suyo, con el mismo protocolo (su `PdfEngine` funciona igual enci
 
 | Archivo | Qué hace |
 |---|---|
-| `native.ts` | `AppNative`, el `PdfiumNative` de EmbedPDF con lo que le falta: girar (en el archivo), mover, borrar, insertar en blanco, duplicar y guardar una página aparte para devolverla. Lo prueba también Python con el motor real (`tests/engine_task.mjs`, tarea `pages`) |
-| `worker.ts` | El worker: atiende las llamadas por el nombre del método, como el de EmbedPDF |
-| `index.ts` | `createAppEngine`: el worker, el ejecutor que le pasa las llamadas y `PageStructure`, las operaciones nuevas con sus tipos |
+| `native.ts` | `AppNative`, el `PdfiumNative` de EmbedPDF con lo que le falta: girar (en el archivo), mover, borrar, insertar en blanco, duplicar y guardar una página aparte para devolverla; y las copias del documento (`saveCopy`, `extractCopy`, sin el texto del OCR y, para imprimir, sin cifrar), la versión del PDF y la copia rápida del PDF desde el wasm (`saveDocument`). Lo prueba también Python con el motor real (`tests/engine_task.mjs`, tareas `pages`, `copy`, `extract` y `facts`) |
+| `worker.ts` | El worker: atiende las llamadas por el nombre del método, como el de EmbedPDF. Los PDF que devuelve pasan a la ventana sin copiarlos (se transfieren) |
+| `index.ts` | `createAppEngine`: el worker, el ejecutor que le pasa las llamadas y las operaciones nuevas con sus tipos: `PageStructure` (páginas) y `DocumentCopies` (copias) |
 | `encoder.ts`, `encoder-worker.ts` | Codifican en workers las imágenes que dibuja el motor (EmbedPDF no publica el suyo) |
 | `protocol.ts` | Los mensajes entre la ventana y el worker |
 
@@ -531,9 +532,9 @@ por número de página (el `deletePage` de EmbedPDF no lo hace).
   cada página aunque cambie de sitio. Con él Python guarda las palabras del OCR, que vuelven si se
   deshace el giro o el borrado de su página.
 - **Python recibe la estructura** con la copia del documento (`viewer.sync_annotations(id, url,
-  uids)`), antes de lo que lee el documento: guardar, censurar, exportar, propiedades, OCR, IA y la
+  uids)`), antes de lo que lee el documento: censurar, exportar texto o imágenes, OCR, IA y la
   búsqueda de la censura (`syncDocument` en `Viewer.svelte`, en la cola del documento). Si nada
-  cambió, no se sube nada.
+  cambió, no se sube nada. Al guardar llega igual, con la copia que se escribe.
 - **Orientación automática:** Python solo dice cuántos grados girar (`ocr.orientation`); gira el
   visor, y se deshace como cualquier giro.
 - **Cambios sin guardar:** anotaciones o censura (lo dice Python, `annotated` y `redacted`) o una
@@ -546,7 +547,60 @@ a dibujar. Y ya no se crea una copia entera del PDF en cada operación.
 **Comprobado:** en Python, `test_engine_*` (`tests/test_pdf.py`, el motor real) y
 `test_viewer_takes_the_pages_from_the_viewer_copy` y `test_viewer_keeps_ocr_words_while_their_page_moves_or_turns`;
 en la app, scratchpad `pages_e2e.py` (16 comprobaciones: cada operación, la nota de una página
-duplicada, deshacer y rehacer, y que Python lee las páginas al día, sin volver a abrir el documento).
+duplicada, deshacer y rehacer, y las propiedades al día, sin volver a abrir el documento).
+
+### Guardar, extraer, propiedades e imprimir (etapa 2)
+
+Lo que sale del visor lo saca el motor de la app, y Python solo escribe los bytes:
+
+- **`document/copy.ts` (`DocumentCopy`)** es la copia del documento que sale del visor: `pdf()` (el
+  PDF entero), `page(i)` (una página como PDF nuevo), `upload()` y `send()` (subirla a Python) y
+  `sync()` (que pase a ser el documento de Python, solo si cambió algo: lleva la cuenta de los
+  cambios de anotaciones y páginas que Python aún no tiene). Antes estaba dentro de
+  `annotations.ts`.
+- **Sin el texto del OCR:** el motor lo quita por su marca (`ExtraerPDFsOCR`) en una copia abierta
+  aparte, solo de las páginas que lo llevan; el documento a la vista lo conserva para seleccionar y
+  buscar. Cuáles lo llevan lo dice Python al dar la versión (`document_url` → `ocr`, por `uid`), y la
+  copia de una página duplicada también lo lleva (`PageEditor.duplicate`). Antes lo quitaba Python
+  al recibir la copia, y no lo quitaba de las páginas duplicadas: el texto del OCR de una copia
+  acababa en el archivo.
+- **Guardar y «Guardar como»** (`viewer.save` / `save_as(id, url, uids)`): Python abre la copia (así
+  nunca escribe una que no se pueda leer), la escribe tal cual en el archivo y pasa a ser su
+  documento. Antes volvía a generar el PDF entero. Un PDF cifrado sigue cifrado: la copia lo está.
+- **Extraer página** (`viewer.extract_page(id, página, url)`): el motor saca la página con sus
+  anotaciones (sin cifrar, como antes) y Python la escribe donde elija el usuario. Ya no hace falta
+  pasar antes el documento entero a Python.
+- **Propiedades** (`document/properties.ts`): metadatos, versión y cifrado los da el motor, las
+  páginas las sabe el visor y de Python solo viene el tamaño del archivo (`viewer.file_size`). Antes
+  había que pasarle el documento entero para abrir el diálogo. Las fechas salen legibles (antes,
+  `D:20240101…`).
+- **Imprimir:** la misma copia, sin cifrar si lo está (`pdf({ decrypt: true })`, el motor quita el
+  cifrado en la copia aparte). `viewer.print_url` ya no existe.
+- **Exportar texto e imágenes** siguen en Python, con el documento al día (`sync`): el texto pasa a
+  EmbedPDF con la IA (etapa 5).
+
+**La copia rápida.** El `saveDocument` de `PdfiumNative` copiaba el PDF desde la memoria del wasm byte
+a byte (`getValue` por cada byte); `AppNative` lo copia de una vez (`HEAPU8.slice`). Lo usan todas las
+copias: guardar, imprimir, `sync`, las tareas de `engine-tasks.ts` y extraer páginas.
+
+**Medido** (PDF de 47 MB y 250 páginas, versión web, scratchpad `perf_save.py`):
+
+| Qué | Antes | Ahora |
+|---|---|---|
+| Copia del PDF en el motor (también en cada `sync`) | 473–554 ms | 48–66 ms |
+| Python vuelve a generar el PDF al guardar (Pyodide) | 72–95 ms | no se hace |
+| Ctrl+S hasta tener el archivo descargado | — | 559–730 ms |
+| Abrir «Propiedades» con cambios | pasar el documento entero a Python | sin pasarlo |
+
+En Node, la misma copia: 887 ms → 78 ms; en Python de escritorio, volver a generar el PDF costaba
+172 ms y quitar el texto del OCR de todas las páginas, 156 ms.
+
+**Comprobado:** en Python, `test_engine_copy_*`, `test_engine_extracts_*` y
+`test_engine_tells_the_pdf_version_and_encryption` (`tests/test_pdf.py`, el motor real) y
+`test_viewer_save_writes_the_viewer_copy_as_is` (`tests/test_app_backend.py`, que además hace de visor
+en todas las pruebas de guardar); en la app, scratchpad `save_e2e.py` (16 comprobaciones: OCR,
+duplicar y girar, guardar sin el texto del OCR ni volver a abrir el documento, propiedades, extraer e
+imprimir).
 
 ## Un solo motor
 
@@ -554,8 +608,9 @@ Todo usa PDFium: el de EmbedPDF en la ventana y `pypdfium2` en Python (`pdf_core
 usaba PyMuPDF, con licencia AGPL, y había dos motores. Se retiró en la 0.1.29-web.
 
 **Reparto:**
-- **Python tiene una copia del documento** (`entry.doc`, un `pdf_core.pdf.Document`): extrae texto,
-  dibuja para el OCR, guarda. Se lee a memoria: así se puede sobrescribir el archivo abierto.
+- **Python tiene una copia del documento** (`entry.doc`, un `pdf_core.pdf.Document`): extrae texto y
+  dibuja para el OCR. Al guardar escribe la copia que le da el visor. Se lee a memoria: así se puede
+  sobrescribir el archivo abierto.
 - **EmbedPDF edita el documento** (anotaciones y páginas) y, cuando hace falta, su copia pasa a ser el
   documento de Python (`viewer.sync_annotations`). No hay que copiar cambios entre dos documentos: es el mismo archivo.
 - **Lo que el PDFium normal no sabe hacer** lo hace el de EmbedPDF, que tiene funciones propias:
@@ -578,13 +633,14 @@ de antes (`adopt_uids`).
 **PDF cifrados.** El visor abre el PDF cifrado con su contraseña (`document_url` la devuelve), y por eso
 su copia conserva el cifrado y las dos contraseñas sin conocer la de propietario. Los permisos no se
 aplican en el visor (`enforceDocumentPermissions: false`): los comprueba Python al guardar. Para imprimir,
-la copia la da Python sin cifrar (`viewer.print_url`), o el diálogo pediría la contraseña. Un PDF
+el motor saca la copia sin cifrar (`saveCopy` con `decrypt`), o el diálogo pediría la contraseña. Un PDF
 descifrado por PDFium (esa copia y «Desbloquear») ya no está cifrado, pero conserva sin usar el
 diccionario de cifrado antiguo: buscar el texto `/Encrypt` en el archivo da un falso positivo.
 
 **Texto del OCR.** Las palabras reconocidas se escriben como texto invisible en la copia que recibe el
-visor, con la marca de contenido `ExtraerPDFsOCR` (`Page.add_invisible_text`). Al volver la copia se
-quitan por esa marca (`remove_invisible_text`), así el texto reconocido no pasa al archivo.
+visor, con la marca de contenido `ExtraerPDFsOCR` (`Page.add_invisible_text`). El motor del visor las
+quita por esa marca de las copias que salen de él (`AppNative.saveCopy`), así el texto reconocido no
+pasa al archivo ni a Python.
 
 **Diferencias con PDFium que importan:**
 - Las cajas de los caracteres pueden ser las del glifo o las holgadas, con la altura de la fuente
@@ -640,8 +696,8 @@ En `app/ui/package.json`, con versiones fijas (todas iguales, 2.15.1):
 - `@embedpdf/core`, `@embedpdf/engines`, `@embedpdf/pdfium`;
 - `@embedpdf/models`: geometría (`transformRect`);
 - los complementos `document-manager`, `viewport`, `scroll`, `spread`, `rotate`, `render`, `zoom`,
-  `tiling`, `interaction-manager`, `selection`, `search`, `annotation`, `history`, `export`,
-  `redaction`, `stamp` y `signature`;
+  `tiling`, `interaction-manager`, `selection`, `search`, `annotation`, `history`, `redaction`,
+  `stamp` y `signature` (`export` se quitó: las copias las saca el motor de la app);
 - `@embedpdf/default-stamps` 0.0.1 (MIT): los sellos estándar, con su manifiesto en español.
 
 Y `svelte` fijado en 5.51.0 (ver «Anotaciones y sellos»).
@@ -676,3 +732,8 @@ Al cambiar las páginas de un documento abierto (operaciones de página), que Em
 - **El giro de una página cargada vale 0:** con la rotación normalizada, `FPDFPage_GetRotation` no da el
   giro real; `AppNative` lo lee del diccionario de la página (`EPDF_GetPageRotationByIndex`).
 - **`extractText` de una página vacía** devuelve caracteres sin sentido (en el motor de EmbedPDF).
+
+Al sacar copias del documento:
+
+- **Copia lenta (`PdfiumNative.saveDocument`):** copia el PDF desde el wasm byte a byte; con 47 MB,
+  medio segundo en el navegador. `AppNative` lo sustituye por una copia de una vez.
