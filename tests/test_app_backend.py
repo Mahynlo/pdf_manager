@@ -1143,20 +1143,23 @@ class FakeAgent:
 
     created: list = []
 
-    def __init__(self, pdf_path, api_key, provider, model, ocr_overrides=None):
-        self.args = (Path(pdf_path).name, api_key, provider, model, ocr_overrides)
+    def __init__(self, api_key, provider, model, base_url, context):
+        self.args = (api_key, provider, model)
+        self.server = (base_url, context)
+        self.docs = []
         FakeAgent.created.append(self)
 
-    def chat(self, message, history):
+    def chat(self, doc, message, history):
+        self.docs.append(doc)
         return f"**Respuesta** a «{message}» con {len(history)} mensajes previos <script>x</script> ![i](http://x/y.png)"
 
-    def summarize(self):
+    def summarize(self, doc):
         return "Resumen del agente"
 
-    def extract_key_info(self):
+    def extract_key_info(self, doc):
         raise RuntimeError("429 RESOURCE_EXHAUSTED")
 
-    def suggest_redactions(self, sensitivity):
+    def suggest_redactions(self, doc, sensitivity):
         return (f"nivel {sensitivity} ```json\n"
                 '{"redacciones": [{"texto": "Juan Pérez", "categoria": "nombre", "motivo": "persona", "tipo": "literal"},'
                 ' {"texto": "\\\\d{9}", "categoria": "teléfono", "tipo": "patron"}, {"texto": ""}]}\n```')
@@ -1211,13 +1214,85 @@ def test_ai_falls_back_to_basic_mode_without_the_provider_client(tmp_path, isola
         FakeViewer(viewer, doc_id).sync()
         assert not svc.config()["available"]
         assert svc.chat(doc_id, "Juan")["messages"][1]["mode"] == "básico"
-
-        # Instalado el de otro proveedor: el agente existe, pero este sigue en modo básico.
-        monkeypatch.setattr(ai, "_installed", lambda module: module == ai.CLIENTS["openai"])
-        assert svc.config()["available"]
-        assert svc.chat(doc_id, "Juan")["messages"][1]["mode"] == "básico"
+        with pytest.raises(UserError, match="no está instalado"):
+            svc.models("google")
     finally:
         viewer.close()
+
+
+def test_ai_local_model_needs_no_key_but_a_model_and_a_safe_address(tmp_path, isolated_ai_config):
+    from app.backend.services import ai
+
+    pdf = _redact_pdf(tmp_path / "contrato.pdf")
+    viewer = ViewerService(FakeHost())
+    FakeAgent.created = []
+    svc = AiService(viewer, agent_factory=FakeAgent)
+    try:
+        doc_id = viewer.open(str(pdf))["id"]
+        FakeViewer(viewer, doc_id).sync()
+        config = svc.set_config("local")
+        local = next(p for p in config["providers"] if p["id"] == "local")
+        assert local["local"] and not local["needs_key"]
+        assert config["base_url"] == "http://localhost:11434/v1" and config["context"] == 4096
+        # Sin modelo elegido, modo básico (los servidores locales no tienen uno por defecto).
+        assert svc.chat(doc_id, "Juan")["messages"][1]["mode"] == "básico" and not FakeAgent.created
+
+        for bad in ("http://ejemplo.com/v1", "ftp://localhost/v1", "http://usuario:clave@localhost/v1",
+                    "http://localhost/v1?x=1", "localhost:11434", "http://169.254.169.254/v1", "http://localhost:99999"):
+            with pytest.raises(UserError) as error:
+                svc.set_config("local", model="otro", base_url=bad)
+            assert error.value.code == "bad_address", bad
+        with pytest.raises(UserError):
+            svc.set_config("local", model="otro", context=100)
+        assert svc.config()["model"] == "" and svc.config()["context"] == 4096  # nada se guardó
+
+        for good in ("http://127.0.0.1:1234/v1", "http://192.168.1.20:11434/v1", "https://ia.ejemplo.com/v1"):
+            assert svc.set_config("local", base_url=good)["base_url"] == good
+        config = svc.set_config("local", model="qwen3:8b", base_url="http://localhost:1234/v1/", context=16384)
+        assert config["base_url"] == "http://localhost:1234/v1" and config["context"] == 16384
+
+        answer = svc.chat(doc_id, "Hola")["messages"][1]
+        assert answer["mode"] == "ia"
+        agent = FakeAgent.created[0]
+        assert agent.args == ("", "local", "qwen3:8b") and agent.server == ("http://localhost:1234/v1", 16384)
+        error = svc.key_data(doc_id)["messages"][1]
+        assert error["role"] == "error" and "servidor de IA local" in error["text"]
+
+        # Gemini y OpenAI siempre usan su propia dirección: la clave no puede ir a otro servidor.
+        assert svc.set_config("google", "AIza-1", base_url="https://otro.ejemplo/v1")["base_url"].startswith(
+            "https://generativelanguage.googleapis.com/")
+        assert ai.PROVIDERS["openai"].base_url == "https://api.openai.com/v1"
+    finally:
+        viewer.close()
+
+
+def test_ai_lists_the_models_of_the_server(isolated_ai_config, monkeypatch):
+    from app.backend.services import ai
+    from pdf_core.agent import pdf_agent
+
+    asked = []
+
+    def list_models(provider, key, url):
+        asked.append((provider, key, url))
+        if provider == "openai":
+            raise RuntimeError(f"401 clave {key} incorrecta")
+        return ["llama3.2", "qwen3:8b"]
+
+    monkeypatch.setattr(ai, "_installed", lambda module: True)
+    monkeypatch.setattr(pdf_agent, "list_models", list_models)
+    svc = AiService(ViewerService(FakeHost()))
+    assert svc.models("local", "http://localhost:1234/v1") == ["llama3.2", "qwen3:8b"]
+    assert asked[-1] == ("local", "", "http://localhost:1234/v1")
+    with pytest.raises(UserError, match="clave de API"):
+        svc.models("google")  # sin clave escrita ni guardada
+    svc.set_config("google", "AIza-guardada")
+    svc.models("google", "http://localhost/no-se-usa")
+    assert asked[-1] == ("google", "AIza-guardada", "https://generativelanguage.googleapis.com/v1beta/openai/")
+    with pytest.raises(UserError) as error:
+        svc.models("openai", api_key="sk-secreta")
+    assert "sk-secreta" not in str(error.value) and "401" in str(error.value)
+    with pytest.raises(UserError, match="https"):
+        svc.models("local", "http://ejemplo.com/v1")
 
 
 def test_ai_uses_the_agent_when_configured(tmp_path, isolated_ai_config):
@@ -1246,11 +1321,14 @@ def test_ai_uses_the_agent_when_configured(tmp_path, isolated_ai_config):
 
         found = svc.sensitive(doc_id, "high")["messages"][1]
         assert [(s["texto"], s["tipo"]) for s in found["suggestions"]] == [("Juan Pérez", "literal"), ("\\d{9}", "patron")]
-        assert len(FakeAgent.created) == 1 and FakeAgent.created[0].args[:4] == ("contrato.pdf", "sk-123", "openai", "gpt-4o-mini")
+        assert len(FakeAgent.created) == 1 and FakeAgent.created[0].args == ("sk-123", "openai", "gpt-4o-mini")
+        # El agente recibe el texto que tiene el visor (con el de OCR) y los metadatos, no el archivo.
+        doc = FakeAgent.created[0].docs[0]
+        assert doc.name == "contrato.pdf" and len(doc.pages) == 4 and "juan@correo.com" in doc.pages[1]
 
         svc.set_config("openai", None, "gpt-4.1")  # al cambiar la configuración se rehace el agente
         svc.chat(doc_id, "De nuevo")
-        assert len(FakeAgent.created) == 2 and FakeAgent.created[1].args[3] == "gpt-4.1"
+        assert len(FakeAgent.created) == 2 and FakeAgent.created[1].args[2] == "gpt-4.1"
     finally:
         viewer.close()
 
@@ -1280,7 +1358,7 @@ def test_ai_errors_never_show_the_api_key(tmp_path, isolated_ai_config, caplog):
         def __init__(self, *args, **kw):
             self.key = kw["api_key"]
 
-        def summarize(self):
+        def summarize(self, doc):
             raise RuntimeError(f"400 Bad Request for url https://api.example/v1?key={self.key}")
 
     pdf = _redact_pdf(tmp_path / "contrato.pdf")

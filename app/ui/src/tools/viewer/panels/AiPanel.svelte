@@ -1,15 +1,16 @@
 <!--
-  Pestaña «IA» del panel lateral (ai_dock.py en Qt): chat sobre el documento y acciones
-  rápidas (resumen, datos clave, datos sensibles). Las respuestas las da el servicio
-  `ai`: con el agente si hay proveedor y clave configurados, o en modo básico con el
+  Pestaña «IA» del panel lateral (ai_dock.py en Qt): un chat sobre el documento con las
+  acciones rápidas (resumen, datos clave, datos sensibles) a mano sobre el cuadro de texto.
+  Las respuestas las da el servicio `ai`: con el agente si hay un proveedor listo (Gemini u
+  OpenAI con su clave, o una IA local con su dirección y modelo), o en modo básico con el
   texto del documento. Los datos sensibles detectados se pueden enviar a «Censura».
 -->
 <script lang="ts">
   import { tick } from 'svelte';
   import { call } from '$lib/api.ts';
   import PasswordField from '$lib/components/PasswordField.svelte';
-  import SubTabs from '$lib/components/SubTabs.svelte';
   import Icon from '$lib/Icon.svelte';
+  import { openMenu } from '$lib/menu.svelte.ts';
   import { setStatus, toast } from '$lib/ui.ts';
   import { t } from '$texts';
 
@@ -29,12 +30,23 @@
     suggestions?: Suggestion[];
   }
 
+  interface Provider {
+    id: string;
+    label: string;
+    needs_key: boolean;
+    local: boolean; // dirección del servidor y contexto configurables
+    base_url: string; // la de por defecto
+    model: string; // el de por defecto ('' = hay que elegirlo)
+  }
+
   interface AiConfig {
-    available: boolean; // están instaladas las bibliotecas del agente
+    available: boolean; // está instalado el cliente del agente
     has_key: boolean;
     provider: string;
     model: string;
-    providers: { id: string; label: string }[];
+    base_url: string;
+    context: number;
+    providers: Provider[];
   }
 
   /** Respuesta de `ai.state`, `ai.chat`, `ai.summary`… */
@@ -54,23 +66,38 @@
   } = $props();
 
   let messages = $state.raw<Message[]>([]);
-  let pending = $state<string | null>(null); // pregunta enviada, a la espera de respuesta
+  let fresh = $state(0); // desde qué mensaje entran con animación (los cargados al abrir, no)
+  let pending = $state<string | null>(null); // lo pedido, a la espera de respuesta
   let busy = $state(false);
+  let elapsed = $state(0); // segundos esperando la respuesta
+  let retry = $state<(() => void) | null>(null); // repetir lo último si el proveedor falló
+  let copied = $state(-1); // mensaje recién copiado (muestra la marca un momento)
+  let atBottom = $state(true);
   let loaded = false;
-  let tab = $state(0);
   let question = $state('');
   let level = $state('medium');
   let list = $state<HTMLDivElement>();
+  let field = $state<HTMLTextAreaElement>();
 
   let config = $state.raw<AiConfig | null>(null);
   let settingsOpen = $state(false);
   let provider = $state('');
   let apiKey = $state('');
   let model = $state('');
-  let modelPlaceholder = $state(T.model);
-  let keyField = $state<PasswordField>();
+  let baseUrl = $state('');
+  let context = $state(0);
+  let models = $state.raw<string[]>([]); // los que ofrece el servidor («Buscar modelos»)
+  let searching = $state(false);
+  let providerField = $state<HTMLSelectElement>();
 
-  const ready = $derived(config && config.available && config.has_key);
+  /** El proveedor elegido en el formulario. */
+  const chosen = $derived(config?.providers.find((p) => p.id === provider));
+  const ready = $derived.by(() => {
+    const current = config?.providers.find((p) => p.id === config!.provider);
+    return !!(config?.available && current && config.model && (config.has_key || !current.needs_key));
+  });
+  const providerLabel = $derived(config?.providers.find((p) => p.id === config!.provider)?.label ?? config?.provider);
+  const empty = $derived(!messages.length && !busy);
 
   // La primera vez que la pestaña se ve, carga la conversación.
   $effect(() => {
@@ -80,9 +107,80 @@
     }
   });
 
+  // Cuenta los segundos de espera (los modelos locales pueden tardar).
+  $effect(() => {
+    if (!busy) return;
+    const started = Date.now();
+    elapsed = 0;
+    const timer = setInterval(() => (elapsed = Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  });
+
+  // ── Peticiones ─────────────────────────────────────────────────────────
+  /** Pregunta al asistente (`method` del servicio `ai`), con el texto del documento al día en Python. */
+  const ask = (method: string, ...args: unknown[]) => syncText().then(() => call<AiResult>(method, docId, ...args));
+
+  async function load(request: Promise<AiResult>) {
+    try {
+      const result = await request;
+      setConfig(result.config);
+      messages = result.messages;
+      fresh = messages.length;
+      retry = null;
+      toBottom(false);
+    } catch (err) {
+      toast((err as Error).message, 'danger');
+    }
+  }
+
+  /**
+   * Muestra lo pedido enseguida y la respuesta cuando llega (las consultas tardan).
+   * `start` crea la petición: si el proveedor falla, «Reintentar» la repite.
+   */
+  async function runRequest(start: () => Promise<AiResult>, shown: string, typed = false) {
+    if (busy) return;
+    busy = true;
+    pending = shown;
+    retry = null;
+    toBottom();
+    try {
+      const result = await start();
+      setConfig(result.config);
+      messages = [...messages, ...result.messages];
+      if (result.messages.at(-1)?.role === 'error') retry = () => runRequest(start, shown, typed);
+    } catch (err) {
+      if (typed && !question) question = shown; // no se pierde lo escrito
+      toast((err as Error).message, 'danger');
+    } finally {
+      busy = false;
+      pending = null;
+      reveal();
+    }
+  }
+
+  function send() {
+    const message = question.trim();
+    if (!message || busy) return;
+    question = '';
+    runRequest(() => ask('ai.chat', message), message, true);
+  }
+
+  const summary = () => runRequest(() => ask('ai.summary'), T.summary);
+  const keyData = () => runRequest(() => ask('ai.key_data'), T.keyData);
+
+  function sensitive(value = level) {
+    level = value;
+    runRequest(() => ask('ai.sensitive', value), T.sensitive);
+  }
+
+  /** «Datos sensibles» pregunta antes con qué sensibilidad buscar. */
+  function sensitiveMenu(ev: MouseEvent) {
+    openMenu(ev.currentTarget as Element, T.levels.map(([value, label]) => (
+      { label, checked: value === level, onSelect: () => sensitive(value) })));
+  }
+
   /** «Explicar con Agente IA» de la selección. */
   export function explain(text: string) {
-    tab = 0;
     if (!loaded) {
       loaded = true;
       load(call<AiResult>('ai.state', docId));
@@ -91,168 +189,127 @@
     send();
   }
 
-  function send() {
-    const message = question.trim();
-    if (!message || busy) return;
-    question = '';
-    runRequest(ask('ai.chat', message), message);
-  }
-
-  async function scrollDown() {
-    await tick();
-    if (list) list.scrollTop = list.scrollHeight;
-  }
-
-  async function load(request: Promise<AiResult>) {
-    try {
-      const result = await request;
-      setConfig(result.config);
-      messages = result.messages;
-      scrollDown();
-    } catch (err) {
-      toast((err as Error).message, 'danger');
-    }
-  }
-
-  /** Muestra la pregunta enseguida y la respuesta cuando llega (las consultas tardan). */
-  /** Pregunta al asistente (`method` del servicio `ai`), con el texto del documento al día en Python. */
-  const ask = (method: string, ...args: unknown[]) => syncText().then(() => call<AiResult>(method, docId, ...args));
-
-  async function runRequest(request: Promise<AiResult>, asked: string | null = null) {
-    if (busy) return;
-    busy = true;
-    pending = asked;
-    scrollDown();
-    try {
-      const result = await request;
-      setConfig(result.config);
-      messages = [...messages, ...result.messages];
-      tab = 0;
-    } catch (err) {
-      if (asked && !question) question = asked;
-      toast((err as Error).message, 'danger');
-    } finally {
-      busy = false;
-      pending = null;
-      scrollDown();
-    }
-  }
-
   function sendToRedact(items: Suggestion[]) {
     redact(items);
     setStatus(T.sent(items.length));
   }
 
+  async function copy(message: Message, i: number) {
+    try {
+      await navigator.clipboard.writeText(message.text ?? '');
+      copied = i;
+      setStatus(T.copied);
+      setTimeout(() => copied === i && (copied = -1), 1500);
+    } catch (err) {
+      toast(T.copyError((err as Error).message), 'danger');
+    }
+  }
+
+  // ── Desplazamiento ─────────────────────────────────────────────────────
+  const motion = (): ScrollBehavior => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
+
+  function scrolled() {
+    if (list) atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 48;
+  }
+
+  async function toBottom(smooth = true) {
+    await tick();
+    list?.scrollTo({ top: list.scrollHeight, behavior: smooth ? motion() : 'auto' });
+  }
+
+  /** La respuesta nueva desde su principio: las largas no saltan al final. */
+  async function reveal() {
+    await tick();
+    const last = [...(list?.querySelectorAll<HTMLElement>('.ai-row') ?? [])].at(-1);
+    if (list && last) list.scrollTo({ top: last.offsetTop - 8, behavior: motion() });
+  }
+
+  function questionKey(ev: KeyboardEvent) {
+    if (ev.key !== 'Enter' || ev.shiftKey || ev.isComposing) return; // Mayús+Intro: salto de línea
+    ev.preventDefault();
+    send();
+  }
+
   // ── Proveedor y clave ──────────────────────────────────────────────────
   function setConfig(next: AiConfig) {
     config = next;
+    if (settingsOpen) return; // no pisa lo que se está escribiendo
     provider = next.provider;
     model = next.model;
+    baseUrl = next.base_url;
+    context = next.context;
   }
 
   async function toggleSettings(show = !settingsOpen) {
     settingsOpen = show;
+    if (!show && config) setConfig(config); // al cancelar, vuelve lo guardado
     await tick();
-    if (show) keyField?.focus();
+    if (show) providerField?.focus();
   }
 
   async function saveSettings() {
     try {
-      const next = await call<AiConfig>('ai.set_config', provider, apiKey, model);
+      const local = chosen?.local;
+      const next = await call<AiConfig>('ai.set_config', provider, apiKey, model,
+                                        local ? baseUrl : null, local ? context : null);
       apiKey = '';
+      settingsOpen = false;
       setConfig(next);
       setStatus(T.saved);
-      toggleSettings(false);
     } catch (err) {
       toast((err as Error).message, 'danger');
     }
   }
 
+  /** Al cambiar de proveedor, sus valores (los guardados si es el configurado). */
   function providerChanged() {
-    model = '';
-    modelPlaceholder = T.modelDefault;
+    const saved = config && provider === config.provider;
+    model = saved ? config!.model : '';
+    baseUrl = saved ? config!.base_url : (chosen?.base_url ?? '');
+    apiKey = '';
+    models = [];
   }
 
-  function questionKey(ev: KeyboardEvent) {
-    if (ev.key !== 'Enter') return;
-    ev.preventDefault();
-    send();
+  async function searchModels() {
+    searching = true;
+    try {
+      models = await call<string[]>('ai.models', provider, chosen?.local ? baseUrl : null, apiKey);
+      setStatus(T.modelsFound(models.length));
+    } catch (err) {
+      toast((err as Error).message, 'danger');
+    } finally {
+      searching = false;
+    }
   }
 
-  const providerLabel = $derived(config?.providers.find((p) => p.id === config!.provider)?.label ?? config?.provider);
+  /** La nota bajo el formulario: qué falta para que responda el agente. */
+  const note = $derived.by(() => {
+    if (!config?.available) return T.notInstalled;
+    if (chosen?.local) return model.trim() ? T.localReady : T.localNoModel;
+    if (provider === config.provider && config.has_key) return T.hasKey;
+    return T.noKey;
+  });
 </script>
 
 {#snippet button(icon: string, title: string, onclick: () => void)}
   <button class="btn btn--icon btn--sm" type="button" {title} aria-label={title} {onclick}><Icon name={icon} /></button>
 {/snippet}
 
-{#snippet action(icon: string, label: string, onclick: () => void)}
-  <button class="btn btn--block ai-action" type="button" disabled={busy} {onclick}><Icon name={icon} />{label}</button>
+{#snippet avatar(icon = 'sparkles')}
+  <span class="ai-avatar" aria-hidden="true"><Icon name={icon} size={13} /></span>
 {/snippet}
 
-{#snippet chat()}
-  <div class="ai-chat">
-    <div class="ai-messages" role="log" aria-live="polite" bind:this={list}>
-      {#each messages as message, i (i)}
-        {#if message.role === 'user'}
-          <div class="ai-msg ai-msg--user">{message.text}</div>
-        {:else if message.role === 'error'}
-          <div class="ai-msg ai-msg--error"><Icon name="circle-alert" size={14} /><span>{message.text}</span></div>
-        {:else}
-          <div class="ai-msg ai-msg--assistant">
-            <!-- HTML generado por el backend sin HTML crudo, imágenes ni enlaces (seguro) -->
-            <div class="ai-msg__body">{@html message.html}</div>
-            {#if message.suggestions?.length}
-              <div class="ai-suggestions">
-                {#each message.suggestions as s, j (j)}
-                  <div class="ai-suggestion" title={s.motivo || ''}>
-                    <span class="caption">[{s.categoria}]</span>
-                    <span class="ai-suggestion__text">{s.texto}</span>
-                    <button class="btn btn--sm" type="button" onclick={() => sendToRedact([s])}><Icon name="eraser" size={14} />{T.redact}</button>
-                  </div>
-                {/each}
-                {#if message.suggestions.length > 1}
-                  <button class="btn btn--sm btn--block" type="button" onclick={() => sendToRedact(message.suggestions!)}>
-                    <Icon name="scissors" size={14} />{T.redactAll}
-                  </button>
-                {/if}
-              </div>
-            {/if}
-          </div>
-        {/if}
-      {/each}
-      {#if pending}<div class="ai-msg ai-msg--user">{pending}</div>{/if}
-      {#if busy}
-        <div class="ai-msg ai-msg--pending"><Icon name="sparkles" size={14} /> {T.thinking}</div>
-      {:else if !messages.length}
-        <div class="ai-welcome muted">
-          <Icon name="sparkles" size={18} />
-          <p>{T.welcome}</p>
-        </div>
-      {/if}
-    </div>
-    <div class="ai-input">
-      <input bind:value={question} class="input" type="text" placeholder={T.question}
-             aria-label={T.questionLabel} onkeydown={questionKey} />
-      <button class="btn btn--primary btn--icon" type="button" title={T.send} aria-label={T.send} disabled={busy} onclick={send}>
-        <Icon name="send" />
-      </button>
-    </div>
-  </div>
+{#snippet starter(icon: string, title: string, text: string, onclick: (ev: MouseEvent) => void)}
+  <button class="ai-starter" type="button" {onclick}>
+    <span class="ai-starter__icon"><Icon name={icon} /></span>
+    <span class="ai-starter__text"><strong>{title}</strong><span>{text}</span></span>
+  </button>
 {/snippet}
 
-{#snippet actions()}
-  <div class="ai-actions">
-    {@render action('file-text', T.summary, () => runRequest(ask('ai.summary')))}
-    {@render action('bar-chart', T.keyData, () => runRequest(ask('ai.key_data')))}
-    <label class="field">
-      <span class="caption">{T.sensitivity}</span>
-      <select class="input select" aria-label={T.sensitivityLabel} bind:value={level}>
-        {#each T.levels as [value, label] (value)}<option {value}>{label}</option>{/each}
-      </select>
-    </label>
-    {@render action('shield', T.sensitive, () => runRequest(ask('ai.sensitive', level)))}
-  </div>
+{#snippet chip(icon: string, label: string, onclick: (ev: MouseEvent) => void, menu = false)}
+  <button class="ai-chip" type="button" disabled={busy} {onclick} aria-haspopup={menu ? 'menu' : undefined}>
+    <Icon name={icon} size={14} />{label}{#if menu}<Icon name="chevron-down" size={12} />{/if}
+  </button>
 {/snippet}
 
 <div class="ai-panel">
@@ -265,7 +322,7 @@
       </span>
     {/if}
     <span class="grow"></span>
-    {@render button('trash', T.clear, () => load(call<AiResult>('ai.clear', docId)))}
+    {#if messages.length}{@render button('trash', T.clear, () => load(call<AiResult>('ai.clear', docId)))}{/if}
     {@render button('settings', T.settings, () => toggleSettings())}
     {@render button('x', T.close, close)}
   </div>
@@ -273,36 +330,148 @@
   <div class="ai-settings" hidden={!settingsOpen}>
     <label class="field">
       <span class="caption">{T.provider}</span>
-      <select class="input select" aria-label={T.provider} bind:value={provider} onchange={providerChanged}>
+      <select class="input select" aria-label={T.provider} bind:this={providerField} bind:value={provider}
+              onchange={providerChanged}>
         {#each config?.providers ?? [] as p (p.id)}<option value={p.id}>{p.label}</option>{/each}
       </select>
     </label>
+    {#if chosen?.local}
+      <label class="field">
+        <span class="caption">{T.baseUrl}</span>
+        <input bind:value={baseUrl} class="input" type="url" placeholder={chosen.base_url} aria-label={T.baseUrl}
+               spellcheck="false" autocomplete="off" />
+        <span class="caption muted">{T.baseUrlHint}</span>
+      </label>
+    {/if}
     <div class="field">
-      <span class="caption">{T.apiKey}</span>
-      <PasswordField bind:this={keyField} bind:value={apiKey} placeholder={T.apiKeyPlaceholder} />
+      <span class="caption">{chosen?.needs_key === false ? T.apiKeyOptional : T.apiKey}</span>
+      <PasswordField bind:value={apiKey} placeholder={T.apiKeyPlaceholder} />
     </div>
-    <label class="field">
+    <div class="field">
       <span class="caption">{T.model}</span>
-      <input bind:value={model} class="input" type="text" placeholder={modelPlaceholder} aria-label={T.model} />
-    </label>
-    <p class="caption ai-settings__note">
-      {#if !config?.available}
-        {T.notInstalled}
-      {:else if config.has_key}
-        {T.hasKey}
-      {:else}
-        {T.noKey}
-      {/if}
-    </p>
+      <div class="ai-settings__row">
+        <input bind:value={model} class="input" type="text" list="ai-models" aria-label={T.model}
+               placeholder={chosen?.model || T.modelPick} spellcheck="false" autocomplete="off" />
+        <button class="btn" type="button" title={T.searchModelsTip} disabled={searching || !config?.available}
+                onclick={searchModels}><Icon name="search" />{T.searchModels}</button>
+      </div>
+      <datalist id="ai-models">{#each models as name (name)}<option value={name}></option>{/each}</datalist>
+    </div>
+    {#if chosen?.local}
+      <label class="field">
+        <span class="caption">{T.context}</span>
+        <input bind:value={context} class="input" type="number" min="2048" step="1024" aria-label={T.context} />
+        <span class="caption muted">{T.contextHint}</span>
+      </label>
+    {/if}
+    <p class="caption ai-settings__note">{note}</p>
     <div class="dialog__actions">
       <button class="btn" type="button" onclick={() => toggleSettings(false)}>{T.cancel}</button>
       <button class="btn btn--primary" type="button" onclick={saveSettings}><Icon name="check" />{T.save}</button>
     </div>
   </div>
 
-  <SubTabs bind:current={tab} tabs={[
-    { label: T.tabs.chat, icon: 'message-circle', panel: chat },
-    { label: T.tabs.actions, icon: 'zap', panel: actions },
-  ]} />
-  <div class="progress progress--busy" hidden={!busy}><span></span></div>
+  <div class="ai-chat">
+    <div class="ai-messages" role="log" aria-live="polite" aria-busy={busy} bind:this={list} onscroll={scrolled}>
+      {#if empty}
+        <div class="ai-welcome">
+          <span class="ai-welcome__icon"><Icon name="sparkles" size={22} /></span>
+          <h3 class="ai-welcome__title">{T.welcomeTitle}</h3>
+          <p class="ai-welcome__text muted">{T.welcome}</p>
+          <div class="ai-starters">
+            {@render starter('file-text', T.summary, T.summaryTip, summary)}
+            {@render starter('bar-chart', T.keyData, T.keyDataTip, keyData)}
+            {@render starter('shield', T.sensitive, T.sensitiveTip, sensitiveMenu)}
+            {@render starter('message-circle', T.about, T.aboutTip, () => { question = T.aboutQuestion; send(); })}
+          </div>
+        </div>
+      {/if}
+
+      {#each messages as message, i (i)}
+        {#if message.role === 'user'}
+          <div class="ai-row ai-row--user" class:is-new={i >= fresh}>
+            <div class="ai-msg ai-msg--user">{message.text}</div>
+          </div>
+        {:else if message.role === 'error'}
+          <div class="ai-row" class:is-new={i >= fresh}>
+            {@render avatar('circle-alert')}
+            <div class="ai-row__main">
+              <div class="ai-msg ai-msg--error">{message.text}</div>
+              {#if retry && !busy && i === messages.length - 1}
+                <div class="ai-msg__tools is-shown">
+                  <button class="btn btn--sm" type="button" onclick={retry}><Icon name="rotate-cw" size={14} />{T.retry}</button>
+                </div>
+              {/if}
+            </div>
+          </div>
+        {:else}
+          <div class="ai-row" class:is-new={i >= fresh}>
+            {@render avatar()}
+            <div class="ai-row__main">
+              <div class="ai-msg ai-msg--assistant">
+                <!-- HTML generado por el backend sin HTML crudo, imágenes ni enlaces (seguro) -->
+                <div class="ai-msg__body">{@html message.html}</div>
+                {#if message.suggestions?.length}
+                  <div class="ai-suggestions">
+                    {#each message.suggestions as s, j (j)}
+                      <div class="ai-suggestion" title={s.motivo || ''}>
+                        <span class="ai-suggestion__tag">{s.categoria}</span>
+                        <span class="ai-suggestion__text">{s.texto}</span>
+                        <button class="btn btn--sm" type="button" onclick={() => sendToRedact([s])}><Icon name="eraser" size={14} />{T.redact}</button>
+                      </div>
+                    {/each}
+                    {#if message.suggestions.length > 1}
+                      <button class="btn btn--sm btn--block" type="button" onclick={() => sendToRedact(message.suggestions!)}>
+                        <Icon name="scissors" size={14} />{T.redactAll}
+                      </button>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+              <div class="ai-msg__tools">
+                <button class="btn btn--icon btn--sm" type="button" title={T.copy} aria-label={T.copy}
+                        onclick={() => copy(message, i)}><Icon name={copied === i ? 'check' : 'copy'} size={14} /></button>
+              </div>
+            </div>
+          </div>
+        {/if}
+      {/each}
+
+      {#if busy}
+        {#if pending}
+          <div class="ai-row ai-row--user is-new"><div class="ai-msg ai-msg--user">{pending}</div></div>
+        {/if}
+        <div class="ai-row ai-row--typing is-new">
+          {@render avatar()}
+          <div class="ai-msg ai-msg--assistant ai-typing">
+            <span class="ai-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="ai-typing__label">{elapsed < 3 ? T.reading : T.thinking(elapsed)}</span>
+          </div>
+        </div>
+      {/if}
+    </div>
+
+    <div class="ai-composer">
+      {#if !atBottom}
+        <button class="ai-jump" type="button" title={T.toBottom} aria-label={T.toBottom} onclick={() => toBottom()}>
+          <Icon name="arrow-down" size={16} />
+        </button>
+      {/if}
+      {#if !empty}
+        <div class="ai-chips" role="toolbar" aria-label={T.quick}>
+          {@render chip('file-text', T.summaryShort, summary)}
+          {@render chip('bar-chart', T.keyDataShort, keyData)}
+          {@render chip('shield', T.sensitiveShort, sensitiveMenu, true)}
+        </div>
+      {/if}
+      <div class="ai-input" class:is-busy={busy}>
+        <textarea bind:this={field} bind:value={question} class="ai-input__field" rows="1" placeholder={T.question}
+                  aria-label={T.questionLabel} title={T.questionTip} onkeydown={questionKey}></textarea>
+        <button class="ai-input__send" type="button" title={T.send} aria-label={T.send}
+                disabled={busy || !question.trim()} onclick={() => { send(); field?.focus(); }}>
+          <Icon name="arrow-up" size={16} />
+        </button>
+      </div>
+    </div>
+  </div>
 </div>

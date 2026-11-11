@@ -32,7 +32,7 @@ en la ventana. Antes el backend usaba PyMuPDF, que es AGPL.
 | `security.py` | Detectar cifrado, desbloquear y leer permisos; máscara de permisos para cifrar | `services/security.py`, `services/viewer.py` |
 | `redaction.py` | Censura: buscar términos, patrones y palabras de OCR | `services/redact.py` |
 | `censorship_profiles.py` | Perfiles de censura (`~/.extraer_pdfs_profiles.json`) | `services/redact.py` |
-| `agent/` (`pdf_agent`, `rag`, `extractor`, `config`) | Agente de IA (Gemini u OpenAI) y su configuración (`~/.extraer_pdfs_config.json`). Dependencias opcionales: `config` funciona sin ellas | `services/ai.py` |
+| `agent/` (`pdf_agent`, `providers`, `rag`, `config`, `keystore`) | Agente de IA (Gemini, OpenAI o IA local por la API de OpenAI) y su configuración (`~/.extraer_pdfs_config.json`, claves cifradas). Su cliente (`openai`) no está en el navegador: `config` y `providers` funcionan sin él | `services/ai.py` |
 | `extractor/` (`engine`, `model`) | Extracción por palabras clave o rango, puntuación y OCR por página | `services/extract/` |
 | `merge/` (`engine`, `model`) | Combinación de PDFs, selección de páginas y rangos | `services/merge.py` |
 | `ocr/` (`processor`, `paddle`) | OCR y detección de orientación. `paddle.py` ejecuta los modelos de PaddleOCR (PP-OCRv6 *small* y PP-LCNet, en `src/assets/ocr_models`) con onnxruntime y NumPy, sin OpenCV | `services/extract/`, `services/ocr.py` |

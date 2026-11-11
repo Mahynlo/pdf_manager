@@ -1,8 +1,8 @@
-"""Agente de IA para documentos PDF (Gemini u OpenAI): chat con búsqueda semántica,
-resumen, datos clave y sugerencias de censura.
+"""Agente de IA para documentos PDF (Gemini, OpenAI o un modelo local): chat con búsqueda
+de fragmentos, resumen, datos clave y sugerencias de censura.
 
-Sus dependencias (``google-genai``, ``langchain-*``) son opcionales:
-``config`` se puede usar sin ellas y ``PDFAgent`` se importa al pedirlo.
+Su cliente (el SDK ``openai``) no está en la versión de navegador: ``config`` y ``providers`` se
+pueden usar sin él y ``PDFAgent`` se importa al pedirlo.
 """
 
 __all__ = ["PDFAgent"]

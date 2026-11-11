@@ -149,8 +149,16 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
 - **Imprimir**: el diálogo de impresión de WebView2 con el PDF y sus anotaciones
   en un iframe oculto (`document/print.ts`). Ver embedpdf.md, «Imprimir».
 - **Asistente IA**: el servicio `ai` copia lo necesario del documento con el candado del visor y
-  consulta sin él (las respuestas tardan segundos). Usa `pdf_core.agent.PDFAgent` si sus dependencias
-  están instaladas y hay clave; si no, responde en modo básico. Las respuestas llegan también como
+  consulta sin él (las respuestas tardan segundos). Usa `pdf_core.agent.PDFAgent` si su cliente
+  (`openai`) está instalado y hay un proveedor listo: Gemini u OpenAI con clave, o una IA local
+  (Ollama, LM Studio…) con dirección y modelo; si no, responde en modo básico. Todos hablan la API
+  de OpenAI. El agente recibe el texto que tiene el visor (`AgentDocument`) y siempre una ficha
+  (metadatos e inicio de la primera página). Si el documento no cabe en el contexto del modelo
+  (4096 tokens por defecto en la IA local; ~130 000 en la nube), el chat envía los pasajes de todo
+  el documento relacionados con la pregunta (`rag.py`: por palabras con su raíz y, en la nube,
+  también por significado), y el resumen una versión condensada del documento entero. Si un
+  modelo de Gemini u OpenAI no responde (503) o no existe, se prueba otro y la respuesta lo dice.
+  `ai.models` pide al servidor su lista de modelos de conversación. Las respuestas llegan también como
   HTML de Markdown sin HTML crudo, imágenes ni enlaces, que el frontend inserta tal cual.
 - **Arrastrar PDFs y «Abrir con»**: el navegador no da la ruta de un archivo soltado; `WebviewHost`
   escucha el `drop` desde Python (pywebview añade `pywebviewFullPath`) y abre los PDF con

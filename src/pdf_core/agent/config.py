@@ -1,4 +1,5 @@
-"""Configuración del asistente IA (proveedor, modelo y claves de API), en la carpeta del usuario.
+"""Configuración del asistente IA (proveedor, modelo, claves de API y, para la IA local, la
+dirección del servidor y su contexto), en la carpeta del usuario.
 
 Las claves de API se guardan cifradas para el usuario (``keystore``: DPAPI en Windows), nunca en
 claro: ``<proveedor>_api_key_secret``. Una clave guardada en claro por una versión anterior
@@ -13,6 +14,7 @@ import os
 from pathlib import Path
 
 from pdf_core.agent import keystore
+from pdf_core.agent.providers import DEFAULT_CONTEXT, PROVIDERS
 
 log = logging.getLogger(__name__)
 
@@ -80,11 +82,39 @@ def set_provider(provider: str) -> None:
 
 
 def get_model(provider: str) -> str:
-    defaults = {"google": "gemini-2.5-flash", "openai": "gpt-4o-mini"}
-    return _load().get(f"{provider}_model", defaults.get(provider, ""))
+    default = PROVIDERS[provider].model if provider in PROVIDERS else ""
+    return _load().get(f"{provider}_model") or default
 
 
 def set_model(provider: str, model: str) -> None:
     data = _load()
     data[f"{provider}_model"] = model
+    _save(data)
+
+
+def get_base_url(provider: str) -> str:
+    """La dirección del servidor: la guardada si es configurable (IA local), si no la del proveedor."""
+    known = PROVIDERS.get(provider)
+    if known is None:
+        return ""
+    stored = _load().get(f"{provider}_base_url") if known.local else None
+    return stored if isinstance(stored, str) and stored else known.base_url
+
+
+def set_base_url(provider: str, url: str) -> None:
+    """``url`` ya comprobada con ``providers.check_base_url``."""
+    data = _load()
+    data[f"{provider}_base_url"] = url
+    _save(data)
+
+
+def get_context(provider: str) -> int:
+    """Tokens de contexto del modelo (IA local; los de la nube no tienen límite práctico aquí)."""
+    value = _load().get(f"{provider}_context")
+    return value if isinstance(value, int) and value > 0 else DEFAULT_CONTEXT
+
+
+def set_context(provider: str, tokens: int) -> None:
+    data = _load()
+    data[f"{provider}_context"] = tokens
     _save(data)

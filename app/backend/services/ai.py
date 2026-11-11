@@ -1,10 +1,10 @@
 """Servicio ``ai``: asistente IA del visor: chat sobre el documento, resumen, datos clave y
 datos sensibles.
 
-Con las dependencias del agente instaladas y una clave de API configurada, usa
-``pdf_core.agent.PDFAgent`` (Gemini u OpenAI). Si no, responde en **modo básico**
-con el texto del documento:
-búsqueda de palabras, resumen del inicio, metadatos y patrones de datos personales.
+Con el cliente del agente instalado (``openai``) y un proveedor listo —Gemini u OpenAI con su clave,
+o un servidor local (Ollama, LM Studio…) con un modelo elegido—, usa ``pdf_core.agent.PDFAgent``.
+Si no, responde en **modo básico** con el texto del documento: búsqueda de palabras, resumen del
+inicio, metadatos y patrones de datos personales.
 
 El historial de cada documento se guarda en el documento abierto. Las respuestas
 se devuelven también como HTML generado desde Markdown sin HTML crudo, imágenes ni
@@ -29,14 +29,15 @@ from app.backend.rpc import UserError, exposed
 from app.backend.services.viewer import ViewerService
 from pdf_core import redaction
 from pdf_core.agent import config as agent_config
+from pdf_core.agent.pdf_agent import AgentDocument
+from pdf_core.agent.providers import MAX_CONTEXT, MIN_CONTEXT, PROVIDERS, BadAddress, check_base_url
 
 log = logging.getLogger(__name__)
 
 SESSION = "ai"  # clave en ``_OpenDocument.extras``
-PROVIDERS = {"google": "Google Gemini", "openai": "OpenAI"}
-CLIENTS = {"google": "google.genai", "openai": "langchain_openai"}  # sus clientes: dependencias opcionales
+CLIENT = "openai"  # el cliente de todos los proveedores (no está en la versión de navegador)
 LEVELS = ("low", "medium", "high")
-BASIC_NOTE = "Modo básico (sin IA): configura un proveedor y su clave de API para respuestas del agente."
+BASIC_NOTE = "Modo básico (sin IA): configura un proveedor (clave de API o IA local) para respuestas del agente."
 MAX_SNIPPETS = 4
 SNIPPET = 200
 # Patrones del modo básico para «Detectar Datos Sensibles» (los de la censura).
@@ -66,28 +67,61 @@ class AiService:
     # ── Configuración ────────────────────────────────────────────────────
     @exposed
     def config(self) -> dict[str, Any]:
-        provider = agent_config.get_provider()
-        if provider not in PROVIDERS:
-            provider = "google"
+        provider = _current_provider()
         return {
             "provider": provider,
-            "providers": [{"id": k, "label": v} for k, v in PROVIDERS.items()],
+            "providers": [p.to_dict() for p in PROVIDERS.values()],
             "model": agent_config.get_model(provider),
+            "base_url": agent_config.get_base_url(provider),
+            "context": agent_config.get_context(provider),
             "has_key": bool(agent_config.get_api_key(provider)),
             "available": self._agent_class() is not None,
         }
 
     @exposed
-    def set_config(self, provider: str, api_key: str | None = None, model: str | None = None) -> dict[str, Any]:
-        """Proveedor, clave y modelo (``~/.extraer_pdfs_config.json``)."""
-        if provider not in PROVIDERS:
-            raise UserError("Proveedor de IA no válido.", "bad_provider")
+    def set_config(self, provider: str, api_key: str | None = None, model: str | None = None,
+                   base_url: str | None = None, context: int | None = None) -> dict[str, Any]:
+        """Proveedor, clave y modelo; en la IA local también la dirección del servidor y su
+        contexto (``~/.extraer_pdfs_config.json``). Se comprueba todo antes de guardar nada."""
+        known = _provider(provider)
+        if known.local and base_url is not None and base_url.strip():
+            base_url = _checked_url(base_url)
+        if known.local and context is not None and not (
+                isinstance(context, int) and MIN_CONTEXT <= context <= MAX_CONTEXT):
+            raise UserError(f"El contexto tiene que estar entre {MIN_CONTEXT} y {MAX_CONTEXT} tokens.", "bad_context")
         agent_config.set_provider(provider)
         if api_key is not None and api_key.strip():
             agent_config.set_api_key(provider, api_key.strip())
         if model is not None and model.strip():
             agent_config.set_model(provider, model.strip())
+        if known.local and base_url:
+            agent_config.set_base_url(provider, base_url)
+        if known.local and context is not None:
+            agent_config.set_context(provider, context)
         return self.config()
+
+    @exposed
+    def models(self, provider: str, base_url: str | None = None, api_key: str | None = None) -> list[str]:
+        """Los modelos del servidor del proveedor, para elegir uno. Sin ``api_key`` usa la guardada;
+        sin ``base_url``, la configurada."""
+        known = _provider(provider)
+        if not _installed(CLIENT):
+            raise UserError("El cliente del agente de IA no está instalado.", "not_installed")
+        if known.local and base_url and base_url.strip():
+            url = _checked_url(base_url)
+        else:
+            url = agent_config.get_base_url(provider)
+        key = (api_key or "").strip() or agent_config.get_api_key(provider)
+        if known.needs_key and not key:
+            raise UserError("Escribe la clave de API para ver los modelos.", "no_key")
+        from pdf_core.agent.pdf_agent import list_models
+
+        try:
+            return list_models(provider, key, url)
+        except Exception as ex:  # red, clave o servidor apagado
+            message = _without_key(str(ex), key)
+            log.warning("No se pudieron listar los modelos de %s: %s: %s", provider, type(ex).__name__, message)
+            raise UserError(f"No se pudieron obtener los modelos: {message}\n{_hint(provider)}", "models_failed") from None
 
     # ── Conversación ─────────────────────────────────────────────────────
     @exposed
@@ -109,16 +143,17 @@ class AiService:
         message = message.strip()
         if not message:
             raise UserError("Escribe una pregunta.", "empty_message")
-        return self._ask(doc_id, message, lambda agent, history: agent.chat(message, history),
+        return self._ask(doc_id, message, lambda agent, doc, history: agent.chat(doc, message, history),
                          lambda doc: _basic_search(doc, message))
 
     @exposed
     def summary(self, doc_id: int) -> dict[str, Any]:
-        return self._ask(doc_id, "Generar Resumen Ejecutivo", lambda agent, _h: agent.summarize(), _basic_summary)
+        return self._ask(doc_id, "Generar Resumen Ejecutivo", lambda agent, doc, _h: agent.summarize(doc), _basic_summary)
 
     @exposed
     def key_data(self, doc_id: int) -> dict[str, Any]:
-        return self._ask(doc_id, "Extraer Datos Clave", lambda agent, _h: agent.extract_key_info(), _basic_key_data)
+        return self._ask(doc_id, "Extraer Datos Clave", lambda agent, doc, _h: agent.extract_key_info(doc),
+                         _basic_key_data)
 
     @exposed
     def sensitive(self, doc_id: int, level: str = "medium") -> dict[str, Any]:
@@ -126,8 +161,8 @@ class AiService:
         if level not in LEVELS:
             raise UserError("Nivel de sensibilidad no válido.", "bad_level")
 
-        def with_agent(agent: Any, _history: list) -> tuple[str, list[dict]]:
-            suggestions = _parse_suggestions(agent.suggest_redactions(level))
+        def with_agent(agent: Any, doc: AgentDocument, _history: list) -> tuple[str, list[dict]]:
+            suggestions = _parse_suggestions(agent.suggest_redactions(doc, level))
             return _suggestions_text(suggestions), suggestions
 
         return self._ask(doc_id, "Detectar Datos Sensibles", with_agent, _basic_sensitive)
@@ -136,16 +171,16 @@ class AiService:
     def _ask(self, doc_id: int, prompt: str, with_agent: Callable, basic: Callable) -> dict[str, Any]:
         """Añade la pregunta y la respuesta al chat; la consulta corre sin ningún candado."""
         with self._viewer.document(doc_id) as entry:
-            snapshot = _Snapshot.of(self._viewer, entry)
+            snapshot = _snapshot(self._viewer, entry)
             session = self._session(entry)
         with self._lock:
-            agent = self._agent_for(session, snapshot)
+            agent = self._agent_for(session)
             history = list(session.history)
         user = {"role": "user", "text": prompt}
         suggestions: list[dict] = []
         try:
             if agent is not None:
-                reply = with_agent(agent, history)
+                reply = with_agent(agent, snapshot, history)
                 mode = "ia"
             else:
                 reply = basic(snapshot)
@@ -155,37 +190,37 @@ class AiService:
             answer = {"role": "assistant", "text": reply, "html": self._html(reply), "mode": mode, "suggestions": suggestions}
         except Exception as ex:  # el proveedor puede fallar por red, cuota o clave
             # Algunos clientes ponen la clave en la URL de sus errores: no llega al registro ni a la ventana.
-            message = _without_key(str(ex), agent_config.get_api_key(agent_config.get_provider()))
+            provider = _current_provider()
+            message = _without_key(str(ex), agent_config.get_api_key(provider))
             log.error("Fallo del asistente IA: %s: %s", type(ex).__name__, message)
-            answer = {"role": "error", "text": f"{message}\n(Verifica tu clave de API y la conexión a Internet.)", "mode": "ia"}
+            answer = {"role": "error", "text": f"{message}\n{_hint(provider)}", "mode": "ia"}
         with self._lock:
             session.messages += [user, answer]
             if answer["role"] == "assistant":
                 session.history += [{"role": "user", "content": prompt}, {"role": "assistant", "content": answer["text"]}]
         return {"messages": [user, answer], "config": self.config()}
 
-    def _agent_for(self, session: _Session, snap: _Snapshot) -> Any:
+    def _agent_for(self, session: _Session) -> Any:
         """El agente del documento (se rehace si cambió la configuración); ``None`` en modo básico."""
         cls = self._factory or self._agent_class()
-        provider = agent_config.get_provider()
+        provider = _current_provider()
         key = agent_config.get_api_key(provider)
-        if cls is None or not key or provider not in PROVIDERS:
+        model = agent_config.get_model(provider)
+        if cls is None or (PROVIDERS[provider].needs_key and not key) or not model:
             return None
-        if self._factory is None and not _installed(CLIENTS[provider]):
-            return None  # sin el cliente de este proveedor: modo básico
-        signature = (provider, key, agent_config.get_model(provider), snap.path)
+        base_url, context = agent_config.get_base_url(provider), agent_config.get_context(provider)
+        signature = (provider, key, model, base_url, context)
         if session.agent is None or session.agent_key != signature:
             if session.agent is not None:
                 getattr(session.agent, "close", lambda: None)()
-            session.agent = cls(snap.path, api_key=key, provider=provider, model=signature[2],
-                                ocr_overrides=snap.ocr_text or None)
+            session.agent = cls(api_key=key, provider=provider, model=model, base_url=base_url, context=context)
             session.agent_key = signature
         return session.agent
 
     @staticmethod
     def _agent_class() -> Any:
-        if not any(_installed(client) for client in CLIENTS.values()):
-            return None  # dependencias del agente sin instalar: modo básico
+        if not _installed(CLIENT):
+            return None  # sin el cliente del agente (p. ej. en el navegador): modo básico
         from pdf_core.agent import PDFAgent
 
         return PDFAgent
@@ -198,6 +233,30 @@ class AiService:
         return self._markdown.render(text)
 
 
+def _current_provider() -> str:
+    provider = agent_config.get_provider()
+    return provider if provider in PROVIDERS else "google"
+
+
+def _provider(provider: str) -> Any:
+    if provider not in PROVIDERS:
+        raise UserError("Proveedor de IA no válido.", "bad_provider")
+    return PROVIDERS[provider]
+
+
+def _checked_url(url: str) -> str:
+    try:
+        return check_base_url(url)
+    except BadAddress as ex:
+        raise UserError(str(ex), "bad_address") from None
+
+
+def _hint(provider: str) -> str:
+    if PROVIDERS[provider].local:
+        return "(Comprueba que el servidor de IA local está en marcha, su dirección y el modelo.)"
+    return "(Verifica tu clave de API, el modelo y la conexión a Internet.)"
+
+
 def _installed(module: str) -> bool:
     try:
         return importlib.util.find_spec(module) is not None
@@ -205,30 +264,20 @@ def _installed(module: str) -> bool:
         return False
 
 
-@dataclass
-class _Snapshot:
-    """Lo que necesitan las respuestas, copiado con el candado del visor tomado."""
-
-    path: str
-    name: str
-    pages: list[str]  # texto de cada página (con el de OCR en las escaneadas)
-    metadata: dict[str, str]
-    ocr_text: dict[int, str]
-
-    @classmethod
-    def of(cls, viewer: ViewerService, entry: Any) -> _Snapshot:
-        """Del texto de las páginas que le dio el visor (tiene que habérselo dado todo)."""
-        pages, ocr_text = [], {}
-        for index, key in enumerate(entry.keys):
-            text = viewer.packed_text(entry, index).text()
-            if not text.strip() and entry.ocr.get(key):
-                text = ocr_text[index] = viewer.text_of(entry, index).text
-            pages.append(text)
-        return cls(entry.path, Path(entry.path).name, pages, dict(entry.metadata), ocr_text)
+def _snapshot(viewer: ViewerService, entry: Any) -> AgentDocument:
+    """Lo que necesitan las respuestas, copiado con el candado del visor tomado: el texto de las
+    páginas que le dio el visor (tiene que habérselo dado todo), con el de OCR en las escaneadas."""
+    pages = []
+    for index, key in enumerate(entry.keys):
+        text = viewer.packed_text(entry, index).text()
+        if not text.strip() and entry.ocr.get(key):
+            text = viewer.text_of(entry, index).text
+        pages.append(text)
+    return AgentDocument(Path(entry.path).name, pages, dict(entry.metadata))
 
 
 # ── Modo básico ──────────────────────────────────────────────────────────────
-def _basic_search(doc: _Snapshot, prompt: str) -> str:
+def _basic_search(doc: AgentDocument, prompt: str) -> str:
     words = [w.lower() for w in re.findall(r"\w+", prompt) if len(w) > 2]
     matches = []
     for i, text in enumerate(doc.pages):
@@ -239,13 +288,13 @@ def _basic_search(doc: _Snapshot, prompt: str) -> str:
     return "Coincidencias encontradas en el texto:\n\n" + "\n".join(matches[:MAX_SNIPPETS]) + f"\n\n_{BASIC_NOTE}_"
 
 
-def _basic_summary(doc: _Snapshot) -> str:
+def _basic_summary(doc: AgentDocument) -> str:
     first = " ".join((doc.pages[0] if doc.pages else "").split())[:500]
     return (f"**Resumen básico**\n\nDocumento de {len(doc.pages)} páginas.\n\n"
             f"Inicio del texto: {first}…\n\n_{BASIC_NOTE}_")
 
 
-def _basic_key_data(doc: _Snapshot) -> str:
+def _basic_key_data(doc: AgentDocument) -> str:
     labels = {"title": "Título", "author": "Autor", "subject": "Asunto", "keywords": "Palabras clave",
               "creator": "Creador", "producer": "Productor", "creationDate": "Creación", "modDate": "Modificación"}
     rows = [f"- **{label}:** {doc.metadata[key]}" for key, label in labels.items() if doc.metadata.get(key)]
@@ -253,7 +302,7 @@ def _basic_key_data(doc: _Snapshot) -> str:
     return f"**Metadatos del PDF** ({doc.name}, {len(doc.pages)} páginas)\n\n{body}\n\n_{BASIC_NOTE}_"
 
 
-def _basic_sensitive(doc: _Snapshot) -> tuple[str, list[dict]]:
+def _basic_sensitive(doc: AgentDocument) -> tuple[str, list[dict]]:
     patterns = {label: pattern for label, pattern in redaction.PII_PATTERNS}
     found: dict[str, dict] = {}
     for category, title in SENSITIVE.items():

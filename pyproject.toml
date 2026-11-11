@@ -8,15 +8,14 @@ authors = [
     { name = "Malcom Navarro", email = "you@example.com" }
 ]
 dependencies = [
-  #"langchain>=0.3.28",
-  #"langchain-community>=0.3.31",
-  #"langchain-google-genai>=2.1.12",
-  #"langchain-openai>=0.3.35",
   "markdown-it-py>=4.0",
   "numpy>=2.0",
   # OCR: modelos de PaddleOCR (src/assets/ocr_models) con onnxruntime y NumPy.
   # Sin onnxtr ni OpenCV/SciPy (~200 MB menos en el ejecutable): ver pdf_core/ocr/paddle.py.
   "onnxruntime>=1.20.1",
+  # Asistente IA: el cliente oficial de la API de OpenAI, que también hablan Gemini y los
+  # servidores locales (Ollama, LM Studio…). Ver pdf_core/agent/providers.py.
+  "openai>=3.45,<4",
   "pydantic>=2.12.5",
   "pypdfium2>=5.14",
   "python-dotenv>=1.2.1",
@@ -31,6 +30,11 @@ dependencies = [
 dev = [
     "pytest>=8.4.2",
 ]
+
+[tool.uv]
+# Solo versiones publicadas hace al menos una semana: una versión maliciosa subida a PyPI
+# (como litellm 1.82.7/1.82.8 y 1.107.0 en 2026) suele detectarse y retirarse antes.
+exclude-newer = "7 days"
 
 [tool.poetry]
 package-mode = false

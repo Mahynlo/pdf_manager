@@ -225,6 +225,7 @@ button, a, [role="tab"] { touch-action: manipulation; }
   .recent-row .btn--icon { opacity: 1; }
   .stamp-tile__remove { opacity: 1; visibility: visible; }
   .home-card:hover { transform: none; box-shadow: none; }
+  .ai-msg__tools { opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {

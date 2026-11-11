@@ -12,6 +12,7 @@ llega de fuera, y por tanto no es de fiar:
 |---|---|
 | **Un PDF** abierto o soltado | Texto, enlaces o anotaciones que intenten colar HTML o abrir programas; archivos mal formados contra el motor PDF |
 | **Una respuesta de la IA** | Puede repetir texto del PDF preparado para ello («prompt injection») con HTML o enlaces |
+| **El servidor de IA** | Que el texto del PDF o la clave viajen sin cifrar, o que la clave llegue a otro servidor |
 | **Otra web abierta en el navegador** | Intentar llegar al servidor local de datos (escritorio) |
 | **Otro programa u otro usuario del equipo** | Hablar con la tubería de la instancia única; leer la clave de la IA |
 | **Las dependencias** | Una versión con una vulnerabilidad conocida |
@@ -78,6 +79,23 @@ podía ejecutar código. Solo se abren rutas de archivos que existen.
 - La clave nunca vuelve a la ventana (solo si hay una: `has_key`), y **se quita de los mensajes de
   error** antes de mostrarlos o registrarlos (algunos clientes la ponen en la URL de sus errores).
 
+### El asistente IA
+
+- Un solo cliente para todos los proveedores: el SDK oficial `openai`
+  ([`pdf_core/agent/providers.py`](../../src/pdf_core/agent/providers.py)). Se descartó LiteLLM por
+  ahora: muchas más dependencias y dos versiones publicadas con código malicioso en 2026.
+- **La dirección de Gemini y de OpenAI es fija**: su clave solo viaja a su servidor. Cada proveedor
+  tiene su propia clave (la de la IA local, opcional).
+- **La IA local** (Ollama, LM Studio…) usa la dirección que elija el usuario (`check_base_url`):
+  `http` solo para el propio equipo o la red privada (`localhost`, `127.0.0.0/8`, `::1`, `10/8`,
+  `172.16/12`, `192.168/16`); cualquier otro servidor, solo `https`. Nunca con usuario y contraseña
+  ni parámetros en la URL, ni direcciones de enlace local como `169.254.169.254` (los metadatos de
+  la nube).
+- Las instrucciones del modelo dicen que el documento es contenido, no órdenes. La respuesta se
+  pinta sin HTML, enlaces ni imágenes (ver «La interfaz»), así que aunque un PDF engañe al modelo,
+  no puede colar nada en la ventana.
+- No se registra el texto enviado ni las respuestas; los errores se registran sin la clave.
+
 ### Cifrar PDF
 
 AES-256 (`security.protect`, motor de EmbedPDF). Sin contraseña de propietario se pone una aleatoria:
@@ -105,6 +123,9 @@ Se lanzan sin shell y con listas de argumentos. «Mostrar en carpeta» usa la ru
 ### Dependencias
 
 - Versiones fijadas: `uv.lock` (Python) y `pnpm-lock.yaml` (interfaz).
+- **Una semana de espera** para las versiones nuevas de Python (`exclude-newer = "7 days"` en
+  `pyproject.toml`): `uv lock` no elige nada publicado hace menos de 7 días. Una versión maliciosa
+  subida a PyPI suele detectarse y retirarse antes (así pasó con litellm 1.82.7/1.82.8 y 1.107.0).
 - [`security.yml`](../../.github/workflows/security.yml) las audita en cada pull request, en cada
   push a `main` y cada lunes: `pip-audit` (Python) y `pnpm audit` (falla con avisos altos o críticos).
 
@@ -130,7 +151,9 @@ Se lanzan sin shell y con listas de argumentos. «Mostrar en carpeta» usa la ru
 - Python: `uv run pytest`; las de seguridad son `test_single_instance_never_unpickles_what_it_receives`,
   `test_byte_server_only_answers_its_own_address_and_limits_uploads`,
   `test_ai_keys_are_stored_encrypted_and_old_plain_keys_are_migrated`,
-  `test_ai_errors_never_show_the_api_key` y `test_only_web_and_mail_links_open_outside`.
+  `test_ai_errors_never_show_the_api_key`, `test_only_web_and_mail_links_open_outside`,
+  `test_ai_local_model_needs_no_key_but_a_model_and_a_safe_address` y las de direcciones de
+  `tests/test_agent.py` (`test_safe_server_addresses`, `test_unsafe_server_addresses`).
 - La CSP: usar la app con la consola abierta y buscar «Content Security Policy». En las pruebas de
   extremo a extremo se recoge cada `securitypolicyviolation` mientras se abre un documento, se busca,
   se usan sellos, el OCR, el asistente, la Ayuda y se imprime (escritorio y navegador).
