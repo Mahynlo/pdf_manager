@@ -5,11 +5,13 @@
 //     { label: 'Abrir', icon: 'folder-open', onSelect: abrir },
 //     'separator',
 //     { label: 'Quitar', icon: 'x', checked: false, disabled: false, onSelect: quitar },
+//     { label: 'Rojo', color: '#E53935', onSelect: … },   // muestra de color en vez de icono
 //   ]);
 
 export interface MenuOption {
   label: string;
   icon?: string;
+  color?: string;
   checked?: boolean;
   disabled?: boolean;
   onSelect?: () => unknown;

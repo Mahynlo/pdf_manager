@@ -7,6 +7,7 @@
 -->
 <script lang="ts">
   import Icon from '../Icon.svelte';
+  import { strip } from '../strip.ts';
 
   import type { Snippet } from 'svelte';
 
@@ -17,7 +18,7 @@
 </script>
 
 <div class="subtabs">
-  <div class="subtabs__bar" role="tablist">
+  <div class="subtabs__bar" role="tablist" use:strip>
     {#each tabs as tab, i (i)}
       <button class="subtabs__tab" class:is-active={current === i} type="button" role="tab"
               aria-selected={current === i} onclick={() => (current = i)}>

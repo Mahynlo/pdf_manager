@@ -5,6 +5,7 @@
 <script lang="ts">
   import Icon from '$lib/Icon.svelte';
   import { openMenu, type MenuItem } from '$lib/menu.svelte.ts';
+  import { strip } from '$lib/strip.ts';
   import { viewport } from '$lib/viewport.svelte.ts';
   import { t, tip } from '$texts';
   import { MODES } from '../canvas/layout.ts';
@@ -117,7 +118,7 @@
 
 {#snippet separator(group = '')}<span class="tb-sep {group}" aria-hidden="true"></span>{/snippet}
 
-<div class="viewer-toolbar" role="toolbar">
+<div class="viewer-toolbar" role="toolbar" aria-label={T.label} use:strip>
   {@render button('more-vertical', T.more, (ev) => openMenu(ev.currentTarget, actions.moreMenu()))}
   {@render separator()}
   {@render button('chevrons-left', tip(T.first), actions.first, { disabled: view.page <= 0, group: WIDE })}

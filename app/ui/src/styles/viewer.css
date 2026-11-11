@@ -229,9 +229,46 @@
 .properties dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
 
 /* ── Barra de herramientas del lienzo (AnnotSubBar en Qt) ─────────────────── */
-/* Con la ventana estrecha, la barra de herramientas se desplaza en vez de apretarse. */
-.viewer-toolbar--tools { height: 42px; padding: 2px 8px; overflow-x: auto; scrollbar-width: thin; }
+/* Se compacta por niveles para caber (lib/fit.ts, `data-level`; ver ToolsBar.svelte) y, si ni así,
+   se desplaza. */
+.viewer-toolbar--tools { height: 42px; padding: 2px 8px; overflow-x: auto; scrollbar-width: none; }
+.viewer-toolbar--tools::-webkit-scrollbar { display: none; }
 .viewer-toolbar--tools > * { flex: none; }
+.tb-group, .tb-group__all, .tb-swatches, .tb-insert-extra { display: flex; align-items: center; }
+.tb-group__all { gap: 2px; }
+
+/* Un grupo en un botón: la herramienta y, en la flecha, las demás del grupo. */
+.tb-split { display: none; align-items: center; border-radius: 6px; }
+.tb-split.is-checked { background: var(--bg-selected); }
+.tb-split.is-checked > .tb-btn:not(.is-checked) { color: var(--accent); }
+.tb-split > .tb-btn { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.tb-split__more {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 0 6px 6px 0;
+  background: transparent;
+  color: var(--icon-color);
+  cursor: pointer;
+}
+.tb-split__more:hover { background: var(--bg-hover); color: var(--text-primary); }
+.tb-palette { display: none; }
+
+/* Nivel 1: los colores en un botón; sellos y firma, solo el icono. */
+.viewer-toolbar--tools[data-level]:not([data-level="0"]) :is(.tb-swatches, .tb-label) { display: none; }
+.viewer-toolbar--tools[data-level]:not([data-level="0"]) .tb-palette { display: inline-flex; }
+.viewer-toolbar--tools[data-level]:not([data-level="0"]) .tb-text-btn { padding: 0 7px; margin-left: 0; }
+/* Niveles 2 y 3: cada grupo en un botón (navegar e insertar, solo en el 3). */
+.viewer-toolbar--tools:is([data-level="2"], [data-level="3"]) [data-collapse="2"] > .tb-group__all,
+.viewer-toolbar--tools[data-level="3"] [data-collapse="3"] > .tb-group__all { display: none; }
+.viewer-toolbar--tools:is([data-level="2"], [data-level="3"]) [data-collapse="2"] > .tb-split,
+.viewer-toolbar--tools[data-level="3"] [data-collapse="3"] > .tb-split { display: flex; }
+.viewer-toolbar--tools[data-level="3"] .tb-insert-extra { display: none; }
+.viewer-toolbar--tools[data-level="3"] { padding-inline: 4px; }
+.viewer-toolbar--tools[data-level="3"] .tb-sep { margin: 0 1px; }
 .tb-swatch {
   flex: none;
   width: 18px;

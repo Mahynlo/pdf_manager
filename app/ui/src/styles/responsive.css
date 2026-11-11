@@ -200,6 +200,7 @@ button, a, [role="tab"] { touch-action: manipulation; }
   .tb-page, .tb-zoom { height: 40px; }
   .tb-zoom__menu { width: 32px; }
   .tb-swatch { width: 28px; height: 28px; margin: 0 4px; }
+  .tb-split__more { width: 20px; height: 40px; }
   .viewer-rail { width: 52px; }
   .viewer-rail__tab { width: 40px; height: 40px; }
   .menu__item { height: 44px; }

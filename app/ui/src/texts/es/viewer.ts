@@ -4,6 +4,7 @@
 export default {
   /** Barra superior del visor (toolbars/Toolbar.svelte). */
   toolbar: {
+    label: 'Barra del visor',
     more: 'Más opciones y operaciones del documento',
     first: { label: 'Primera página', shortcut: 'Inicio' },
     prev: { label: 'Página anterior', shortcut: 'Re Pág / ←' },
@@ -28,6 +29,17 @@ export default {
   },
   /** Barra de herramientas del lienzo (toolbars/ToolsBar.svelte); una entrada por herramienta. */
   tools: {
+    label: 'Herramientas de anotación',
+    /** Grupos de herramientas: cuando la barra no cabe, cada uno va en un botón. */
+    groups: {
+      navigate: 'Navegar y seleccionar',
+      markup: 'Marcar texto',
+      shapes: 'Formas',
+      draw: 'Trazos libres',
+      insert: 'Insertar',
+    },
+    more: (group: string) => `Más herramientas: ${group}`,
+    colors: 'Color de la anotación',
     hand: 'Mano: Desplazar página / Panning',
     select: 'Seleccionar Texto: Copiar, buscar y resaltar texto',
     pointer: 'Puntero de Objetos: Seleccionar, mover y transformar anotaciones',

@@ -34,15 +34,50 @@
 .header-btn { color: var(--icon-color); }
 .header-actions { margin-left: auto; display: flex; gap: 2px; }
 
-/* ── Pestañas ────────────────────────────────────────────────────────────── */
-.tabbar { display: flex; align-items: flex-end; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+/* ── Pestañas (shell/TabStrip.svelte) ────────────────────────────────────── */
+.tabstrip { flex: 0 1 auto; display: flex; align-items: flex-end; min-width: 0; height: 100%; }
+.tabbar {
+  position: relative; /* tab-drag.ts mide las pestañas desde aquí (offsetLeft) */
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  height: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
 .tabbar::-webkit-scrollbar { display: none; }
+.tabbar.is-reordering { cursor: grabbing; }
+
+/* Flechas de los lados: con ratón y solo si las pestañas no caben (con el dedo se desliza). */
+.tabstrip__scroll {
+  display: none;
+  align-self: center;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--icon-color);
+  cursor: pointer;
+}
+.tabstrip__scroll:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+.tabstrip__scroll:disabled { opacity: 0.35; cursor: default; }
+@media (pointer: fine) {
+  .tabstrip.is-scrollable .tabstrip__scroll { display: grid; }
+}
 
 .tab {
   position: relative;
+  flex: none; /* no se aprietan: cada una con su nombre, y la tira se desplaza */
   display: flex;
   align-items: center;
   gap: 8px;
+  max-width: 240px;
   height: 36px;
   padding: 0 8px 0 14px;
   margin-bottom: -1px;
@@ -59,6 +94,16 @@
 .tab.is-active { color: var(--text-primary); background: var(--bg-base); border-color: var(--border-light); }
 .tab.is-active > .icon:first-child { color: var(--accent); }
 .tab:not(.is-closable) { padding-right: 18px; }
+.tab:focus-visible { outline-offset: -2px; }
+.tab.is-dragging {
+  z-index: 1;
+  color: var(--text-primary);
+  background: var(--bg-base);
+  border-color: var(--border-light);
+  box-shadow: var(--shadow-2);
+  cursor: grabbing;
+  transition: none;
+}
 
 .tab__close {
   display: grid;

@@ -18,6 +18,8 @@ export default {
     closeTab: { label: 'Cerrar pestaña', shortcut: 'Ctrl+F4' },
     openPdf: { label: 'Abrir documento PDF', shortcut: 'Ctrl+O' },
     tabsList: 'Lista de pestañas abiertas',
+    scrollTabsStart: 'Ver las pestañas anteriores',
+    scrollTabsEnd: 'Ver las pestañas siguientes',
     theme: 'Cambiar tema claro / oscuro',
   },
   /** Menú de la marca (shell.brandMenu); los nombres de las herramientas están en `tools`. */
@@ -30,6 +32,8 @@ export default {
     close: 'Cerrar pestaña',
     closeOthers: 'Cerrar las otras pestañas',
     closeRight: 'Cerrar pestañas a la derecha',
+    moveLeft: 'Mover a la izquierda (Ctrl+Shift+Re Pág)',
+    moveRight: 'Mover a la derecha (Ctrl+Shift+Av Pág)',
     copyPath: 'Copiar ruta del archivo',
     pathCopied: 'Ruta copiada al portapapeles',
     reveal: 'Abrir carpeta en el Explorador',

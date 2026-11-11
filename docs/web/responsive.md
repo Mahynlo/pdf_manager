@@ -31,12 +31,42 @@ comporta como una tableta. Por eso el tamaño mínimo de la ventana es 420 × 48
 
 ## Reglas
 
-- **Nada queda fuera de alcance.** Lo que no cabe se desplaza (`.viewer-toolbar`, `.subtabs__bar`) o
-  pasa a un menú. Un control que se oculta con `tb-wide` o `tb-zoom-group` tiene que seguir en
-  `hiddenControls()` de `Viewer.svelte`.
+- **Nada queda fuera de alcance.** Lo que no cabe se agrupa, pasa a un menú o se desplaza. Un control
+  que se oculta con `tb-wide` o `tb-zoom-group` tiene que seguir en `hiddenControls()` de
+  `Viewer.svelte`.
+- **Una tira que se desplaza lo dice** (`use:strip`, `lib/strip.ts`: pestañas, barras del visor,
+  pestañas internas): el borde por el que sigue se difumina y la rueda del ratón la desplaza en
+  horizontal. Con el dedo, se desliza.
 - **Las filas de botones bajan de línea** antes que salirse o recortar el texto.
 - **No se usa `:hover` como única forma de llegar a algo**: en el móvil no existe.
 - **Las rejillas nuevas usan `auto-fill` con `minmax`**: se adaptan solas, sin cortes.
+
+## Pestañas
+
+Las de la cabecera (`shell/TabStrip.svelte`) no se aprietan: cada una muestra su nombre (hasta 240 px)
+y, si no caben, la tira se desplaza. La activa siempre queda a la vista, también al cambiar el tamaño.
+
+| | Ratón | Dedo | Teclado |
+|---|---|---|---|
+| Desplazar | rueda, flechas de los lados (solo si no caben) | deslizar | — |
+| Cambiar de pestaña | clic | toque | ← → Inicio Fin sobre una pestaña; Ctrl+Tab, Ctrl+Re Pág / Av Pág |
+| Reordenar | arrastrar (Escape la devuelve) | mantener pulsada y arrastrar | Ctrl+Shift+Re Pág / Av Pág |
+| Menú (cerrar, mover…) | clic derecho | mantener pulsada sin mover | — |
+
+Inicio va siempre la primera. Las vistas no cambian de sitio en la página al reordenar las pestañas
+(`shell.views`, por orden de apertura): así no pierden su desplazamiento.
+
+## La barra de anotaciones
+
+Se compacta por niveles para caber (`use:fit`, `lib/fit.ts`, patrón «priority+»): mide el contenido de
+verdad, así vale con ratón o con dedo y con el panel lateral abierto o cerrado.
+
+| Nivel | Qué cambia |
+|---|---|
+| 0 | Todo a la vista |
+| 1 | Los colores, en un botón con su menú; «Sellos» y «Firma», solo con su icono |
+| 2 | Marcar texto, formas y trazos: un botón por grupo (la última herramienta usada; la flecha abre las demás) |
+| 3 | También navegar e insertar (que suma los sellos y la firma) |
 
 ## El visor en un móvil
 
@@ -58,6 +88,7 @@ el dedo hay que enviar eventos de toque (`Input.dispatchTouchEvent`).
 
 ## Limitaciones conocidas
 
-- **Reordenar arrastrando** (miniaturas del visor, páginas en Unir) no funciona con el dedo: usa arrastre
-  HTML, que las pantallas táctiles no tienen. En el visor están «Mover página arriba» y «abajo» en el menú ⋮.
+- **Reordenar arrastrando** las miniaturas del visor y las páginas en Unir no funciona con el dedo:
+  usa arrastre HTML, que las pantallas táctiles no tienen. En el visor están «Mover página arriba» y
+  «abajo» en el menú ⋮. Las pestañas sí (`tab-drag.ts`, con eventos de puntero).
 - **Probado en emulación**, no en teléfonos físicos.

@@ -32,12 +32,15 @@ app/ui/
       menu.svelte.ts    openMenu(botón, opciones) / openMenuAt(x, y, opciones)
       theme.svelte.ts   tema claro/oscuro compartido (theme.dark, theme.toggle())
       thumbs.ts         miniaturas bajo demanda (ThumbLoader y la acción use:thumb)
+      strip.ts, fit.ts  tiras que no caben: use:strip (rueda y bordes difuminados) y use:fit
+                        (barras que se compactan por niveles)
       Icon.svelte       iconos del juego común (assets/icons.json)
       dom.ts, icons.ts  h() e ic(): solo para el código imperativo del lienzo
       components/       Dialog y los diálogos de ui.ts; controles: PasswordField, Checkbox,
                         RadioGroup, Fieldset, Banner, SubTabs, SectionCard, ToolHeader, Menu
-    shell/              shell.svelte.ts (estado de las pestañas), tools.ts (registro de
-                        herramientas), Home y RecentFiles (Inicio), dropzone.ts
+    shell/              shell.svelte.ts (estado de las pestañas), TabStrip.svelte y
+                        tab-drag.ts (la tira de pestañas y reordenarlas), tools.ts (registro de
+                        herramientas), Home y RecentFiles (Inicio), dropzone.ts, router.ts
     tools/
       settings/  help/  security/  merge/  extract/
       viewer/           Viewer.svelte y sus piezas (ver abajo)

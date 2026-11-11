@@ -1,18 +1,18 @@
 <!--
   Ventana principal: cabecera (marca, pestañas, acciones), una vista por pestaña,
   barra de estado, avisos y menú emergente. El estado de las pestañas vive en
-  shell/shell.svelte.ts.
+  shell/shell.svelte.ts y la tira de pestañas en shell/TabStrip.svelte.
 -->
 <script lang="ts">
-  import { tick } from 'svelte';
   import Menu from '$lib/components/Menu.svelte';
   import { feedback } from '$lib/feedback.svelte.ts';
   import Icon from '$lib/Icon.svelte';
-  import { openMenu, openMenuAt } from '$lib/menu.svelte.ts';
+  import { openMenu } from '$lib/menu.svelte.ts';
   import { theme } from '$lib/theme.svelte.ts';
   import { enableFileDrop } from './shell/dropzone.ts';
   import Home from './shell/Home.svelte';
   import { HOME, shell } from './shell/shell.svelte.ts';
+  import TabStrip from './shell/TabStrip.svelte';
   import type { Tone } from '$lib/ui.ts';
   import { t, tip } from '$texts';
 
@@ -22,21 +22,6 @@
 
   shell.start(theme.toggle);
   enableFileDrop();
-
-  function tabKey(ev: KeyboardEvent, key: string) {
-    if (ev.key === 'Enter' || ev.key === ' ') shell.activate(key);
-  }
-
-  function tabContextMenu(ev: MouseEvent, tab: { closable: boolean; key: string }) {
-    ev.preventDefault();
-    if (tab.closable) openMenuAt(ev.clientX, ev.clientY, shell.tabContextMenu(tab.key));
-  }
-
-  // La pestaña activa siempre a la vista, aunque no quepan todas.
-  $effect(() => {
-    void shell.current;
-    tick().then(() => document.querySelector('.tab.is-active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
-  });
 </script>
 
 <svelte:document onkeydown={(ev) => shell.onKey(ev)} />
@@ -46,23 +31,7 @@
           onclick={(ev) => openMenu(ev.currentTarget, shell.brandMenu())}>
     <Icon name="file-text" size={18} /><span class="brand__label">{T.appName}</span>
   </button>
-  <div class="tabbar" role="tablist" aria-label={T.tabs}>
-    {#each shell.tabs as tab (tab.key)}
-      <div class="tab" class:is-closable={tab.closable} class:is-active={tab.key === shell.current}
-           role="tab" tabindex="0" aria-selected={tab.key === shell.current} title={tab.path}
-           onclick={() => shell.activate(tab.key)} onkeydown={(ev) => tabKey(ev, tab.key)}
-           onauxclick={(ev) => ev.button === 1 && shell.close(tab.key)} oncontextmenu={(ev) => tabContextMenu(ev, tab)}>
-        <Icon name={tab.icon} />
-        <span class="ellipsis">{tab.label}</span>
-        {#if tab.closable}
-          <button class="tab__close" type="button" title={tip(T.closeTab)}
-                  onclick={(ev) => { ev.stopPropagation(); shell.close(tab.key); }}>
-            <Icon name="x" size={14} />
-          </button>
-        {/if}
-      </div>
-    {/each}
-  </div>
+  <TabStrip />
   <button class="btn btn--icon header-btn" type="button" title={tip(T.openPdf)}
           onclick={() => shell.openPdfDialog()}>
     <Icon name="plus" size={18} />
@@ -79,7 +48,7 @@
 </header>
 
 <main class="views">
-  {#each shell.tabs as tab (tab.key)}
+  {#each shell.views as tab (tab.key)}
     <section class="view" class:view--viewer={tab.viewer} role="tabpanel" hidden={tab.key !== shell.current}>
       {#if tab.key === HOME}
         <Home />

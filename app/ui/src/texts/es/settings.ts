@@ -24,7 +24,8 @@ export default {
         ['Guardar como…', [['Ctrl', 'Shift', 'S']]],
         ['Imprimir', [['Ctrl', 'P']]],
         ['Cerrar pestaña', [['Ctrl', 'F4']]],
-        ['Cambiar de pestaña', [['Ctrl', 'Tab'], ['Ctrl', 'Shift', 'Tab']]],
+        ['Cambiar de pestaña', [['Ctrl', 'Tab'], ['Ctrl', 'Shift', 'Tab'], ['Ctrl', 'Re Pág'], ['Ctrl', 'Av Pág']]],
+        ['Mover la pestaña', [['Ctrl', 'Shift', 'Re Pág'], ['Ctrl', 'Shift', 'Av Pág']]],
       ]],
       ['Navegación', [
         ['Página anterior', [['↑'], ['Re Pág']]],
