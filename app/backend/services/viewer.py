@@ -21,6 +21,9 @@ da el ``id`` de cada página. Python no tiene el PDF abierto. Guarda de cada doc
 Al guardar, el visor sube su copia y Python la escribe tal cual (:meth:`save`); al extraer una
 página, sube ese PDF (:meth:`extract_page`); para exportar sus imágenes, una copia que se usa y se
 suelta (:meth:`export_images`).
+
+Los archivos se leen y se escriben con el ``Host`` (``read_file``, ``write_file``, ``file_url``),
+nunca con rutas directamente: en el navegador los tiene la ventana, no Python.
 """
 
 from __future__ import annotations
@@ -106,15 +109,19 @@ class ViewerService:
         ``invalid_password`` para que el frontend pida la contraseña y reintente.
         """
         resolved = Path(path).resolve()
-        if not resolved.is_file():
-            raise UserError(f"Archivo no encontrado: {resolved.name}", "not_found")
         path = str(resolved)
         with self._lock:
             existing = next((i for i, d in self._docs.items() if d.path == path), None)
             if existing is not None:
                 return self._file_info(existing)
             try:
-                doc = PDFSecurityManager.open_for_viewer(path, password=password or None)
+                data = self._host.read_file(path)
+            except FileNotFoundError as ex:
+                raise UserError(f"Archivo no encontrado: {resolved.name}", "not_found") from ex
+            except OSError as ex:
+                raise UserError(f"No se pudo leer {resolved.name}: {ex}", "open_failed") from ex
+            try:
+                doc = PDFSecurityManager.open_for_viewer(data, password=password or None)
             except PDFPasswordRequiredError as ex:
                 raise UserError("El PDF está protegido con contraseña", "password_required") from ex
             except PDFInvalidPasswordError as ex:
@@ -151,23 +158,22 @@ class ViewerService:
     # ── El documento para EmbedPDF ───────────────────────────────────────
     @exposed
     def document_url(self, doc_id: int) -> dict[str, Any]:
-        """URL de un solo uso con el archivo, para abrirlo en EmbedPDF.
+        """URL de un solo uso con el archivo, para abrirlo en EmbedPDF (``host.file_url``: viaja
+        en binario, sin pasar por el puente, y en el navegador sin pasar por Python).
 
         Un PDF cifrado sigue cifrado, para que la copia que vuelve conserve el cifrado:
-        ``password`` es la contraseña con la que abrirlo. Viaja en binario por
-        ``host.share_bytes``: por el puente, en base64, un PDF grande tardaría segundos. ``keys``
-        son las claves de sus páginas y ``ocr``, las palabras reconocidas de cada página que las
-        tiene (``{index, words}``), que el visor escribe en el documento como texto invisible.
+        ``password`` es la contraseña con la que abrirlo. ``keys`` son las claves de sus páginas y
+        ``ocr``, las palabras reconocidas de cada página que las tiene (``{index, words}``), que el
+        visor escribe en el documento como texto invisible.
         """
         with self._lock:
             entry = self._doc(doc_id)
-            path, password, keys = Path(entry.path), entry.password, list(entry.file_keys)
+            path, password, keys = entry.path, entry.password, list(entry.file_keys)
             ocr = [{"index": i, "words": list(entry.ocr[key])} for i, key in enumerate(keys) if entry.ocr.get(key)]
         try:
-            data = path.read_bytes()
+            url = self._host.file_url(path)
         except OSError as ex:
-            raise UserError(f"No se pudo leer {path.name}: {ex}", "open_failed") from ex
-        url = self._host.share_bytes(data, "application/pdf")
+            raise UserError(f"No se pudo leer {Path(path).name}: {ex}", "open_failed") from ex
         return {"url": url, "keys": keys, "password": password, "ocr": ocr}
 
     # ── Páginas y texto (los da el visor) ────────────────────────────────
@@ -367,7 +373,7 @@ class ViewerService:
         except PdfError as ex:
             log.exception("No se pudo leer la copia del visor")
             raise UserError(f"No se pudo leer la copia del documento: {ex}", "sync_failed") from ex
-        target.write_bytes(data)
+        self._host.write_file(str(target), data)
         entry.keys, entry.layout, entry.metadata = list(keys), layout, metadata
         entry.mark_saved()
 
@@ -427,20 +433,19 @@ class ViewerService:
             raise UserError(f"No se pudieron extraer las imágenes: {ex}", "export_failed") from ex
         return {"folder": folder, "count": count}
 
-    @staticmethod
-    def _write(path: str, data: bytes) -> None:
+    def _write(self, path: str, data: bytes) -> None:
         try:
-            Path(path).write_bytes(data)
+            self._host.write_file(path, data)
         except OSError as ex:
             raise UserError(f"No se pudo guardar {Path(path).name}: {ex}", "save_failed") from ex
 
     # ── Propiedades ──────────────────────────────────────────────────────
     @exposed
     def file_size(self, doc_id: int) -> int | None:
-        """Tamaño del archivo en disco, en bytes (diálogo de propiedades; lo demás lo da el visor)."""
+        """Tamaño del archivo, en bytes (diálogo de propiedades; lo demás lo da el visor)."""
         with self._lock:
-            path = Path(self._doc(doc_id).path)
-        return path.stat().st_size if path.is_file() else None
+            path = self._doc(doc_id).path
+        return self._host.file_size(path)
 
     # ── Auxiliares ───────────────────────────────────────────────────────
     def _doc(self, doc_id: int) -> _OpenDocument:

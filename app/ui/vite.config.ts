@@ -22,7 +22,10 @@ export default defineConfig(({ mode }) => {
   plugins: [svelte()],
   // Rutas desde la raíz de app/ui (Vite las resuelve allí); las mismas que en tsconfig.json.
   resolve: { alias: { $lib: '/src/lib', $texts: '/src/texts' } },
-  base: './', // rutas relativas: pywebview sirve dist/ como raíz
+  // Escritorio: rutas relativas (pywebview sirve dist/ como raíz). Navegador: desde la raíz de la
+  // web, porque la dirección cambia con la pestaña (/ver/contrato.pdf, shell/router.ts) y los
+  // archivos tienen que cargarse igual desde cualquiera.
+  base: browser ? '/' : './',
   build: {
     outDir: browser ? 'dist-web' : 'dist',
     emptyOutDir: true,

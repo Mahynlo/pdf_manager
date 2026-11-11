@@ -1,7 +1,11 @@
 """Lo que los servicios pueden pedirle a la ventana anfitriona.
 
 Los servicios dependen de este protocolo y no de pywebview: en las pruebas se usa
-un doble, y en la versión web bastará otra implementación.
+un doble, y en la versión de navegador, ``app/browser/host.py``.
+
+Las herramientas (unir, extraer, seguridad) abren con ``pdf_core`` las rutas que dan los diálogos.
+El visor no: lee y escribe sus documentos con los métodos de «Documentos del visor», porque en el
+navegador esos archivos los tiene la ventana y Python no guarda copia.
 """
 
 from __future__ import annotations
@@ -12,6 +16,10 @@ from typing import Any, Protocol
 class Host(Protocol):
     def pick_pdfs(self) -> list[str]:
         """Diálogo para elegir uno o varios PDF; lista vacía si se cancela."""
+
+    def pick_documents(self) -> list[str]:
+        """Diálogo «Abrir PDF» del visor (uno o varios); lista vacía si se cancela. Los archivos
+        se leen con :meth:`read_file` y :meth:`file_url`."""
 
     def pick_pdf(self) -> str | None:
         """Diálogo para elegir un solo PDF; ``None`` si se cancela."""
@@ -27,6 +35,29 @@ class Host(Protocol):
 
     def save_text(self, suggested_path: str) -> str | None:
         """Diálogo «Guardar como» para un .txt; ``None`` si se cancela."""
+
+    # ── Documentos del visor ─────────────────────────────────────────────────
+    def read_file(self, path: str) -> bytes:
+        """El contenido de ``path``.
+
+        :raises FileNotFoundError: si no existe.
+        :raises OSError: si no se puede leer.
+        """
+
+    def write_file(self, path: str, data: bytes) -> None:
+        """Escribe ``data`` en ``path``, creándolo o sustituyéndolo.
+
+        :raises OSError: si no se puede escribir (``PermissionError`` si no hay permiso).
+        """
+
+    def file_size(self, path: str) -> int | None:
+        """El tamaño de ``path`` en bytes; ``None`` si no existe."""
+
+    def file_url(self, path: str) -> str:
+        """URL desde la que el frontend descarga ``path`` con ``fetch`` (como :meth:`share_bytes`).
+
+        :raises FileNotFoundError: si no existe.
+        """
 
     def open_folder(self, path: str) -> None: ...
 

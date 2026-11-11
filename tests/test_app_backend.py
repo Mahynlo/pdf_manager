@@ -58,6 +58,9 @@ class FakeHost:
     def pick_pdfs(self) -> list[str]:
         return self.picks
 
+    def pick_documents(self) -> list[str]:
+        return self.picks
+
     def pick_pdf(self) -> str | None:
         return self.picks[0] if self.picks else None
 
@@ -73,6 +76,18 @@ class FakeHost:
 
     def save_text(self, suggested_path: str) -> str | None:
         return self.save_pdf(suggested_path)
+
+    def read_file(self, path: str) -> bytes:
+        return Path(path).read_bytes()
+
+    def write_file(self, path: str, data: bytes) -> None:
+        Path(path).write_bytes(data)
+
+    def file_size(self, path: str) -> int | None:
+        return Path(path).stat().st_size if Path(path).is_file() else None
+
+    def file_url(self, path: str) -> str:
+        return self.share_bytes(self.read_file(path), "application/pdf")
 
     def reveal_file(self, path: str) -> None:
         self.opened.append(f"reveal:{path}")
@@ -428,6 +443,47 @@ def test_viewer_keeps_ocr_words_while_their_page_moves_or_turns(tmp_path):
         # Se deshace el giro en el visor: la página vuelve con su clave y con sus palabras.
         viewer.reshape([["rotate", [1], -1]], [2, 1])
         assert "reconocido" in _text(svc, doc_id, 1)
+    finally:
+        svc.close()
+
+
+class WindowFilesHost(FakeHost):
+    """Los archivos los tiene la ventana, no el disco (como en el navegador)."""
+
+    def __init__(self, files: dict[str, bytes], **kw) -> None:
+        super().__init__(**kw)
+        self.files = files
+
+    def read_file(self, path: str) -> bytes:
+        if path not in self.files:
+            raise FileNotFoundError(path)
+        return self.files[path]
+
+    def write_file(self, path: str, data: bytes) -> None:
+        self.files[path] = data
+
+    def file_size(self, path: str) -> int | None:
+        return len(self.files[path]) if path in self.files else None
+
+
+def test_viewer_only_touches_its_files_through_the_host(tmp_path):
+    path = str(tmp_path / "ventana" / "doc.pdf")  # no existe en disco
+    copy = str(tmp_path / "ventana" / "copia.pdf")
+    data = pdf_bytes([[(72, 72, "uno")], [(72, 72, "dos")]])
+    host = WindowFilesHost({path: data}, save_to=copy)
+    svc = ViewerService(host)
+    try:
+        doc_id = svc.open(path)["id"]
+        viewer = FakeViewer(svc, doc_id)
+        assert viewer.data == data and svc.file_size(doc_id) == len(data)
+        viewer.reshape([["remove", 0]], [2])
+        viewer.save()
+        viewer.save("save_as")
+        assert page_texts(host.files[path]) == page_texts(host.files[copy]) == ["dos"]
+        assert not (tmp_path / "ventana").exists()
+        with pytest.raises(UserError) as ex:
+            svc.open(str(tmp_path / "ventana" / "otro.pdf"))
+        assert ex.value.code == "not_found"
     finally:
         svc.close()
 

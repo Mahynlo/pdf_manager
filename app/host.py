@@ -113,6 +113,9 @@ class WebviewHost:
         result = self.window.create_file_dialog(webview.FileDialog.OPEN, allow_multiple=True, file_types=PDF_TYPES)
         return list(result or [])
 
+    def pick_documents(self) -> list[str]:
+        return self.pick_pdfs()
+
     def pick_pdf(self) -> str | None:
         result = self.window.create_file_dialog(webview.FileDialog.OPEN, file_types=PDF_TYPES)
         return result[0] if result else None
@@ -141,6 +144,20 @@ class WebviewHost:
         if not result:
             return None
         return result if isinstance(result, str) else result[0]
+
+    # ── Documentos del visor: los archivos del disco ─────────────────────────
+    def read_file(self, path: str) -> bytes:
+        return Path(path).read_bytes()
+
+    def write_file(self, path: str, data: bytes) -> None:
+        Path(path).write_bytes(data)
+
+    def file_size(self, path: str) -> int | None:
+        file = Path(path)
+        return file.stat().st_size if file.is_file() else None
+
+    def file_url(self, path: str) -> str:
+        return self.share_bytes(self.read_file(path), "application/pdf")
 
     # ── Escritorio ───────────────────────────────────────────────────────────
     def open_folder(self, path: str) -> None:

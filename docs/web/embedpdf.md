@@ -495,7 +495,7 @@ y lo volvía a abrir en EmbedPDF. Ahora el dueño es EmbedPDF, por etapas que de
 | 1 | Operaciones de página y su deshacer | Hecha |
 | 2 | Guardar, guardar como, extraer una página, propiedades e imprimir (Python solo escribe los bytes) | Hecha |
 | 3 | El texto del OCR y la orientación (Python recibe imágenes de página) | Hecha |
-| 4 | Quitar el documento del visor de Python (en el navegador, sin copia en `/files`) | Hecha, salvo la copia de `/files` |
+| 4 | Quitar el documento del visor de Python (en el navegador, sin copia en `/files`) | Hecha |
 | 5 | La IA lee el texto a través de EmbedPDF | Pendiente |
 
 ### El motor de la app (`lib/pdf-engine/`)
@@ -684,10 +684,15 @@ suelta. Lo que necesita de él le llega del visor:
   `lib/types.ts`): las lleva el visor. Python lleva las claves y sabe con ellas si la estructura es
   la guardada.
 
-**Queda la copia de `/files` en el navegador:** el archivo que se abre se copia al sistema de archivos
-de Pyodide, donde lo leen `viewer.open` y `document_url` y donde Python escribe al guardar (y la
-ventana lo pasa al archivo real). Quitarla obliga a que el visor abra el archivo sin Python y a que
-guardar no pase por `/files`: está por decidir.
+**Los archivos del visor, a través del `Host`:** el visor (y «Guardar como TXT» del OCR) lee y
+escribe sus archivos con `host.read_file`, `write_file`, `file_size` y `file_url`, nunca con rutas
+directamente; «Abrir PDF» elige con `host.pick_documents`. En el escritorio son el disco. En el
+navegador los tiene la ventana (`lib/browser/files.ts`) y Python no guarda copia en `/files`:
+`viewer.open` los lee un momento, `document_url` da una URL `blob:` del archivo de la ventana (EmbedPDF
+lo abre sin que pase por Python) y lo que se guarda va a la ventana, que lo escribe en el archivo real o
+lo descarga. Las herramientas siguen copiando a `/files` lo que eligen, porque `pdf_core` abre rutas;
+si el visor abre uno de esos archivos (el resultado de unir, por ejemplo), lo lee y lo escribe ahí.
+Ver [navegador.md](navegador.md) («Archivos»).
 
 **Medido** (PDF de 47 MB y 250 páginas, versión web, scratchpad `perf_text.py`):
 

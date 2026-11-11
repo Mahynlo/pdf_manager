@@ -52,6 +52,19 @@ def test_the_backend_does_not_know_about_the_browser(path):
     assert not _imports(path) & {"js", "pyodide"}
 
 
+VIEWER_SERVICES = ["viewer.py", "ocr.py", "redact.py", "ai.py"]
+
+
+@pytest.mark.parametrize("name", VIEWER_SERVICES)
+def test_the_viewer_reaches_its_files_through_the_host(name):
+    """En el navegador los archivos del visor los tiene la ventana, no Python: el visor los lee y
+    los escribe con el ``Host`` (``read_file``, ``write_file``…), nunca con rutas."""
+    code = (ROOT / "app" / "backend" / "services" / name).read_text(encoding="utf-8")
+    path_methods = re.findall(r"\.(read_bytes|write_bytes|read_text|write_text|stat|is_file|exists)\(", code)
+    builtin_open = re.findall(r"(?<!def )(?<![\w.])open\(", code)
+    assert not path_methods and not builtin_open
+
+
 def test_only_the_pdf_layer_talks_to_the_engine():
     """PDFium no admite hilos: el candado de ``pdf_core.pdf`` solo protege si todo pasa por él."""
     users = {p.relative_to(ROOT).as_posix() for p in [*_files(ROOT / "app"), *_files(SRC / "pdf_core")] if "pypdfium2" in _imports(p)}

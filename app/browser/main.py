@@ -33,6 +33,9 @@ class JsChannel:
     def saved(self, path: str, data: bytes) -> None:
         self._worker.saved(path, to_js(data))
 
+    def write(self, path: str, data: bytes) -> None:
+        self._worker.write(path, to_js(data))
+
 
 class Backend:
     def __init__(self, worker: Any) -> None:
@@ -50,8 +53,7 @@ class Backend:
                             format="%(asctime)s %(levelname)s %(name)s: %(message)s")
         channel = JsChannel(worker)
         onnx.install(onnx.channel_ask(channel))
-        self._files = Files()
-        self._host = BrowserHost(channel, self._files)
+        self._host = BrowserHost(channel, Files())
         self._registry, self._services = build_registry(self._host, Settings())
         self._warnings = quit_warnings
 
@@ -77,11 +79,8 @@ class Backend:
         self._host.flush()
         self._worker.dirty(self._warnings(self._services) is not None)
 
-    def add_file(self, path: str, data: Any) -> None:
-        self._files.add(path, data.to_bytes())
-
     def open_files(self, paths: str) -> None:
-        """PDF soltados en la ventana."""
+        """PDF soltados en la ventana (los tiene la ventana: el visor los lee al abrirlos)."""
         for path in json.loads(paths):
             self._services["documents"].open(path)
 

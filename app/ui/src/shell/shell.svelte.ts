@@ -4,6 +4,8 @@
 //
 // Cada pestaña monta su componente y guarda su instancia (bind:this) para llamar a las
 // funciones que exporte: canClose(), onKey(ev) y onShow() (ver tools.ts).
+//
+// En la versión de navegador la dirección de la página sigue a la pestaña activa (router.ts).
 import { call, on, type ApiError } from '$lib/api.ts';
 import { fileName } from '$lib/dom.ts';
 import type { MenuItem } from '$lib/menu.svelte.ts';
@@ -11,6 +13,7 @@ import type { DocumentInfo } from '$lib/types.ts';
 import { askChoice, askPassword, setStatus, toast } from '$lib/ui.ts';
 import type { Component } from 'svelte';
 import { t } from '$texts';
+import { ROUTED, Router, type Route } from './router.ts';
 import { getTool, loadViewer, TOOLS } from './tools.ts';
 
 export const HOME = 'home';
@@ -71,11 +74,15 @@ class Shell {
   history: string[] = []; // claves en orden de uso, para volver a la anterior al cerrar
   opening = new Set<string>(); // rutas que se están abriendo (evita pestañas duplicadas)
   toggleTheme: () => void = () => {};
+  router: Router | null = null;
 
   start(toggleTheme: () => void): void {
     this.toggleTheme = toggleTheme;
+    this.router = ROUTED ? new Router(T.header.appName, (key, route) => this.follow(key, route)) : null;
+    const initial = this.router?.current() ?? null;
     this.tabs.push(new Tab(HOME, T.home.title, 'home', { closable: false }));
     this.activate(HOME);
+    if (initial) this.follow(null, initial);
     // Aperturas pedidas por el backend (Abrir PDF, resultados de otras herramientas…).
     on<{ path: string; password: string | null }>('document:open', ({ path, password }) => this.openDocument(path, password));
     // Se cerró la ventana con documentos sin guardar o trabajos en curso (como closeEvent en Qt).
@@ -166,7 +173,9 @@ class Shell {
   /** Marca de cambios sin guardar y, tras «Guardar como», la nueva ruta (como _refresh_viewer_tab en Qt). */
   _updateDocumentTab(key: string, { name, path, modified }: Pick<DocumentInfo, 'name' | 'path' | 'modified'>): void {
     const tab = this.get(key);
-    if (tab) Object.assign(tab, { title: name, path, modified });
+    if (!tab) return;
+    Object.assign(tab, { title: name, path, modified });
+    if (key === this.current) this.router?.show(tab, { replace: true }); // su dirección lleva el nombre
   }
 
   _documentTab(path: string): Tab | undefined {
@@ -192,10 +201,26 @@ class Shell {
     }
   }
 
-  activate(key: string): void {
+  activate(key: string, { replace = false } = {}): void {
     this.current = key;
     this.history = [...this.history.filter((k) => k !== key), key];
-    this.get(key)?.instance?.onShow?.();
+    const tab = this.get(key);
+    if (tab) this.router?.show(tab, { replace });
+    tab?.instance?.onShow?.();
+  }
+
+  /**
+   * Va adonde lleva una entrada del historial del navegador (o la dirección al cargar la página):
+   * a la pestaña `key` si sigue abierta; si no, a la herramienta de `route`. Un documento no se
+   * puede volver a abrir desde su dirección: se avisa y se queda en la pestaña activa.
+   */
+  follow(key: string | null, route: Route): void {
+    if (key && this.get(key)) this.activate(key);
+    else if (route && 'tool' in route) void this.open(route.tool);
+    else {
+      if (route) toast(T.reopen(route.document), 'warning', 8000);
+      this.activate(this.current, { replace: true });
+    }
   }
 
   /** Cierra la pestaña; la herramienta puede impedirlo con `canClose()` (p. ej. trabajo en curso). */
@@ -206,7 +231,7 @@ class Shell {
     if (!this.get(key)) return;
     this.tabs = this.tabs.filter((tab) => tab.key !== key); // desmontar el componente libera sus recursos
     this.history = this.history.filter((k) => k !== key);
-    if (this.current === key) this.activate(this.history.at(-1) ?? HOME);
+    if (this.current === key) this.activate(this.history.at(-1) ?? HOME, { replace: true });
   }
 
   /** Cierra varias pestañas por clave, de la última a la primera (como Qt). */

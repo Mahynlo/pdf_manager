@@ -92,10 +92,14 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
 - **Imágenes bajo demanda**: miniaturas solo para lo visible (`IntersectionObserver`), por lotes,
   en JPEG y con caché acotada (`lib/thumbs.ts`). Las páginas del visor las dibuja
   EmbedPDF en el navegador, solo las que están a la vista y en mosaico a la resolución del zoom, a
-  partir de los bytes del documento abierto en Python (`viewer.document_url`, ver [embedpdf.md](embedpdf.md)).
+  partir del documento que tiene abierto (el archivo lo da `viewer.document_url`, ver [embedpdf.md](embedpdf.md)).
 - **Datos grandes hacia el frontend**: el puente de pywebview pasa los valores como texto JSON. Para
   datos grandes (un PDF entero), `host.share_bytes(datos, tipo)` da una URL de un solo uso en
-  127.0.0.1 (`app/byte_server.py`) y el frontend los descarga en binario con `fetch`.
+  127.0.0.1 (`app/byte_server.py`) y el frontend los descarga en binario con `fetch`. El visor abre su
+  archivo con `host.file_url(ruta)`, que en el navegador es una URL del archivo que tiene la ventana.
+- **Archivos del visor**: el visor lee y escribe sus documentos con el `Host` (`read_file`,
+  `write_file`, `file_size`, `file_url`), nunca con rutas; las herramientas abren rutas con `pdf_core`.
+  En el navegador así el visor no guarda copia en Python (ver [navegador.md](navegador.md)).
 - **Atajos de una pestaña**: su componente exporta `onKey(ev)`; el shell se lo pasa solo cuando
   es la pestaña activa y no hay un diálogo abierto.
 - **Cambios en el documento del visor**: cada operación de `viewer.*` devuelve la información

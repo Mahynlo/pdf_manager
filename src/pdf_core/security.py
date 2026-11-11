@@ -112,14 +112,14 @@ class PDFSecurityManager:
             raise ValueError(f"Error al desbloquear PDF: {e}") from e
 
     @staticmethod
-    def open_for_viewer(path: str, password: str | None = None) -> Document:
-        """Abre un PDF para el visor.
+    def open_for_viewer(source: str | bytes, password: str | None = None) -> Document:
+        """Abre un PDF para el visor, de disco o de memoria.
 
         :raises PDFPasswordRequiredError: si hace falta contraseña y no se indicó.
         :raises PDFInvalidPasswordError: si la indicada no es la correcta.
         """
         try:
-            return Document.open(path, password)
+            return Document.open(source, password)
         except PasswordError as e:
             if not password:
                 raise PDFPasswordRequiredError("PDF protegido requiere contraseña") from e

@@ -3,6 +3,12 @@
 Lo que necesita a la ventana (diálogos, el motor de EmbedPDF) se le pide por un :class:`Channel`,
 y Python espera la respuesta como espera a un diálogo en el escritorio. Lo que no tiene sentido en
 un navegador (abrir una carpeta del sistema, la barra de título) no hace nada.
+
+Los archivos que elige el usuario los tiene la ventana (``lib/browser/files.ts``). Los de las
+herramientas se copian a Python (:class:`Files`) al elegirlos, porque ``pdf_core`` abre rutas; los
+del visor no: se leen al pedirlos (``read_file``, ``file_url``) y se escriben en la ventana
+(``write_file``). Un documento del visor que esté en ``Files`` (el resultado de una herramienta) se
+lee y se escribe ahí.
 """
 
 from __future__ import annotations
@@ -28,7 +34,12 @@ class Channel(Protocol):
         """URL ``blob:`` con ``data``."""
 
     def saved(self, path: str, data: bytes) -> None:
-        """Se escribió ``path``: la ventana lo guarda en el archivo real o lo descarga."""
+        """Se escribió la copia de ``path`` que tiene Python: la ventana lo guarda en el archivo
+        real o lo descarga."""
+
+    def write(self, path: str, data: bytes) -> None:
+        """Escribe ``path``, del que Python no tiene copia: la ventana se lo queda y lo guarda en
+        el archivo real o lo descarga."""
 
 
 class BrowserHost:
@@ -42,21 +53,37 @@ class BrowserHost:
         text, reply = self._channel.ask(kind, json.dumps(payload), data)
         return json.loads(text), reply
 
-    def _picked(self, value: dict[str, Any], data: bytes) -> list[str]:
-        """Copia los archivos que eligió el usuario: ``data`` los lleva uno detrás de otro."""
-        paths, start = [], 0
+    def _read(self, paths: list[str]) -> dict[str, bytes]:
+        """El contenido de los archivos ``paths`` que tiene la ventana (los que no, no vienen):
+        ``data`` los lleva uno detrás de otro."""
+        if not paths:
+            return {}
+        value, data = self._ask("read", {"paths": paths})
+        found, start = {}, 0
         for item in value["files"]:
-            self._files.add(item["path"], data[start:start + item["size"]])
+            found[item["path"]] = data[start:start + item["size"]]
             start += item["size"]
-            paths.append(item["path"])
+        return found
+
+    def _copy(self, paths: list[str]) -> list[str]:
+        """Copia a Python los archivos que eligió el usuario para una herramienta."""
+        for path, data in self._read(paths).items():
+            self._files.add(path, data)
         return paths
+
+    def _pick(self, multiple: bool) -> list[str]:
+        value, _ = self._ask("pick", {"multiple": multiple})
+        return value
 
     # ── Diálogos ─────────────────────────────────────────────────────────────
     def pick_pdfs(self) -> list[str]:
-        return self._picked(*self._ask("pick", {"multiple": True}))
+        return self._copy(self._pick(multiple=True))
+
+    def pick_documents(self) -> list[str]:
+        return self._pick(multiple=True)
 
     def pick_pdf(self) -> str | None:
-        return next(iter(self._picked(*self._ask("pick", {"multiple": False}))), None)
+        return next(iter(self._copy(self._pick(multiple=False))), None)
 
     def pick_folder(self) -> str | None:
         return self._folder(output=False)
@@ -65,10 +92,10 @@ class BrowserHost:
         return self._folder(output=True)
 
     def _folder(self, output: bool) -> str | None:
-        value, data = self._ask("folder", {"output": output})
+        value, _ = self._ask("folder", {"output": output})
         if value is None:
             return None
-        self._picked(value, data)
+        self._copy(value["files"])
         Path(value["path"]).mkdir(parents=True, exist_ok=True)
         return value["path"]
 
@@ -83,6 +110,35 @@ class BrowserHost:
         if path:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         return path
+
+    # ── Documentos del visor ─────────────────────────────────────────────────
+    def read_file(self, path: str) -> bytes:
+        if Path(path).is_file():
+            return Path(path).read_bytes()
+        data = self._read([path]).get(path)
+        if data is None:
+            raise FileNotFoundError(path)
+        return data
+
+    def write_file(self, path: str, data: bytes) -> None:
+        if Path(path).is_file():
+            Path(path).write_bytes(data)  # se la entrega flush
+        else:
+            self._channel.write(path, data)
+
+    def file_size(self, path: str) -> int | None:
+        if Path(path).is_file():
+            return Path(path).stat().st_size
+        size, _ = self._ask("size", {"path": path})
+        return size
+
+    def file_url(self, path: str) -> str:
+        if Path(path).is_file():
+            return self.share_bytes(Path(path).read_bytes(), "application/pdf")
+        url, _ = self._ask("url", {"path": path})  # sin copiarlo: la URL es del archivo de la ventana
+        if url is None:
+            raise FileNotFoundError(path)
+        return url
 
     # ── Sin equivalente en un navegador ──────────────────────────────────────
     def open_folder(self, path: str) -> None: ...

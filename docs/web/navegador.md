@@ -29,7 +29,7 @@ ventana (Svelte, EmbedPDF)  ──llamadas──▶  worker: Pyodide
 | `Host` | `app/host.py` (`WebviewHost`) | `app/browser/host.py` (`BrowserHost`) |
 | PDFium en Python | `pypdfium2` | `pypdfium2` (su wheel para Pyodide) |
 | Motor de la ventana | EmbedPDF | EmbedPDF |
-| Archivos | Rutas reales | Copias en el sistema de archivos virtual (`/files/…`) |
+| Archivos | Rutas reales | Los tiene la ventana; las herramientas los copian al sistema de archivos virtual (`/files/…`) |
 | Preferencias, leyendas, sellos y firmas | Perfil del usuario | IndexedDB (IDBFS en `/home/pyodide`) |
 | Hilos | `threading` | `app/browser/background.py` |
 | OCR | `onnxruntime` | `app/browser/onnx.py` sobre onnxruntime-web, con los mismos modelos |
@@ -59,9 +59,19 @@ evento que emite el trabajo. Si un trabajo nuevo tiene que poder interrumpirse, 
 
 ### Archivos
 
-Los servicios siguen trabajando con rutas. La ventana da una ruta virtual a cada archivo que elige el
-usuario y recuerda a qué archivo real corresponde. Tras cada llamada, `Files.changed` dice qué
-escribieron los servicios, y [`files.ts`](../../app/ui/src/lib/browser/files.ts) lo entrega:
+Los servicios siguen trabajando con rutas. La ventana da una ruta virtual (`/files/…`) a cada archivo
+que elige el usuario, recuerda a qué archivo real corresponde y tiene su contenido
+([`files.ts`](../../app/ui/src/lib/browser/files.ts)). Python lo pide cuando lo necesita:
+
+- **Las herramientas** (unir, extraer, seguridad) lo copian a su sistema de archivos al elegirlo,
+  porque `pdf_core` abre rutas. Tras cada llamada, `Files.changed` dice qué escribieron y la ventana
+  lo entrega.
+- **El visor** no guarda copia: abre el archivo desde la ventana, sin que pase por Python
+  (`host.file_url` da una URL `blob:` del archivo), Python lo lee un momento al abrirlo
+  (`host.read_file`) y lo que guarda vuelve a la ventana (`host.write_file`). Así cada PDF abierto
+  está una sola vez en memoria, en EmbedPDF. Ver `app/backend/host.py` («Documentos del visor»).
+
+Lo que se guarda llega al archivo real así:
 
 | | Chrome, Edge | Firefox, Safari |
 |---|---|---|
@@ -69,6 +79,23 @@ escribieron los servicios, y [`files.ts`](../../app/ui/src/lib/browser/files.ts)
 | Guardar | Sobre el archivo real | Se descarga |
 | Guardar como | Diálogo del sistema | Se descarga con el nombre sugerido |
 | Carpeta de salida | Diálogo del sistema | Cada archivo se descarga |
+
+### Direcciones
+
+La dirección de la página sigue a la pestaña activa: `/inicio`, `/ayuda`, `/unir`, `/extraer`,
+`/seguridad`, `/ajustes` y `/ver/<nombre del archivo>`; el título de la pestaña del navegador es el de
+la activa, y atrás y adelante cambian de pestaña ([`router.ts`](../../app/ui/src/shell/router.ts)). En
+el escritorio no se usa: la dirección no se ve.
+
+- Abrir una dirección de herramienta abre esa herramienta.
+- Un documento no se puede volver a abrir desde su dirección (al recargar, con un enlace o con atrás
+  si ya se cerró): el navegador no deja leer un archivo que el usuario no haya vuelto a elegir. Se
+  avisa y se queda en Inicio (o en la pestaña activa).
+- Cerrar una pestaña sustituye su entrada del historial en vez de añadir otra.
+- Por eso la web se compila desde la raíz (`base: '/'` en `vite.config.ts`) y **el servidor tiene que
+  devolver `index.html` en cualquier dirección** (`pnpm preview:web` y `pnpm dev:web` ya lo hacen; en
+  Netlify, `/* /index.html 200` en `_redirects`; Cloudflare Pages lo hace solo). Para servirla en una
+  subcarpeta hay que cambiar `base`.
 
 ### Pantalla de carga
 
@@ -84,7 +111,7 @@ muestra ahí mismo.
 - **«Abrir con» y barra de título:** no existen.
 - **Asistente IA:** solo el modo básico, porque los clientes de los proveedores no están en Pyodide.
 - **Durante una extracción** las demás herramientas esperan a que termine.
-- **Memoria:** un worker de wasm tiene un límite de unos 2-4 GB, y cada PDF abierto está en Python y en EmbedPDF.
+- **Memoria:** un worker de wasm tiene un límite de unos 2-4 GB. Un PDF abierto en el visor está solo en EmbedPDF; los de las herramientas, en Python.
 
 ## Gotchas
 

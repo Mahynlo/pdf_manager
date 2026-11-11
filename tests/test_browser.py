@@ -11,14 +11,28 @@ from app.browser.host import BrowserHost
 
 
 class FakeChannel:
+    """La ventana: ``window`` son los archivos que tiene (ruta -> contenido)."""
+
     def __init__(self):
         self.replies = {}
         self.events = []
-        self.written = {}
+        self.written = {}  # lo que entrega flush (Python tiene copia)
+        self.kept = {}  # lo que escribe write_file (Python no tiene copia)
         self.asked = []
+        self.window = {}
 
     def ask(self, kind, payload, data=None):
-        self.asked.append((kind, json.loads(payload), data))
+        request = json.loads(payload)
+        self.asked.append((kind, request, data))
+        if kind == "read":
+            found = [path for path in request["paths"] if path in self.window]
+            files = [{"path": path, "size": len(self.window[path])} for path in found]
+            return json.dumps({"files": files}), b"".join(self.window[path] for path in found)
+        if kind == "size":
+            data = self.window.get(request["path"])
+            return json.dumps(None if data is None else len(data)), b""
+        if kind == "url":
+            return json.dumps(f"blob:{request['path']}" if request["path"] in self.window else None), b""
         value, reply = self.replies[kind]
         return json.dumps(value), reply
 
@@ -31,15 +45,25 @@ class FakeChannel:
     def saved(self, path, data):
         self.written[path] = data
 
+    def write(self, path, data):
+        self.kept[path] = data
+        self.window[path] = data
+
 
 @pytest.fixture
 def host(tmp_path):
     return BrowserHost(FakeChannel(), Files(tmp_path))
 
 
+def _pick(host, files):
+    """El usuario elige ``files`` (ruta -> contenido): la ventana se los queda."""
+    host._channel.window.update(files)
+    host._channel.replies["pick"] = (list(files), b"")
+
+
 def test_picked_files_are_copied_and_not_reported_as_changed(host, tmp_path):
     first, second = str(tmp_path / "1" / "a.pdf"), str(tmp_path / "2" / "b.pdf")
-    host._channel.replies["pick"] = ({"files": [{"path": first, "size": 3}, {"path": second, "size": 2}]}, b"aaabb")
+    _pick(host, {first: b"aaa", second: b"bb"})
     assert host.pick_pdfs() == [first, second]
     assert (tmp_path / "1" / "a.pdf").read_bytes() == b"aaa"
     assert (tmp_path / "2" / "b.pdf").read_bytes() == b"bb"
@@ -48,7 +72,7 @@ def test_picked_files_are_copied_and_not_reported_as_changed(host, tmp_path):
 
 
 def test_a_cancelled_pick_gives_nothing(host):
-    host._channel.replies["pick"] = ({"files": []}, b"")
+    host._channel.replies["pick"] = ([], b"")
     assert host.pick_pdfs() == []
     assert host.pick_pdf() is None
 
@@ -67,7 +91,7 @@ def test_what_a_service_writes_reaches_the_window_once(host, tmp_path):
 
 def test_saving_over_a_picked_file_reaches_the_window(host, tmp_path):
     path = tmp_path / "1" / "a.pdf"
-    host._channel.replies["pick"] = ({"files": [{"path": str(path), "size": 1}]}, b"a")
+    _pick(host, {str(path): b"a"})
     host.pick_pdf()
     path.write_bytes(b"cambiado")
     host.flush()
@@ -84,7 +108,8 @@ def test_cancelled_dialogs_return_none(host):
 def test_picked_folder_brings_its_pdfs(host, tmp_path):
     folder = tmp_path / "9"
     item = str(folder / "a.pdf")
-    host._channel.replies["folder"] = ({"path": str(folder), "files": [{"path": item, "size": 1}]}, b"a")
+    host._channel.window[item] = b"a"
+    host._channel.replies["folder"] = ({"path": str(folder), "files": [item]}, b"")
     assert host.pick_folder() == str(folder)
     assert (folder / "a.pdf").read_bytes() == b"a"
 
@@ -101,6 +126,51 @@ def test_output_folder_says_what_it_is_for(host, tmp_path):
     host.pick_folder()
     host.pick_output_folder()
     assert [asked[1] for asked in host._channel.asked] == [{"output": False}, {"output": True}]
+
+
+def test_documents_for_the_viewer_stay_in_the_window(host, tmp_path):
+    path = str(tmp_path / "1" / "a.pdf")
+    _pick(host, {path: b"pdf"})
+    assert host.pick_documents() == [path]
+    assert not (tmp_path / "1").exists()  # sin copia en Python
+    assert host.file_size(path) == 3
+    assert host.read_file(path) == b"pdf"
+    assert host.file_url(path) == f"blob:{path}"  # la URL es del archivo de la ventana
+
+
+def test_the_viewer_writes_its_documents_in_the_window(host, tmp_path):
+    path = str(tmp_path / "1" / "a.pdf")
+    _pick(host, {path: b"pdf"})
+    host.pick_documents()
+    host.write_file(path, b"guardado")
+    host.flush()
+    assert host._channel.kept == {path: b"guardado"}
+    assert host._channel.written == {}  # flush no lo entrega otra vez
+    assert host.read_file(path) == b"guardado"
+    assert not (tmp_path / "1").exists()
+
+
+def test_a_document_python_has_is_read_and_written_there(host, tmp_path):
+    """El resultado de una herramienta abierto en el visor."""
+    path = tmp_path / "3" / "combinado.pdf"
+    path.parent.mkdir()
+    path.write_bytes(b"pdf")
+    assert host.read_file(str(path)) == b"pdf"
+    assert host.file_size(str(path)) == 3
+    assert host.file_url(str(path)) == "blob:3"
+    host.write_file(str(path), b"guardado")
+    host.flush()
+    assert host._channel.written == {str(path): b"guardado"}
+    assert host._channel.kept == {}
+
+
+def test_a_missing_document_is_not_found(host, tmp_path):
+    path = str(tmp_path / "1" / "otro.pdf")
+    assert host.file_size(path) is None
+    with pytest.raises(FileNotFoundError):
+        host.read_file(path)
+    with pytest.raises(FileNotFoundError):
+        host.file_url(path)
 
 
 def test_engine_tasks_go_to_the_window(host):

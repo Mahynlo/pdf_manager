@@ -194,7 +194,7 @@ class OcrService:
         if not dest:
             return None
         try:
-            Path(dest).write_text(text, encoding="utf-8")
+            self._host.write_file(dest, text.encode("utf-8"))
         except OSError as ex:
             raise UserError(f"No se pudo guardar {Path(dest).name}: {ex}", "save_failed") from ex
         return dest

@@ -32,7 +32,6 @@ export interface Init {
 export type ToWorker =
   | Init
   | { type: 'call'; id: number; method: string; args: string }
-  | { type: 'file'; path: string; data: Uint8Array }
   | { type: 'open'; paths: string }
   | { type: 'upload'; url: string; data: Uint8Array };
 
@@ -44,5 +43,6 @@ export type FromWorker =
   | { type: 'result'; id: number; json: string }
   | { type: 'emit'; event: string; json: string }
   | { type: 'ask'; kind: string; json: string; data: Uint8Array | null }
-  | { type: 'saved'; path: string; data: Uint8Array }
+  | { type: 'saved'; path: string; data: Uint8Array } // Python tiene copia (files.ts: writeBack)
+  | { type: 'write'; path: string; data: Uint8Array } // Python no tiene copia (files.ts: writeFile)
   | { type: 'dirty'; dirty: boolean };

@@ -14,7 +14,6 @@ const BLOB_LIFETIME_MS = 120_000;
 interface Backend {
   call(method: string, args: string): string;
   settle(): void;
-  add_file(path: string, data: Uint8Array): void;
   open_files(paths: string): void;
   upload(url: string, data: Uint8Array): void;
 }
@@ -57,6 +56,10 @@ const channel = {
   saved(path: string, data: Uint8Array) {
     const copy = data.slice();
     scope.postMessage({ type: 'saved', path, data: copy }, [copy.buffer]);
+  },
+  write(path: string, data: Uint8Array) {
+    const copy = data.slice();
+    scope.postMessage({ type: 'write', path, data: copy }, [copy.buffer]);
   },
   /** Una llamada que interrumpe el trabajo en curso, si llega en `ms` (ver INTERRUPTS). */
   poll(ms: number) {
@@ -129,9 +132,6 @@ scope.onmessage = ({ data: message }) => {
     case 'call':
       scope.postMessage({ type: 'result', id: message.id, json: backend.call(message.method, message.args) });
       settle();
-      break;
-    case 'file':
-      backend.add_file(message.path, message.data);
       break;
     case 'open':
       backend.open_files(message.paths);

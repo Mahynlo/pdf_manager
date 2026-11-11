@@ -3,7 +3,9 @@
 import { runTask } from '$lib/engine-tasks.ts';
 import { engine } from '$lib/engine.ts';
 import { t } from '$texts';
-import { droppedPdfs, pickFolder, pickPdfs, pickSave, writeBack, type Picked } from './files.ts';
+import {
+  droppedPdfs, fileSize, fileUrl, pickFolder, pickPdfs, pickSave, readFiles, writeBack, writeFile, type FileData,
+} from './files.ts';
 import type { OnnxReply, OnnxRequest } from './onnx-worker.ts';
 import {
   BUSY, CONTROL_SLOTS, DATA_LENGTH, INBOX_BYTES, INBOX_LENGTH, INTERRUPTS, JSON_LENGTH, READY, REPLY_BYTES,
@@ -46,10 +48,9 @@ function answer(value: unknown, parts: Uint8Array[] = []): void {
   Atomics.notify(control, READY);
 }
 
-/** Respuesta a una petición de archivos: la lista y su contenido, uno detrás de otro. */
-async function answerFiles(files: Picked[], extra: object = {}): Promise<void> {
-  const parts = await Promise.all(files.map(async ({ file }) => new Uint8Array(await file.arrayBuffer())));
-  answer({ ...extra, files: files.map(({ path }, i) => ({ path, size: parts[i].length })) }, parts);
+/** Respuesta con el contenido de unos archivos: la lista y su contenido, uno detrás de otro. */
+function answerFiles(files: FileData[]): void {
+  answer({ files: files.map(({ path, data }) => ({ path, size: data.length })) }, files.map(({ data }) => data));
 }
 
 /** Pasa una petición al worker de los modelos y escribe su respuesta. */
@@ -69,11 +70,15 @@ async function serve(kind: string, json: string, data: Uint8Array | null): Promi
   const request = JSON.parse(json);
   try {
     if (kind === 'pick') {
-      await answerFiles(await pickPdfs(request.multiple));
+      answer(await pickPdfs(request.multiple));
     } else if (kind === 'folder') {
-      const folder = await pickFolder(request.output);
-      if (folder) await answerFiles(folder.files, { path: folder.path });
-      else answer(null);
+      answer(await pickFolder(request.output));
+    } else if (kind === 'read') {
+      answerFiles(await readFiles(request.paths));
+    } else if (kind === 'size') {
+      answer(await fileSize(request.path));
+    } else if (kind === 'url') {
+      answer(await fileUrl(request.path));
     } else if (kind === 'save') {
       answer(await pickSave(request.name, request.kind));
     } else if (kind === 'engine') {
@@ -87,7 +92,7 @@ async function serve(kind: string, json: string, data: Uint8Array | null): Promi
   } catch (err) {
     console.error(err);
     const message = (err as Error).message ?? String(err);
-    answer(kind === 'pick' ? { files: [] } : kind === 'engine' || kind === 'onnx' ? { error: message } : null);
+    answer(kind === 'pick' ? [] : kind === 'read' ? { files: [] } : kind === 'engine' || kind === 'onnx' ? { error: message } : null);
   }
 }
 
@@ -108,6 +113,9 @@ function receive(message: FromWorker): void {
       break;
     case 'saved':
       void writeBack(message.path, message.data as Uint8Array<ArrayBuffer>);
+      break;
+    case 'write':
+      void writeFile(message.path, message.data as Uint8Array<ArrayBuffer>);
       break;
     case 'dirty':
       dirty = message.dirty;
@@ -170,12 +178,8 @@ export function upload(url: string, body: ArrayBuffer): void {
   post({ type: 'upload', url, data: new Uint8Array(body) });
 }
 
-/** PDF soltados en la ventana. */
+/** PDF soltados en la ventana: se abren en el visor, que los lee de aquí (files.ts). */
 export async function openDropped(transfer: DataTransfer): Promise<void> {
-  const files = await droppedPdfs(transfer);
-  for (const { path, file } of files) {
-    const data = new Uint8Array(await file.arrayBuffer());
-    post({ type: 'file', path, data }, [data.buffer]);
-  }
-  if (files.length) post({ type: 'open', paths: JSON.stringify(files.map(({ path }) => path)) });
+  const paths = await droppedPdfs(transfer);
+  if (paths.length) post({ type: 'open', paths: JSON.stringify(paths) });
 }

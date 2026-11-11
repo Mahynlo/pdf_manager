@@ -37,6 +37,8 @@ export default {
   /** Barra de estado (lib/feedback.svelte.ts): lo que muestra cuando no hay ningún mensaje. */
   status: { idle: 'Listo • Extraer PDFs' },
   opened: (name: string) => `Abierto: ${name}`,
+  /** La dirección de la página es la de un documento que ya no está abierto (al recargar, o atrás). */
+  reopen: (name: string) => `${name} ya no está abierto: ábrelo de nuevo para verlo.`,
   openFailed: (tool: string, message: string) => `No se pudo abrir ${tool}: ${message}`,
   /** Al cerrar la ventana con cambios sin guardar o trabajos en curso. */
   quit: {
