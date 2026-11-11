@@ -8,8 +8,10 @@
 import { PdfEngine, createHybridImageConverter } from '@embedpdf/engines';
 import { Task, type IPdfiumExecutor, type PdfDocumentObject, type PdfPageObject } from '@embedpdf/models';
 import { ImageEncoderPool } from './encoder.ts';
-import type { CopyMethod, CopyOptions, DocumentFacts, OcrMethod, StructureMethod } from './native.ts';
-import type { Box, OcrText, PageFacts, PageImage } from './page-ocr.ts';
+import type { CopyMethod, CopyOptions, DocumentFacts, ReadingMethod, StructureMethod } from './native.ts';
+import type { OcrText, PageFacts, PageImage } from './page-ocr.ts';
+import type { Box } from './page-reader.ts';
+import type { PageTexts } from './page-text.ts';
 import { READY_ID, type FromEngine, type ToEngine } from './protocol.ts';
 
 const ENCODERS = 2; // workers que codifican imágenes (los mismos que EmbedPDF)
@@ -137,11 +139,11 @@ export class DocumentCopies {
   }
 }
 
-/** Lo que necesita el OCR del documento abierto: leer y dibujar una página y escribir su texto (page-ocr.ts). */
+/** Leer el documento abierto: lo que necesita el OCR (page-ocr.ts) y el texto de las páginas para Python (page-text.ts). */
 export class PageReading {
   constructor(private executor: WorkerExecutor) {}
 
-  private call<R>(method: OcrMethod, ...args: unknown[]): Promise<R> {
+  private call<R>(method: ReadingMethod, ...args: unknown[]): Promise<R> {
     return this.executor.send<R>(method, args).toPromise();
   }
 
@@ -156,6 +158,10 @@ export class PageReading {
   /** Devuelve las páginas que cambiaron (las que hay que volver a leer en EmbedPDF). */
   writeOcrText(doc: PdfDocumentObject, pages: OcrText[]): Promise<number[]> {
     return this.call('writeOcrText', doc, pages);
+  }
+
+  pageTexts(doc: PdfDocumentObject, indices: number[]): Promise<PageTexts> {
+    return this.call('pageTexts', doc, indices);
   }
 }
 
@@ -183,4 +189,6 @@ export function createAppEngine(wasmUrl: string): AppEngine {
   };
 }
 
-export type { Box, OcrText, OcrWord, PageFacts, PageImage } from './page-ocr.ts';
+export type { OcrText, OcrWord, PageFacts, PageImage } from './page-ocr.ts';
+export type { Box } from './page-reader.ts';
+export type { PageTexts } from './page-text.ts';

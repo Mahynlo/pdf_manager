@@ -1,8 +1,8 @@
 // Marcas de censura del visor (complemento Redaction de EmbedPDF, en modo anotación; paso 4
 // de docs/web/embedpdf.md). Cada marca es una anotación Redact: se ve con borde rojo (al pasar
 // el ratón, con el relleno que tendrá) y se revisa, se mueve, se borra y se deshace en la
-// página como las demás anotaciones. La censura la aplica el motor de EmbedPDF (redact.apply) con las marcas
-// que recibe al sincronizar.
+// página como las demás anotaciones. La censura la aplica el motor de EmbedPDF en el documento del
+// visor (apply.ts).
 //
 // Las marcas se agrupan por lo que las puso (su texto, /Contents) y por cómo (/Subj):
 //   · texto y regex: un término de la lista (Python busca dónde aparece: redact.find);

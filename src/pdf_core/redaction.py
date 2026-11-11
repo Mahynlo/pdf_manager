@@ -6,7 +6,8 @@ reconocidas por OCR.
 
 Las coordenadas de :func:`find_in_page` son las de la página sin girar; las de
 :func:`find_in_ocr`, las de la página tal como se ve (como las palabras de OCR). Las marcas
-de censura las aplica el motor de EmbedPDF (``ViewerService.apply_redaction_marks``).
+de censura las aplica el motor de EmbedPDF en el documento del visor
+(``app/ui/src/tools/viewer/redact/apply.ts``).
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import re
 import string
 from collections.abc import Iterable
 
-from pdf_core.pdf import Page, Rect, TextMap
+from pdf_core.pdf import PackedPageText, PageText, Rect
 from pdf_core.text_utils import fold_accents
 
 # Patrones predefinidos de datos personales (menú ⚡ del panel).
@@ -37,24 +38,15 @@ def looks_like_regex(term: str) -> bool:
     return any(ch in _REGEX_CHARS for ch in term)
 
 
-def find_in_page(
-    page: Page,
-    term: str,
-    *,
-    case_sensitive: bool,
-    whole_word: bool,
-    regex: bool,
-    text: TextMap | None = None,
-) -> list[Rect]:
+def find_in_page(page: PageText | PackedPageText, term: str, *, case_sensitive: bool, whole_word: bool, regex: bool) -> list[Rect]:
     """Rectángulos (sin girar) donde aparece ``term`` en el texto nativo de ``page``; uno por línea.
 
-    Una frase se encuentra también partida en varias líneas. ``text``: ``page.text_map()`` ya
-    extraído (para no repetirlo por término).
+    Una frase se encuentra también partida en varias líneas.
     """
     q = term.strip()
     if not q:
         return []
-    found = page.text_map() if text is None else text
+    found = page.text_map()
     flags = 0 if case_sensitive else re.IGNORECASE
     subject = found.text
     if regex:

@@ -44,10 +44,10 @@
   }
 
   /** `active`: la pestaña está a la vista; `redact([{ texto, tipo }])`: enviar a «Censura». */
-  let { docId, active, close, redact, syncDocument }: {
+  let { docId, active, close, redact, syncText }: {
     docId: number;
-    /** Python recibe el documento al día (páginas y anotaciones) antes de leerlo. */
-    syncDocument: () => Promise<unknown>;
+    /** Python recibe el texto de las páginas al día antes de leerlo. */
+    syncText: () => Promise<unknown>;
     active: boolean;
     close: () => void;
     redact: (items: Suggestion[]) => void;
@@ -95,7 +95,7 @@
     const message = question.trim();
     if (!message || busy) return;
     question = '';
-    runRequest(syncDocument().then(() => call<AiResult>('ai.chat', docId, message)), message);
+    runRequest(ask('ai.chat', message), message);
   }
 
   async function scrollDown() {
@@ -115,6 +115,9 @@
   }
 
   /** Muestra la pregunta enseguida y la respuesta cuando llega (las consultas tardan). */
+  /** Pregunta al asistente (`method` del servicio `ai`), con el texto del documento al día en Python. */
+  const ask = (method: string, ...args: unknown[]) => syncText().then(() => call<AiResult>(method, docId, ...args));
+
   async function runRequest(request: Promise<AiResult>, asked: string | null = null) {
     if (busy) return;
     busy = true;
@@ -240,15 +243,15 @@
 
 {#snippet actions()}
   <div class="ai-actions">
-    {@render action('file-text', T.summary, () => runRequest(syncDocument().then(() => call<AiResult>('ai.summary', docId))))}
-    {@render action('bar-chart', T.keyData, () => runRequest(call<AiResult>('ai.key_data', docId)))}
+    {@render action('file-text', T.summary, () => runRequest(ask('ai.summary')))}
+    {@render action('bar-chart', T.keyData, () => runRequest(ask('ai.key_data')))}
     <label class="field">
       <span class="caption">{T.sensitivity}</span>
       <select class="input select" aria-label={T.sensitivityLabel} bind:value={level}>
         {#each T.levels as [value, label] (value)}<option {value}>{label}</option>{/each}
       </select>
     </label>
-    {@render action('shield', T.sensitive, () => runRequest(call<AiResult>('ai.sensitive', docId, level)))}
+    {@render action('shield', T.sensitive, () => runRequest(ask('ai.sensitive', level)))}
   </div>
 {/snippet}
 

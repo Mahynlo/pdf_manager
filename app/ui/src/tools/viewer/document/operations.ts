@@ -2,18 +2,23 @@
 // eliminar, mover y exportar (equivale a _page_ops_mixin.py y _file_ops_mixin.py en
 // Qt). Aquí se decide a qué página ir después de cada una, como hace Qt.
 //
-// El documento es de EmbedPDF: las operaciones de página las hace su motor en el documento abierto
-// (pages.ts), y al guardar o extraer una página Python escribe tal cual la copia que saca el motor
-// (copy.ts). Lo demás lo hace Python con el documento al día: antes se le pasa la copia (`sync`).
+// El documento es de EmbedPDF: las operaciones de página y la censura las hace su motor en el
+// documento abierto (pages.ts, redact/apply.ts), y al guardar o extraer una página Python escribe tal
+// cual la copia que saca el motor (copy.ts). Python no tiene el documento: lo que lee de él es el
+// texto de las páginas, que le pasa el visor antes (text.ts).
 import { call, type ApiError } from '$lib/api.ts';
 import { fileName } from '$lib/dom.ts';
 import type { MenuItem } from '$lib/menu.svelte.ts';
-import type { DocumentInfo } from '$lib/types.ts';
+import type { DocumentInfo, DocumentState } from '$lib/types.ts';
 import { askChoice, confirmDialog, progressDialog, setStatus, toast } from '$lib/ui.ts';
 import { t, tip } from '$texts';
+import type { PageCanvas } from '../canvas/canvas.ts';
 import type { PageRecognizer } from '../ocr/recognize.ts';
+import { applyMarks } from '../redact/apply.ts';
+import type { RedactionMarks } from '../redact/redaction.ts';
 import { send, type DocumentCopy } from './copy.ts';
 import type { PageEditor } from './pages.ts';
+import type { DocumentText } from './text.ts';
 
 const T = t.viewer.document;
 
@@ -27,21 +32,31 @@ export interface DocumentView {
   apply(info: DocumentInfo, page: number): void;
 }
 
-/** Cambio del documento: [info nueva, página a la que ir], o null si no se hizo nada. */
-export type Change = [DocumentInfo, number] | null;
+/** Las partes del documento con las que trabajan las operaciones (las crea Viewer.svelte). */
+export interface DocumentParts {
+  canvas: PageCanvas; // el documento a la vista
+  pages: PageEditor; // las páginas en el motor, con su deshacer
+  copy: DocumentCopy; // las copias que salen del visor
+  text: DocumentText; // el texto que recibe Python
+  recognizer: PageRecognizer; // el OCR y la orientación
+}
 
 export class DocumentActions {
   info: DocumentInfo;
   view: DocumentView;
+  canvas: PageCanvas;
   pages: PageEditor;
   copy: DocumentCopy;
+  text: DocumentText;
   recognizer: PageRecognizer;
   queue: Promise<unknown> = Promise.resolve(); // las operaciones se encadenan: cada una ve el resultado de la anterior
 
-  constructor(info: DocumentInfo, view: DocumentView, pages: PageEditor, copy: DocumentCopy, recognizer: PageRecognizer) {
+  constructor(info: DocumentInfo, view: DocumentView, { canvas, pages, copy, text, recognizer }: DocumentParts) {
     this.view = view;
+    this.canvas = canvas;
     this.pages = pages;
     this.copy = copy;
+    this.text = text;
     this.recognizer = recognizer;
     this.info = this._withState(info);
   }
@@ -152,7 +167,6 @@ export class DocumentActions {
         await this.view.commit(); // las anotaciones van con su página
         const target = await fn(this.view.page());
         if (target === null) return;
-        this.copy.changed(); // Python recibe las páginas nuevas en el próximo `sync`
         const info = { ...this.info, pages: this.pages.sizes, keys: this.pages.keys, toc: await this.pages.toc() };
         this._apply(info, target);
       } catch (err) {
@@ -163,24 +177,21 @@ export class DocumentActions {
     return task;
   }
 
-  /** Ejecuta `fn(página)` → [info, página destino] | null en la cola del documento (p. ej. la censura). */
-  change(fn: (page: number) => Promise<Change>) {
-    return this._change(fn);
+  // ── Censura ────────────────────────────────────────────────────────────
+  /** Aplica las marcas de censura (redact/apply.ts). Resuelve cuántas, o false si no había o falló. */
+  redact(marks: RedactionMarks): Promise<number | false> {
+    return this._file(async () => {
+      const done = await applyMarks({ docId: this.info.id, canvas: this.canvas, pages: this.pages, text: this.text,
+                                      marks, commit: () => this.view.commit() });
+      if (!done) return false;
+      this._apply(this._current(done.state), this.view.page());
+      return done.count;
+    });
   }
 
-  /** Ejecuta `fn(página)` → [info, página destino] | null, en orden y avisando de los errores. */
-  _change(fn: (page: number) => Promise<Change>): Promise<void> {
-    const task = this.queue.then(async () => {
-      try {
-        await this.copy.sync();
-        const result = await fn(this.view.page());
-        if (result) this._apply(...result);
-      } catch (err) {
-        toast((err as Error).message, 'danger');
-      }
-    });
-    this.queue = task;
-    return task;
+  /** `info` con el estado que dio Python y las páginas como están en el visor. */
+  _current(state: Partial<DocumentState>): DocumentInfo {
+    return { ...this.info, ...state, pages: this.pages.sizes, keys: this.pages.keys };
   }
 
   _apply(info: DocumentInfo, page: number): void {
@@ -218,17 +229,16 @@ export class DocumentActions {
   }
 
   /**
-   * Sube la copia del documento y Python la escribe en el archivo con `method`; también pasa a
-   * ser su documento. Resuelve false si se canceló el diálogo de «Guardar como».
+   * Sube la copia del documento y Python la escribe en el archivo con `method`. Resuelve false si
+   * se canceló el diálogo de «Guardar como».
    */
   async _write(method: 'viewer.save' | 'viewer.save_as'): Promise<boolean> {
     const copy = await this.copy.upload();
-    const info = await call<DocumentInfo | null>(method, this.info.id, copy.url, copy.uids);
-    if (!info) return false;
-    copy.adopted();
+    const state = await call<DocumentState | null>(method, this.info.id, copy.url, copy.keys);
+    if (!state) return false;
     this.pages.markSaved();
-    this._apply(info, this.view.page());
-    setStatus(T.saved(info.name));
+    this._apply(this._current(state), this.view.page());
+    setStatus(T.saved(state.name));
     return true;
   }
 
@@ -288,7 +298,7 @@ export class DocumentActions {
 
   exportText() {
     return this._file(async () => {
-      await this.copy.sync(); // las páginas como están ahora
+      await this.text.sync(); // el texto de todas las páginas, como están ahora
       const path = await call<string | null>('viewer.export_text', this.info.id);
       if (path) setStatus(T.textExported(fileName(path)));
     });
@@ -296,8 +306,8 @@ export class DocumentActions {
 
   exportImages() {
     return this._file(async () => {
-      await this.copy.sync();
-      const result = await call<{ folder: string; count: number } | null>('viewer.export_images', this.info.id);
+      const copy = await this.copy.upload(); // Python saca las imágenes del PDF
+      const result = await call<{ folder: string; count: number } | null>('viewer.export_images', this.info.id, copy.url);
       if (!result) return;
       if (result.count) setStatus(T.imagesExported(result.count, result.folder));
       else toast(T.noImages, 'info');

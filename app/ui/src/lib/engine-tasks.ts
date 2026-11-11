@@ -1,5 +1,6 @@
-// Lo que el PDFium de Python no sabe hacer y hace el motor de EmbedPDF: censurar, cifrar y
-// escribir marcadores. Python pide la tarea (Host.run_engine) con el PDF y recibe el PDF cambiado.
+// Lo que el PDFium de Python no sabe hacer y hace el motor de EmbedPDF: cifrar y escribir
+// marcadores. Python pide la tarea (Host.run_engine) con el PDF y recibe el PDF cambiado. (La
+// censura la hace el visor en su documento: tools/viewer/redact/apply.ts.)
 // Sin dependencias, para probarlo con el motor real en las pruebas de Python (tests/engine_task.mjs).
 
 /** Lo que se usa del motor: cada llamada devuelve una tarea con `toPromise()`. */
@@ -11,7 +12,6 @@ export interface TaskEngine {
   openDocumentBuffer(file: { id: string; content: ArrayBuffer }, options?: { password?: string; normalizeRotation?: boolean }): Task<any>;
   closeDocument(doc: any): Task<unknown>;
   saveAsCopy(doc: any): Task<ArrayBuffer>;
-  applyAllRedactions(doc: any, page: any): Task<boolean>;
   setDocumentEncryption(doc: any, user: string, owner: string, flags: number): Task<boolean>;
   setBookmarks(doc: any, bookmarks: any[]): Task<boolean>;
 }
@@ -35,9 +35,7 @@ export async function runTask(engine: TaskEngine, task: string, buffer: ArrayBuf
     { id: `engine-task-${++taskId}`, content: buffer }, { password: args.password ?? undefined, normalizeRotation: true },
   ).toPromise();
   try {
-    if (task === 'redact') {
-      for (const page of doc.pages) await engine.applyAllRedactions(doc, page).toPromise();
-    } else if (task === 'encrypt') {
+    if (task === 'encrypt') {
       const done = await engine.setDocumentEncryption(doc, args.user!, args.owner!, args.permissions!).toPromise();
       if (!done) throw new Error('El motor no pudo cifrar el documento.');
     } else if (task === 'outline') {

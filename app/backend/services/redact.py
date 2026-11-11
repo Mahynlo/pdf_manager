@@ -2,9 +2,10 @@
 
 Lo que se va a censurar son las marcas de censura del visor (anotaciones ``Redact`` de
 EmbedPDF): se revisan, se mueven, se borran y se deshacen en la página. Este servicio busca
-dónde aparece cada término (:meth:`RedactService.find`: frases, patrones, texto de OCR) para
-que el visor ponga sus marcas, y aplica las marcas que le llegan con las anotaciones
-(:meth:`RedactService.apply`).
+dónde aparece cada término (:meth:`RedactService.find`: frases, patrones, texto de OCR) en el
+texto de las páginas que le da el visor, para que el visor ponga sus marcas. Las aplica el motor
+del visor en su documento; después :meth:`RedactService.apply` borra las palabras de OCR que
+tapaban.
 
 Cada documento abierto guarda sus opciones de búsqueda, su color y su perfil activo en el
 propio documento abierto, así desaparecen al cerrarlo. Los perfiles (listas de términos con
@@ -21,7 +22,6 @@ from app.backend.rpc import UserError, exposed
 from app.backend.services.viewer import ViewerService
 from pdf_core import redaction
 from pdf_core.censorship_profiles import get_profile_manager
-from pdf_core.pdf import TextMap
 
 SESSION = "redact"  # clave en ``_OpenDocument.extras``
 HEX_COLOR = re.compile(r"#[0-9A-Fa-f]{6}")
@@ -71,24 +71,23 @@ class RedactService:
         """Dónde aparece cada término (frase o expresión regular), con las opciones del documento.
 
         Devuelve ``[{term, kind, matches: [{page, rect}]}]``, con ``rect`` en coordenadas de la
-        página sin girar (las de las anotaciones). ``kind`` es ``texto`` o ``regex``.
+        página sin girar (las de las anotaciones). ``kind`` es ``texto`` o ``regex``. El visor tiene
+        que haberle dado antes el texto de todas las páginas.
         """
         terms = [t.strip() for t in terms if t.strip()]
         with self._viewer.document(doc_id) as entry:
             session = self._session(entry)
-            texts: dict[int, TextMap] = {}  # el texto de cada página se extrae una vez para todos los términos
+            pages = [self._viewer.packed_text(entry, i) for i in range(len(entry.keys))]
             result = []
             for term in terms:
                 regex = redaction.looks_like_regex(term)
                 options = {"case_sensitive": session.case_sensitive, "whole_word": session.whole_word, "regex": regex}
                 matches = []
-                for index, page in enumerate(entry.doc):
-                    if index not in texts:
-                        texts[index] = page.text_map()
-                    rects = redaction.find_in_page(page, term, text=texts[index], **options)
-                    words = entry.ocr.get(entry.key(page)) if session.search_ocr else None
+                for index, page in enumerate(pages):
+                    rects = redaction.find_in_page(page, term, **options)
+                    words = entry.ocr.get(entry.keys[index]) if session.search_ocr else None
                     if words:  # las palabras de OCR están en la página vista
-                        found = [page.to_page(r) for r in redaction.find_in_ocr(words, term, **options)]
+                        found = [page.geometry.to_page(r) for r in redaction.find_in_ocr(words, term, **options)]
                         rects += [r for r in found if not any(r.intersects(n) for n in rects)]
                     matches += [{"page": index, "rect": [round(v, 2) for v in r]} for r in rects]
                 result.append({"term": term, "kind": "regex" if regex else "texto", "matches": matches})
@@ -96,17 +95,20 @@ class RedactService:
 
     # ── Aplicar ──────────────────────────────────────────────────────────
     @exposed
-    def apply(self, doc_id: int) -> dict[str, Any]:
-        """Censura de forma irreversible lo que tapan las marcas. ``{info, count}``.
+    def apply(self, doc_id: int, pages: list[dict[str, Any]]) -> dict[str, Any]:
+        """El visor aplicó las marcas en su documento (con su motor): se borran para siempre las
+        palabras de OCR que tapaban y el documento queda censurado (solo se guarda como copia).
 
-        Las marcas llegan antes con las anotaciones del visor (``viewer.sync_annotations``).
+        ``pages``: ``{before, after, rects}`` de cada página censurada (ver
+        ``ViewerService.redaction_applied``). Devuelve el estado del documento: ``{modified,
+        annotated, redacted}``.
         """
-        info, count = self._viewer.apply_redaction_marks(doc_id)
-        if not count:
+        if not pages:
             raise UserError("No hay marcas de censura en el documento.", "no_marks")
+        self._viewer.redaction_applied(doc_id, pages)
         with self._viewer.document(doc_id) as entry:
             self._session(entry).profile_id = None  # tras aplicar, la lista queda vacía
-        return {"info": info, "count": count}
+            return {"modified": entry.modified, "annotated": entry.annotated, "redacted": entry.redacted}
 
     # ── Perfiles ─────────────────────────────────────────────────────────
     @exposed

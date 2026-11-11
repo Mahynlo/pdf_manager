@@ -24,7 +24,7 @@ import threading
 import zlib
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import wraps
 from io import BytesIO
 from pathlib import Path
@@ -109,8 +109,8 @@ class TextMap:
     """Texto de una página con la posición de cada carácter (``rects[i]`` es la de ``text[i]``)."""
 
     text: str
-    rects: list[Rect | None]  # None en espacios y saltos de línea
-    lines: list[int]
+    rects: Sequence[Rect | None]  # None en espacios y saltos de línea
+    lines: Sequence[int]
 
     def rects_of(self, start: int, end: int) -> list[Rect]:
         """Rectángulos de ``text[start:end]`` en coordenadas de página: uno por línea."""
@@ -122,14 +122,178 @@ class TextMap:
         return [_union(run) for run in boxes.values()]
 
 
-class _Meta(NamedTuple):
-    """Lo que se consulta a menudo de una página, leído una sola vez."""
+class PageGeometry(NamedTuple):
+    """Medidas de una página: su caja visible sin girar y su giro (grados, como /Rotate)."""
 
     width: float  # sin girar
     height: float
-    left: float  # esquina de su caja visible
+    left: float  # esquina de su caja visible, en coordenadas de PDFium (origen abajo)
     top: float
     rotation: int
+
+    @property
+    def rect(self) -> Rect:
+        """La página tal como se ve (ya girada)."""
+        if self.rotation in (90, 270):
+            return Rect(0, 0, self.height, self.width)
+        return Rect(0, 0, self.width, self.height)
+
+    def to_view(self, rect: Sequence[float]) -> Rect:
+        """De coordenadas de página a la página tal como se ve."""
+        x0, y0, x1, y1 = rect
+        w, h = self.width, self.height
+        if self.rotation == 90:
+            return Rect(h - y1, x0, h - y0, x1)
+        if self.rotation == 180:
+            return Rect(w - x1, h - y1, w - x0, h - y0)
+        if self.rotation == 270:
+            return Rect(y0, w - x1, y1, w - x0)
+        return Rect(x0, y0, x1, y1)
+
+    def to_page(self, rect: Sequence[float]) -> Rect:
+        """De la página tal como se ve a coordenadas de página."""
+        x0, y0, x1, y1 = rect
+        w, h = self.width, self.height
+        if self.rotation == 90:
+            return Rect(y0, h - x1, y1, h - x0)
+        if self.rotation == 180:
+            return Rect(w - x1, h - y1, w - x0, h - y0)
+        if self.rotation == 270:
+            return Rect(w - y1, x0, w - y0, x1)
+        return Rect(x0, y0, x1, y1)
+
+    def from_pdf(self, left: float, bottom: float, right: float, top: float) -> Rect:
+        """De las coordenadas de PDFium (origen abajo) a coordenadas de página."""
+        return Rect(left - self.left, self.top - top, right - self.left, self.top - bottom)
+
+
+@dataclass
+class PageText:
+    """El texto de una página con la posición de cada carácter y las medidas de la página.
+
+    Lo da :meth:`Page.page_text` (un PDF abierto en Python) o el visor, que lee el texto de su
+    documento con su motor y lo pasa a Python (``ViewerService``): con él trabajan la capa de
+    texto (``text_layer``) y la búsqueda de la censura (``redaction``), vengan de donde vengan.
+    """
+
+    geometry: PageGeometry
+    chars: list[Char]  # en orden de contenido, también los espacios y saltos de línea
+    _map: TextMap | None = field(default=None, repr=False, compare=False)
+
+    @property
+    def rect(self) -> Rect:
+        return self.geometry.rect
+
+    @property
+    def rotation(self) -> int:
+        return self.geometry.rotation
+
+    def to_view(self, rect: Sequence[float]) -> Rect:
+        return self.geometry.to_view(rect)
+
+    def to_page(self, rect: Sequence[float]) -> Rect:
+        return self.geometry.to_page(rect)
+
+    def text_map(self) -> TextMap:
+        if self._map is None:
+            self._map = TextMap(
+                "".join(c.text for c in self.chars),
+                [c.box if c.text.strip() else None for c in self.chars],
+                [c.line for c in self.chars],
+            )
+        return self._map
+
+    def text(self) -> str:
+        return self.text_map().text
+
+    def words(self) -> list[tuple[Rect, str, int]]:
+        """Palabras de la página: ``(rect, texto, línea)``, en coordenadas de página."""
+        words: list[tuple[Rect, str, int]] = []
+        run: list[Char] = []
+
+        def flush() -> None:
+            if run:
+                words.append((_union([c.box for c in run]), "".join(c.text for c in run), run[0].line))
+                run.clear()
+
+        for char in self.chars:
+            if char.text.strip():
+                run.append(char)
+            else:
+                flush()
+        flush()
+        return words
+
+
+_PACKED_CHAR = 4 + 16 + 4  # código (uint32), caja (4 float32) y línea (uint32)
+
+
+class _PackedRects(Sequence):
+    """Los rectángulos de un :class:`TextMap` sacados al pedirlos de las cajas empaquetadas: buscar
+    solo necesita los de lo que encuentra."""
+
+    def __init__(self, text: str, boxes: np.ndarray) -> None:
+        self._text, self._boxes = text, boxes
+
+    def __len__(self) -> int:
+        return len(self._text)
+
+    def __getitem__(self, index):  # type: ignore[override]
+        if isinstance(index, slice):
+            return [self[i] for i in range(*index.indices(len(self)))]
+        return None if not self._text[index].strip() else Rect(*self._boxes[index].tolist())
+
+
+class PackedPageText(NamedTuple):
+    """El texto de una página tal como lo da el motor del visor, sin desempaquetar: ocupa unos 24
+    bytes por carácter (como objetos de Python, diez veces más).
+
+    El texto (:meth:`text`) y lo que usa la búsqueda (:meth:`text_map`) salen sin desempaquetarlo;
+    :meth:`unpack` da el ``PageText`` entero (la capa de texto en orden de lectura).
+    """
+
+    geometry: PageGeometry
+    codes: np.ndarray  # código Unicode de cada carácter
+    boxes: np.ndarray  # caja holgada de cada uno (n × 4), en coordenadas de página
+    lines: np.ndarray  # línea de cada uno
+
+    def text(self) -> str:
+        return "".join(map(chr, self.codes.tolist()))
+
+    def text_map(self) -> TextMap:
+        text = self.text()
+        return TextMap(text, _PackedRects(text, self.boxes), self.lines.tolist())
+
+    def unpack(self) -> PageText:
+        chars = []
+        for code, box, line in zip(self.codes.tolist(), self.boxes.tolist(), self.lines.tolist(), strict=True):
+            rect = Rect(*box)
+            chars.append(Char(chr(code), rect, rect, line))
+        return PageText(self.geometry, chars)
+
+
+def unpack_page_texts(pages: Sequence[dict[str, Any]], data: bytes) -> list[tuple[int, PackedPageText]]:
+    """El texto de unas páginas como lo da el motor del visor (``app/ui/src/lib/pdf-engine/page-text.ts``).
+
+    ``pages``: ``{index, geometry: [ancho, alto, izquierda, arriba, giro], count}`` de cada página,
+    en el orden de ``data``. Devuelve ``(índice, PackedPageText)``.
+
+    :raises PdfError: si ``data`` no tiene lo que dicen ``pages``.
+    """
+    if sum(int(page["count"]) for page in pages) * _PACKED_CHAR != len(data):
+        raise PdfError("El texto de las páginas no llegó completo")
+    result: list[tuple[int, PackedPageText]] = []
+    offset = 0
+    for page in pages:
+        count = int(page["count"])
+        codes = np.frombuffer(data, np.uint32, count, offset).copy()
+        boxes = np.frombuffer(data, np.float32, count * 4, offset + count * 4).reshape(count, 4).copy()
+        lines = np.frombuffer(data, np.uint32, count, offset + count * 20).copy()
+        offset += count * _PACKED_CHAR
+        width, height, left, top, rotation = page["geometry"]
+        geometry = PageGeometry(float(width), float(height), float(left), float(top), int(rotation))
+        result.append((int(page["index"]), PackedPageText(geometry, codes, boxes, lines)))
+    return result
 
 
 class Page:
@@ -138,8 +302,7 @@ class Page:
     def __init__(self, doc: Document, index: int) -> None:
         self.parent = doc
         self.number = index
-        self._text: TextMap | None = None
-        self._chars: list[Char] | None = None
+        self._text: PageText | None = None
 
     @contextmanager
     def _opened(self) -> Iterator[pdfium.PdfPage]:
@@ -151,7 +314,7 @@ class Page:
                 page.close()
 
     @property
-    def _meta(self) -> _Meta:
+    def _meta(self) -> PageGeometry:
         return self.parent._page_meta(self.number)
 
     @property
@@ -166,10 +329,7 @@ class Page:
     @property
     def rect(self) -> Rect:
         """La página tal como se ve (ya girada)."""
-        meta = self._meta
-        if meta.rotation in (90, 270):
-            return Rect(0, 0, meta.height, meta.width)
-        return Rect(0, 0, meta.width, meta.height)
+        return self._meta.rect
 
     @locked
     def set_rotation(self, angle: int) -> None:
@@ -180,41 +340,20 @@ class Page:
     # ── Coordenadas ──────────────────────────────────────────────────────
     def to_view(self, rect: Sequence[float]) -> Rect:
         """De coordenadas de página a la página tal como se ve."""
-        x0, y0, x1, y1 = rect
-        meta = self._meta
-        w, h = meta.width, meta.height
-        if meta.rotation == 90:
-            return Rect(h - y1, x0, h - y0, x1)
-        if meta.rotation == 180:
-            return Rect(w - x1, h - y1, w - x0, h - y0)
-        if meta.rotation == 270:
-            return Rect(y0, w - x1, y1, w - x0)
-        return Rect(x0, y0, x1, y1)
+        return self._meta.to_view(rect)
 
     def to_page(self, rect: Sequence[float]) -> Rect:
         """De la página tal como se ve a coordenadas de página."""
-        x0, y0, x1, y1 = rect
-        meta = self._meta
-        w, h = meta.width, meta.height
-        if meta.rotation == 90:
-            return Rect(y0, h - x1, y1, h - x0)
-        if meta.rotation == 180:
-            return Rect(w - x1, h - y1, w - x0, h - y0)
-        if meta.rotation == 270:
-            return Rect(w - y1, x0, w - y0, x1)
-        return Rect(x0, y0, x1, y1)
+        return self._meta.to_page(rect)
 
     def _from_pdf(self, left: float, bottom: float, right: float, top: float) -> Rect:
         """De las coordenadas de PDFium (origen abajo) a coordenadas de página."""
-        meta = self._meta
-        return Rect(left - meta.left, meta.top - top, right - meta.left, meta.top - bottom)
+        return self._meta.from_pdf(left, bottom, right, top)
 
     # ── Texto ────────────────────────────────────────────────────────────
     @locked
     def chars(self) -> list[Char]:
         """Los caracteres de la página, también los espacios y saltos de línea."""
-        if self._chars is not None:
-            return self._chars
         result: list[Char] = []
         tight = [ctypes.c_double() for _ in range(4)]
         refs = [ctypes.byref(v) for v in tight]
@@ -249,39 +388,23 @@ class Page:
                 text.close()
                 if rotation:
                     page.set_rotation(rotation)
-        self._chars = result
         return result
 
-    def text_map(self) -> TextMap:
+    def page_text(self) -> PageText:
+        """El texto de la página con sus posiciones (se lee una vez)."""
         if self._text is None:
-            chars = self.chars()
-            self._text = TextMap(
-                "".join(c.text for c in chars),
-                [c.box if c.text.strip() else None for c in chars],
-                [c.line for c in chars],
-            )
+            self._text = PageText(self._meta, self.chars())
         return self._text
 
+    def text_map(self) -> TextMap:
+        return self.page_text().text_map()
+
     def text(self) -> str:
-        return self.text_map().text
+        return self.page_text().text()
 
     def words(self) -> list[tuple[Rect, str, int]]:
         """Palabras de la página: ``(rect, texto, línea)``, en coordenadas de página."""
-        words: list[tuple[Rect, str, int]] = []
-        run: list[Char] = []
-
-        def flush() -> None:
-            if run:
-                words.append((_union([c.box for c in run]), "".join(c.text for c in run), run[0].line))
-                run.clear()
-
-        for char in self.chars():
-            if char.text.strip():
-                run.append(char)
-            else:
-                flush()
-        flush()
-        return words
+        return self.page_text().words()
 
     @locked
     def text_direction(self) -> tuple[float, float]:
@@ -375,7 +498,7 @@ class Document:
     def __init__(self, document: pdfium.PdfDocument, path: str = "") -> None:
         self.raw = document
         self.name = path
-        self._meta: dict[int, _Meta] = {}
+        self._meta: dict[int, PageGeometry] = {}
         self._next_uid = len(document) + 1
         self.uids = list(range(1, self._next_uid))
 
@@ -428,7 +551,7 @@ class Document:
         return (Page(self, i) for i in range(len(self)))
 
     @locked
-    def _page_meta(self, index: int) -> _Meta:
+    def _page_meta(self, index: int) -> PageGeometry:
         meta = self._meta.get(index)
         if meta is None:
             page = self.raw[index]
@@ -438,7 +561,7 @@ class Document:
                     left, bottom, right, top = box.left, box.bottom, box.right, box.top
                 else:
                     (right, top), left, bottom = page.get_size(), 0.0, 0.0
-                meta = _Meta(right - left, top - bottom, left, top, page.get_rotation())
+                meta = PageGeometry(right - left, top - bottom, left, top, page.get_rotation())
             finally:
                 page.close()
             self._meta[index] = meta

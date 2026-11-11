@@ -15,7 +15,7 @@
   import OcrBatchDialog from './OcrBatchDialog.svelte';
   import OcrResultDialog from './OcrResultDialog.svelte';
   import type { PageRecognizer } from './recognize.ts';
-  import type { Box, OcrResult, PageText } from './types.ts';
+  import type { Box, OcrResult } from './types.ts';
 
   const T = t.viewer.ocr;
   const MIN_AREA = 4; // pt: un recorte más pequeño es un clic, no un rectángulo
@@ -25,12 +25,12 @@
    * texto de cada página); `changed(index)`: el texto de la página cambió (la búsqueda lo
    * relee); `orient()`: corregir la orientación de la página actual.
    */
-  let { canvas, docId, recognizer, page, active, close, setTool, changed, orient, syncDocument }: {
+  let { canvas, docId, recognizer, page, active, close, setTool, changed, orient, syncText }: {
     canvas: PageCanvas;
     docId: number;
     recognizer: PageRecognizer;
-    /** Python recibe el documento al día (páginas y anotaciones) antes de leer su texto. */
-    syncDocument: () => Promise<unknown>;
+    /** Python recibe las páginas al día y el texto de `pages` (sin ellas, de todas) antes de leerlo. */
+    syncText: (pages?: number[] | null) => Promise<unknown>;
     page: number;
     active: boolean;
     close: () => void;
@@ -75,8 +75,8 @@
   async function load(index = page) {
     const mine = ++run;
     try {
-      await syncDocument();
-      const result = await call<PageText>('ocr.page_text', docId, index);
+      await syncText([index]);
+      const result = await recognizer.pageText(index);
       if (mine !== run) return;
       kind = result.kind;
       segments = String(result.segments);
@@ -117,7 +117,7 @@
   function runPage() {
     const index = page;
     withBusy(T.processing, async () => {
-      await syncDocument();
+      await syncText([index]);
       const result = await recognizer.page(index);
       showResult(result, T.modeOf(result.mode ?? ''));
       kind = result.kind ?? '-';
@@ -184,7 +184,7 @@
       const rect = rectOf(done);
       if (rect[2] - rect[0] < MIN_AREA || rect[3] - rect[1] < MIN_AREA) return;
       withBusy(T.areaMode, async () => {
-        await syncDocument();
+        await syncText([done.index]);
         const result = await recognizer.area(done.index, rect);
         showResult(result, T.areaDone);
         text = result.text.trim() ? result.text : T.areaEmpty;
@@ -210,7 +210,7 @@
   // ── Lotes ──────────────────────────────────────────────────────────────
   async function openBatch() {
     if (busy) return;
-    await syncDocument(); // mientras está abierto, las páginas no cambian
+    await syncText(); // mientras está abierto, las páginas no cambian
     const result = await openModal<string>(OcrBatchDialog, {
       docId,
       recognize: (index: number) => recognizer.page(index),

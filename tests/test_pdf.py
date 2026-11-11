@@ -12,7 +12,7 @@ import pytest
 from pdfkit import add_annot, add_image, add_page, add_text, annot_names, annots, encrypted, pdf_bytes, run_engine
 
 from pdf_core import redaction
-from pdf_core.pdf import UNRESTRICTED, Document, PasswordError, PdfError, Rect, png
+from pdf_core.pdf import UNRESTRICTED, Document, PageText, PasswordError, PdfError, Rect, png, unpack_page_texts
 from pdf_core.reading_order import sort_words_clustered, sort_words_column_aware
 from pdf_core.text_layer import build_text_layer, page_words
 
@@ -375,10 +375,38 @@ def test_engine_draws_the_page_as_seen_for_the_ocr(rotation):
     assert (image["height"], image["width"]) == whole.shape[:2]
 
 
+def _engine_texts(data: bytes, indices: list[int], password: str | None = None) -> list[tuple[int, PageText]]:
+    """El texto que da el motor del visor a Python (lib/pdf-engine/page-text.ts)."""
+    out = json.loads(run_engine("texts", data, {"indices": indices, "password": password}))
+    return [(index, packed.unpack()) for index, packed in unpack_page_texts(out["pages"], base64.b64decode(out["data"]))]
+
+
+@pytest.mark.parametrize("rotation", ROTATIONS)
+def test_engine_gives_python_the_same_page_text_without_the_ocr(rotation):
+    with _doc(rotation) as doc:
+        want = doc[0].page_text()
+        data = _with_ocr(doc.to_bytes(), {0: [[40, 500, 140, 520, "reconocido"]]})
+    ((index, got),) = _engine_texts(data, [0])
+    assert index == 0 and got.geometry == pytest.approx(want.geometry)
+    assert got.text() == want.text() == "Hola mundo\nSegunda linea"  # sin el texto del OCR
+    assert [c.line for c in got.chars] == [c.line for c in want.chars]
+    for mine, theirs in zip(got.chars, want.chars, strict=True):  # otra compilación de PDFium: ±0,6 pt
+        assert list(mine.box) == pytest.approx(list(theirs.box), abs=1)
+    assert build_text_layer(got).text == build_text_layer(want).text
+
+
+def test_engine_page_texts_come_in_the_order_asked():
+    data = pdf_bytes([[(72, 72, f"pagina {i}")] for i in range(3)])
+    texts = _engine_texts(data, [2, 0])
+    assert [(i, t.text().strip()) for i, t in texts] == [(2, "pagina 2"), (0, "pagina 0")]
+    with pytest.raises(PdfError):
+        unpack_page_texts([{"index": 0, "geometry": [1, 1, 0, 1, 0], "count": 3}], bytes(10))
+
+
 # ── Capa de texto y orden de lectura ─────────────────────────────────────────
 def test_text_layer_has_spaces_and_lines():
     with _doc() as doc:
-        layer = build_text_layer(doc[0])
+        layer = build_text_layer(doc[0].page_text())
         assert layer.text == "Hola mundo\nSegunda linea"
         assert len(layer.chars) == len(layer.rects) == len(layer.seps)
 
@@ -388,18 +416,18 @@ def test_text_layer_keeps_tall_and_short_letters_together():
     with Document.new() as doc:
         page = add_page(doc)
         add_text(page, 72, 100, "Contrato con Juan Pérez, gypsy", 12)
-        assert build_text_layer(page).text == "Contrato con Juan Pérez, gypsy"
+        assert build_text_layer(page.page_text()).text == "Contrato con Juan Pérez, gypsy"
 
 
 @pytest.mark.parametrize("rotation", ROTATIONS)
 def test_text_layer_reads_rotated_pages(rotation):
     with _doc(rotation) as doc:
-        assert build_text_layer(doc[0]).text == "Hola mundo\nSegunda linea"
+        assert build_text_layer(doc[0].page_text()).text == "Hola mundo\nSegunda linea"
 
 
 def test_page_words_merges_ocr_with_native_text():
     with _doc() as doc:
-        words = page_words(doc[0], [(50, 300, 100, 320, "Tercera")])
+        words = page_words(doc[0].page_text(), [(50, 300, 100, 320, "Tercera")])
         assert "Tercera" in [w[1] for w in words]
 
 
@@ -426,7 +454,7 @@ def test_column_aware_sorter_is_also_group_ordered():
 
 # ── Buscar para censurar ─────────────────────────────────────────────────────
 def _find(page, term, *, case_sensitive=False, whole_word=False, regex=False):
-    return redaction.find_in_page(page, term, case_sensitive=case_sensitive, whole_word=whole_word, regex=regex)
+    return redaction.find_in_page(page.page_text(), term, case_sensitive=case_sensitive, whole_word=whole_word, regex=regex)
 
 
 def test_find_ignores_accents_and_case_and_keeps_enye():
@@ -528,7 +556,7 @@ def test_redaction_on_rotated_pages(rotation):
     """Las marcas van en coordenadas de la página sin girar, como en el visor."""
     with Document.open(_secret_pdf()) as doc:
         doc[0].set_rotation(rotation)
-        (rect,) = redaction.find_in_page(doc[0], SECRET, case_sensitive=False, whole_word=False, regex=False)
+        (rect,) = redaction.find_in_page(doc[0].page_text(), SECRET, case_sensitive=False, whole_word=False, regex=False)
         view = doc[0].to_view(rect)
         data = doc.to_bytes()
     marked = run_engine("mark", data, {"marks": [{"page": 0, "rect": list(rect), "color": "#B21A1A"}]})

@@ -18,7 +18,7 @@ import pypdfium2 as pdfium
 import pypdfium2.raw as raw
 import pytest
 
-from pdf_core.pdf import Document, Page, Rect
+from pdf_core.pdf import Document, Page, PageText, Rect
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tests" / "engine_task.mjs"
@@ -43,6 +43,21 @@ def run_engine(task: str, data: bytes, args: dict) -> bytes:
         if done.returncode:
             raise RuntimeError(done.stderr.strip()[-400:])
         return target.read_bytes()
+
+
+def pack_page_texts(texts: list[tuple[int, PageText]]) -> tuple[list[dict], bytes]:
+    """El texto de unas páginas como lo da el motor del visor a Python (``lib/pdf-engine/page-text.ts``):
+    ``(pages, data)``, lo que lee ``pdf_core.pdf.unpack_page_texts``."""
+    pages, parts = [], []
+    for index, text in texts:
+        chars = text.chars
+        pages.append({"index": index, "geometry": list(text.geometry), "count": len(chars)})
+        parts += [
+            np.array([ord(c.text) for c in chars], np.uint32).tobytes(),
+            np.array([list(c.box) for c in chars], np.float32).reshape(len(chars), 4).tobytes(),
+            np.array([c.line for c in chars], np.uint32).tobytes(),
+        ]
+    return pages, b"".join(parts)
 
 
 def add_page(doc: Document, width: float = 595, height: float = 842) -> Page:

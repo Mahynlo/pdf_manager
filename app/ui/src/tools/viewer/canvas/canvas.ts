@@ -4,14 +4,13 @@
 // clase da al resto del visor la misma API que antes. El registro de EmbedPDF es uno para
 // toda la app: cada visor abre en él su documento y solo atiende los avisos de ese documento.
 //
-// - Las operaciones de página (girar, mover, insertar, duplicar, borrar) las hace el motor de
-//   EmbedPDF en el documento abierto (document/pages.ts) y `showPages` las muestra sin volver a
-//   abrirlo. Lo que cambia Python (censurar) se vuelve a abrir en EmbedPDF con la versión
-//   que él tiene (`viewer.document_url`); mientras se carga, la vista sigue con la anterior.
-//   document/copy.ts le pasa a Python la copia de EmbedPDF antes de lo que la necesita.
+// - El documento es del visor: se abre una vez en EmbedPDF (`viewer.document_url` da el archivo)
+//   y después lo cambia su motor. Las operaciones de página (girar, mover, insertar, duplicar,
+//   borrar: document/pages.ts) y la censura (redact/apply.ts) se hacen en el documento abierto y
+//   `showPages` las muestra sin volver a abrirlo.
 // - El texto reconocido por OCR lo escribe el motor en el documento abierto como texto invisible
-//   (`writeOcrText`), que EmbedPDF selecciona y busca como el nativo: al abrir una versión, el
-//   que guarda Python, y tras cada OCR, el nuevo.
+//   (`writeOcrText`), que EmbedPDF selecciona y busca como el nativo: al abrirlo, el que guarda
+//   Python, y tras cada OCR, el nuevo.
 // - Cada página tiene una capa del visor (`slots[i]`) donde otros módulos dibujan en
 //   porcentaje de la página las marcas (`marks(i)`) de selección, búsqueda, OCR o censura.
 //   Las capas existen siempre, aunque EmbedPDF solo monte las páginas a la vista; se
@@ -230,8 +229,8 @@ export class PageCanvas {
   }
 
   /**
-   * Páginas de una versión del documento que da Python (`keys`: la clave de cada una). Si no es
-   * la que se ve (la cambió Python: censura, OCR), se vuelve a abrir en EmbedPDF.
+   * Las páginas del documento (`keys`: la clave de cada una). Si no son las que se ven (otra versión
+   * del archivo), se vuelve a abrir en EmbedPDF; los cambios del visor ya llegan con `showPages`.
    */
   setPages(sizes: [number, number][], keys: string[]): void {
     if (sameKeys(this.keys, keys) && sameKeys(this.shownKeys, keys)) {
@@ -666,7 +665,7 @@ export class PageCanvas {
     ];
   }
 
-  /** Abre en EmbedPDF la versión del documento que tiene Python y la pone a la vista. */
+  /** Abre el archivo en EmbedPDF (`viewer.document_url`) y lo pone a la vista. */
   async _load(): Promise<void> {
     const seq = ++this.seq;
     const { url, keys, password, ocr } = await call<DocumentVersion>('viewer.document_url', this.docId);

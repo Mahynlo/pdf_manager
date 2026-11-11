@@ -15,11 +15,9 @@
   import Checkbox from '$lib/components/Checkbox.svelte';
   import Icon from '$lib/Icon.svelte';
   import { openMenu } from '$lib/menu.svelte.ts';
-  import type { DocumentInfo } from '$lib/types.ts';
   import { askText, confirmDialog, openModal, setStatus, toast } from '$lib/ui.ts';
   import { t } from '$texts';
   import { TOOLS } from '../canvas/canvas.ts';
-  import type { Change } from '../document/operations.ts';
   import ProfilesDialog from './ProfilesDialog.svelte';
   import type { FindResult, RedactGroup, RedactionMarks } from './redaction.ts';
 
@@ -36,20 +34,19 @@
 
   /**
    * `marks`: las marcas (redaction.ts); `tool`, `setTool(t)`: herramienta del lienzo (para
-   * «Marcar»); `show(marca)`: ir a una marca y seleccionarla; `commit(fn)`: ejecutar
-   * `fn(página)` → [info, página] en la cola de cambios del documento (antes, las marcas
-   * pasan a Python con las anotaciones).
+   * «Marcar»); `show(marca)`: ir a una marca y seleccionarla; `apply()`: aplicar las marcas en
+   * el documento (redact/apply.ts, en la cola del documento), que resuelve cuántas o false.
    */
-  let { docId, marks, tool, setTool, close, show, commit, syncDocument }: {
+  let { docId, marks, tool, setTool, close, show, apply: applyMarks, syncText }: {
     docId: number;
-    /** Python recibe el documento al día (páginas y anotaciones) antes de leerlo. */
-    syncDocument: () => Promise<unknown>;
+    /** Python recibe el texto de las páginas al día antes de buscar en él. */
+    syncText: () => Promise<unknown>;
     marks: RedactionMarks;
     tool: string;
     setTool: (tool: string) => void;
     close: () => void;
     show: (mark: PdfRedactAnnoObject) => void;
-    commit: (fn: (page: number) => Promise<Change>) => Promise<unknown>;
+    apply: () => Promise<number | false>;
   } = $props();
 
   let redact = $state.raw<RedactState | null>(null);
@@ -84,7 +81,7 @@
   /** Marca dónde aparece una frase o patrón (también desde la búsqueda y la IA). */
   export async function addTerm(value: string) {
     await run(async () => {
-      await syncDocument();
+      await syncText();
       const results = await call<FindResult[]>('redact.find', docId, [value]);
       const found = results.reduce((n, r) => n + r.matches.length, 0);
       if (!found) toast(T.notFound(value), 'info');
@@ -107,7 +104,7 @@
 
   /** Busca de nuevo los términos de la lista (cambiaron las opciones o el perfil). */
   async function findAgain(terms: string[], replace = terms) {
-    if (terms.length) await syncDocument();
+    if (terms.length) await syncText();
     marks.addMatches(terms.length ? await call<FindResult[]>('redact.find', docId, terms) : [], replace);
   }
 
@@ -157,12 +154,10 @@
     }
     if (!(await confirmDialog(T.confirmTitle, T.confirm(total)))) return;
     if (marking) setTool(TOOLS.SELECT);
-    await commit(async (page) => {
-      const { info, count } = await call<{ info: DocumentInfo; count: number }>('redact.apply', docId);
-      setState(await call<RedactState>('redact.state', docId));
-      setStatus(T.applied(count));
-      return [info, page];
-    });
+    const count = await applyMarks();
+    if (count === false) return;
+    setState(await call<RedactState>('redact.state', docId));
+    setStatus(T.applied(count));
   }
 
   // ── Perfiles ───────────────────────────────────────────────────────────

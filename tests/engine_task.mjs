@@ -4,8 +4,8 @@
 //   node engine_task.mjs <tarea> <args JSON> <entrada.pdf> <salida.pdf>
 //
 // Además de las de engine-tasks.ts tiene las que en la app hace el visor: poner marcas de censura
-// (como redaction.ts), escribir metadatos, cambiar las páginas (como document/pages.ts), sacar
-// copias (document/copy.ts) y lo que necesita el OCR (ocr/recognize.ts), con el mismo motor:
+// (como redaction.ts) y aplicarlas (como redact/apply.ts), escribir metadatos, cambiar las páginas (como document/pages.ts), sacar
+// copias (document/copy.ts), lo que necesita el OCR (ocr/recognize.ts) y el texto que recibe Python, con el mismo motor:
 // lib/pdf-engine/native.ts. Las que no devuelven un PDF escriben un JSON.
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
@@ -63,6 +63,11 @@ if (task === 'mark') {
   result = await edit(async (doc) => {
     for (const [index, item] of args.marks.entries()) await mark(doc, item, index);
   });
+} else if (task === 'redact') {
+  // Aplica las marcas de censura, como el visor en su documento (redact/apply.ts).
+  result = await edit(async (doc) => {
+    for (const page of doc.pages) await engine.applyAllRedactions(doc, page).toPromise();
+  });
 } else if (task === 'meta') {
   result = await edit((doc) => engine.setMetadata(doc, args.metadata).toPromise());
 } else if (task === 'pages') {
@@ -101,6 +106,12 @@ if (task === 'mark') {
   result = await opened((doc) => {
     const { width, height, data } = engine.pageImage(doc, args.index, args.scale, args.clip);
     return json({ width, height, data: Buffer.from(data).toString('base64') });
+  });
+} else if (task === 'texts') {
+  // El texto de unas páginas para Python (page-text.ts): {pages, data} con los datos en base64.
+  result = await opened((doc) => {
+    const { pages, data } = engine.pageTexts(doc, args.indices);
+    return json({ pages, data: Buffer.from(data).toString('base64') });
   });
 } else {
   result = await runTask(engine, task, buffer, args);

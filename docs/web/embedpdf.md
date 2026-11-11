@@ -218,8 +218,8 @@ documento a la vista, también en el texto de OCR (va en él como texto invisibl
 - `SearchPanel.svelte` habla con el complemento (`searchAllPages`, con las opciones de mayúsculas y
   palabra completa) y dibuja las marcas en las capas del lienzo (`.search-hit`, la actual con
   `.is-current`), pasando las coordenadas con `canvas.toView`.
-- Tras una operación de página o un OCR el documento se vuelve a abrir en EmbedPDF; la búsqueda
-  espera a que termine (`canvas.loading`) y se repite sobre la versión nueva.
+- Tras una operación de página, un OCR o la censura la búsqueda se repite sobre el documento como
+  queda (el visor lo cambia sin volver a abrirlo; si se está abriendo, espera a `canvas.loading`).
 - Antes de cambiar las opciones se para la sesión de búsqueda: si no, EmbedPDF lanzaba otra
   búsqueda por su cuenta, que la nuestra cancelaba (y lo registraba como error).
 - La lista pinta 200 resultados y «Mostrar más»: con miles, pintarlos todos a la vez tardaba
@@ -283,12 +283,9 @@ La barra de propiedades va debajo de la selección, centrada (encima si no cabe,
 tirador de giro de EmbedPDF), y encima mientras se escribe un texto libre.
 
 **Reparto con Python:**
-- EmbedPDF las edita en su copia del documento. Antes de lo que lee el documento en Python
-  (censurar, OCR, IA, exportar texto o imágenes), `document/copy.ts` (`sync`) sube la copia que saca
-  el motor (`saveCopy`, sin el texto del OCR) por el servidor local (`ByteServer.expect`, `POST`,
-  `Host.upload_url`) y con `viewer.sync_annotations` esa copia pasa a ser el documento en Python.
-  Espera antes a que termine de cargar la última versión (`canvas.loading`): una copia anterior
-  desharía lo último que hizo Python. Al guardar, la misma copia se escribe tal cual (ver «Guardar,
+- EmbedPDF las edita en su documento; Python no lo tiene (ver la etapa 4). Al guardar, el motor
+  saca la copia (`saveCopy`, sin el texto del OCR), el visor la sube por el servidor local
+  (`ByteServer.expect`, `POST`, `Host.upload_url`) y Python la escribe tal cual (ver «Guardar,
   extraer, propiedades e imprimir»).
 - Los enlaces siguen bloqueados en EmbedPDF: son del documento.
 - `viewer.annotations_changed` avisa del primer cambio: así Python sabe que hay cambios sin guardar
@@ -424,13 +421,13 @@ anotaciones. Antes, la vista previa era una capa nuestra que no se podía tocar.
 - Un término o patrón con muchas coincidencias se deshace de **un solo Ctrl+Z**: `Annotations.batch`
   junta las órdenes que EmbedPDF apunta en su historial (una por anotación) en una sola.
 - El color del panel es el relleno de todas las marcas (`/IC`).
-- **Aplicar**: las marcas pasan a Python con las demás anotaciones (`sync`) y `redact.apply` →
-  `ViewerService.apply_redaction_marks` las aplica con el motor de EmbedPDF (`run_engine('redact')`,
-  `applyAllRedactions`): borra lo de debajo (texto, también dentro de Form XObjects; píxeles de las
-  imágenes; dibujos), pinta el recuadro (`/RO`) y quita la marca. Python quita también las palabras de
-  OCR que tapa y la página cambia de clave.
-- **Comprobado** (`tests/test_pdf.py`, con el motor real): en el archivo guardado no queda el texto en
-  ningún stream, en la imagen no queda ni un píxel de la zona tapada (fuera de ella sigue intacta), el
+- **Aplicar** (`redact/apply.ts`): el motor de EmbedPDF las aplica en el documento del visor
+  (`applyAllRedactions`, sin volver a abrirlo): borra lo de debajo (texto, también el invisible del
+  OCR y el de dentro de Form XObjects; píxeles de las imágenes; dibujos), pinta el recuadro (`/RO`) y
+  quita la marca. Las páginas censuradas suben de revisión (cambian de clave: `PageEditor.contentChanged`)
+  y `redact.apply` le dice a Python cuáles, con sus marcas: borra las palabras de OCR que tapaban.
+- **Comprobado** (`tests/test_pdf.py`, con el motor real, tarea `redact` de `engine_task.mjs`, la misma
+  función que el visor): en el archivo guardado no queda el texto en ningún stream, en la imagen no queda ni un píxel de la zona tapada (fuera de ella sigue intacta), el
   recuadro sale del color elegido y en su sitio en los cuatro giros, y un PDF cifrado sigue cifrado.
 
 **Conservado:** términos, patrones ⚡, Aa (mayúsculas), W (palabra completa), buscar en OCR,
@@ -498,7 +495,7 @@ y lo volvía a abrir en EmbedPDF. Ahora el dueño es EmbedPDF, por etapas que de
 | 1 | Operaciones de página y su deshacer | Hecha |
 | 2 | Guardar, guardar como, extraer una página, propiedades e imprimir (Python solo escribe los bytes) | Hecha |
 | 3 | El texto del OCR y la orientación (Python recibe imágenes de página) | Hecha |
-| 4 | Quitar el documento del visor de Python (en el navegador, sin copia en `/files`) | Pendiente |
+| 4 | Quitar el documento del visor de Python (en el navegador, sin copia en `/files`) | Hecha, salvo la copia de `/files` |
 | 5 | La IA lee el texto a través de EmbedPDF | Pendiente |
 
 ### El motor de la app (`lib/pdf-engine/`)
@@ -532,12 +529,11 @@ por número de página (el `deletePage` de EmbedPDF no lo hace).
   (doble página), recolocarlas y volver a leer las anotaciones. Cada página se vuelve a montar al
   cambiar su contenido (`{#key}` en `PdfPages.svelte`).
 - **Claves de página** `uid:giro:revisión`: el `uid` lo da el visor a las páginas nuevas y sigue a
-  cada página aunque cambie de sitio. Con él Python guarda las palabras del OCR, que vuelven si se
-  deshace el giro o el borrado de su página.
-- **Python recibe la estructura** con la copia del documento (`viewer.sync_annotations(id, url,
-  uids)`), antes de lo que lee el documento: censurar, exportar texto o imágenes, OCR, IA y la
-  búsqueda de la censura (`syncDocument` en `Viewer.svelte`, en la cola del documento). Si nada
-  cambió, no se sube nada. Al guardar llega igual, con la copia que se escribe.
+  cada página aunque cambie de sitio; la revisión sube al censurarla. Con la clave Python guarda las
+  palabras del OCR y el texto de la página, que vuelven si se deshace el giro o el borrado de su página.
+- **Python recibe la estructura** (las claves, `viewer.set_pages`) antes de lo que lee el texto
+  (`syncText` en `Viewer.svelte`, en la cola del documento; ver la etapa 4), y al guardar, con la
+  copia que se escribe.
 - **Orientación automática:** el visor sabe cuántos grados girar (por el sentido del texto o, en un
   escaneo, `ocr.orientation`: ver la etapa 3) y gira la página; se deshace como cualquier giro.
 - **Cambios sin guardar:** anotaciones o censura (lo dice Python, `annotated` y `redacted`) o una
@@ -557,19 +553,17 @@ duplicada, deshacer y rehacer, y las propiedades al día, sin volver a abrir el 
 Lo que sale del visor lo saca el motor de la app, y Python solo escribe los bytes:
 
 - **`document/copy.ts` (`DocumentCopy`)** es la copia del documento que sale del visor: `pdf()` (el
-  PDF entero), `page(i)` (una página como PDF nuevo), `upload()` y `send()` (subirla a Python) y
-  `sync()` (que pase a ser el documento de Python, solo si cambió algo: lleva la cuenta de los
-  cambios de anotaciones y páginas que Python aún no tiene). Antes estaba dentro de
-  `annotations.ts`.
+  PDF entero), `page(i)` (una página como PDF nuevo) y `upload()` (subirla a Python, con la clave de
+  cada página); `send()` sube cualquier dato. Antes estaba dentro de `annotations.ts`.
 - **Sin el texto del OCR:** el motor lo quita por su marca (`ExtraerPDFsOCR`) en una copia abierta
   aparte, solo de las páginas que lo llevan; el documento a la vista lo conserva para seleccionar y
   buscar. Cuáles lo llevan lo apunta el lienzo al escribirlo (`canvas.ocrPages`, por `uid`), y la
   copia de una página duplicada también lo lleva (`PageEditor.duplicate`). Antes lo quitaba Python
   al recibir la copia, y no lo quitaba de las páginas duplicadas: el texto del OCR de una copia
   acababa en el archivo.
-- **Guardar y «Guardar como»** (`viewer.save` / `save_as(id, url, uids)`): Python abre la copia (así
-  nunca escribe una que no se pueda leer), la escribe tal cual en el archivo y pasa a ser su
-  documento. Antes volvía a generar el PDF entero. Un PDF cifrado sigue cifrado: la copia lo está.
+- **Guardar y «Guardar como»** (`viewer.save` / `save_as(id, url, keys)`): Python abre la copia (así
+  nunca escribe una que no se pueda leer), la escribe tal cual en el archivo y la suelta. Antes
+  volvía a generar el PDF entero. Un PDF cifrado sigue cifrado: la copia lo está.
 - **Extraer página** (`viewer.extract_page(id, página, url)`): el motor saca la página con sus
   anotaciones (sin cifrar, como antes) y Python la escribe donde elija el usuario. Ya no hace falta
   pasar antes el documento entero a Python.
@@ -634,14 +628,12 @@ escribe el texto reconocido en el documento a la vista.
   el sentido de su texto, en el visor y sin llamar a Python. Si es un escaneo, el motor la dibuja a
   0,8 px por punto y la sonda, y Python decide con el clasificador y, si duda, con el OCR en las
   cuatro orientaciones (`ocr.orientation(url, imágenes)`, `OCRProcessor.image_correction`).
-- **Python tiene que tener el documento al día** solo para el texto que devuelve (`ocr.page` da el de
-  la página entera, con el nativo) y para comprobar que la página sigue siendo la misma: el panel
-  llama a `syncDocument` antes, que no sube nada si nada cambió. El OCR no cambia lo que Python
-  necesita, porque el texto del OCR no va en las copias.
-- **Límite que sigue:** Python guarda las palabras por el `uid` de la página, y la copia de una página
-  duplicada tiene otro. En el visor la copia lleva el texto (lo copia el motor con la página), pero si
-  después se vuelve a abrir el documento (al censurar), la copia lo pierde. No llega al archivo. Se
-  resuelve cuando el texto pase a leerse de EmbedPDF (etapa 5).
+- **Python tiene que tener el texto de la página** para el que devuelve (`ocr.page` da el de la
+  página entera, con el nativo) y comprobar que la página sigue siendo la misma: el panel llama
+  antes a `syncText([página])`, que no sube nada si ya lo tiene.
+- **Límite que sigue:** Python guarda las palabras por la clave de la página, y la copia de una
+  página duplicada tiene otra. En el visor la copia lleva el texto (lo copia el motor con la página) y
+  no llega al archivo, pero el asistente IA y exportar texto no lo ven. Lo resuelve la etapa 5.
 
 **Medido** (PDF de 47 MB y 250 páginas, versión web, scratchpad `perf_ocr.py`):
 
@@ -661,7 +653,63 @@ página se ve igual), `test_engine_ocr_words_replace_the_previous_ones_and_skip_
 (`tests/test_app_backend.py`, que hace de visor con imágenes dibujadas por Python). En la app,
 scratchpad `ocr_e2e.py` (19 comprobaciones, con los modelos reales: recorte y página sin volver a abrir
 el documento, búsqueda, orientación de una página con texto y de un escaneo de lado, lote, guardar
-sin el texto del OCR y censurar, que vuelve a abrir el documento con él).
+sin el texto del OCR y censurar, que conserva el resto del texto del OCR).
+
+### Python sin el documento del visor (etapa 4)
+
+Python ya no tiene abierto el PDF del visor (antes, `entry.doc`, que se cambiaba por cada copia que
+subía el visor). Lo lee una vez al abrirlo (contraseña, tamaños, índice, metadatos, permisos) y lo
+suelta. Lo que necesita de él le llega del visor:
+
+- **El texto de las páginas** (`document/text.ts`, `DocumentText.sync`): el visor le da la clave de
+  cada página (`viewer.set_pages`), Python contesta qué páginas no tiene (`missing`) y el visor le da
+  solo el texto de esas: el motor lo extrae (`pageTexts`, `lib/pdf-engine/page-text.ts`: cada carácter
+  con su caja holgada y su línea, sin el texto del OCR, igual que lo lee Python de un PDF) y lo sube en
+  binario (`viewer.add_texts`, 24 bytes por carácter). Python lo guarda así, por clave
+  (`PackedPageText`), y lo desempaqueta al usarlo (`PageText`). El texto de una página no cambia con
+  sus anotaciones ni al moverla, así que cada versión de una página se extrae una vez.
+- **Con ese texto** trabajan la capa de texto en orden de lectura (`text_layer.py`: asistente IA,
+  panel del OCR, exportar texto) y la búsqueda de la censura (`redaction.find_in_page`), que ahora
+  reciben un `pdf_core.pdf.PageText` (lo da también `Page.page_text` con un PDF abierto en Python).
+- **Lo pide** lo que lee el texto: el asistente IA, la búsqueda de la censura y exportar texto, de
+  todas las páginas (`syncText()`), y el panel del OCR, de la página que muestra (`syncText([i])`).
+- **La censura** la aplica el visor (ver «Censura»); Python solo borra las palabras del OCR tapadas
+  (`ViewerService.redaction_applied`). Ya no se vuelve a abrir el documento.
+- **Guardar** escribe la copia que sube el visor; los permisos los comprueba Python al abrir el
+  archivo (`can_save`). **Exportar imágenes** recibe una copia del visor, que Python abre, usa y
+  suelta (`viewer.export_images(id, url)`).
+- **`document_url`** sirve el archivo tal como está en disco, con sus claves (`file_keys`): solo se
+  usa al abrirlo.
+- **El estado** que devuelve Python (guardar, censurar) ya no lleva las páginas (`DocumentState` en
+  `lib/types.ts`): las lleva el visor. Python lleva las claves y sabe con ellas si la estructura es
+  la guardada.
+
+**Queda la copia de `/files` en el navegador:** el archivo que se abre se copia al sistema de archivos
+de Pyodide, donde lo leen `viewer.open` y `document_url` y donde Python escribe al guardar (y la
+ventana lo pasa al archivo real). Quitarla obliga a que el visor abra el archivo sin Python y a que
+guardar no pase por `/files`: está por decidir.
+
+**Medido** (PDF de 47 MB y 250 páginas, versión web, scratchpad `perf_text.py`):
+
+| Qué | Tiempo |
+|---|---|
+| El motor extrae el texto de las 250 páginas (935.000 caracteres, 22 MB empaquetado), la primera vez / después | 4,0 s / 1,1–1,2 s |
+| Subirlo a Python (`viewer.add_texts`) | 26–34 ms |
+| «Generar Resumen» del asistente (modo básico) con el texto ya en Python | 93–105 ms |
+
+Python de escritorio tardaba 13,2–13,7 s en leer ese mismo texto de su copia con `pypdfium2`. El
+texto de una página para el panel del OCR se extrae en unos milisegundos. Dos cosas lo hacen rápido:
+el motor lee el texto de cada página de una vez (`FPDFText_GetText`) y las cajas directamente de su
+memoria, y no mira de qué objeto es cada carácter si la página no tiene texto del OCR; Python no
+desempaqueta un objeto por carácter para leer el texto ni para buscar en él (`PackedPageText.text`
+y `text_map`), solo para la capa en orden de lectura de una página.
+
+**Comprobado:** en Python, `test_engine_gives_python_the_same_page_text_without_the_ocr` (los cuatro
+giros: mismo texto, mismas líneas y cajas a menos de 1 pt, y la misma capa de texto) y
+`test_engine_page_texts_come_in_the_order_asked` (`tests/test_pdf.py`); en `tests/test_app_backend.py`
+todas las pruebas del visor, el OCR, la censura y la IA hacen de visor con `FakeViewer` (su documento,
+sus claves y el texto en el formato del motor). En la app, scratchpad `ocr_e2e.py`, `save_e2e.py`,
+`pages_e2e.py` y `web_tools_e2e.py` (que censura desde el panel).
 
 ## Un solo motor
 
@@ -669,17 +717,14 @@ Todo usa PDFium: el de EmbedPDF en la ventana y `pypdfium2` en Python (`pdf_core
 usaba PyMuPDF, con licencia AGPL, y había dos motores. Se retiró en la 0.1.29-web.
 
 **Reparto:**
-- **Python tiene una copia del documento** (`entry.doc`, un `pdf_core.pdf.Document`): extrae texto
-  (IA, panel de OCR, exportar, buscar para censurar). Al guardar escribe la copia que le da el visor.
-  Se lee a memoria: así se puede sobrescribir el archivo abierto. Para el OCR ya no la dibuja: las
-  imágenes las dibuja el visor.
-- **EmbedPDF edita el documento** (anotaciones y páginas) y, cuando hace falta, su copia pasa a ser el
-  documento de Python (`viewer.sync_annotations`). No hay que copiar cambios entre dos documentos: es el mismo archivo.
+- **El documento del visor es de EmbedPDF**: lo edita (anotaciones, páginas, censura) y saca sus
+  copias. Python no lo tiene abierto: recibe el texto de sus páginas y, al guardar, la copia que
+  escribe (ver la etapa 4). Los archivos de las demás herramientas (Unir, Extraer, Seguridad…) sí los
+  abre Python con `pypdfium2`, siempre a memoria: así se puede sobrescribir el archivo abierto.
 - **Lo que el PDFium normal no sabe hacer** lo hace el de EmbedPDF, que tiene funciones propias:
 
   | Tarea (`lib/engine-tasks.ts`) | Quién la pide | Función de EmbedPDF |
   |---|---|---|
-  | `redact` | `viewer.apply_redaction_marks` | `applyAllRedactions` |
   | `encrypt` | `security.protect` | `setDocumentEncryption` (AES-256, R6) |
   | `outline` | `merge.merge` (marcadores) | `setBookmarks` |
 
@@ -687,10 +732,9 @@ usaba PyMuPDF, con licencia AGPL, y había dos motores. Se retiró en la 0.1.29-
   a que la ventana suba el resultado y llame a `app.engine_done`. La ventana abre un documento propio
   en el motor, sin tocar los del visor.
 
-**Identidad de las páginas.** PDFium no da el número de objeto de una página, así que `Document.uids`
-lleva un identificador por página. La clave de página es `id:rotación:revisión`. Los da el visor,
-que es quien mueve las páginas, y llegan con su copia (`Document.set_uids`); la censura conserva los
-de antes (`adopt_uids`).
+**Identidad de las páginas.** PDFium no da el número de objeto de una página, así que cada página
+lleva un identificador (`Document.uids` al abrir el archivo: 1, 2, 3…). La clave de página es
+`id:rotación:revisión`. Después los da el visor, que es quien añade, mueve y censura las páginas.
 
 **PDF cifrados.** El visor abre el PDF cifrado con su contraseña (`document_url` la devuelve), y por eso
 su copia conserva el cifrado y las dos contraseñas sin conocer la de propietario. Los permisos no se

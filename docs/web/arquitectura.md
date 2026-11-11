@@ -112,12 +112,12 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
     `viewer.text_of`): el texto en orden de lectura, con el nativo y el de OCR;
   - lo que se dibuja sobre una página (selección, coincidencias) va en su capa de marcas
     (`canvas.addMark`), en puntos de la página tal como se ve y medido en porcentaje.
-- **Anotaciones y páginas**: las edita EmbedPDF (complementos Annotation y History, y el motor de la
-  app para las páginas) en su copia del documento, con deshacer y rehacer en el navegador. Las copias
-  que salen del visor las saca su motor sin el texto del OCR (`document/copy.ts`): al guardar o
-  extraer una página Python las escribe tal cual, y antes de lo que lee el documento en Python
-  (censurar, OCR, IA) el visor sube su copia (`viewer.sync_annotations`, por el servidor local de
-  datos), que pasa a ser el documento en Python. Ver [embedpdf.md](embedpdf.md).
+- **Anotaciones, páginas y censura**: las hace EmbedPDF (complementos Annotation y History, y el
+  motor de la app) en su documento, con deshacer y rehacer en el navegador. Python no tiene el
+  documento: recibe la clave y el texto de cada página que le falta (`document/text.ts`,
+  `viewer.set_pages` y `viewer.add_texts`, por el servidor local de datos) y, al guardar o extraer
+  una página, la copia que saca el motor sin el texto del OCR (`document/copy.ts`), que escribe tal
+  cual. Ver [embedpdf.md](embedpdf.md), etapa 4.
 - **Ratón en el lienzo**: cada página va en un `PagePointerProvider` de EmbedPDF, que pasa el ratón
   a la selección de texto (solo con las herramientas de texto, por los modos del gestor de
   interacción) y a las anotaciones (seleccionar, mover, dibujar con su herramienta activa). Los
@@ -137,10 +137,10 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
 - **Censura**: lo que se censura son las marcas de EmbedPDF (anotaciones `Redact`, ver
   `redaction.ts`), que se revisan en la página. El servicio `redact` busca dónde aparece cada término
   (`find`) y guarda las opciones, el color y el perfil activo en el propio documento abierto
-  (`_OpenDocument.extras`). Al aplicar, las marcas llegan con las anotaciones y
-  `ViewerService.apply_redaction_marks` las aplica: borra el contenido de debajo (también las
-  palabras de OCR) y sube la revisión de esas páginas, así su clave cambia y el lienzo no reutiliza
-  la imagen anterior. Un documento censurado (`redacted`) solo se guarda como copia.
+  (`_OpenDocument.extras`). Al aplicar, el motor del visor borra el contenido de debajo en su
+  documento (`redact/apply.ts`) y sube la revisión de esas páginas, así su clave cambia y nada
+  reutiliza su imagen ni su texto anteriores; `redact.apply` le dice a Python qué páginas, y borra
+  las palabras de OCR que tapaban. Un documento censurado (`redacted`) solo se guarda como copia.
 - **Imprimir**: el diálogo de impresión de WebView2 con el PDF y sus anotaciones
   en un iframe oculto (`document/print.ts`). Ver embedpdf.md, «Imprimir».
 - **Asistente IA**: el servicio `ai` copia lo necesario del documento con el candado del visor y

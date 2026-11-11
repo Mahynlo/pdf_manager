@@ -30,6 +30,7 @@
   import OcrPanel from './ocr/OcrPanel.svelte';
   import { PageRecognizer } from './ocr/recognize.ts';
   import { DocumentCopy } from './document/copy.ts';
+  import { DocumentText } from './document/text.ts';
   import { DocumentActions } from './document/operations.ts';
   import { PageEditor } from './document/pages.ts';
   import { printPdf, release as releasePrint } from './document/print.ts';
@@ -90,7 +91,7 @@
   let ai = $state<AiPanel>();
 
   // ── Lienzo y sus capas ─────────────────────────────────────────────────
-  // Las páginas y miniaturas las dibuja EmbedPDF con la versión del documento que tiene Python.
+  // Las páginas y miniaturas las dibuja EmbedPDF, que es el dueño del documento.
   const canvas = new PageCanvas(docId, doc.pages, doc.keys, {
     onPage: (i) => (view.page = i),
     onZoom: (z) => {
@@ -100,13 +101,12 @@
     },
     onMode: (m) => (view.mode = m),
     onTool: (t) => annotations.applyStyle(t),
-    onDocument: () => {
-      copy.shown();
-      annotations.documentShown();
-    },
+    onDocument: () => annotations.documentShown(),
   });
-  // La copia del documento que sale del visor: a Python, a un archivo o a la impresora.
-  const copy = new DocumentCopy(canvas, docId, () => annotations.commit());
+  // La copia del documento que sale del visor (a un archivo, a la impresora o a Python) y el texto
+  // de sus páginas, que es lo que lee Python.
+  const copy = new DocumentCopy(canvas, () => annotations.commit());
+  const text = new DocumentText(canvas, docId);
   // El OCR y la orientación: el motor dibuja las páginas y Python las reconoce.
   const recognizer = new PageRecognizer(canvas, docId);
   if (viewport.narrow || viewport.reading) canvas.fitWidth(); // al 100 % no se vería la página entera
@@ -150,7 +150,7 @@
       update(next);
       showHistory();
     },
-  }, new PageEditor(canvas), copy, recognizer);
+  }, { canvas, pages: new PageEditor(canvas), copy, text, recognizer });
 
   // Deshacer y rehacer: primero lo de EmbedPDF (anotaciones); si no queda, las operaciones de
   // página (pages.ts). Tras una operación de página EmbedPDF empieza un historial nuevo, así que
@@ -188,19 +188,16 @@
       history = { canUndo, canRedo };
       showHistory();
     },
-    onChanged: () => {
-      copy.changed();
-      actions.annotationsChanged().then(() => update(actions.info));
-    },
+    onChanged: () => void actions.annotationsChanged().then(() => update(actions.info)),
     onSelect: (items) => editor.setSelection(items),
     onRendered: refreshThumbs,
     setTool: (t) => setTool(t),
   });
 
   const editor = new AnnotationEditor(canvas, annotations);
-  // Python recibe el documento al día antes de leerlo (las páginas las cambia EmbedPDF). En la cola
+  // Python recibe las páginas al día y su texto (de `pages`, o de todas) antes de leerlo. En la cola
   // del documento: espera a las operaciones de página pendientes.
-  const syncDocument = () => actions.run(() => copy.sync());
+  const syncText = (pages: number[] | null = null) => actions.run(() => text.sync(pages));
   const marks = new RedactionMarks(annotations);
 
   /** Va a una marca de censura y la selecciona (para moverla o borrarla). */
@@ -488,20 +485,20 @@
           <TocTree {toc} onSelect={(index) => { leavePanel(); goTo(index); }} />
         </div>
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'ocr'}>
-          <OcrPanel bind:this={ocr} {canvas} {docId} {recognizer} {syncDocument} page={view.page}
+          <OcrPanel bind:this={ocr} {canvas} {docId} {recognizer} {syncText} page={view.page}
                     active={view.dock && dockTab === 'ocr'} close={() => (view.dock = false)} {setTool}
                     orient={() => actions.fixOrientation()} changed={() => search!.refresh()} />
         </div>
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'redact'}>
-          <RedactPanel bind:this={redact} {docId} {syncDocument} {marks} {tool} {setTool} close={() => (view.dock = false)}
-                       show={showMark} commit={(fn) => actions.change(fn)} />
+          <RedactPanel bind:this={redact} {docId} {syncText} {marks} {tool} {setTool} close={() => (view.dock = false)}
+                       show={showMark} apply={() => actions.redact(marks)} />
         </div>
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'stamps'}>
           <StampsPanel bind:this={stamps} {canvas} {annotations} {tool} {setTool} active={view.dock && dockTab === 'stamps'}
                        close={() => (view.dock = false)} />
         </div>
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'ai'}>
-          <AiPanel bind:this={ai} {docId} {syncDocument} active={view.dock && dockTab === 'ai'} close={() => (view.dock = false)}
+          <AiPanel bind:this={ai} {docId} {syncText} active={view.dock && dockTab === 'ai'} close={() => (view.dock = false)}
                    redact={async (items) => {
                      openDockTab('redact');
                      for (const item of items) await redact!.addTerm(item.texto);

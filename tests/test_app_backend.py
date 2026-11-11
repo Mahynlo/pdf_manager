@@ -21,6 +21,7 @@ from pdfkit import (
     annots,
     delete_annots,
     encrypted,
+    pack_page_texts,
     page_texts,
     pdf_bytes,
     run_engine,
@@ -312,31 +313,102 @@ def test_viewer_password_errors_let_the_frontend_retry(tmp_path):
         assert wrong.value.code == "invalid_password"
         info = svc.open(str(locked), "clave")
         assert len(info["pages"]) == 1
-        assert svc._docs[info["id"]].doc[0].text().strip() == "secreto 1"
+        viewer = FakeViewer(svc, info["id"])
+        viewer.sync()
+        assert _text(svc, info["id"], 0) == "secreto 1"
     finally:
         svc.close()
 
 
-def test_viewer_takes_the_pages_from_the_viewer_copy(tmp_path):
+class FakeViewer:
+    """Hace de visor (``Viewer.svelte``) en las pruebas de los servicios.
+
+    Tiene su documento (el PDF que abre EmbedPDF con ``document_url``) y la clave de cada página;
+    cambia las páginas con el motor de EmbedPDF (``tests/engine_task.mjs``); da a Python las claves
+    y el texto de las páginas que le faltan (como ``document/text.ts``, en el formato de
+    ``lib/pdf-engine/page-text.ts``) y le sube su copia al guardar. Su documento no lleva el texto
+    del OCR: el visor lo escribe y lo quita su motor de lo que sale de él (``tests/test_pdf.py``).
+    """
+
+    def __init__(self, svc: ViewerService, doc_id: int) -> None:
+        served = svc.document_url(doc_id)
+        self.svc, self.doc_id = svc, doc_id
+        self.password = served["password"]
+        self.data = base64.b64decode(served["url"].split(",", 1)[1])
+        self.keys: list[str] = list(served["keys"])
+
+    def sync(self, pages: list[int] | None = None) -> dict:
+        """Python recibe las páginas y el texto de ``pages`` (sin ellas, de todas) que le falta."""
+        result = self.svc.set_pages(self.doc_id, self.keys)
+        wanted = [i for i in result["missing"] if pages is None or i in pages]
+        if wanted:
+            with Document.open(self.data, self.password) as doc:
+                meta, data = pack_page_texts([(i, doc[i].page_text()) for i in wanted])
+            self.svc.add_texts(self.doc_id, _put(self.svc, data), meta)
+        return result
+
+    def reshape(self, ops: list[list], uids: list[int]) -> dict:
+        """Cambia las páginas (``ops``, como en ``engine_task.mjs``); ``uids``: el id de cada página
+        que queda (los da el visor). Devuelve lo que dice Python al recibirlas."""
+        self.data = run_engine("pages", self.data, {"ops": ops, "password": self.password})
+        revisions = {key.split(":")[0]: key.split(":")[2] for key in self.keys}
+        with Document.open(self.data, self.password) as doc:
+            self.keys = [f"{uid}:{page.rotation}:{revisions.get(str(uid), 0)}" for uid, page in zip(uids, doc, strict=True)]
+        return self.sync()
+
+    def annotate(self, edit) -> dict:
+        """Cambia con ``edit(documento)`` las anotaciones de su documento y se lo dice a Python."""
+        with Document.open(self.data, self.password) as doc:
+            edit(doc)
+            self.data = doc.to_bytes()
+        return self.svc.annotations_changed(self.doc_id)
+
+    def save(self, method: str = "save") -> dict | None:
+        """Guarda (``save`` o ``save_as``): sube su copia del documento con la clave de cada página."""
+        return getattr(self.svc, method)(self.doc_id, _put(self.svc, self.data), self.keys)
+
+    def redact(self, service: RedactService, marks: list[tuple[int, list[float]]], color: str = "#000000") -> dict:
+        """Aplica marcas de censura (página, rectángulo sin girar) como ``redact/apply.ts``: el motor en
+        su documento y después ``redact.apply``. Devuelve lo que responde Python."""
+        indices = sorted({page for page, _rect in marks})
+        self.sync(indices)
+        items = [{"page": page, "rect": rect, "color": color} for page, rect in marks]
+        marked = run_engine("mark", self.data, {"marks": items, "password": self.password})
+        self.data = run_engine("redact", marked, {"password": self.password})
+        before = list(self.keys)
+        for i in indices:
+            uid, rotation, revision = self.keys[i].split(":")
+            self.keys[i] = f"{uid}:{rotation}:{int(revision) + 1}"
+        pages = [{"before": before[i], "after": self.keys[i], "rects": [r for p, r in marks if p == i]} for i in indices]
+        return service.apply(self.doc_id, pages)
+
+    def document(self) -> Document:
+        return Document.open(self.data, self.password)
+
+
+def test_viewer_takes_the_pages_from_the_viewer(tmp_path):
     pdf = _make_pdf(tmp_path / "ops.pdf", 3)
     svc = ViewerService(FakeHost())
     try:
         info = svc.open(str(pdf))
         doc_id = info["id"]
         assert info["modified"] is False and info["keys"] == ["1:0:0", "2:0:0", "3:0:0"]
+        viewer = FakeViewer(svc, doc_id)
         ops = [["rotate", [0], 1], ["blank", 1, 595, 842], ["duplicate", 2, 3], ["move", 4, 0], ["remove", 2]]
         # [3, 1↻, 2, 2'], con los id que da el visor (4 era la blanca, ya borrada; 5 es la copia).
-        state = _reshape(svc, doc_id, ops, [3, 1, 2, 5])
-        assert state["keys"] == ["3:0:0", "1:90:0", "2:0:0", "5:0:0"]
-        assert state["pages"][1] == [842.0, 595.0] and state["modified"]
-        assert svc.unsaved_documents() == ["ops.pdf"]
+        result = viewer.reshape(ops, [3, 1, 2, 5])
+        assert viewer.keys == ["3:0:0", "1:90:0", "2:0:0", "5:0:0"]
+        assert result["modified"] and result["missing"] == [0, 1, 2, 3] and svc.unsaved_documents() == ["ops.pdf"]
+        assert viewer.sync()["missing"] == []  # el texto de cada versión de una página llega una vez
 
-        saved = _save(svc, doc_id)
+        saved = viewer.save()
         assert saved["modified"] is False and saved["annotated"] is False and svc.unsaved_documents() == []
         assert page_texts(pdf) == ["ops 3", "ops 1", "ops 2", "ops 2"]
-        assert _text(svc, doc_id, 0) == "ops 3"  # sigue legible tras reabrirse desde memoria
-        with pytest.raises(UserError, match="no coincide"):
-            _reshape(svc, doc_id, [], [3, 1])  # un id por página
+        assert _text(svc, doc_id, 0) == "ops 3"
+        # Python no tiene el documento: lo que vuelve a abrir el visor es el archivo guardado.
+        assert svc.document_url(doc_id)["keys"] == viewer.keys
+        with pytest.raises(UserError, match="no son válidas"):
+            svc.set_pages(doc_id, ["3:0"])
     finally:
         svc.close()
 
@@ -346,14 +418,15 @@ def test_viewer_keeps_ocr_words_while_their_page_moves_or_turns(tmp_path):
     svc = ViewerService(FakeHost())
     try:
         doc_id = svc.open(str(pdf))["id"]
+        viewer = FakeViewer(svc, doc_id)
+        viewer.sync()
         with svc.document(doc_id) as entry:
-            svc.set_ocr_words(entry, entry.doc[0], [(100, 300, 220, 320, "reconocido")])
-        # El visor la lleva al final y la gira: su copia trae el texto de OCR invisible.
-        _reshape(svc, doc_id, [["move", 0, 1], ["rotate", [1], 1]], [2, 1])
-        assert "reconocido" not in svc._docs[doc_id].doc[1].text()  # no pasa al documento
+            svc.set_ocr_words(entry, "1:0:0", [(100, 300, 220, 320, "reconocido")])
+        # El visor la lleva al final y la gira.
+        viewer.reshape([["move", 0, 1], ["rotate", [1], 1]], [2, 1])
         assert "reconocido" not in _text(svc, doc_id, 1)  # girada, esas palabras ya no valen
         # Se deshace el giro en el visor: la página vuelve con su clave y con sus palabras.
-        _reshape(svc, doc_id, [["rotate", [1], -1]], [2, 1])
+        viewer.reshape([["rotate", [1], -1]], [2, 1])
         assert "reconocido" in _text(svc, doc_id, 1)
     finally:
         svc.close()
@@ -366,16 +439,18 @@ def test_viewer_save_as_moves_the_tab_to_the_new_file(tmp_path):
     svc = ViewerService(host)
     try:
         doc_id = svc.open(str(pdf))["id"]
-        _reshape(svc, doc_id, [["remove", 0]], [2])
-        info = _save(svc, doc_id, "save_as")
+        viewer = FakeViewer(svc, doc_id)
+        viewer.reshape([["remove", 0]], [2])
+        info = viewer.save("save_as")
         assert info["path"] == str(tmp_path / "copia.pdf") and info["name"] == "copia.pdf"
         assert not info["modified"] and host.saved_suggestions == [str(pdf)]
         assert page_texts(tmp_path / "copia.pdf") == ["original 2"]
         assert page_texts(pdf) == ["original 1", "original 2"]  # el original no cambia
-        assert svc.open(str(tmp_path / "copia.pdf"))["id"] == doc_id
+        reopened = svc.open(str(tmp_path / "copia.pdf"))
+        assert reopened["id"] == doc_id and reopened["keys"] == ["2:0:0"] and len(reopened["pages"]) == 1
 
         host.save_to = None
-        assert _save(svc, doc_id, "save_as") is None  # cancelado
+        assert viewer.save("save_as") is None  # cancelado
     finally:
         svc.close()
 
@@ -385,17 +460,19 @@ def test_viewer_save_writes_the_viewer_copy_as_is(tmp_path):
     svc = ViewerService(FakeHost())
     try:
         doc_id = svc.open(str(pdf))["id"]
-        served, data, uids = _served_bytes(svc, doc_id)
-        copy = run_engine("pages", data, {"ops": [["move", 1, 0]]})
-        assert not svc.save(doc_id, _put(svc, copy), [2, 1])["modified"]
-        assert pdf.read_bytes() == copy  # sin volver a generarla en Python
-        assert _text(svc, doc_id, 0) == "tal_cual 2"  # y es el documento abierto
+        viewer = FakeViewer(svc, doc_id)
+        viewer.reshape([["move", 1, 0]], [2, 1])
+        assert not viewer.save()["modified"]
+        assert pdf.read_bytes() == viewer.data  # sin volver a generarla en Python
 
         with pytest.raises(UserError) as error:
-            svc.save(doc_id, _put(svc, b"esto no es un PDF"), [2, 1])
-        assert error.value.code == "sync_failed" and pdf.read_bytes() == copy  # no se escribe
+            svc.save(doc_id, _put(svc, b"esto no es un PDF"), viewer.keys)
+        assert error.value.code == "sync_failed" and pdf.read_bytes() == viewer.data  # no se escribe
         with pytest.raises(UserError) as error:
-            svc.save(doc_id, svc.upload_url())  # no llegó nada
+            svc.save(doc_id, _put(svc, viewer.data), viewer.keys[:1])  # una clave por página
+        assert error.value.code == "sync_failed"
+        with pytest.raises(UserError) as error:
+            svc.save(doc_id, svc.upload_url(), viewer.keys)  # no llegó nada
         assert error.value.code == "upload_missing"
     finally:
         svc.close()
@@ -406,15 +483,29 @@ def test_viewer_save_keeps_the_password(tmp_path):
     svc = ViewerService(FakeHost())
     try:
         doc_id = svc.open(str(locked), "clave")["id"]
-        _reshape(svc, doc_id, [["rotate", [1], 1]], [1, 2])
-        _save(svc, doc_id)
-        assert svc._docs[doc_id].doc[0].text().strip() == "secreto 1"
+        viewer = FakeViewer(svc, doc_id)
+        assert viewer.password == "clave"
+        viewer.reshape([["rotate", [1], 1]], [1, 2])
+        viewer.save()
     finally:
         svc.close()
     with pytest.raises(PasswordError):
         Document.open(locked)
     with Document.open(locked, "clave") as doc:
         assert doc.encrypted and doc[1].rotation == 90 and doc[0].text().strip() == "secreto 1"
+
+
+def test_viewer_save_respects_the_pdf_permissions(tmp_path):
+    pdf = tmp_path / "solo_lectura.pdf"
+    pdf.write_bytes(encrypted(pdf_bytes([[(72, 72, "fijo")]]), "", owner="dueño", permissions=0))
+    svc = ViewerService(FakeHost())
+    try:
+        doc_id = svc.open(str(pdf))["id"]
+        with pytest.raises(UserError) as error:
+            FakeViewer(svc, doc_id).save()
+        assert error.value.code == "save_not_allowed"
+    finally:
+        svc.close()
 
 
 def test_viewer_exports_page_text_and_images(tmp_path):
@@ -431,20 +522,40 @@ def test_viewer_exports_page_text_and_images(tmp_path):
     svc = ViewerService(host)
     try:
         doc_id = svc.open(str(pdf))["id"]
-        _, data, _ = _served_bytes(svc, doc_id)
-        page = run_engine("extract", data, {"indices": [1], "withoutText": []})  # la saca el visor
+        viewer = FakeViewer(svc, doc_id)
+        page = run_engine("extract", viewer.data, {"indices": [1], "withoutText": []})  # la saca el visor
         assert svc.extract_page(doc_id, 1, _put(svc, page)) == str(tmp_path / "pagina.pdf")
         assert host.saved_suggestions[-1] == str(tmp_path / "fuente_pagina_2.pdf")
         assert page_texts(tmp_path / "pagina.pdf") == ["adiós"]
 
         host.save_to = str(tmp_path / "texto.txt")
+        with pytest.raises(UserError) as error:
+            svc.export_text(doc_id)  # sin el texto de las páginas
+        assert error.value.code == "text_missing"
+        viewer.sync()
         svc.export_text(doc_id)
         assert host.saved_suggestions[-1] == str(tmp_path / "fuente_texto.txt")
         text = (tmp_path / "texto.txt").read_text(encoding="utf-8")
         assert "=== PÁGINA 1 ===\nhola" in text and "=== PÁGINA 2 ===\nadiós" in text
 
-        assert svc.export_images(doc_id) == {"folder": str(out), "count": 1}
+        assert svc.export_images(doc_id, _put(svc, viewer.data)) == {"folder": str(out), "count": 1}
         assert [p.name for p in out.iterdir()] == ["fuente_p1_img1.png"]
+    finally:
+        svc.close()
+
+
+def test_viewer_rejects_page_texts_that_do_not_fit(tmp_path):
+    pdf = _make_pdf(tmp_path / "texto.pdf", 1)
+    svc = ViewerService(FakeHost())
+    try:
+        doc_id = svc.open(str(pdf))["id"]
+        svc.set_pages(doc_id, ["1:0:0"])
+        with pytest.raises(UserError) as error:
+            svc.add_texts(doc_id, _put(svc, b"corto"), [{"index": 0, "geometry": [1, 1, 0, 1, 0], "count": 2}])
+        assert error.value.code == "bad_texts"
+        meta, data = pack_page_texts([])
+        with pytest.raises(UserError, match="fuera de rango"):
+            svc.add_texts(doc_id, _put(svc, data), [{"index": 3, "geometry": [1, 1, 0, 1, 0], "count": 0}])
     finally:
         svc.close()
 
@@ -459,17 +570,20 @@ def test_viewer_text_layer_follows_reading_order(tmp_path):
     svc = ViewerService(FakeHost())
     try:
         info = svc.open(str(pdf))
+        viewer = FakeViewer(svc, info["id"])
+        viewer.sync()
         assert _text(svc, info["id"], 0) == "Hola mundo\nsegunda linea"
-        _reshape(svc, info["id"], [["rotate", [0], 1]], [1])
+        viewer.reshape([["rotate", [0], 1]], [1])
         # Girada se lee igual; los rectángulos ya están en la página girada (apaisada).
         assert _text(svc, info["id"], 0).startswith("Hola mundo")
         with svc.document(info["id"]) as entry:
-            assert max(r.x0 for r in svc.text_of(entry, entry.doc[0]).rects) > 600
+            assert max(r.x0 for r in svc.text_of(entry, 0).rects) > 600
     finally:
         svc.close()
 
+
 def _served(svc: ViewerService, doc_id: int) -> Document:
-    """Copia del documento como la recibe EmbedPDF (``document_url``)."""
+    """El documento como lo abre EmbedPDF (``document_url``)."""
     served = svc.document_url(doc_id)
     return Document.open(base64.b64decode(served["url"].split(",", 1)[1]), served["password"])
 
@@ -481,46 +595,7 @@ def _put(svc: ViewerService, data: bytes) -> str:
     return url
 
 
-def _upload(svc: ViewerService, doc_id: int, data: bytes, uids: list[int] | None = None) -> dict:
-    return svc.sync_annotations(doc_id, _put(svc, data), uids)
-
-
-def _served_bytes(svc: ViewerService, doc_id: int) -> tuple[dict, bytes, list[int]]:
-    """Lo que recibe EmbedPDF (``document_url``): la respuesta, el PDF y el id de cada página.
-
-    Las copias que el visor sube a Python salen igual: el texto del OCR, que escribe el visor al
-    abrirlo, lo quita su motor al sacarlas (lo prueba tests/test_pdf.py, ``test_engine_*``).
-    """
-    served = svc.document_url(doc_id)
-    uids = [int(key.split(":", 1)[0]) for key in served["keys"]]
-    return served, base64.b64decode(served["url"].split(",", 1)[1]), uids
-
-
-def _reshape(svc: ViewerService, doc_id: int, ops: list[list], uids: list[int]) -> dict:
-    """Hace de visor: cambia las páginas de su copia con el motor de EmbedPDF (``ops``, como en
-    tests/engine_task.mjs) y la sube con el id de cada página. Devuelve la información nueva."""
-    served, data, _ = _served_bytes(svc, doc_id)
-    changed = run_engine("pages", data, {"ops": ops, "password": served["password"]})
-    _upload(svc, doc_id, changed, uids)
-    return svc._info(doc_id)
-
-
-def _sync(svc: ViewerService, doc_id: int, edit) -> dict:
-    """Hace de visor: cambia con ``edit(copia)`` las anotaciones de su copia y la sube."""
-    served, data, uids = _served_bytes(svc, doc_id)
-    with Document.open(data, served["password"]) as copy:
-        edit(copy)
-        data = copy.to_bytes()
-    return _upload(svc, doc_id, data)
-
-
-def _save(svc: ViewerService, doc_id: int, method: str = "save") -> dict | None:
-    """Hace de visor al guardar (``save`` o ``save_as``): sube su copia del documento."""
-    served, data, uids = _served_bytes(svc, doc_id)
-    return getattr(svc, method)(doc_id, _put(svc, data), uids)
-
-
-def test_viewer_takes_annotations_from_the_viewer_copy(tmp_path):
+def test_viewer_annotations_go_to_the_file_with_the_viewer_copy(tmp_path):
     pdf = tmp_path / "notas.pdf"
     with Document.new() as doc:
         for i in range(2):
@@ -536,62 +611,28 @@ def test_viewer_takes_annotations_from_the_viewer_copy(tmp_path):
         with _served(svc, doc_id) as copy:  # EmbedPDF recibe las anotaciones: las edita él
             assert [annots(page) for page in copy] == [["Link"], ["Square"]]
 
-        assert svc.annotations_changed(doc_id) == {"modified": True}
-        assert svc.unsaved_documents() == ["notas.pdf"]
-
-        # OCR en la página 2: lo escribe el visor en su documento, pero no pasa a sus copias.
-        with svc.document(doc_id) as entry:
-            svc.set_ocr_words(entry, entry.doc[1], [(300, 300, 360, 320, "reconocido")])
+        viewer = FakeViewer(svc, doc_id)
+        viewer.sync()
+        with svc.document(doc_id) as entry:  # OCR en la página 2: no va al archivo
+            svc.set_ocr_words(entry, viewer.keys[1], [(300, 300, 360, 320, "reconocido")])
 
         def edit(copy):
-            assert "reconocido" not in copy[1].text()
             add_annot(copy[0], "Highlight", Rect(70, 60, 140, 80))
             delete_annots(copy[1])
             add_annot(copy[1], "Text", Rect(300, 300, 320, 320), "nota")
 
-        assert _sync(svc, doc_id, edit) == {"modified": True}
-        assert not _save(svc, doc_id)["modified"] and svc.unsaved_documents() == []
+        assert viewer.annotate(edit) == {"modified": True}
+        assert svc.unsaved_documents() == ["notas.pdf"]
+        assert not viewer.save()["modified"] and svc.unsaved_documents() == []
         with Document.open(pdf) as doc:
             assert [annots(page) for page in doc] == [["Link", "Highlight"], ["Text"]]
             assert doc[1].text().strip() == "Pagina 2"  # sin el texto de OCR
 
-        # Las palabras de OCR siguen en la página aunque el documento sea otro objeto.
-        with svc.document(doc_id) as entry:
-            assert "reconocido" in svc.text_of(entry, entry.doc[1]).text
-
-        # Al mover páginas en el visor, cada anotación sigue a la suya, y el OCR también.
-        _reshape(svc, doc_id, [["move", 1, 0]], [2, 1])
-        with svc.document(doc_id) as entry:
-            assert [annots(page) for page in entry.doc] == [["Text"], ["Link", "Highlight"]]
-            assert "reconocido" in svc.text_of(entry, entry.doc[0]).text
+        # Al mover páginas en el visor, el OCR sigue a su página.
+        viewer.reshape([["move", 1, 0]], [2, 1])
+        assert "reconocido" in _text(svc, doc_id, 0)
     finally:
         svc.close()
-
-
-def test_viewer_sync_keeps_encryption_and_checks_the_copy(tmp_path):
-    pdf = _make_pdf(tmp_path / "cifrado.pdf", 2, password="clave")
-    svc = ViewerService(FakeHost())
-    try:
-        doc_id = svc.open(str(pdf), "clave")["id"]
-        with pytest.raises(UserError) as error:
-            svc.sync_annotations(doc_id, svc.upload_url())  # no llegó nada
-        assert error.value.code == "upload_missing"
-
-        with pytest.raises(UserError) as error:
-            _sync(svc, doc_id, lambda copy: copy.delete_page(0))
-        assert error.value.code == "sync_failed"
-        with pytest.raises(UserError) as error:
-            _upload(svc, doc_id, b"esto no es un PDF")
-        assert error.value.code == "sync_failed"
-
-        _sync(svc, doc_id, lambda copy: add_annot(copy[1], "Square", Rect(10, 10, 90, 90)))
-        _save(svc, doc_id)
-    finally:
-        svc.close()
-    with pytest.raises(PasswordError):
-        Document.open(pdf)
-    with Document.open(pdf, "clave") as doc:
-        assert annots(doc[1]) == ["Square"]
 
 
 def test_legends_menu_and_store(tmp_path, monkeypatch):
@@ -698,13 +739,14 @@ class ScriptedOCR:
 def _text(svc: ViewerService, doc_id: int, index: int) -> str:
     """Texto de la página en orden de lectura (nativo y de OCR), como lo leen la IA y la exportación."""
     with svc.document(doc_id) as entry:
-        return svc.text_of(entry, entry.doc[index]).text
+        return svc.text_of(entry, index).text
 
 
 def _served_text(svc: ViewerService, doc_id: int) -> list[str]:
-    """Texto de cada página del documento como lo tiene EmbedPDF (el que selecciona y busca): el
-    de ``document_url`` con las palabras del OCR que escribe en él el visor (canvas.ts)."""
-    served, data, _uids = _served_bytes(svc, doc_id)
+    """Texto de cada página del documento como lo tiene EmbedPDF al abrirlo (el que selecciona y
+    busca): el de ``document_url`` con las palabras del OCR que escribe en él el visor (canvas.ts)."""
+    served = svc.document_url(doc_id)
+    data = base64.b64decode(served["url"].split(",", 1)[1])
     if served["ocr"]:
         pages = [{**page, "replace": False} for page in served["ocr"]]
         data = run_engine("ocr-write", data, {"pages": pages, "password": served["password"]})
@@ -712,25 +754,27 @@ def _served_text(svc: ViewerService, doc_id: int) -> list[str]:
         return [page.text() for page in doc]
 
 
-def _region(svc: ViewerService, doc_id: int, index: int, rect: list[float] | None = None, scale: float = 1.0) -> tuple[str, dict]:
+def _region(viewer: FakeViewer, index: int, rect: list[float] | None = None, scale: float = 1.0) -> tuple[str, dict]:
     """Hace de visor (ocr/recognize.ts): dibuja ``rect`` de la página (sin él, la página entera) y
     lo sube; devuelve la URL y la región que se pasa al servicio ``ocr``."""
-    with svc.document(doc_id) as entry:
-        page = entry.doc[index]
+    with viewer.document() as doc:
+        page = doc[index]
         rect = rect or [0, 0, page.rect.width, page.rect.height]
         image = page.render(scale, clip=rect)
     height, width = image.shape[:2]
-    return _put(svc, image.tobytes()), {"rect": rect, "scale": scale, "width": width, "height": height}
+    return _put(viewer.svc, image.tobytes()), {"rect": rect, "scale": scale, "width": width, "height": height}
 
 
-def _ocr_page(ocr: OcrService, svc: ViewerService, doc_id: int, index: int) -> dict:
-    url, region = _region(svc, doc_id, index)
-    return ocr.page(doc_id, index, url, [region], {"lines": 0, "images": False})
+def _ocr_page(ocr: OcrService, viewer: FakeViewer, index: int) -> dict:
+    viewer.sync([index])
+    url, region = _region(viewer, index)
+    return ocr.page(viewer.doc_id, index, url, [region], {"lines": 0, "images": False})
 
 
-def _ocr_area(ocr: OcrService, svc: ViewerService, doc_id: int, index: int, rect: list[float]) -> dict:
-    url, region = _region(svc, doc_id, index, rect, scale=2)
-    return ocr.area(doc_id, index, url, region)
+def _ocr_area(ocr: OcrService, viewer: FakeViewer, index: int, rect: list[float]) -> dict:
+    viewer.sync([index])
+    url, region = _region(viewer, index, rect, scale=2)
+    return ocr.area(viewer.doc_id, index, url, region)
 
 
 def _blank_pdf(path: Path, pages: int, native: dict[int, str] | None = None) -> Path:
@@ -741,58 +785,61 @@ def _blank_pdf(path: Path, pages: int, native: dict[int, str] | None = None) -> 
 def test_ocr_words_join_the_text_layer_search_and_export(tmp_path):
     pdf = _blank_pdf(tmp_path / "escaneo.pdf", 2)
     host = FakeHost(save_to=str(tmp_path / "texto.txt"))
-    viewer = ViewerService(host)
+    svc = ViewerService(host)
     # Palabras seguidas en una línea (a 0.07 de ancho de página = 42 pt entre centros).
     words = [(0.1 + 0.07 * i, 0.1, 0.16 + 0.07 * i, 0.13, w) for i, w in enumerate(["Hola", "mundo", "desde", "OCR"])]
-    ocr = OcrService(host, viewer, ScriptedOCR(words))
+    ocr = OcrService(host, svc, ScriptedOCR(words))
     try:
-        doc_id = viewer.open(str(pdf))["id"]
-        before = ocr.page_text(doc_id, 0)
+        doc_id = svc.open(str(pdf))["id"]
+        viewer = FakeViewer(svc, doc_id)
+        viewer.sync([0])
+        before = ocr.page_text(doc_id, 0, images=True)
         assert before == {"page": 0, "text": "", "segments": 0, "boxes": [], "kind": "Escaneado", "ocr": False}
 
-        result = _ocr_page(ocr, viewer, doc_id, 0)
+        result = _ocr_page(ocr, viewer, 0)
         assert result["text"] == "Hola mundo desde OCR" and result["mode"] == "OCR" and result["kind"] == "Escaneado"
         assert result["boxes"][:2] == [[60, 80, 96, 104], [102, 80, 138, 104]]  # de píxeles a puntos
         assert [w[4] for w in result["words"]] == ["Hola", "mundo", "desde", "OCR"]  # las escribe el visor
         assert ocr.page_text(doc_id, 0)["ocr"] and ocr.page_text(doc_id, 0)["text"] == "Hola mundo desde OCR"
 
-        assert "Hola mundo desde OCR" in _text(viewer, doc_id, 0)
-        assert "mundo" in _served_text(viewer, doc_id)[0]  # EmbedPDF lo selecciona y lo busca
-        viewer.export_text(doc_id)
+        assert "Hola mundo desde OCR" in _text(svc, doc_id, 0)
+        assert "mundo" in _served_text(svc, doc_id)[0]  # al volver a abrirlo, EmbedPDF lo selecciona y lo busca
+        viewer.sync()
+        svc.export_text(doc_id)
         assert "=== PÁGINA 1 ===\nHola mundo desde OCR" in (tmp_path / "texto.txt").read_text(encoding="utf-8")
 
         # Un recorte suma sus palabras a las de la página.
         ocr.processor.words = [(0, 0, 1, 1, "recorte")]
-        area = _ocr_area(ocr, viewer, doc_id, 1, [100, 100, 200, 150])
+        area = _ocr_area(ocr, viewer, 1, [100, 100, 200, 150])
         assert area["text"] == "recorte" and area["boxes"] == [[100, 100, 200, 150]]
         assert [list(w) for w in area["words"]] == [[100, 100, 200, 150, "recorte"]]  # solo las nuevas
-        assert len(_ocr_area(ocr, viewer, doc_id, 1, [300, 300, 400, 350])["boxes"]) == 2
+        assert len(_ocr_area(ocr, viewer, 1, [300, 300, 400, 350])["boxes"]) == 2
 
         # Al girar la página en el visor, sus palabras ya no coinciden con lo que se ve: no cuentan.
-        _reshape(viewer, doc_id, [["rotate", [0], 1]], [1, 2])
+        viewer.reshape([["rotate", [0], 1]], [1, 2])
         assert not ocr.page_text(doc_id, 0)["ocr"] and ocr.page_text(doc_id, 1)["ocr"]
 
         assert ocr.save_text(doc_id, "texto reconocido") == str(tmp_path / "texto.txt")
         assert host.saved_suggestions[-1] == str(tmp_path / "escaneo_ocr.txt")
         assert (tmp_path / "texto.txt").read_text(encoding="utf-8") == "texto reconocido"
-        url, region = _region(viewer, doc_id, 0)
+        url, region = _region(viewer, 0)
         with pytest.raises(UserError, match="fuera de rango"):
             ocr.page(doc_id, 5, url, [region], {})
-        url, region = _region(viewer, doc_id, 0)
+        url, region = _region(viewer, 0)
         with pytest.raises(UserError) as error:  # faltan píxeles
             ocr.page(doc_id, 0, url, [{**region, "height": region["height"] + 1}], {})
         assert error.value.code == "bad_images"
     finally:
         ocr.close()
-        viewer.close()
+        svc.close()
 
 
 def test_ocr_batch_pages_and_orientation(tmp_path):
     pdf = _blank_pdf(tmp_path / "lote.pdf", 5)
-    viewer = ViewerService(FakeHost())
-    ocr = OcrService(FakeHost(), viewer, ScriptedOCR([], angle=90))
+    svc = ViewerService(FakeHost())
+    ocr = OcrService(FakeHost(), svc, ScriptedOCR([], angle=90))
     try:
-        doc_id = viewer.open(str(pdf))["id"]
+        doc_id = svc.open(str(pdf))["id"]
         assert ocr.batch_pages(doc_id, "all", "") == [0, 1, 2, 3, 4]
         assert ocr.batch_pages(doc_id, "even", "") == [1, 3]
         assert ocr.batch_pages(doc_id, "odd", "") == [0, 2, 4]
@@ -804,14 +851,14 @@ def test_ocr_batch_pages_and_orientation(tmp_path):
 
         # Un escaneo, por sus imágenes (la del clasificador y la sonda): pide girar 90°. Con
         # texto, lo decide el visor por el sentido del texto (test_engine_reads_page_facts_*).
-        with viewer.document(doc_id) as entry:
-            small, probe = entry.doc[1].render(0.8), entry.doc[1].render(1.5)
+        with FakeViewer(svc, doc_id).document() as doc:
+            small, probe = doc[1].render(0.8), doc[1].render(1.5)
         shapes = [{"width": i.shape[1], "height": i.shape[0]} for i in (small, probe)]
-        assert ocr.orientation(_put(viewer, small.tobytes() + probe.tobytes()), shapes) == {"angle": 90}  # lo gira el visor
-        assert viewer._info(doc_id)["modified"] is False
+        assert ocr.orientation(_put(svc, small.tobytes() + probe.tobytes()), shapes) == {"angle": 90}  # lo gira el visor
+        assert svc._info(doc_id)["modified"] is False
     finally:
         ocr.close()
-        viewer.close()
+        svc.close()
 
 
 # ── Servicio Censura (visor) ─────────────────────────────────────────────────
@@ -839,22 +886,19 @@ def _redact_pdf(path: Path) -> Path:
     return path
 
 
-def _mark(svc: ViewerService, doc_id: int, marks: list[tuple[int, list[float]]], color: str = "#000000") -> None:
-    """Hace de visor: pone marcas de censura (página, rectángulo sin girar) en su copia y la sube."""
-    served = svc.document_url(doc_id)
-    data = base64.b64decode(served["url"].split(",", 1)[1])
-    items = [{"page": page, "rect": rect, "color": color} for page, rect in marks]
-    _upload(svc, doc_id, run_engine("mark", data, {"marks": items, "password": served["password"]}))
-
-
 def test_redact_finds_terms_patterns_and_ocr(tmp_path, isolated_profiles):
     pdf = _redact_pdf(tmp_path / "contrato.pdf")
-    viewer = ViewerService(FakeHost())
-    svc = RedactService(viewer)
+    viewer_svc = ViewerService(FakeHost())
+    svc = RedactService(viewer_svc)
     try:
-        doc_id = viewer.open(str(pdf))["id"]
+        doc_id = viewer_svc.open(str(pdf))["id"]
         state = svc.state(doc_id)
         assert state == {"case_sensitive": False, "whole_word": False, "search_ocr": True, "color": "#000000", "profile": None}
+        viewer = FakeViewer(viewer_svc, doc_id)
+        with pytest.raises(UserError) as error:
+            svc.find(doc_id, ["juan"])  # sin el texto de las páginas
+        assert error.value.code == "text_missing"
+        viewer.sync()
 
         (found,) = svc.find(doc_id, ["  juan perez ", " "])  # sin tildes ni mayúsculas; los vacíos no cuentan
         assert found["term"] == "juan perez" and found["kind"] == "texto"
@@ -873,9 +917,9 @@ def test_redact_finds_terms_patterns_and_ocr(tmp_path, isolated_profiles):
 
         # Las palabras de OCR también se buscan (y se puede desactivar); en la página girada
         # vienen de la página vista y se devuelven sin girar.
-        with viewer.document(doc_id) as entry:
-            viewer.set_ocr_words(entry, entry.doc[2], [(100, 100, 160, 120, "JUAN"), (165, 100, 230, 120, "PEREZ")])
-            viewer.set_ocr_words(entry, entry.doc[3], [(500, 100, 560, 120, "Pérez")], merge=True)
+        with viewer_svc.document(doc_id) as entry:
+            viewer_svc.set_ocr_words(entry, viewer.keys[2], [(100, 100, 160, 120, "JUAN"), (165, 100, 230, 120, "PEREZ")])
+            viewer_svc.set_ocr_words(entry, viewer.keys[3], [(500, 100, 560, 120, "Pérez")], merge=True)
         matches = svc.find(doc_id, ["pérez"])[0]["matches"]
         assert [m["page"] for m in matches] == [0, 0, 2, 3, 3]
         x0, y0, x1, y1 = matches[-1]["rect"]
@@ -887,52 +931,55 @@ def test_redact_finds_terms_patterns_and_ocr(tmp_path, isolated_profiles):
             svc.set_color(doc_id, "negro")
         assert svc.set_color(doc_id, "#b71c1c")["color"] == "#B71C1C"
         with pytest.raises(UserError, match="marcas"):
-            svc.apply(doc_id)
+            svc.apply(doc_id, [])
     finally:
-        viewer.close()
+        viewer_svc.close()
 
 
 def test_redact_apply_removes_what_the_marks_cover_and_forces_save_as(tmp_path, isolated_profiles):
     pdf = _redact_pdf(tmp_path / "contrato.pdf")
     out = tmp_path / "copia.pdf"
     host = FakeHost(save_to=str(out))
-    viewer = ViewerService(host)
-    svc = RedactService(viewer)
+    viewer_svc = ViewerService(host)
+    svc = RedactService(viewer_svc)
     try:
-        info = viewer.open(str(pdf))
+        info = viewer_svc.open(str(pdf))
         doc_id = info["id"]
-        with viewer.document(doc_id) as entry:
-            viewer.set_ocr_words(entry, entry.doc[2], [(100, 100, 160, 120, "Pérez"), (300, 300, 360, 320, "queda")])
+        viewer = FakeViewer(viewer_svc, doc_id)
+        viewer.sync()
+        with viewer_svc.document(doc_id) as entry:
+            viewer_svc.set_ocr_words(entry, viewer.keys[2], [(100, 100, 160, 120, "Pérez"), (300, 300, 360, 320, "queda")])
         matches = svc.find(doc_id, ["Pérez"])[0]["matches"]  # páginas 0 y 3 (texto) y 2 (OCR); la 1 no
-        _mark(viewer, doc_id, [(m["page"], m["rect"]) for m in matches], color="#B21A1A")
-        result = svc.apply(doc_id)
-        after = result["info"]
-        assert result["count"] == len(matches) == 4 and after["redacted"] and after["modified"]
-        # Las páginas censuradas cambian de clave (no se reutiliza su imagen); las demás no.
-        changed = [a != b for a, b in zip(info["keys"], after["keys"], strict=True)]
-        assert changed == [True, False, True, True]
-        # Ni el texto nativo ni el OCR: tampoco en el documento que busca EmbedPDF.
-        assert not any("Pérez" in _text(viewer, doc_id, i) for i in range(4))
-        assert "Perez" not in _text(viewer, doc_id, 3)
-        assert not any("Pérez" in text for text in _served_text(viewer, doc_id))
-        assert "Juan" in _text(viewer, doc_id, 0) and "queda" in _text(viewer, doc_id, 2)  # lo demás sigue ahí
-        # Las marcas aplicadas desaparecen; el recuadro queda con su color.
-        with viewer.document(doc_id) as entry:
-            assert not any(annots(page) for page in entry.doc)
-            image = entry.doc[0].render(clip=matches[0]["rect"])
+        assert len(matches) == 4
+        state = viewer.redact(svc, [(m["page"], m["rect"]) for m in matches], color="#B21A1A")
+        assert state["redacted"] and state["modified"]
+        # Las palabras de OCR que tapaban las marcas se borran; las demás pasan a la clave nueva.
+        with viewer_svc.document(doc_id) as entry:
+            assert viewer.keys[2].endswith(":1") and [w[4] for w in entry.ocr[viewer.keys[2]]] == ["queda"]
+        # Las páginas censuradas cambian de clave: Python pide su texto nuevo.
+        assert viewer.sync()["missing"] == [0, 2, 3]
+        assert viewer_svc.set_pages(doc_id, viewer.keys)["missing"] == []
+        assert not any("Pérez" in _text(viewer_svc, doc_id, i) for i in range(4))
+        assert "Perez" not in _text(viewer_svc, doc_id, 3)
+        assert "Juan" in _text(viewer_svc, doc_id, 0) and "queda" in _text(viewer_svc, doc_id, 2)  # lo demás sigue ahí
+        with viewer.document() as doc:  # las marcas aplicadas desaparecen; el recuadro queda con su color
+            assert not any(annots(page) for page in doc)
+            image = doc[0].render(clip=matches[0]["rect"])
             r, g, b = image[image.shape[0] // 2, image.shape[1] // 2]
             assert r > 150 and g < 60 and b < 60
 
         with pytest.raises(UserError) as err:
-            _save(viewer, doc_id)
+            viewer.save()
         assert err.value.code == "redacted"
-        saved = _save(viewer, doc_id, "save_as")
+        saved = viewer.save("save_as")
         assert host.saved_suggestions[-1] == str(tmp_path / "contrato_censurado.pdf")
         assert saved["path"] == str(out) and not saved["redacted"] and not saved["modified"]
         assert "Pérez" not in page_texts(out)[0] and "Contrato con Juan" in page_texts(out)[0]
         assert "Pérez" in page_texts(pdf)[0]  # el original no se toca
+        # Al volver a abrirlo, EmbedPDF tampoco lo tiene, ni en el texto del OCR.
+        assert not any("Pérez" in text for text in _served_text(viewer_svc, doc_id))
     finally:
-        viewer.close()
+        viewer_svc.close()
 
 
 def test_redact_profiles(tmp_path, isolated_profiles):
@@ -1013,8 +1060,9 @@ def test_ai_basic_mode_without_agent(tmp_path, isolated_ai_config, monkeypatch):
     monkeypatch.setattr(AiService, "_agent_class", staticmethod(lambda: None))  # sin dependencias del agente
     try:
         doc_id = viewer.open(str(pdf))["id"]
+        FakeViewer(viewer, doc_id).sync()  # el visor le da el texto antes de preguntar
         with viewer.document(doc_id) as entry:  # la página escaneada aporta su texto de OCR
-            viewer.set_ocr_words(entry, entry.doc[2], [(100, 100, 160, 120, "Factura"), (165, 100, 230, 120, "pagada")])
+            viewer.set_ocr_words(entry, entry.keys[2], [(100, 100, 160, 120, "Factura"), (165, 100, 230, 120, "pagada")])
         config = svc.config()
         assert config["provider"] == "google" and not config["has_key"] and not config["available"]
 
@@ -1048,6 +1096,7 @@ def test_ai_falls_back_to_basic_mode_without_the_provider_client(tmp_path, isola
     try:
         svc.set_config("google", "clave-de-prueba")
         doc_id = viewer.open(str(pdf))["id"]
+        FakeViewer(viewer, doc_id).sync()
         assert not svc.config()["available"]
         assert svc.chat(doc_id, "Juan")["messages"][1]["mode"] == "básico"
 
@@ -1066,6 +1115,7 @@ def test_ai_uses_the_agent_when_configured(tmp_path, isolated_ai_config):
     svc = AiService(viewer, agent_factory=FakeAgent)
     try:
         doc_id = viewer.open(str(pdf))["id"]
+        FakeViewer(viewer, doc_id).sync()
         with pytest.raises(UserError):
             svc.set_config("anthropic")
         config = svc.set_config("openai", "  sk-123  ", "gpt-4o-mini")
@@ -1479,7 +1529,7 @@ def test_ui_needs_build_only_when_sources_are_newer(tmp_path):
 
 
 # ── Datos para el visor con PDFium ───────────────────────────────────────────
-def test_document_url_is_the_open_version_with_its_password(tmp_path):
+def test_document_url_is_the_file_with_its_password(tmp_path):
     with Document.new() as doc:
         for _ in range(3):
             add_page(doc)
@@ -1489,18 +1539,20 @@ def test_document_url_is_the_open_version_with_its_password(tmp_path):
     pdf.write_bytes(encrypted(data, "clave"))
     svc = ViewerService(FakeHost())
     info = svc.open(str(pdf), "clave")
-    info = _reshape(svc, info["id"], [["rotate", [1], 1]], [1, 2, 3])
+    viewer = FakeViewer(svc, info["id"])
+    viewer.reshape([["rotate", [1], 1]], [1, 2, 3])
 
     result = svc.document_url(info["id"])
-    assert result["keys"] == info["keys"]  # la versión que tiene el lienzo
+    assert result["keys"] == info["keys"]  # el archivo en disco, con las páginas que tiene
     assert result["password"] == "clave"  # sigue cifrado: la copia que vuelve conserva el cifrado
     data = base64.b64decode(result["url"].split(",", 1)[1])
+    assert data == pdf.read_bytes()
     with pytest.raises(PasswordError):
         Document.open(data)
     with Document.open(data, "clave") as doc:
-        assert [p.rotation for p in doc] == [0, 90, 0]
         assert annots(doc[0]) == ["Square"]  # las anotaciones las edita EmbedPDF
-    _save(svc, info["id"])
+    viewer.save()
+    assert svc.document_url(info["id"])["keys"] == ["1:0:0", "2:90:0", "3:0:0"]  # ya guardado
     svc.close()
     with Document.open(pdf, "clave") as saved:
         assert saved.encrypted and [p.rotation for p in saved] == [0, 90, 0]
@@ -1511,7 +1563,7 @@ def test_document_url_gives_the_ocr_words_for_the_viewer_to_write(tmp_path):
     svc = ViewerService(FakeHost())
     info = svc.open(str(pdf))
     with svc.document(info["id"]) as entry:
-        svc.set_ocr_words(entry, entry.doc[1], [(100, 300, 220, 320, "Hola ñandú")])
+        svc.set_ocr_words(entry, info["keys"][1], [(100, 300, 220, 320, "Hola ñandú")])
     served = svc.document_url(info["id"])
     assert served["ocr"] == [{"index": 1, "words": [(100, 300, 220, 320, "Hola ñandú")]}]
     with _served(svc, info["id"]) as doc:

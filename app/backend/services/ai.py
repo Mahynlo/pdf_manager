@@ -215,13 +215,14 @@ class _Snapshot:
 
     @classmethod
     def of(cls, viewer: ViewerService, entry: Any) -> _Snapshot:
+        """Del texto de las páginas que le dio el visor (tiene que habérselo dado todo)."""
         pages, ocr_text = [], {}
-        for index, page in enumerate(entry.doc):
-            text = page.text()
-            if not text.strip() and entry.ocr.get(viewer.page_key(entry, page)):
-                text = ocr_text[index] = viewer.text_of(entry, page).text
+        for index, key in enumerate(entry.keys):
+            text = viewer.packed_text(entry, index).text()
+            if not text.strip() and entry.ocr.get(key):
+                text = ocr_text[index] = viewer.text_of(entry, index).text
             pages.append(text)
-        return cls(entry.path, Path(entry.path).name, pages, dict(entry.doc.metadata or {}), ocr_text)
+        return cls(entry.path, Path(entry.path).name, pages, dict(entry.metadata), ocr_text)
 
 
 # ── Modo básico ──────────────────────────────────────────────────────────────

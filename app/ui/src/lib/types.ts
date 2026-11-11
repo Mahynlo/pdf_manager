@@ -22,15 +22,22 @@ export interface TocEntry {
   page: number; // desde 0
 }
 
-/** Documento abierto en el visor: `viewer.open` y las operaciones que lo cambian (`ViewerService._info`). */
-export interface DocumentInfo {
+/** El estado de un documento abierto que da Python (`ViewerService._info`: guardar, censurar…). */
+export interface DocumentState {
   id: number;
   path: string;
   name: string;
-  pages: [number, number][]; // [ancho, alto] de cada página, en puntos
-  keys: string[]; // identifica la imagen de cada página: cambia al girarla o editarla
-  toc: TocEntry[];
   modified: boolean; // cambios sin guardar (en el visor lo calcula operations.ts)
   annotated: boolean; // anotaciones cambiadas sin guardar
   redacted: boolean; // con censura aplicada: solo se guarda como copia
+}
+
+/**
+ * Documento abierto en el visor. Al abrirlo lo da Python (`viewer.open`: el archivo); después,
+ * las páginas las lleva el visor y Python solo da el estado (`DocumentState`).
+ */
+export interface DocumentInfo extends DocumentState {
+  pages: [number, number][]; // [ancho, alto] de cada página, en puntos
+  keys: string[]; // identifica la imagen de cada página: cambia al girarla o editarla
+  toc: TocEntry[];
 }

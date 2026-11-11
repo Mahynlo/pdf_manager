@@ -1,14 +1,16 @@
 // El motor PDFium de EmbedPDF con lo que le falta para ser el dueño del documento del visor:
 // cambiar sus páginas sin volver a abrirlo, sacar copias del documento (para guardarlo,
-// imprimirlo o extraer una página) sin el texto del OCR, y leer, dibujar y escribir lo que
-// necesita el OCR (page-ocr.ts). Corre en el worker (worker.ts); lo prueba también Python con el
+// imprimirlo o extraer una página) sin el texto del OCR, leer, dibujar y escribir lo que
+// necesita el OCR (page-ocr.ts) y dar a Python el texto de las páginas (page-text.ts). Corre en el worker (worker.ts); lo prueba también Python con el
 // motor real (tests/engine_task.mjs), por eso no depende de nada de la app.
 //
 // Usa partes privadas de PdfiumNative 2.15.1 (`Internals`, en pdfium.ts): revisarlas al
 // actualizar EmbedPDF.
 import { PdfiumNative } from '@embedpdf/engines/pdfium';
 import type { PdfDocumentObject, PdfPageObject } from '@embedpdf/models';
-import { PageOcr, type OcrText, type PageFacts, type PageImage, type Box } from './page-ocr.ts';
+import { PageOcr, type OcrText, type PageFacts, type PageImage } from './page-ocr.ts';
+import { PageReader, type Box } from './page-reader.ts';
+import { pageTexts, type PageTexts } from './page-text.ts';
 import type { DocumentContext, Internals } from './pdfium.ts';
 
 /** Cómo sacar una copia del documento (`saveCopy`). */
@@ -40,16 +42,22 @@ interface Stash {
 export class AppNative extends PdfiumNative {
   private stashes = new Map<string, Stash>();
   private stashCount = 0;
+  private reader: PageReader | null = null;
   private pageOcr: PageOcr | null = null;
 
   private get internals(): Internals {
     return this as unknown as Internals;
   }
 
-  /** Se crea al usarlo: el módulo de PDFium lo pone el constructor de PdfiumNative. */
-  private get ocr(): PageOcr {
+  /** Las páginas abiertas aparte (page-reader.ts). Se crea al usarlo: el módulo de PDFium lo pone el constructor de PdfiumNative. */
+  private get pages(): PageReader {
     const { pdfiumModule, memoryManager } = this.internals;
-    this.pageOcr ??= new PageOcr(pdfiumModule, memoryManager, (value, fn) => this.internals.withWString(value, fn));
+    this.reader ??= new PageReader(pdfiumModule, memoryManager);
+    return this.reader;
+  }
+
+  private get ocr(): PageOcr {
+    this.pageOcr ??= new PageOcr(this.pages, (value, fn) => this.internals.withWString(value, fn));
     return this.pageOcr;
   }
 
@@ -282,6 +290,12 @@ export class AppNative extends PdfiumNative {
     return changed;
   }
 
+  // ── Texto para Python ──────────────────────────────────────────────────
+  /** El texto de las páginas `indices` (sin el del OCR), como lo lee Python de un PDF. */
+  pageTexts(doc: PdfDocumentObject, indices: number[]): PageTexts {
+    return pageTexts(this.pages, this.context(doc).docPtr, indices);
+  }
+
   // ── Páginas guardadas aparte ───────────────────────────────────────────
   /** Guarda una copia de la página `index` (con sus anotaciones); devuelve su id. */
   stashPage(doc: PdfDocumentObject, index: number): string {
@@ -326,4 +340,4 @@ export class AppNative extends PdfiumNative {
 export type StructureMethod = 'pageList' | 'rotatePages' | 'movePage' | 'removePage' | 'insertBlankPage' | 'duplicatePage'
   | 'stashPage' | 'restorePages' | 'dropStash';
 export type CopyMethod = 'saveCopy' | 'extractCopy' | 'documentFacts';
-export type OcrMethod = 'pageFacts' | 'pageImage' | 'writeOcrText';
+export type ReadingMethod = 'pageFacts' | 'pageImage' | 'writeOcrText' | 'pageTexts';

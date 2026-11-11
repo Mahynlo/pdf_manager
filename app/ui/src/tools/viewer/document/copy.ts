@@ -1,12 +1,9 @@
-// La copia del documento del visor que sale de él: a Python (lo que hace con el documento al día:
-// guardarlo, censurar, OCR, IA…), a un archivo (extraer una página) y a la impresora.
+// La copia del documento del visor que sale de él: a un archivo (guardar, extraer una página), a
+// la impresora y a Python cuando necesita el PDF (exportar sus imágenes).
 //
 // El dueño del documento es EmbedPDF: la copia la saca su motor (lib/pdf-engine, `saveCopy`) sin
 // el texto invisible del OCR, que solo sirve para seleccionar y buscar en el visor. Python la
-// escribe tal cual al guardar.
-//
-// Lleva la cuenta de los cambios (anotaciones y páginas) que Python aún no tiene: `sync` solo
-// sube la copia cuando hace falta.
+// escribe tal cual al guardar. El texto que lee Python no va en una copia: ver text.ts.
 import { call, upload } from '$lib/api.ts';
 import { t } from '$texts';
 import type { PageCanvas } from '../canvas/canvas.ts';
@@ -16,12 +13,10 @@ import { pageUids } from './pages.ts';
 /** Una copia ya subida, para pasársela a un servicio de Python. */
 export interface Uploaded {
   url: string; // de dónde la toma Python (viewer.upload_url)
-  uids: number[]; // el `uid` de cada página (pages.ts)
-  /** Python ya tiene esta versión como su documento (sync, guardar). */
-  adopted(): void;
+  keys: string[]; // la clave de cada página (pages.ts)
 }
 
-/** Sube `data` (un PDF o imágenes de página) para un servicio de Python; devuelve su URL. */
+/** Sube `data` (un PDF, el texto de unas páginas o imágenes de página) para Python; devuelve su URL. */
 export async function send(data: ArrayBuffer): Promise<string> {
   const url = await call<string>('viewer.upload_url');
   const response = await upload(url, data);
@@ -30,22 +25,8 @@ export async function send(data: ArrayBuffer): Promise<string> {
 }
 
 export class DocumentCopy {
-  private version = 0; // cambios hechos en el documento a la vista
-  private synced = 0; // `version` que ya tiene Python
-
   /** `commit`: escribe en el documento de EmbedPDF las anotaciones pendientes. */
-  constructor(private canvas: PageCanvas, private docId: number, private commit: () => Promise<void>) {}
-
-  /** Cambió el documento a la vista (anotaciones o páginas): Python aún no lo tiene. */
-  changed(): void {
-    this.version++;
-  }
-
-  /** El lienzo puso a la vista otra versión del documento, que viene de Python: ya la tiene. */
-  shown(): void {
-    this.version = 0;
-    this.synced = 0;
-  }
+  constructor(private canvas: PageCanvas, private commit: () => Promise<void>) {}
 
   /** El PDF tal como está en el visor. `decrypt`: sin cifrado (para imprimir). */
   async pdf({ decrypt = false } = {}): Promise<ArrayBuffer> {
@@ -64,35 +45,11 @@ export class DocumentCopy {
   /** Sube a Python el PDF tal como está en el visor (ver `Uploaded`). */
   async upload(): Promise<Uploaded> {
     this.canvas.finishEditing(); // el texto que se está escribiendo también cuenta
-    await this.canvas.loading; // la copia tiene que ser de la versión que tiene Python
-    const documentId = this.canvas.shown;
-    const version = this.version;
-    const url = await send(await this.pdf());
-    return {
-      url,
-      uids: pageUids(this.canvas.keys),
-      adopted: () => {
-        if (documentId === this.canvas.shown) this.synced = Math.max(this.synced, version);
-      },
-    };
-  }
-
-  /**
-   * Pasa a Python el documento si cambió desde la última vez: la copia pasa a ser su documento.
-   * Llamarlo antes de todo lo que lee el documento en Python. Resuelve `{ modified }`, o null si
-   * no hacía falta.
-   */
-  async sync(): Promise<{ modified: boolean } | null> {
-    this.canvas.finishEditing();
     await this.canvas.loading;
-    if (!this.canvas.shown || this.version === this.synced) return null;
-    const copy = await this.upload();
-    const result = await call<{ modified: boolean }>('viewer.sync_annotations', this.docId, copy.url, copy.uids);
-    copy.adopted();
-    return result;
+    const keys = [...this.canvas.keys];
+    return { url: await send(await this.pdf()), keys };
   }
 
-  // ── Auxiliares ─────────────────────────────────────────────────────────
   /** Las páginas que llevan el texto del OCR, por su posición. */
   private ocrPages(): number[] {
     return pageUids(this.canvas.keys).flatMap((uid, index) => (this.canvas.ocrPages.has(uid) ? [index] : []));

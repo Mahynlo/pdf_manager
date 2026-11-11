@@ -1,6 +1,7 @@
 """Texto de una página en orden de lectura.
 
-``page_words`` extrae los caracteres de la página (y las palabras de OCR que no
+Trabaja con el texto de una página (:class:`pdf_core.pdf.PageText`), que lee Python de un PDF o
+da el visor con su motor. ``page_words`` toma sus caracteres (y las palabras de OCR que no
 tapen texto nativo) ordenados por columnas y líneas. ``TextLayer`` añade el separador que va
 delante de cada carácter (``""``, espacio o salto de línea) y el texto completo, que usan el
 asistente IA y el panel de OCR (la selección y la búsqueda del visor son de EmbedPDF).
@@ -15,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from pdf_core.pdf import Page, Rect
+from pdf_core.pdf import PageText, Rect
 from pdf_core.reading_order import (
     assign_line_indices,
     sort_words_clustered,
@@ -25,7 +26,7 @@ from pdf_core.reading_order import (
 Word = tuple  # (Rect, texto, inicio_de_palabra, línea)
 
 
-def reads_unrotated(page: Page, has_ocr: bool) -> bool:
+def reads_unrotated(page: PageText, has_ocr: bool) -> bool:
     """True si el orden de lectura se calcula sobre la página sin girar.
 
     El texto nativo de una página girada se lee en su orientación original; las
@@ -69,7 +70,7 @@ def _coverage(native: list[Rect]):
     return covered_by_native
 
 
-def page_words(page: Page, ocr_words: list[tuple] | None = None) -> list[Word]:
+def page_words(page: PageText, ocr_words: list[tuple] | None = None) -> list[Word]:
     """Caracteres de la página (más palabras de OCR) en orden de lectura.
 
     Cada elemento es ``(rect, texto, inicio_de_palabra, línea)``; ``rect`` está en
@@ -82,7 +83,7 @@ def page_words(page: Page, ocr_words: list[tuple] | None = None) -> list[Word]:
     gid = 0
     last_line = None
     pending_space = False
-    for char in page.chars():
+    for char in page.chars:
         if char.line != last_line:
             gid += 1
             last_line = char.line
@@ -125,7 +126,7 @@ class TextLayer:
     text: str = ""  # "".join(sep + carácter)
 
 
-def build_text_layer(page: Page, ocr_words: list[tuple] | None = None) -> TextLayer:
+def build_text_layer(page: PageText, ocr_words: list[tuple] | None = None) -> TextLayer:
     """Capa de texto de ``page``, en orden de lectura."""
     unrotated = reads_unrotated(page, bool(ocr_words))
     layer = TextLayer()

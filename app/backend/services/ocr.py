@@ -27,7 +27,7 @@ from app.backend.rpc import UserError, exposed
 from app.backend.services.viewer import ViewerService
 from pdf_core.ocr import kind_of, mode_of
 from pdf_core.page_ranges import select_pages
-from pdf_core.pdf import Page, Rect
+from pdf_core.pdf import Rect
 from pdf_core.text_layer import words_text
 
 log = logging.getLogger(__name__)
@@ -75,21 +75,25 @@ class OcrService:
 
     # ── Página actual ────────────────────────────────────────────────────
     @exposed
-    def page_text(self, doc_id: int, index: int) -> dict[str, Any]:
-        """Lo que muestra el panel al cambiar de página: texto, tipo y cajas (OCR si lo hay, si no el nativo)."""
+    def page_text(self, doc_id: int, index: int, images: bool = False) -> dict[str, Any]:
+        """Lo que muestra el panel al cambiar de página: texto, tipo y cajas (OCR si lo hay, si no el nativo).
+
+        El visor tiene que haberle dado el texto de la página; ``images``: si la página tiene
+        imágenes (lo dice su motor).
+        """
         with self._viewer.document(doc_id) as entry:
-            page = self._viewer.page(entry, index)
-            ocr = entry.ocr.get(self._viewer.page_key(entry, page))
+            page = self._viewer.page_text(entry, index)
+            ocr = entry.ocr.get(self._viewer.page_key(entry, index))
             if ocr:
                 boxes = [[round(v, 2) for v in w[:4]] for w in ocr]
             else:
                 boxes = [_rect(page.to_view(rect)) for rect, _text, _line in page.words()]
             return {
                 "page": index,
-                "text": self._viewer.text_of(entry, page).text,
+                "text": self._viewer.text_of(entry, index).text,
                 "segments": len(boxes),
                 "boxes": boxes,
-                "kind": PAGE_KINDS.get(self.processor.page_kind(page), "-"),
+                "kind": PAGE_KINDS[kind_of(bool(page.text().strip()), images)],
                 "ocr": bool(ocr),
             }
 
@@ -104,16 +108,17 @@ class OcrService:
         """
         found = self._read(upload, regions)
         with self._viewer.document(doc_id) as entry:
-            key = self._viewer.page_key(entry, self._viewer.page(entry, index))
+            key = self._viewer.page_key(entry, index)
         words, elapsed_ms = self._recognize(found)
         with self._viewer.document(doc_id) as entry:
-            page = self._current_page(entry, index, key)
-            layer = self._viewer.set_ocr_words(entry, page, words)
+            self._check_same_page(entry, index, key)
+            self._viewer.set_ocr_words(entry, key, words)
+            text = self._viewer.text_of(entry, index).text
         lines = int(facts.get("lines", 0))
         mode = mode_of(lines > 0, bool(words))
         return {
             "page": index,
-            "text": layer.text,
+            "text": text,
             "segments": lines + len(words),
             "boxes": [list(w[:4]) for w in words],
             "words": words,
@@ -128,13 +133,14 @@ class OcrService:
         Sus palabras se suman a las de la página; ``words`` son las nuevas."""
         found = self._read(upload, [region])
         with self._viewer.document(doc_id) as entry:
-            key = self._viewer.page_key(entry, self._viewer.page(entry, index))
+            key = self._viewer.page_key(entry, index)
+            width = self._viewer.packed_text(entry, index).geometry.rect.width
         words, elapsed_ms = self._recognize(found)
         with self._viewer.document(doc_id) as entry:
-            page = self._current_page(entry, index, key)
-            self._viewer.set_ocr_words(entry, page, words, merge=True)
+            self._check_same_page(entry, index, key)
+            self._viewer.set_ocr_words(entry, key, words, merge=True)
             boxes = [[round(v, 2) for v in w[:4]] for w in entry.ocr[key]]
-            text = words_text(words, page.rect.width)
+        text = words_text(words, width)
         return {
             "page": index,
             "text": text,
@@ -163,11 +169,9 @@ class OcrService:
             finally:
                 self._schedule_release()
 
-    def _current_page(self, entry: Any, index: int, key: str) -> Page:
-        page = self._viewer.page(entry, index)
-        if self._viewer.page_key(entry, page) != key:
+    def _check_same_page(self, entry: Any, index: int, key: str) -> None:
+        if self._viewer.page_key(entry, index) != key:
             raise UserError("La página cambió mientras se reconocía su texto.", "stale")
-        return page
 
     # ── Lotes ────────────────────────────────────────────────────────────
     @exposed
@@ -176,7 +180,7 @@ class OcrService:
         if scope not in ("all", "even", "odd", "custom"):
             raise UserError("Selección de páginas no válida.", "bad_scope")
         with self._viewer.document(doc_id) as entry:
-            pages = select_pages(len(entry.doc), scope, custom)
+            pages = select_pages(len(entry.keys), scope, custom)
         if not pages:
             raise UserError("No se seleccionaron páginas válidas.", "no_pages")
         return pages

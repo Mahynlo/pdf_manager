@@ -13,7 +13,7 @@ import type { Box, OcrWord, PageFacts, PageImage } from '$lib/pdf-engine/index.t
 import type { PageCanvas } from '../canvas/canvas.ts';
 import { reading } from '../canvas/embed.ts';
 import { send } from '../document/copy.ts';
-import type { OcrResult } from './types.ts';
+import type { OcrResult, PageText } from './types.ts';
 
 const PAGE_SCALE = 2; // px por punto para reconocer una página (_SCALE_FOR_OCR)
 const PAGE_MAX_PX = 2000; // lado mayor de cada imagen (_MAX_OCR_PX)
@@ -58,6 +58,13 @@ export class PageRecognizer {
     const result = await call<OcrResult>('ocr.area', this.docId, index, url, regions[0]);
     await this.write(index, key, result.words, false);
     return result;
+  }
+
+  /** Lo que muestra el panel de una página: su texto (con el del OCR), su tipo y sus cajas. Python
+   * tiene que tener su texto. */
+  async pageText(index: number): Promise<PageText> {
+    const { images } = await this.facts(index);
+    return call<PageText>('ocr.page_text', this.docId, index, images.length > 0);
   }
 
   /** Los grados que hay que girar la página `index` para dejarla derecha (0: está bien). */

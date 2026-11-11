@@ -1,11 +1,11 @@
 // Las páginas del documento del visor: girar, insertar, duplicar, borrar y mover, y deshacerlo.
 // Las hace el motor de EmbedPDF en el documento abierto (lib/pdf-engine) y el lienzo las muestra
-// sin volver a abrirlo (canvas.showPages). Python recibe la nueva estructura con la copia del
-// documento (copy.ts `sync`) antes de lo que la necesita.
+// sin volver a abrirlo (canvas.showPages). Python recibe la nueva estructura (las claves de página,
+// text.ts `sync`) antes de lo que la necesita.
 //
 // Cada página tiene una clave `uid:giro:revisión`: `uid` la identifica aunque cambie de sitio
 // (los da este módulo a las páginas nuevas; con él Python guarda el texto del OCR de cada
-// página), el giro va en grados y la revisión la sube Python al censurarla.
+// página), el giro va en grados y la revisión sube al censurarla (cambia su imagen).
 import type { PdfBookmarkObject, PdfDocumentObject, PdfPageObject } from '@embedpdf/models';
 import type { PageStructure } from '$lib/pdf-engine/index.ts';
 import type { TocEntry } from '$lib/types.ts';
@@ -159,6 +159,19 @@ export class PageEditor {
     });
   }
 
+  /**
+   * El motor cambió el contenido de `indices` (la censura, que no se deshace): se muestran con la
+   * revisión una más, así su clave cambia y nada reutiliza su imagen ni su texto anteriores.
+   */
+  async contentChanged(indices: number[]): Promise<void> {
+    await this.change((engine, doc) => engine.pageList(doc), revising(indices));
+  }
+
+  /** Las claves que tendrán las páginas tras `contentChanged(indices)`. */
+  revisedKeys(indices: number[]): string[] {
+    return revising(indices)(this.canvas.keys);
+  }
+
   /** Deshace la última operación; devuelve la página a la que ir (null si no había). */
   async undo(): Promise<number | null> {
     const step = this.done.pop();
@@ -215,6 +228,11 @@ export class PageEditor {
 // ── Claves tras cada operación ──────────────────────────────────────────────
 const inserting = (at: number, key: string) => (keys: string[]) => [...keys.slice(0, at), key, ...keys.slice(at)];
 const removing = (at: number) => (keys: string[]) => keys.filter((_, i) => i !== at);
+const revising = (indices: number[]) => (keys: string[]) => keys.map((key, i) => {
+  if (!indices.includes(i)) return key;
+  const parsed = parseKey(key);
+  return formatKey({ ...parsed, revision: parsed.revision + 1 });
+});
 const moving = (from: number, to: number) => (keys: string[]) => {
   const next = keys.filter((_, i) => i !== from);
   next.splice(to, 0, keys[from]);

@@ -6,6 +6,7 @@
 export interface Pdfium {
   pdfium: {
     HEAPU8: Uint8Array;
+    HEAPF32: Float32Array; // la misma memoria: se lee de nuevo cada vez (cambia si la memoria crece)
     getValue(ptr: number, type: string): number;
     setValue(ptr: number, value: number, type: string): void;
     UTF16ToString(ptr: number): string;
@@ -61,6 +62,7 @@ export interface Pdfium {
   FPDFText_ClosePage(text: number): void;
   FPDFText_CountChars(text: number): number;
   FPDFText_GetUnicode(text: number, index: number): number;
+  FPDFText_GetText(text: number, start: number, count: number, buffer: number): number;
   FPDFText_IsGenerated(text: number, index: number): number;
   FPDFText_GetCharAngle(text: number, index: number): number;
   FPDFText_GetLooseCharBox(text: number, index: number, rect: number): boolean;
