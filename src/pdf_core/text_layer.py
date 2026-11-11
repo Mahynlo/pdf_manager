@@ -9,14 +9,18 @@ asistente IA y el panel de OCR (la selección y la búsqueda del visor son de Em
 Las palabras de OCR las escribe el visor en su documento como texto invisible, para que
 EmbedPDF las seleccione como texto nativo (``app/ui/src/lib/pdf-engine/page-ocr.ts``).
 
-Las coordenadas son las de la página tal como se ve (ya girada), en puntos.
+Las coordenadas son las de la página tal como se ve (ya girada), en puntos. Una palabra de OCR
+es ``(x0, y0, x1, y1, texto)`` y, si está girada respecto a la vista (porque se giró su página
+después de reconocerla), su giro detrás: grados en sentido horario.
 """
 
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from pdf_core.pdf import PageText, Rect
+from pdf_core.pdf import PageGeometry, PageText, Rect
 from pdf_core.reading_order import (
     assign_line_indices,
     sort_words_clustered,
@@ -33,6 +37,22 @@ def reads_unrotated(page: PageText, has_ocr: bool) -> bool:
     palabras de OCR ya vienen en la orientación en que se ve la página.
     """
     return bool(page.rotation) and not has_ocr
+
+
+def _ocr_frame(page: PageText, ocr_words: list[tuple]) -> tuple[Callable[[Rect], Rect], float] | None:
+    """Dónde se leen derechas las palabras de OCR de una página girada después de reconocerlas: la
+    función que lleva un rectángulo de vista allí y el ancho de ese marco. ``None`` si se leen
+    derechas en la vista (lo normal). Si hay palabras con giros distintos, manda el de la mayoría."""
+    turn = Counter(_ocr_turn(w) for w in ocr_words).most_common(1)[0][0]
+    if not turn:
+        return None
+    seen = page.geometry
+    upright = PageGeometry(seen.width, seen.height, seen.left, seen.top, (seen.rotation - turn) % 360)
+    return (lambda rect: upright.to_view(seen.to_page(rect))), upright.rect.width
+
+
+def _ocr_turn(word: tuple) -> int:
+    return int(word[5]) % 360 if isinstance(word[0], (int, float)) and len(word) > 5 else 0
 
 
 def _ocr_word(word: tuple) -> tuple[Rect, str]:
@@ -68,6 +88,16 @@ def _coverage(native: list[Rect]):
         return False
 
     return covered_by_native
+
+
+def reading_frame(page: PageText, ocr_words: list[tuple] | None = None) -> Callable[[Rect], Rect] | None:
+    """La función que lleva un rectángulo de vista al marco en que se lee la página (``None``: la
+    vista): sin girar si es texto nativo de una página girada; donde se leen derechas las palabras
+    de OCR, si se giró la página después de reconocerlas."""
+    if reads_unrotated(page, bool(ocr_words)):
+        return page.to_page
+    frame = _ocr_frame(page, ocr_words) if ocr_words else None
+    return frame[0] if frame else None
 
 
 def page_words(page: PageText, ocr_words: list[tuple] | None = None) -> list[Word]:
@@ -111,6 +141,9 @@ def page_words(page: PageText, ocr_words: list[tuple] | None = None) -> list[Wor
         words = sort_words_column_aware(words, sort_w, pos=page.to_page, groups=gids)
         return assign_line_indices(words, pos=page.to_page)
     if ocr_words:
+        frame = _ocr_frame(page, ocr_words)
+        if frame:
+            return sort_words_clustered(words, frame[1], pos=frame[0], groups=gids)
         return sort_words_clustered(words, page_width, groups=gids)
     words = sort_words_column_aware(words, page_width, groups=gids)
     return assign_line_indices(words)
@@ -128,7 +161,7 @@ class TextLayer:
 
 def build_text_layer(page: PageText, ocr_words: list[tuple] | None = None) -> TextLayer:
     """Capa de texto de ``page``, en orden de lectura."""
-    unrotated = reads_unrotated(page, bool(ocr_words))
+    frame = reading_frame(page, ocr_words)
     layer = TextLayer()
     parts: list[str] = []
     last: Rect | None = None
@@ -137,7 +170,7 @@ def build_text_layer(page: PageText, ocr_words: list[tuple] | None = None) -> Te
         text = str(text).strip()
         if not text:
             continue
-        ur = page.to_page(rect) if unrotated else rect  # en el sentido de lectura
+        ur = frame(rect) if frame else rect  # en el sentido de lectura
         if last is None:
             sep = ""
         elif line != last_line:

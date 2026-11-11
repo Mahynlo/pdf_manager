@@ -12,9 +12,11 @@ da el ``id`` de cada página. Python no tiene el PDF abierto. Guarda de cada doc
 - **el texto de cada página**, por clave, que también le da el visor con su motor
   (:meth:`add_texts`, solo el de las páginas que aún no tiene). Con él trabajan la capa de texto
   (``text_of``: asistente IA, panel de OCR, exportar texto) y la búsqueda de la censura;
-- **las palabras reconocidas por OCR** (servicio ``ocr``), por clave. Entran en la capa de texto, y
-  el visor las escribe en su documento como texto invisible, que EmbedPDF selecciona y busca como
-  el texto nativo (al abrirlo, las de :meth:`document_url`). No pasan al archivo;
+- **las palabras reconocidas por OCR**, por clave. Entran en la capa de texto, y el visor las
+  escribe en su documento como texto invisible, que EmbedPDF selecciona y busca como el texto
+  nativo (al abrirlo, las de :meth:`document_url`). No pasan al archivo. Las de una página que
+  acaba de reconocer las guarda el servicio ``ocr``; las de una página nueva (girada, copiada o
+  censurada) se las da el visor con su texto, porque están en su documento;
 - lo que dice el archivo (metadatos, si los permisos dejan guardar, tamaños e índice) y el estado:
   censura aplicada, anotaciones cambiadas y el de otros servicios (``extras``).
 
@@ -41,7 +43,7 @@ from app.backend.host import Host
 from app.backend.rpc import UserError, exposed
 from app.backend.services.documents import RECENT_CHANGED
 from pdf_core import page_ops, recent_files
-from pdf_core.pdf import Document, PackedPageText, PageText, PdfError, Rect, unpack_page_texts
+from pdf_core.pdf import Document, PackedPageText, PageText, PdfError, unpack_page_texts
 from pdf_core.security import PDFInvalidPasswordError, PDFPasswordRequiredError, PDFSecurityManager
 from pdf_core.text_layer import TextLayer, build_text_layer
 
@@ -53,6 +55,16 @@ def _structure(keys: list[str]) -> tuple[str, ...]:
 
     Detecta añadir, borrar, duplicar, mover y girar páginas, y también su reversión."""
     return tuple(key.rsplit(":", 1)[0] for key in keys)
+
+
+def _ocr_words(words: list[list[Any]] | None) -> list[tuple]:
+    """Las palabras del OCR que da el visor (``[x0, y0, x1, y1, texto, giro]``) como las guarda Python:
+    ``(x0, y0, x1, y1, texto)`` y el giro detrás solo si está girada (ver ``pdf_core.text_layer``)."""
+    found = []
+    for x0, y0, x1, y1, text, *rest in words or []:
+        turn = int(rest[0]) % 360 if rest else 0
+        found.append((float(x0), float(y0), float(x1), float(y1), str(text), *((turn,) if turn else ())))
+    return found
 
 
 def _file_layout(doc: Document) -> dict[str, Any]:
@@ -76,7 +88,7 @@ class _OpenDocument:
     baseline: tuple[str, ...] = ()  # estructura del archivo en disco
     texts: dict[str, PackedPageText] = field(default_factory=dict)  # texto de cada página por clave
     layers: dict[str, TextLayer] = field(default_factory=dict)  # capas de texto por clave
-    ocr: dict[str, list[tuple]] = field(default_factory=dict)  # palabras de OCR (x0, y0, x1, y1, texto) por clave
+    ocr: dict[str, list[tuple]] = field(default_factory=dict)  # palabras de OCR (x0, y0, x1, y1, texto[, giro]) por clave
     redacted: bool = False  # censura aplicada sin guardar: solo se guarda como copia
     annotated: bool = False  # anotaciones cambiadas en el visor sin guardar
     extras: dict[str, Any] = field(default_factory=dict)  # estado de otros servicios (p. ej. la censura en curso)
@@ -197,18 +209,26 @@ class ViewerService:
     def add_texts(self, doc_id: int, upload: str, pages: list[dict[str, Any]]) -> None:
         """El texto de unas páginas, que el visor subió a ``upload`` (de :meth:`upload_url`) con su
         motor (``lib/pdf-engine/page-text.ts``). ``pages``: ``{index, geometry, count}`` de cada una
-        (``index``, su posición en lo último que dio :meth:`set_pages`)."""
+        (``index``, su posición en lo último que dio :meth:`set_pages`) y ``words``, las palabras del
+        OCR escritas en ella si las tiene.
+
+        Esas palabras son de páginas que Python aún no tenía: las de una página girada, copiada o
+        censurada, que su motor lee del documento. Las que ya tiene (las acaba de reconocer el
+        servicio ``ocr``) no se tocan."""
         data = self.received(upload)
         try:
             texts = unpack_page_texts(pages, data)
+            words = [_ocr_words(page.get("words")) for page in pages]
         except (PdfError, KeyError, TypeError, ValueError) as ex:
             raise UserError("No llegó bien el texto de las páginas.", "bad_texts") from ex
         with self._lock:
             entry = self._doc(doc_id)
-            for index, text in texts:
+            for (index, text), found in zip(texts, words, strict=True):
                 key = self.page_key(entry, index)
                 entry.texts[key] = text
                 entry.layers.pop(key, None)
+                if found and key not in entry.ocr:
+                    entry.ocr[key] = found
 
     @exposed
     def upload_url(self) -> str:
@@ -267,27 +287,20 @@ class ViewerService:
 
     def redaction_applied(self, doc_id: int, pages: list[dict[str, Any]]) -> None:
         """El visor aplicó la censura en su documento (servicio ``redact``). ``pages``: ``{before,
-        after, rects}`` de cada página censurada: su clave antes y después (sube la revisión, porque
-        cambia su imagen) y los rectángulos de las marcas, en coordenadas de página.
+        after}`` de cada página censurada, su clave antes y después (sube la revisión, porque cambia
+        su contenido).
 
-        Las palabras de OCR que tapaban las marcas se borran para siempre (en el documento del
-        visor ya no están: la censura de EmbedPDF borra también ese texto); las demás pasan a la
-        clave nueva. Python tiene que tener el texto de esas páginas (sus medidas, para pasar las
-        marcas a la página vista).
+        Python olvida lo que tenía de esas páginas: el visor le da su texto nuevo y sus palabras de
+        OCR (:meth:`add_texts`), ya sin lo que tapaban las marcas (la censura de EmbedPDF borra
+        también el texto del OCR).
         """
         with self._lock:
             entry = self._doc(doc_id)
             for page in pages:
-                before, after = str(page["before"]), str(page["after"])
-                packed = entry.texts.get(before)
-                words = entry.ocr.pop(before, [])
-                if words and packed is None:
-                    raise UserError("Falta el texto de la página: vuelve a intentarlo.", "text_missing")
-                if words:
-                    shown = [packed.geometry.to_view(rect) for rect in page["rects"]]
-                    entry.ocr[after] = [w for w in words if not any(Rect(*w[:4]).intersects(r) for r in shown)]
-                entry.texts.pop(before, None)  # su contenido cambió: el visor da el nuevo
+                before = str(page["before"])
+                entry.texts.pop(before, None)
                 entry.layers.pop(before, None)
+                entry.ocr.pop(before, None)
             entry.redacted = True
 
     # ── Anotaciones (las edita el visor con EmbedPDF) ────────────────────

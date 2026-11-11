@@ -4,11 +4,8 @@
 // marca OCR_MARK: `removeText` lo quita de las copias que salen del visor, porque no va al archivo.
 //
 // Las páginas las abre aparte page-reader.ts. Coordenadas «de vista»: la página tal como se ve.
-import { apply, fromPdf, OCR_MARK, toView, type Box, type Geometry, type PageReader } from './page-reader.ts';
+import { apply, fromPdf, OCR_MARK, toPage, toView, type Box, type Geometry, type OcrWord, type PageReader } from './page-reader.ts';
 import { withMemory } from './pdfium.ts';
-
-/** Palabra reconocida: su rectángulo de vista y el texto (como las guarda Python). */
-export type OcrWord = [number, number, number, number, string];
 
 /** Lo que dice el texto de una página, sin contar el del OCR, y dónde tiene imágenes. */
 export interface PageFacts {
@@ -121,8 +118,8 @@ export class PageOcr {
   // ── Escribir ───────────────────────────────────────────────────────────
   /**
    * Escribe las palabras de la página como texto invisible: cada una ocupa su rectángulo y se lee
-   * en el sentido en que se ve la página. Se saltan las que tapa el texto nativo (ya están).
-   * Devuelve si cambió la página.
+   * derecha en la vista (o con su giro, si lo tiene). Se saltan las que tapa el texto nativo (ya
+   * están). Devuelve si cambió la página.
    */
   write(docPtr: number, { index, words, replace }: OcrText): boolean {
     return this.pages.withPage(docPtr, index, (page, geo) => {
@@ -131,10 +128,13 @@ export class PageOcr {
       const font = this.m.FPDFText_LoadStandardFont(docPtr, OCR_FONT);
       if (!font) throw new Error('No se pudo cargar la fuente del texto del OCR');
       try {
-        for (const [x0, y0, x1, y1, text] of words) {
+        for (const [x0, y0, x1, y1, text, turn = 0] of words) {
           const box: Box = [x0, y0, x1, y1];
           if (!text.trim() || x1 <= x0 || y1 <= y0 || covered(box)) continue;
-          changed = this.addWord(docPtr, page, geo, font, box, text.trim()) || changed;
+          // Una palabra girada se escribe como si la página tuviera el giro en que se lee derecha.
+          const upright: Geometry = { ...geo, rotation: (((geo.rotation - turn) % 360) + 360) % 360 };
+          const seen = turn ? toView(upright, toPage(geo, box)) : box;
+          changed = this.addWord(docPtr, page, upright, font, seen, text.trim()) || changed;
         }
       } finally {
         this.m.FPDFFont_Close(font);

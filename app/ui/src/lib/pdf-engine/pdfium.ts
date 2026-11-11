@@ -72,6 +72,7 @@ export interface Pdfium {
   FPDFPageObj_CreateTextObj(doc: number, font: number, size: number): number;
   FPDFText_SetText(obj: number, text: number): boolean;
   FPDFTextObj_SetTextRenderMode(obj: number, mode: number): boolean;
+  FPDFTextObj_GetText(obj: number, text: number, buffer: number, length: number): number;
   // Dibujar
   FPDFBitmap_CreateEx(width: number, height: number, format: number, buffer: number, stride: number): number;
   FPDFBitmap_FillRect(bitmap: number, left: number, top: number, width: number, height: number, color: number): void;

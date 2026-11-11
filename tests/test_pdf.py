@@ -375,6 +375,11 @@ def test_engine_draws_the_page_as_seen_for_the_ocr(rotation):
     assert (image["height"], image["width"]) == whole.shape[:2]
 
 
+def _engine_pages_texts(data: bytes, indices: list[int]) -> list[dict]:
+    """Lo que da el motor de cada página, sin los caracteres: medidas, cuántos y sus palabras del OCR."""
+    return json.loads(run_engine("texts", data, {"indices": indices}))["pages"]
+
+
 def _engine_texts(data: bytes, indices: list[int], password: str | None = None) -> list[tuple[int, PageText]]:
     """El texto que da el motor del visor a Python (lib/pdf-engine/page-text.ts)."""
     out = json.loads(run_engine("texts", data, {"indices": indices, "password": password}))
@@ -388,11 +393,36 @@ def test_engine_gives_python_the_same_page_text_without_the_ocr(rotation):
         data = _with_ocr(doc.to_bytes(), {0: [[40, 500, 140, 520, "reconocido"]]})
     ((index, got),) = _engine_texts(data, [0])
     assert index == 0 and got.geometry == pytest.approx(want.geometry)
+    assert "words" not in _engine_pages_texts(pdf_bytes([[(72, 72, "sin OCR")]]), [0])[0]  # sin texto del OCR, sin palabras
     assert got.text() == want.text() == "Hola mundo\nSegunda linea"  # sin el texto del OCR
     assert [c.line for c in got.chars] == [c.line for c in want.chars]
     for mine, theirs in zip(got.chars, want.chars, strict=True):  # otra compilación de PDFium: ±0,6 pt
         assert list(mine.box) == pytest.approx(list(theirs.box), abs=1)
     assert build_text_layer(got).text == build_text_layer(want).text
+
+
+@pytest.mark.parametrize("rotation", ROTATIONS)
+def test_engine_gives_python_the_ocr_words_where_they_are_seen(rotation):
+    """Las palabras del OCR escritas en la página vuelven con su texto, en coordenadas de vista; si
+    después se gira la página, donde se ven ahora y con ese giro."""
+    word = [40, 500, 140, 520, "reconocido"]
+    with _doc(rotation) as doc:
+        data = _with_ocr(doc.to_bytes(), {0: [word]})
+    (page,) = _engine_pages_texts(data, [0])
+    ((*box, text, turn),) = page["words"]
+    assert text == "reconocido" and turn == 0 and box == pytest.approx(word[:4], abs=0.05)
+
+    turned = _engine_pages(data, [["rotate", [0], 1]])
+    (page,) = _engine_pages_texts(turned, [0])
+    with Document.open(data) as before, Document.open(turned) as after:
+        want = after[0].page_text().geometry.to_view(before[0].page_text().geometry.to_page(word[:4]))
+    ((*box, text, turn),) = page["words"]
+    assert turn == 90 and box == pytest.approx(list(want), abs=0.05)
+
+    # Escrita con su giro (al volver a abrir el documento, document_url), se lee igual.
+    again = _with_ocr(_engine_pages(data, [["rotate", [0], 1]]), {0: [[*box, text, turn]]}, replace=True)
+    ((*box2, _text, turn2),) = _engine_pages_texts(again, [0])[0]["words"]
+    assert turn2 == 90 and box2 == pytest.approx(box, abs=0.05)
 
 
 def test_engine_page_texts_come_in_the_order_asked():
@@ -409,6 +439,17 @@ def test_text_layer_has_spaces_and_lines():
         layer = build_text_layer(doc[0].page_text())
         assert layer.text == "Hola mundo\nSegunda linea"
         assert len(layer.chars) == len(layer.rects) == len(layer.seps)
+
+
+def test_text_layer_reads_ocr_words_of_a_page_turned_after_recognizing_them():
+    """Girada la página después del OCR, sus palabras se ven de lado: se leen en su sentido."""
+    with Document.new() as doc:
+        page = add_page(doc)
+        page.set_rotation(90)
+        text = page.page_text()
+    words = [(722, 100, 742, 140, "Hola", 90), (722, 150, 742, 200, "mundo", 90), (690, 100, 710, 160, "abajo", 90)]
+    assert build_text_layer(text, words).text == "Hola mundo\nabajo"
+    assert build_text_layer(text, [w[:5] for w in words]).text != "Hola mundo\nabajo"  # sin el giro, de lado
 
 
 def test_text_layer_keeps_tall_and_short_letters_together():

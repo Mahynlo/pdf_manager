@@ -189,6 +189,6 @@ export function createAppEngine(wasmUrl: string): AppEngine {
   };
 }
 
-export type { OcrText, OcrWord, PageFacts, PageImage } from './page-ocr.ts';
-export type { Box } from './page-reader.ts';
+export type { OcrText, PageFacts, PageImage } from './page-ocr.ts';
+export type { Box, OcrWord } from './page-reader.ts';
 export type { PageTexts } from './page-text.ts';

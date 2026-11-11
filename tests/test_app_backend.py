@@ -341,8 +341,9 @@ class FakeViewer:
     Tiene su documento (el PDF que abre EmbedPDF con ``document_url``) y la clave de cada página;
     cambia las páginas con el motor de EmbedPDF (``tests/engine_task.mjs``); da a Python las claves
     y el texto de las páginas que le faltan (como ``document/text.ts``, en el formato de
-    ``lib/pdf-engine/page-text.ts``) y le sube su copia al guardar. Su documento no lleva el texto
-    del OCR: el visor lo escribe y lo quita su motor de lo que sale de él (``tests/test_pdf.py``).
+    ``lib/pdf-engine/page-text.ts``) y le sube su copia al guardar. Las palabras del OCR las escribe
+    en su documento con el motor (:meth:`write_ocr`, como ``canvas.writeOcrText``) cuando la prueba
+    se lo pide; lo que sale de él va sin ellas (lo quita el motor: ``tests/test_pdf.py``).
     """
 
     def __init__(self, svc: ViewerService, doc_id: int) -> None:
@@ -351,16 +352,39 @@ class FakeViewer:
         self.password = served["password"]
         self.data = base64.b64decode(served["url"].split(",", 1)[1])
         self.keys: list[str] = list(served["keys"])
+        self.with_ocr = False  # su documento tiene texto del OCR
 
     def sync(self, pages: list[int] | None = None) -> dict:
         """Python recibe las páginas y el texto de ``pages`` (sin ellas, de todas) que le falta."""
         result = self.svc.set_pages(self.doc_id, self.keys)
         wanted = [i for i in result["missing"] if pages is None or i in pages]
         if wanted:
-            with Document.open(self.data, self.password) as doc:
-                meta, data = pack_page_texts([(i, doc[i].page_text()) for i in wanted])
+            meta, data = self._texts(wanted)
             self.svc.add_texts(self.doc_id, _put(self.svc, data), meta)
         return result
+
+    def _texts(self, indices: list[int]) -> tuple[list[dict], bytes]:
+        """El texto de esas páginas como lo da el motor, con las palabras del OCR que tengan. Sin texto
+        del OCR en el documento lo lee Python, que da lo mismo y más rápido
+        (``test_engine_gives_python_the_same_page_text_without_the_ocr``)."""
+        if self.with_ocr:
+            out = json.loads(run_engine("texts", self.data, {"indices": indices, "password": self.password}))
+            return out["pages"], base64.b64decode(out["data"])
+        with Document.open(self.data, self.password) as doc:
+            return pack_page_texts([(i, doc[i].page_text()) for i in indices])
+
+    def write_ocr(self, index: int, words: list, replace: bool = True) -> None:
+        """Escribe en su documento las palabras de un OCR como texto invisible (``canvas.writeOcrText``)."""
+        items = [{"index": index, "words": [list(w) for w in words], "replace": replace}]
+        self.data = run_engine("ocr-write", self.data, {"pages": items, "password": self.password})
+        self.with_ocr = True
+
+    def recognized(self, index: int, words: list[tuple]) -> None:
+        """Lo que queda tras el OCR de la página ``index``: Python guarda sus palabras (servicio
+        ``ocr``) y el visor las escribe en su documento."""
+        with self.svc.document(self.doc_id) as entry:
+            self.svc.set_ocr_words(entry, self.keys[index], words)
+        self.write_ocr(index, words)
 
     def reshape(self, ops: list[list], uids: list[int]) -> dict:
         """Cambia las páginas (``ops``, como en ``engine_task.mjs``); ``uids``: el id de cada página
@@ -386,7 +410,6 @@ class FakeViewer:
         """Aplica marcas de censura (página, rectángulo sin girar) como ``redact/apply.ts``: el motor en
         su documento y después ``redact.apply``. Devuelve lo que responde Python."""
         indices = sorted({page for page, _rect in marks})
-        self.sync(indices)
         items = [{"page": page, "rect": rect, "color": color} for page, rect in marks]
         marked = run_engine("mark", self.data, {"marks": items, "password": self.password})
         self.data = run_engine("redact", marked, {"password": self.password})
@@ -394,7 +417,7 @@ class FakeViewer:
         for i in indices:
             uid, rotation, revision = self.keys[i].split(":")
             self.keys[i] = f"{uid}:{rotation}:{int(revision) + 1}"
-        pages = [{"before": before[i], "after": self.keys[i], "rects": [r for p, r in marks if p == i]} for i in indices]
+        pages = [{"before": before[i], "after": self.keys[i]} for i in indices]
         return service.apply(self.doc_id, pages)
 
     def document(self) -> Document:
@@ -435,14 +458,42 @@ def test_viewer_keeps_ocr_words_while_their_page_moves_or_turns(tmp_path):
         doc_id = svc.open(str(pdf))["id"]
         viewer = FakeViewer(svc, doc_id)
         viewer.sync()
-        with svc.document(doc_id) as entry:
-            svc.set_ocr_words(entry, "1:0:0", [(100, 300, 220, 320, "reconocido")])
-        # El visor la lleva al final y la gira.
+        viewer.recognized(0, [(100, 300, 220, 320, "reconocido")])
+        # El visor la lleva al final y la gira: sus palabras van con ella, donde se ven ahora.
         viewer.reshape([["move", 0, 1], ["rotate", [1], 1]], [2, 1])
-        assert "reconocido" not in _text(svc, doc_id, 1)  # girada, esas palabras ya no valen
+        assert "reconocido" in _text(svc, doc_id, 1)
+        with svc.document(doc_id) as entry:
+            ((*box, word, turn),) = entry.ocr["1:90:0"]
+        assert word == "reconocido" and turn == 90
+        assert box == pytest.approx([842 - 320, 100, 842 - 300, 220], abs=0.05)
         # Se deshace el giro en el visor: la página vuelve con su clave y con sus palabras.
         viewer.reshape([["rotate", [1], -1]], [2, 1])
         assert "reconocido" in _text(svc, doc_id, 1)
+    finally:
+        svc.close()
+
+
+def test_a_copied_page_keeps_its_ocr_words_for_the_ai_and_export(tmp_path):
+    """La copia de una página (otra clave) lleva el texto del OCR en el visor: Python lo recibe con
+    su texto, y así lo ven el asistente IA y exportar texto."""
+    pdf = _blank_pdf(tmp_path / "escaneo.pdf", 2)
+    host = FakeHost(save_to=str(tmp_path / "texto.txt"))
+    svc = ViewerService(host)
+    try:
+        doc_id = svc.open(str(pdf))["id"]
+        viewer = FakeViewer(svc, doc_id)
+        viewer.sync()
+        viewer.recognized(0, [(100, 300, 220, 320, "reconocido")])
+        assert viewer.reshape([["duplicate", 0, 1]], [1, 3, 2])["missing"] == [1]
+        assert "reconocido" in _text(svc, doc_id, 1)
+        svc.export_text(doc_id)
+        assert (tmp_path / "texto.txt").read_text(encoding="utf-8").count("reconocido") == 2
+        # Lo que reconoce Python de una página sustituye a lo que tenía.
+        viewer.recognized(1, [(100, 300, 220, 320, "nuevo")])
+        assert "nuevo" in _text(svc, doc_id, 1) and "reconocido" not in _text(svc, doc_id, 1)
+        # Las guarda con su clave: si el visor vuelve a abrir el archivo guardado, las escribe.
+        viewer.save()
+        assert [page["index"] for page in svc.document_url(doc_id)["ocr"]] == [0, 1]
     finally:
         svc.close()
 
@@ -822,15 +873,21 @@ def _region(viewer: FakeViewer, index: int, rect: list[float] | None = None, sca
 
 
 def _ocr_page(ocr: OcrService, viewer: FakeViewer, index: int) -> dict:
+    """«Procesar Página Actual» (ocr/recognize.ts): el visor escribe en su documento lo que devuelve."""
     viewer.sync([index])
     url, region = _region(viewer, index)
-    return ocr.page(viewer.doc_id, index, url, [region], {"lines": 0, "images": False})
+    result = ocr.page(viewer.doc_id, index, url, [region], {"lines": 0, "images": False})
+    viewer.write_ocr(index, result["words"])
+    return result
 
 
 def _ocr_area(ocr: OcrService, viewer: FakeViewer, index: int, rect: list[float]) -> dict:
+    """El OCR de un recorte: sus palabras se suman a las de la página, también en el visor."""
     viewer.sync([index])
     url, region = _region(viewer, index, rect, scale=2)
-    return ocr.area(viewer.doc_id, index, url, region)
+    result = ocr.area(viewer.doc_id, index, url, region)
+    viewer.write_ocr(index, result["words"], replace=False)
+    return result
 
 
 def _blank_pdf(path: Path, pages: int, native: dict[int, str] | None = None) -> Path:
@@ -871,9 +928,9 @@ def test_ocr_words_join_the_text_layer_search_and_export(tmp_path):
         assert [list(w) for w in area["words"]] == [[100, 100, 200, 150, "recorte"]]  # solo las nuevas
         assert len(_ocr_area(ocr, viewer, 1, [300, 300, 400, 350])["boxes"]) == 2
 
-        # Al girar la página en el visor, sus palabras ya no coinciden con lo que se ve: no cuentan.
+        # Al girar la página en el visor, sus palabras van con ella (el visor se las da a Python).
         viewer.reshape([["rotate", [0], 1]], [1, 2])
-        assert not ocr.page_text(doc_id, 0)["ocr"] and ocr.page_text(doc_id, 1)["ocr"]
+        assert ocr.page_text(doc_id, 0)["ocr"] and ocr.page_text(doc_id, 0)["text"] == "Hola mundo desde OCR"
 
         assert ocr.save_text(doc_id, "texto reconocido") == str(tmp_path / "texto.txt")
         assert host.saved_suggestions[-1] == str(tmp_path / "escaneo_ocr.txt")
@@ -1003,17 +1060,16 @@ def test_redact_apply_removes_what_the_marks_cover_and_forces_save_as(tmp_path, 
         doc_id = info["id"]
         viewer = FakeViewer(viewer_svc, doc_id)
         viewer.sync()
-        with viewer_svc.document(doc_id) as entry:
-            viewer_svc.set_ocr_words(entry, viewer.keys[2], [(100, 100, 160, 120, "Pérez"), (300, 300, 360, 320, "queda")])
+        viewer.recognized(2, [(100, 100, 160, 120, "Pérez"), (300, 300, 360, 320, "queda")])
         matches = svc.find(doc_id, ["Pérez"])[0]["matches"]  # páginas 0 y 3 (texto) y 2 (OCR); la 1 no
         assert len(matches) == 4
         state = viewer.redact(svc, [(m["page"], m["rect"]) for m in matches], color="#B21A1A")
         assert state["redacted"] and state["modified"]
-        # Las palabras de OCR que tapaban las marcas se borran; las demás pasan a la clave nueva.
+        # Las páginas censuradas cambian de clave: Python pide su texto nuevo, y el visor le da las
+        # palabras de OCR que quedan (la censura de su motor borró las que tapaban las marcas).
+        assert viewer.sync()["missing"] == [0, 2, 3]
         with viewer_svc.document(doc_id) as entry:
             assert viewer.keys[2].endswith(":1") and [w[4] for w in entry.ocr[viewer.keys[2]]] == ["queda"]
-        # Las páginas censuradas cambian de clave: Python pide su texto nuevo.
-        assert viewer.sync()["missing"] == [0, 2, 3]
         assert viewer_svc.set_pages(doc_id, viewer.keys)["missing"] == []
         assert not any("Pérez" in _text(viewer_svc, doc_id, i) for i in range(4))
         assert "Perez" not in _text(viewer_svc, doc_id, 3)

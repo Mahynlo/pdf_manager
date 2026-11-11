@@ -1,9 +1,8 @@
 // Aplicar la censura en el documento del visor, de forma irreversible: el motor de EmbedPDF borra lo
 // que tapan las marcas (`applyAllRedactions`, en su documento: no se vuelve a abrir), también el
-// texto invisible del OCR, y Python borra las palabras del OCR que tapaban (`redact.apply`). Las
-// páginas censuradas cambian de clave (sube su revisión) y su texto vuelve a leerse.
+// texto invisible del OCR. Las páginas censuradas cambian de clave (sube su revisión) y Python
+// (`redact.apply`) vuelve a recibir su texto y sus palabras del OCR, ya sin lo que tapaban.
 import { call } from '$lib/api.ts';
-import type { Box } from '$lib/pdf-engine/index.ts';
 import type { DocumentState } from '$lib/types.ts';
 import type { PageCanvas } from '../canvas/canvas.ts';
 import { registry } from '../canvas/embed.ts';
@@ -32,13 +31,7 @@ export interface RedactionDone {
 export async function applyMarks({ docId, canvas, pages, text, marks, commit }: RedactionContext): Promise<RedactionDone | null> {
   const all = marks.all();
   if (!all.length) return null;
-  const rects = new Map<number, Box[]>(); // página -> rectángulos de sus marcas (página sin girar)
-  for (const { pageIndex, rect } of all) {
-    const box: Box = [rect.origin.x, rect.origin.y, rect.origin.x + rect.size.width, rect.origin.y + rect.size.height];
-    rects.set(pageIndex, [...(rects.get(pageIndex) ?? []), box]);
-  }
-  const indices = [...rects.keys()];
-  await text.sync(indices); // Python necesita las medidas de esas páginas para sus palabras del OCR
+  const indices = [...new Set(all.map(({ pageIndex }) => pageIndex))];
   await commit();
 
   const doc = canvas.shownDocument();
@@ -48,7 +41,7 @@ export async function applyMarks({ docId, canvas, pages, text, marks, commit }: 
   const before = canvas.keys;
   const after = pages.revisedKeys(indices);
   const state = await call<RedactionDone['state']>('redact.apply', docId,
-    indices.map((index) => ({ before: before[index], after: after[index], rects: rects.get(index) })));
+    indices.map((index) => ({ before: before[index], after: after[index] })));
   await pages.contentChanged(indices);
   text.changed();
   return { state, count: all.length };

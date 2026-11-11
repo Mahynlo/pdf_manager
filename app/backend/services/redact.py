@@ -96,10 +96,10 @@ class RedactService:
     # ── Aplicar ──────────────────────────────────────────────────────────
     @exposed
     def apply(self, doc_id: int, pages: list[dict[str, Any]]) -> dict[str, Any]:
-        """El visor aplicó las marcas en su documento (con su motor): se borran para siempre las
-        palabras de OCR que tapaban y el documento queda censurado (solo se guarda como copia).
+        """El visor aplicó las marcas en su documento (con su motor, que borra también las
+        palabras de OCR que tapaban): el documento queda censurado (solo se guarda como copia).
 
-        ``pages``: ``{before, after, rects}`` de cada página censurada (ver
+        ``pages``: ``{before, after}`` de cada página censurada (ver
         ``ViewerService.redaction_applied``). Devuelve el estado del documento: ``{modified,
         annotated, redacted}``.
         """

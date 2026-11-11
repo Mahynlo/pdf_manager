@@ -11,6 +11,12 @@ import { withMemory, type Memory, type Pdfium } from './pdfium.ts';
 
 /** Rectángulo `[x0, y0, x1, y1]` en puntos. */
 export type Box = [number, number, number, number];
+/**
+ * Palabra del OCR (como las guarda Python): su rectángulo de vista, el texto y cuánto está girada
+ * respecto a la vista (grados en sentido horario: 0, 90, 180 o 270; sin él, 0). El OCR reconoce
+ * las palabras derechas; quedan giradas si después se gira su página.
+ */
+export type OcrWord = [x0: number, y0: number, x1: number, y1: number, text: string, turn?: number];
 export type Matrix = [number, number, number, number, number, number];
 
 /** Medidas de una página: su caja visible sin girar (en el PDF, origen abajo) y su giro. */
@@ -25,6 +31,7 @@ export interface Geometry {
 /** Marca del texto invisible con las palabras del OCR: no es texto de la página. */
 export const OCR_MARK = 'ExtraerPDFsOCR';
 const MARK_NAME_BYTES = 128; // sitio para leer el nombre de una marca (UTF-16)
+const WORD_BYTES = 256; // sitio para leer el texto de una palabra del OCR (UTF-16); se amplía si no cabe
 // Constantes de PDFium
 const OBJ_TEXT = 1;
 const OBJ_IMAGE = 3;
@@ -78,11 +85,11 @@ export class PageReader {
    * Llama a `fn` por cada carácter del texto de la página, sin el del OCR, en el orden de PDFium.
    * Los espacios y saltos de línea entre el texto de la página y el del OCR no cuentan: solo se
    * pasan los que van delante de otro carácter de la página. `unrotated`: el texto se ordena con la
-   * página sin girar (así se lee en su sentido original, como en Python).
+   * página sin girar (así se lee en su sentido original, como en Python). `withOcr`: si ya se sabe
+   * si la página tiene texto del OCR (así no se vuelven a mirar sus objetos).
    */
-  eachChar(page: number, fn: (char: CharVisit) => void, { unrotated = false } = {}): void {
+  eachChar(page: number, fn: (char: CharVisit) => void, { unrotated = false, withOcr = this.hasOcrText(page) } = {}): void {
     const { m } = this;
-    const withOcr = this.hasOcrText(page);
     const rotation = m.FPDFPage_GetRotation(page);
     if (unrotated && rotation) m.FPDFPage_SetRotation(page, 0);
     const text = m.FPDFText_LoadPage(page);
@@ -167,6 +174,53 @@ export class PageReader {
     return false;
   }
 
+  /**
+   * Las palabras del OCR que hay escritas en la página (page-ocr.ts escribe cada una en un objeto
+   * de texto con la marca), en coordenadas de vista y con su giro: siguen a la página si se gira,
+   * se copia o se censura. Vacío si no tiene.
+   */
+  ocrWords(page: number, geo: Geometry): OcrWord[] {
+    const { m } = this;
+    const words: OcrWord[] = [];
+    let text = 0; // la página de texto, que pide FPDFTextObj_GetText: solo si hay palabras
+    try {
+      for (let i = 0; i < m.FPDFPage_CountObjects(page); i++) {
+        const obj = m.FPDFPage_GetObject(page, i);
+        if (!this.hasOcrMark(obj)) continue;
+        text ||= m.FPDFText_LoadPage(page);
+        const word = text ? this.objectText(obj, text).trim() : '';
+        const bounds = withMemory(this.memory, 16, (ptr) =>
+          m.FPDFPageObj_GetBounds(obj, ptr, ptr + 4, ptr + 8, ptr + 12) ? this.floats(ptr, 4) : null);
+        if (!word || !bounds) continue;
+        const [x0, y0, x1, y1] = toView(geo, fromPdf(geo, ...(bounds as Box))).map((v) => Math.round(v * 100) / 100);
+        words.push([x0, y0, x1, y1, word, this.turn(obj, geo)]);
+      }
+    } finally {
+      if (text) m.FPDFText_ClosePage(text);
+    }
+    return words;
+  }
+
+  /**
+   * Cuánto está girado en la vista un objeto de texto (grados en sentido horario, de 90 en 90): un
+   * texto se lee derecho si su línea base va en el PDF hacia el ángulo del giro de la página
+   * (page-ocr.ts lo escribe así).
+   */
+  private turn(obj: number, geo: Geometry): number {
+    const [a, b] = this.matrix(obj);
+    const baseline = (Math.atan2(b, a) * 180) / Math.PI; // antihorario, con `y` hacia arriba
+    return ((Math.round((geo.rotation - baseline) / 90) % 4) + 4) % 4 * 90;
+  }
+
+  /** El texto de un objeto de texto (`text`: la página de texto de su página). */
+  private objectText(obj: number, text: number, size = WORD_BYTES): string {
+    return withMemory(this.memory, size, (buffer) => {
+      const needed = this.m.FPDFTextObj_GetText(obj, text, buffer, size); // bytes, con el final
+      if (needed > size) return this.objectText(obj, text, needed);
+      return needed ? this.m.pdfium.UTF16ToString(buffer) : '';
+    });
+  }
+
   /** Llama a `fn` con la matriz (hasta la página) de cada imagen, también dentro de Form XObjects. */
   eachImage(page: number, fn: (matrix: Matrix) => void): void {
     const walk = (count: number, get: (i: number) => number, parent: Matrix): void => {
@@ -219,6 +273,14 @@ export class PageReader {
 /** De PDFium (origen abajo, absolutas) a la página sin girar con el origen arriba. */
 export function fromPdf(geo: Geometry, left: number, bottom: number, right: number, top: number): Box {
   return [left - geo.left, geo.top - top, right - geo.left, geo.top - bottom];
+}
+
+/** De la vista a la página sin girar (PageGeometry.to_page en pdf_core/pdf.py). */
+export function toPage({ width: w, height: h, rotation }: Geometry, [x0, y0, x1, y1]: Box): Box {
+  if (rotation === 90) return [y0, h - x1, y1, h - x0];
+  if (rotation === 180) return [w - x1, h - y1, w - x0, h - y0];
+  if (rotation === 270) return [w - y1, x0, w - y0, x1];
+  return [x0, y0, x1, y1];
 }
 
 /** De la página sin girar a la vista (PageGeometry.to_view en pdf_core/pdf.py). */

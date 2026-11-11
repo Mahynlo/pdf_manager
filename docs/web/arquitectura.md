@@ -143,8 +143,9 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
   (`find`) y guarda las opciones, el color y el perfil activo en el propio documento abierto
   (`_OpenDocument.extras`). Al aplicar, el motor del visor borra el contenido de debajo en su
   documento (`redact/apply.ts`) y sube la revisión de esas páginas, así su clave cambia y nada
-  reutiliza su imagen ni su texto anteriores; `redact.apply` le dice a Python qué páginas, y borra
-  las palabras de OCR que tapaban. Un documento censurado (`redacted`) solo se guarda como copia.
+  reutiliza su imagen ni su texto anteriores; `redact.apply` le dice a Python qué páginas, y el
+  visor le da su texto nuevo y las palabras de OCR que quedan. Un documento censurado (`redacted`)
+  solo se guarda como copia.
 - **Imprimir**: el diálogo de impresión de WebView2 con el PDF y sus anotaciones
   en un iframe oculto (`document/print.ts`). Ver embedpdf.md, «Imprimir».
 - **Asistente IA**: el servicio `ai` copia lo necesario del documento con el candado del visor y

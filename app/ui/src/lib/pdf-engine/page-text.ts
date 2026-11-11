@@ -4,15 +4,20 @@
 //
 // Es lo mismo que lee Python de un PDF (Page.chars en pdf_core/pdf.py): cada carácter en el orden
 // de PDFium con la página sin girar, también espacios y saltos de línea, con su caja holgada en
-// coordenadas de página y su línea. Sin el texto del OCR, que Python guarda aparte.
-import { fromPdf, type Geometry, type PageReader } from './page-reader.ts';
+// coordenadas de página y su línea. Sin el texto del OCR: de él van aparte las palabras (`words`,
+// con su giro), como las guarda Python, y así le llegan también las de una página girada, copiada
+// o censurada.
+import { fromPdf, type Geometry, type OcrWord, type PageReader } from './page-reader.ts';
 
 /** Las medidas de una página: `[ancho, alto, izquierda, arriba, giro]` (PageGeometry en Python). */
 export type GeometryTuple = [number, number, number, number, number];
 
-/** El texto de unas páginas: `pages[i]` dice cuántos caracteres de `data` son suyos. */
+/**
+ * El texto de unas páginas: `pages[i]` dice cuántos caracteres de `data` son suyos y, si tiene
+ * texto del OCR, sus palabras (`words`).
+ */
 export interface PageTexts {
-  pages: { index: number; geometry: GeometryTuple; count: number }[];
+  pages: { index: number; geometry: GeometryTuple; count: number; words?: OcrWord[] }[];
   /**
    * Por cada página, uno tras otro: el código Unicode de cada carácter (uint32), su caja
    * `[x0, y0, x1, y1]` (4 float32; ceros si no tiene) y su línea (uint32).
@@ -39,15 +44,17 @@ export function pageTexts(reader: PageReader, docPtr: number, indices: number[])
   const packed: PackedPage[] = [];
   for (const index of indices) {
     reader.withPage(docPtr, index, (page, geo) => {
-      const found = readPage(reader, page, geo);
-      pages.push({ index, geometry: [geo.width, geo.height, geo.left, geo.top, geo.rotation], count: found.codes.length });
+      const words = reader.ocrWords(page, geo);
+      const found = readPage(reader, page, geo, words.length > 0);
+      const geometry: GeometryTuple = [geo.width, geo.height, geo.left, geo.top, geo.rotation];
+      pages.push({ index, geometry, count: found.codes.length, ...(words.length ? { words } : {}) });
       packed.push(found);
     });
   }
   return { pages, data: pack(packed) };
 }
 
-function readPage(reader: PageReader, page: number, geo: Geometry): PackedPage {
+function readPage(reader: PageReader, page: number, geo: Geometry, withOcr: boolean): PackedPage {
   // Crecen al doble cuando se llenan (las cajas, siempre cuatro veces los caracteres).
   let codes = new Uint32Array(INITIAL_CHARS);
   let boxes = new Float32Array(INITIAL_CHARS * 4);
@@ -62,7 +69,7 @@ function readPage(reader: PageReader, page: number, geo: Geometry): PackedPage {
       if (loose) boxes.set(fromPdf(geo, ...loose), count * 4);
       lines[count] = char.line;
       count++;
-    }, { unrotated: true });
+    }, { unrotated: true, withOcr });
   });
   return { codes: codes.subarray(0, count), boxes: boxes.subarray(0, count * 4), lines: lines.subarray(0, count) };
 }
