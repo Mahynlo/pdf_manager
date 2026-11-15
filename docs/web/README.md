@@ -15,6 +15,7 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
 
 | Documento | Contenido |
 |---|---|
+| [como-funciona.md](como-funciona.md) | **Empieza aquí.** Cómo funciona cada parte, paso a paso y con diagramas: arranque, llamadas, abrir, guardar, OCR, censura, trabajos largos y la versión de navegador |
 | [arquitectura.md](arquitectura.md) | Estructura de `app/`, comunicación JS ↔ Python, reglas y cómo migrar una herramienta |
 | [modulos-python.md](modulos-python.md) | Módulos de Python (`src/pdf_core`), motor de PDF y reglas |
 | [paridad.md](paridad.md) | Lista función por función de la versión Qt (retirada) y su estado en la web |
@@ -23,6 +24,7 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
 | [embedpdf.md](embedpdf.md) | Migración del visor a EmbedPDF paso a paso: plan, estado y cómo está hecho cada paso |
 | [navegador.md](navegador.md) | La app en un navegador: el mismo Python en wasm (Pyodide) |
 | [responsive.md](responsive.md) | Adaptación a cada pantalla: cortes, reglas y cómo comprobarlo |
+| [versiones.md](versiones.md) | Publicar una versión: el changelog generado de los commits, cómo escribirlos y la Release |
 | [seguridad.md](seguridad.md) | Seguridad: amenazas, medidas (CSP, servidor local, clave de la IA…), riesgos aceptados y cómo comprobarlo |
 
 ## Estado
@@ -65,8 +67,8 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
 ### Pendiente
 
 - **Pruebas de la 0.1.29-web**: uso real del instalador antes de darla por estable.
-- **Asistente IA con agente**: en fase de pruebas, no está probado del todo. Sus dependencias están
-  comentadas en `pyproject.toml`; sin ellas responde en modo básico.
+- **Asistente IA con agente**: en fase de pruebas, no está probado del todo. Sin un proveedor
+  configurado (clave de API o IA local) responde en modo básico.
 - **En pruebas con uso real**: censura con marcas, deshacer las operaciones de página, anotaciones,
   impresión e instalador (lista completa en el [README](../../README.md#-qué-está-en-fase-de-pruebas)).
 

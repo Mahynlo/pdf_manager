@@ -1,7 +1,8 @@
 # Documentación de PDF Manager
 
 La aplicación es la **versión web**: interfaz en Svelte dentro de una ventana de escritorio (pywebview
-y WebView2) y backend en Python. Su documentación está en [web/](web/README.md).
+y WebView2) y backend en Python. Su documentación está en [web/](web/README.md); para entender cómo funciona por
+dentro, empieza por [web/como-funciona.md](web/como-funciona.md), que lo explica con diagramas.
 
 Las versiones anteriores se retiraron de esta rama: **Flet** (la 0.1.28 fue la última, en la rama
 `Flet`) y **Qt** (PySide6, en la rama local `feature/html-ui`).
@@ -16,6 +17,8 @@ src/assets/       manuales de ayuda y modelos de OCR
 docs/web/         documentación técnica
 docs/ayuda/       manuales que muestra la pestaña Ayuda
 tests/            pruebas
+installer/        ejecutable e instalador (web/), versión de navegador (browser/) y changelog.py
+cliff.toml        cómo se genera CHANGELOG.md de los commits (web/versiones.md)
 ```
 
 El mapa de los módulos de Python y sus reglas están en [web/modulos-python.md](web/modulos-python.md).

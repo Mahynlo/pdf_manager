@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.1.29-web] - 2026-10-30
+
+Primera versión web, en pruebas. Sustituye a la versión Flet, cuya última versión es la 0.1.28
+(rama `Flet`). Qué está todavía en pruebas: ver el [README](README.md#-qué-está-en-fase-de-pruebas).
+
+### Changed
+- **Nueva interfaz web**: Svelte dentro de una ventana de escritorio (pywebview + WebView2), con el backend en Python (`app/`). Ver [docs/web](docs/web/README.md).
+- **Un solo motor de PDF**: todo usa PDFium (`pypdfium2` en Python y EmbedPDF en la ventana); se retiró PyMuPDF (licencia AGPL).
+- **Instalador propio** (`ExtraerPDFs_Web_Setup_<versión>.exe`), que puede convivir con el de la versión Flet.
+- Más escalas de zoom, mejoras visuales en los botones de cerrar pestaña y pantalla de inicio (*splash*).
+
+### Documentation
+- Documentación de la versión web (`docs/web/`), capturas y GIF de muestra en el README.
+
+## [0.1.28] - 2026-06-23
+
+Última versión con Flet.
+
+### Changed
+- Los archivos de ayuda se leen también en la app instalada (producción).
+- Limpieza de librerías que ya no se usaban.
+
+### Documentation
+- Manuales de usuario de la pestaña «Ayuda».
+
 ## [0.1.27-Parte_1] - 2026-06-20
 
 ### Added

@@ -3,7 +3,8 @@ name: Build & Package Web Installer
 # Versión web (app/: Svelte + pywebview/WebView2), ver docs/web/instalador.md.
 #
 # Dispara el workflow:
-#   - Al hacer push de un tag vX.Y.Z-web → compila + crea Release (prerelease) en GitHub
+#   - Al hacer push de un tag vX.Y.Z-web → compila + crea Release (prerelease) en GitHub, con la
+#     sección de esa versión de CHANGELOG.md como notas (si falta, falla antes de compilar)
 #   - Manualmente desde la UI de GitHub (Actions → Run workflow) → solo el artefacto
 # La versión es APP_VERSION de app/__init__.py; el tag tiene que coincidir con ella.
 on:
@@ -43,6 +44,18 @@ jobs:
           }
           Write-Host "Version: $ver"
           echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
+
+      # ── 2b. Notas de la versión: su sección de CHANGELOG.md (docs/web/versiones.md) ──
+      # Antes de compilar: sin la sección no se publica (installer/changelog.py add).
+      - name: Release notes from CHANGELOG.md
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+        run: |
+          python installer/changelog.py notes "${{ steps.version.outputs.VERSION }}" > release_notes.md
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-Content release_notes.md
 
       # ── 3. Herramientas: uv (Python), pnpm y Node (interfaz) ───────────────
       - name: Setup uv
@@ -103,6 +116,6 @@ jobs:
           tag_name: "v${{ steps.version.outputs.VERSION }}"
           name: "Extraer PDFs v${{ steps.version.outputs.VERSION }} (versión web, prueba)"
           files: dist/ExtraerPDFs_Web_Setup_*.exe
-          generate_release_notes: true
+          body_path: release_notes.md
           draft: false
           prerelease: true

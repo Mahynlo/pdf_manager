@@ -1,0 +1,54 @@
+# Genera las secciones nuevas de CHANGELOG.md a partir de los commits (git-cliff).
+#
+#   uvx git-cliff --unreleased                                        ver lo que entraría en la próxima versión
+#   uvx git-cliff --unreleased --tag v0.1.30-web --prepend CHANGELOG.md   añadir su sección al principio
+#
+# Las secciones ya escritas no se regeneran: se pueden retocar a mano. Cómo se publica una versión
+# y cómo escribir los commits para que salgan bien: docs/web/versiones.md.
+
+[changelog]
+header = "# Changelog\n\n"
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Sin publicar]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim }}
+{% for commit in commits %}\
+- {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | split(pat="\n") | first | trim | upper_first }}
+{% endfor %}\
+{% endfor %}
+"""
+trim = false
+
+[git]
+conventional_commits = true
+filter_unconventional = false  # los commits sin prefijo también cuentan (ver commit_parsers)
+split_commits = false
+tag_pattern = "v[0-9].*"
+sort_commits = "oldest"
+# El orden de las secciones lo da el comentario HTML (se quita al escribir: `striptags`).
+commit_parsers = [
+  # No aportan nada al lector.
+  { message = '(?i)^merge (branch|pull request|remote)', skip = true },
+  { message = '(?i)^versi[oó]n (web )?[0-9]', skip = true },
+  # Con prefijo (feat:, fix:…): la forma recomendada.
+  { message = '^feat(\(.*\))?!?:', group = "<!-- 0 -->Added" },
+  { message = '^refactor(\(.*\))?!?:', group = "<!-- 1 -->Changed" },
+  { message = '^fix(\(.*\))?!?:', group = "<!-- 2 -->Fixed" },
+  { message = '^perf(\(.*\))?!?:', group = "<!-- 3 -->Performance" },
+  { message = '^security(\(.*\))?!?:', group = "<!-- 4 -->Security" },
+  { message = '^docs?(\(.*\))?!?:', group = "<!-- 5 -->Documentation" },
+  { message = '^tests?(\(.*\))?!?:', group = "<!-- 6 -->Tests" },
+  { message = '^(chore|ci|build|style)(\(.*\))?!?:', group = "<!-- 7 -->Maintenance" },
+  # Sin prefijo: por cómo empieza la frase o por lo que dice su primera línea.
+  { message = '(?i)^(corregi|correcci|arregl|soluci|repar)', group = "<!-- 2 -->Fixed" },
+  { message = '(?i)^[^\n]*seguridad', group = "<!-- 4 -->Security" },
+  { message = '(?i)^[^\n]*(readme|documentaci|docuemntaci|\bgif\b)', group = "<!-- 5 -->Documentation" },
+  { message = '(?i)^(refactor|cambi|mejor|actualiz|migra|optimiz|elimin|borra|quita|limpi)', group = "<!-- 1 -->Changed" },
+  { message = '(?i)^(implement|añad|agreg|se añad|nuev|soporte)', group = "<!-- 0 -->Added" },
+  { message = '(?i)^(prueba|test)', group = "<!-- 6 -->Tests" },
+  { message = '.*', group = "<!-- 8 -->Other" },
+]

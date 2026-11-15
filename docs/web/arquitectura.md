@@ -11,6 +11,30 @@ uv run python -m app.main --debug    # con herramientas de desarrollo (F12)
 
 Hacen falta Node.js y pnpm para compilar la interfaz; ver [svelte.md](svelte.md).
 
+> Este documento es la referencia: la estructura y las reglas. Para ver **cómo se mueve todo** (quién
+> llama a quién y en qué orden, con diagramas), empieza por [como-funciona.md](como-funciona.md).
+
+```mermaid
+flowchart LR
+    subgraph V["Ventana (WebView2)"]
+        UI["Interfaz Svelte<br/>app/ui/src"]
+        EP["EmbedPDF<br/>dibuja y edita el PDF del visor"]
+        UI <--> EP
+    end
+    subgraph P["Proceso de Python"]
+        SV["Servicios<br/>app/backend/services"]
+        CORE["pdf_core<br/>src/pdf_core"]
+        HOST["WebviewHost<br/>app/host.py"]
+        SV --> CORE
+        SV --> HOST
+    end
+    UI -- "call('servicio.metodo')" --> SV
+    HOST -- "emit('evento')" --> UI
+    UI <-. "datos grandes, en binario<br/>(ByteServer, 127.0.0.1)" .-> HOST
+    CORE <--> DISK[("Archivos")]
+    HOST <--> DISK
+```
+
 ## Estructura
 
 ```
@@ -56,6 +80,8 @@ La lógica de PDF está en `src/pdf_core/` (motores de combinar, extraer, seguri
 anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [modulos-python.md](modulos-python.md).
 
 ## Cómo se comunican
+
+Con diagramas de secuencia: [como-funciona.md](como-funciona.md), secciones 3, 4 y 11.
 
 - **JS → Python:** `await call('merge.toggle', id, pagina)`. Solo se pueden llamar métodos
   marcados con `@exposed` de un servicio registrado. Errores previstos: `raise UserError("mensaje")`

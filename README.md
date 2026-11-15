@@ -22,8 +22,12 @@ docs/web/       documentación de la versión web
 
 La interfaz llama a los servicios de Python con `call('servicio.metodo', ...)`. EmbedPDF dibuja las
 páginas y edita las anotaciones en la ventana; Python guarda el archivo y hace lo pesado (operaciones
-de página, OCR, censura, IA, combinar y seguridad). Detalle en
-[docs/web/arquitectura.md](docs/web/arquitectura.md).
+de página, OCR, censura, IA, combinar y seguridad).
+
+- **[Cómo funciona, paso a paso](docs/web/como-funciona.md)**: diagramas de cada flujo (arranque,
+  abrir, guardar, OCR, censura, la versión de navegador…). El mejor sitio para empezar.
+- [Arquitectura y reglas](docs/web/arquitectura.md) y el resto de la
+  [documentación técnica](docs/web/README.md).
 
 ## Características
 
@@ -70,9 +74,9 @@ orientación. El texto reconocido se puede seleccionar, buscar, censurar y expor
 Chat sobre el documento, resumen, datos clave y detección de datos sensibles (que se envían a
 Censura). Sin clave de API responde en modo básico.
 
-> ⚠️ El agente de IA está **en fase de pruebas** y todavía no está probado del todo. Sus
-> dependencias no se instalan por defecto (están comentadas en `pyproject.toml`); sin ellas solo
-> funciona el modo básico.
+> ⚠️ El agente de IA está **en fase de pruebas** y todavía no está probado del todo. Necesita un
+> proveedor configurado en el panel del asistente (Gemini u OpenAI con su clave de API, o una IA local como Ollama);
+> sin él solo funciona el modo básico.
 
 ### 📄 Combinar PDF
 Une varios PDF eligiendo, girando y reordenando las páginas, con vista previa del resultado.
@@ -98,7 +102,7 @@ probado del todo con uso real:
 
 | Aspecto | Estado |
 |---|---|
-| **Agente de IA** | En pruebas, no probado del todo. Sin sus dependencias (comentadas en `pyproject.toml`) ni clave de API responde en modo básico |
+| **Agente de IA** | En pruebas, no probado del todo. Sin un proveedor configurado (clave de API o IA local) responde en modo básico |
 | **Censura con marcas** | Nueva: las marcas se revisan en la página y Python las aplica. Conviene revisar el resultado antes de compartir la copia censurada |
 | **Deshacer operaciones de página** | Nuevo: Ctrl+Z / Ctrl+Y sobre girar, mover, insertar, duplicar y eliminar páginas, junto con las anotaciones |
 | **Anotaciones** | Edición con EmbedPDF (mover, redimensionar, orden, texto libre). Probadas en pruebas automáticas, falta uso real con PDF variados |
@@ -143,6 +147,12 @@ detalles en [docs/web/svelte.md](docs/web/svelte.md).
 El instalador necesita Inno Setup 6. En GitHub lo genera el workflow `build-web.yml` al subir una
 etiqueta `v*-web` (por ejemplo `v0.1.29-web`). Detalle en
 [docs/web/instalador.md](docs/web/instalador.md).
+
+## Versiones
+
+Los cambios de cada versión están en [CHANGELOG.md](CHANGELOG.md). Su sección se genera a partir de
+los commits (`uv run python installer/changelog.py add`) y es también el texto de la Release de GitHub.
+Cómo publicar una versión y cómo escribir los commits: [docs/web/versiones.md](docs/web/versiones.md).
 
 
 ## Versión Flet
