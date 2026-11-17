@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 
 # Versión de la app (la del instalador). Va aparte de pyproject.toml, que solo admite versiones
-# PEP 440: «-web» marca la versión de prueba.
-APP_VERSION = "0.1.30-web"
+# PEP 440. Formato: «X.Y.Z-beta-web» en pruebas, «X.Y.Z-web» estable (docs/web/versiones.md).
+APP_VERSION = "0.1.30-beta-web"
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
 SRC_DIR: Path = PROJECT_ROOT / "src"

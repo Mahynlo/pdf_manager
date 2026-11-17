@@ -5,7 +5,7 @@ extracción por palabras clave, combinación y seguridad.
 
 ![Visor PDF](docs/web/imagenes/visor.png)
 
-> **Versión web 0.1.30-web: segunda versión de pruebas.** La interfaz ahora usa tecnología web
+> **Versión web 0.1.30-beta-web: segunda versión de pruebas (beta).** La interfaz ahora usa tecnología web
 > (Svelte) dentro de una ventana de escritorio (pywebview + WebView2), con el backend en Python. Todo
 > el trabajo con PDF usa un solo motor, PDFium (licencia Apache/BSD). **La última versión estable
 > sigue siendo la 0.1.28** (Flet), que queda en la rama `Flet`. Ver [docs/README.md](docs/README.md).
@@ -98,7 +98,7 @@ encontradas.
 
 ## 🧪 Qué está en fase de pruebas
 
-La 0.1.30-web es la **segunda versión de pruebas** (la primera fue la 0.1.29-web). Funciona en
+La 0.1.30-beta-web es la **segunda versión de pruebas** (la primera fue la 0.1.29-web). Funciona en
 general y pasa las pruebas automáticas, pero cambió mucho por dentro: el visor ahora es dueño del
 documento y PyMuPDF se sustituyó por PDFium. Para trabajo importante, usa la 0.1.28 o guarda una
 copia del PDF antes de editarlo.
@@ -166,7 +166,7 @@ detalles en [docs/web/svelte.md](docs/web/svelte.md).
 ```
 
 El instalador necesita Inno Setup 6. En GitHub lo genera el workflow `build-web.yml` al subir una
-etiqueta `v*-web` (por ejemplo `v0.1.30-web`). Detalle en
+etiqueta `v*-web` (por ejemplo `v0.1.30-beta-web`). Detalle en
 [docs/web/instalador.md](docs/web/instalador.md).
 
 ## Versiones

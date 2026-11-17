@@ -3,7 +3,8 @@ name: Build & Package Web Installer
 # Versión web (app/: Svelte + pywebview/WebView2), ver docs/web/instalador.md.
 #
 # Dispara el workflow:
-#   - Al hacer push de un tag vX.Y.Z-web → compila + crea Release (prerelease) en GitHub, con la
+#   - Al hacer push de un tag vX.Y.Z-web o vX.Y.Z-beta-web → compila + crea Release en GitHub
+#     (prerelease si la versión lleva «-beta»), con la
 #     sección de esa versión de CHANGELOG.md como notas (si falta, falla antes de compilar)
 #   - Manualmente desde la UI de GitHub (Actions → Run workflow) → solo el artefacto
 # La versión es APP_VERSION de app/__init__.py; el tag tiene que coincidir con ella.
@@ -108,14 +109,15 @@ jobs:
           path: dist/ExtraerPDFs_Web_Setup_*.exe
           if-no-files-found: error
 
-      # ── 8. Release en GitHub (solo con tag): siempre prerelease (prueba) ───
+      # ── 8. Release en GitHub (solo con tag): «-beta» en la versión → prerelease ───
+      # vX.Y.Z-beta-web → prerelease (pruebas); vX.Y.Z-web → versión normal (docs/web/versiones.md)
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "v${{ steps.version.outputs.VERSION }}"
-          name: "Extraer PDFs v${{ steps.version.outputs.VERSION }} (versión web, prueba)"
+          name: "Extraer PDFs v${{ steps.version.outputs.VERSION }} (versión web)"
           files: dist/ExtraerPDFs_Web_Setup_*.exe
           body_path: release_notes.md
           draft: false
-          prerelease: true
+          prerelease: ${{ contains(steps.version.outputs.VERSION, '-beta') }}

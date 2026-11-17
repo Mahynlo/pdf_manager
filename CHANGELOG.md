@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.30-web] - 2026-11-17
+## [0.1.30-beta-web] - 2026-11-17
 
 Segunda versión de pruebas de la versión web. **La última versión estable sigue siendo la 0.1.28**
 (Flet). Esta sirve para probar con uso real los cambios grandes de abajo antes de una versión

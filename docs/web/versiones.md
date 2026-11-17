@@ -6,11 +6,32 @@ Cómo se publica una versión y cómo se escribe `CHANGELOG.md` sin hacerlo a ma
 
 ```powershell
 uv run python installer/changelog.py preview   # qué entraría en la próxima versión
-# 1. subir APP_VERSION en app/__init__.py (p. ej. "0.1.30-web")
+# 1. subir APP_VERSION en app/__init__.py (p. ej. "0.1.31-beta-web")
 uv run python installer/changelog.py add       # añade su sección a CHANGELOG.md
 # 2. revisar la sección (se puede retocar a mano) y subirla con el cambio de versión
-git tag v0.1.30-web
-git push origin v0.1.30-web                     # GitHub compila y publica la Release
+git tag -a v0.1.31-beta-web -m "Versión web 0.1.31 beta"
+git push origin v0.1.31-beta-web                # GitHub compila y publica la Release
+```
+
+## Nombres de versión
+
+| Versión | Qué es | Release en GitHub |
+|---|---|---|
+| `X.Y.Z-beta-web` (p. ej. `0.1.30-beta-web`) | De pruebas | *Pre-release*: GitHub no la muestra como la última |
+| `X.Y.Z-web` (p. ej. `0.1.31-web`) | Estable | Versión normal (*Latest*) |
+
+Lo decide el propio nombre: el workflow marca como *pre-release* toda versión que lleve `-beta`. La
+etiqueta es siempre `v` + `APP_VERSION`, y tiene que acabar en `-web` para que se dispare el workflow.
+
+Si la etiqueta no coincide con `APP_VERSION`, el workflow falla antes de compilar («El tag … no
+coincide con APP_VERSION») y no se publica nada. Se arregla así: corregir `APP_VERSION` (y el título de
+la sección de `CHANGELOG.md`), hacer commit, borrar la etiqueta y volver a crearla sobre el commit nuevo:
+
+```powershell
+git tag -d v0.1.30-beta-web                     # borrarla en local
+git push origin :refs/tags/v0.1.30-beta-web     # borrarla en GitHub
+git tag -a v0.1.30-beta-web -m "Versión web 0.1.30 beta"
+git push origin v0.1.30-beta-web
 ```
 
 ## Qué pasa en cada paso

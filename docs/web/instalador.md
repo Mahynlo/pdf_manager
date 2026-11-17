@@ -61,8 +61,8 @@ El instalador registra:
 
 `.github/workflows/build-web.yml` hace lo mismo en un runner de Windows (con Inno Setup, que allí sí
 se instala):
-- **tag `vX.Y.Z-web`** (p. ej. `v0.1.30-web`): compila, sube el instalador como artefacto y crea
-  una Release marcada como prerelease. El tag tiene que coincidir con `APP_VERSION`, y `CHANGELOG.md`
+- **tag `vX.Y.Z-web`** (p. ej. `v0.1.30-beta-web`): compila, sube el instalador como artefacto y crea
+  una Release (prerelease si la versión lleva `-beta`, ver [versiones.md](versiones.md#nombres-de-versión)). El tag tiene que coincidir con `APP_VERSION`, y `CHANGELOG.md`
   tiene que tener la sección de esa versión (son las notas de la Release): si no, falla antes de
   compilar. Ver [versiones.md](versiones.md);
 - **Actions → Run workflow**: solo el artefacto, sin Release.

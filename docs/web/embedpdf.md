@@ -750,7 +750,7 @@ censura busca también en la copia).
 ## Un solo motor
 
 Todo usa PDFium: el de EmbedPDF en la ventana y `pypdfium2` en Python (`pdf_core/pdf.py`). Antes Python
-usaba PyMuPDF, con licencia AGPL, y había dos motores. Se retiró en la 0.1.30-web.
+usaba PyMuPDF, con licencia AGPL, y había dos motores. Se retiró en la 0.1.30-beta-web.
 
 **Reparto:**
 - **El documento del visor es de EmbedPDF**: lo edita (anotaciones, páginas, censura) y saca sus
