@@ -5,10 +5,10 @@ extracción por palabras clave, combinación y seguridad.
 
 ![Visor PDF](docs/web/imagenes/visor.png)
 
-> **Versión web 0.1.29-web (en pruebas).** La interfaz ahora usa tecnología web (Svelte) dentro de
-> una ventana de escritorio (pywebview + WebView2), con el backend en Python. Todo el trabajo con
-> PDF usa un solo motor, PDFium (licencia Apache/BSD). La versión **Flet** se retiró: la 0.1.28 fue
-> la última y queda en la rama `Flet`. Ver [docs/README.md](docs/README.md).
+> **Versión web 0.1.30-web: segunda versión de pruebas.** La interfaz ahora usa tecnología web
+> (Svelte) dentro de una ventana de escritorio (pywebview + WebView2), con el backend en Python. Todo
+> el trabajo con PDF usa un solo motor, PDFium (licencia Apache/BSD). **La última versión estable
+> sigue siendo la 0.1.28** (Flet), que queda en la rama `Flet`. Ver [docs/README.md](docs/README.md).
 
 ## Arquitectura
 
@@ -20,9 +20,10 @@ installer/web/  ejecutable (PyInstaller) e instalador (Inno Setup)
 docs/web/       documentación de la versión web
 ```
 
-La interfaz llama a los servicios de Python con `call('servicio.metodo', ...)`. EmbedPDF dibuja las
-páginas y edita las anotaciones en la ventana; Python guarda el archivo y hace lo pesado (operaciones
-de página, OCR, censura, IA, combinar y seguridad).
+La interfaz llama a los servicios de Python con `call('servicio.metodo', ...)`. EmbedPDF es dueño
+del documento abierto en el visor: dibuja las páginas y edita anotaciones, páginas y censura en la
+ventana. Python lee y escribe los archivos y hace lo que EmbedPDF no puede (OCR, IA, orientación del
+escaneo) y las herramientas de archivos (combinar, extraer y seguridad).
 
 - **[Cómo funciona, paso a paso](docs/web/como-funciona.md)**: diagramas de cada flujo (arranque,
   abrir, guardar, OCR, censura, la versión de navegador…). El mejor sitio para empezar.
@@ -97,18 +98,38 @@ encontradas.
 
 ## 🧪 Qué está en fase de pruebas
 
-La 0.1.29-web es una versión de prueba. Funciona en general, pero estas partes todavía no se han
-probado del todo con uso real:
+La 0.1.30-web es la **segunda versión de pruebas** (la primera fue la 0.1.29-web). Funciona en
+general y pasa las pruebas automáticas, pero cambió mucho por dentro: el visor ahora es dueño del
+documento y PyMuPDF se sustituyó por PDFium. Para trabajo importante, usa la 0.1.28 o guarda una
+copia del PDF antes de editarlo.
 
-| Aspecto | Estado |
+Qué conviene probar con uso real:
+
+| Aspecto | Qué probar |
 |---|---|
-| **Agente de IA** | En pruebas, no probado del todo. Sin un proveedor configurado (clave de API o IA local) responde en modo básico |
-| **Censura con marcas** | Nueva: las marcas se revisan en la página y Python las aplica. Conviene revisar el resultado antes de compartir la copia censurada |
-| **Deshacer operaciones de página** | Nuevo: Ctrl+Z / Ctrl+Y sobre girar, mover, insertar, duplicar y eliminar páginas, junto con las anotaciones |
-| **Anotaciones** | Edición con EmbedPDF (mover, redimensionar, orden, texto libre). Probadas en pruebas automáticas, falta uso real con PDF variados |
-| **Imprimir** | Nueva: el diálogo de WebView2 con el PDF y sus anotaciones. Falta probar con distintas impresoras |
-| **Sellos y firmas** | Nuevos (EmbedPDF): sellos estándar, de texto y propios, y firmas guardables. Probados en pruebas automáticas, falta uso real |
-| **Instalador** | Probados la instalación, «Abrir con» y el OCR. Falta más uso en otros equipos |
+| **Abrir y guardar** | PDF variados (escaneados, de Word, grandes, con contraseña, con formularios). Guardar, «Guardar como» y volver a abrir: que no falte nada y que la contraseña se conserve |
+| **Páginas** | Girar, mover (también arrastrando miniaturas), insertar, duplicar, eliminar y extraer, con Ctrl+Z / Ctrl+Y en medio, y guardar al final |
+| **Anotaciones, sellos y firmas** | Crearlas, editarlas, guardarlas y abrir el PDF en otro lector (Edge, Acrobat) para ver que se ven igual |
+| **Censura** | Marcar, aplicar y guardar la copia; comprobar en otro lector que el texto tapado ya no se puede copiar ni buscar (tampoco el del OCR) |
+| **OCR** | Página, área y documento entero en escaneos reales; corregir orientación; buscar y exportar el texto reconocido |
+| **Imprimir** | Distintas impresoras y «Microsoft Print to PDF», con anotaciones y páginas giradas |
+| **Asistente IA** | Con Gemini u OpenAI (clave de API) o con una IA local (Ollama, LM Studio). Sin proveedor responde en modo básico |
+| **Combinar, Extraer y Seguridad** | Los diálogos de Windows para elegir archivos y carpetas, el progreso y los PDF que generan |
+| **Sistema** | Instalar sobre la 0.1.29-web, «Abrir con», arrastrar PDF desde el Explorador, varias pestañas y reordenarlas, ventana pequeña |
+
+Ya se sabe que:
+
+- Imprimir ya no tiene orden inverso ni orientación automática por página (lo hace ahora el diálogo de Windows).
+- El instalador no está firmado: Windows SmartScreen puede avisar al instalarlo («Más información» → «Ejecutar de todas formas»).
+
+### Cómo avisar de un fallo
+
+Abre un [issue](https://github.com/Mahynlo/pdf_manager/issues) con:
+
+1. qué hiciste, qué esperabas y qué pasó (una captura ayuda);
+2. la versión (se ve en **Ajustes**);
+3. el registro de la app, `%USERPROFILE%\.pdf_manager\app.log` (o en **Ajustes → Ver Registro de Diagnóstico…**);
+4. si se puede, el PDF que falla (o uno parecido sin datos privados).
 
 ## Instalación
 
@@ -145,7 +166,7 @@ detalles en [docs/web/svelte.md](docs/web/svelte.md).
 ```
 
 El instalador necesita Inno Setup 6. En GitHub lo genera el workflow `build-web.yml` al subir una
-etiqueta `v*-web` (por ejemplo `v0.1.29-web`). Detalle en
+etiqueta `v*-web` (por ejemplo `v0.1.30-web`). Detalle en
 [docs/web/instalador.md](docs/web/instalador.md).
 
 ## Versiones

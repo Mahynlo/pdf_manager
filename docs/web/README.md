@@ -1,8 +1,8 @@
 # Versión web
 
 Interfaz en **Svelte** (`app/ui`, compilada con Vite) y backend en **Python**, unidos por pywebview
-(WebView2 en Windows). El visor dibuja los PDF con **EmbedPDF** (motor PDFium en el navegador). Es la versión que se publica desde la 0.1.29-web (en pruebas); Flet queda descartada (la 0.1.28
-fue su última versión). Las funciones se trajeron desde la versión Qt, ya retirada.
+(WebView2 en Windows). El visor dibuja los PDF con **EmbedPDF** (motor PDFium en el navegador). Es la versión que se publica desde la 0.1.29-web; la 0.1.30-web es la segunda versión de pruebas y la última estable sigue siendo la 0.1.28,
+la última de Flet (ya descartada). Las funciones se trajeron desde la versión Qt, ya retirada.
 
 ```
 uv run python -m app.main            # arrancar (recompila la interfaz si cambió)
@@ -66,7 +66,7 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
 
 ### Pendiente
 
-- **Pruebas de la 0.1.29-web**: uso real del instalador antes de darla por estable.
+- **Pruebas de la 0.1.30-web** (segunda versión de pruebas): uso real del visor, ahora dueño del documento, y del instalador antes de sacar una versión estable.
 - **Asistente IA con agente**: en fase de pruebas, no está probado del todo. Sin un proveedor
   configurado (clave de API o IA local) responde en modo básico.
 - **En pruebas con uso real**: censura con marcas, deshacer las operaciones de página, anotaciones,
