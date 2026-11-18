@@ -114,8 +114,8 @@ Se lanzan sin shell y con listas de argumentos. «Mostrar en carpeta» usa la ru
 - Python y el OCR corren en *workers*: el wasm de cada uno, en su propio espacio.
 - La página tiene que estar aislada (COOP/COEP) para que Python tenga memoria compartida
   (`lib/browser/protocol.ts`).
-- **Al publicarla**, el servidor debería enviar estas cabeceras (`pnpm preview:web` ya lo hace, en
-  `vite.config.ts`): `Cross-Origin-Opener-Policy: same-origin`,
+- **Al publicarla**, el servidor debe enviar estas cabeceras (`pnpm preview:web` las envía desde
+  `vite.config.ts`, y Netlify desde [`netlify.toml`](../../netlify.toml)): `Cross-Origin-Opener-Policy: same-origin`,
   `Cross-Origin-Embedder-Policy: require-corp`, `X-Content-Type-Options: nosniff`,
   `Referrer-Policy: no-referrer` y, si puede, la misma CSP como cabecera con
   `frame-ancestors 'none'` (contra que otra web la meta en un marco; desde `<meta>` no se puede).
@@ -137,7 +137,6 @@ Se lanzan sin shell y con listas de argumentos. «Mostrar en carpeta» usa la ru
 | **picomatch ≤4.0.7**, ReDoS ([GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf), alto) | Solo lo usan Vite y svelte-check al compilar, con patrones escritos por nosotros; no va dentro de la app (ni en `dist` ni en `dist-web`). No hay versión corregida. Se ignora solo ese aviso en `app/ui/pnpm-workspace.yaml` (`auditConfig.ignoreGhsas`), así que `pnpm audit` sigue fallando con cualquier otro aviso alto | Cuando salga picomatch 4.0.8: quitarlo de `ignoreGhsas` y actualizar |
 | `style-src 'unsafe-inline'` en la CSP | Svelte y EmbedPDF ponen estilos en atributos `style`. Un estilo no ejecuta código | Si Svelte deja de necesitarlo |
 | La clave de API, en claro dentro del navegador (IndexedDB) | No hay almacén del sistema en una web; en el navegador el asistente funciona en modo básico (sin proveedor) | Si el navegador llega a usar un proveedor de IA |
-| En GitHub Pages, sin `frame-ancestors` | No se pueden poner cabeceras. La app no tiene acciones de servidor que otra web pudiera provocar | Si se publica en un servidor con cabeceras |
 | PDFium en el proceso de Python (escritorio) | No hay alternativa sin aislar en otro proceso; se mantiene actualizado (`pypdfium2`) | Con cada versión de `pypdfium2` |
 
 ## Pendiente (recomendado)
