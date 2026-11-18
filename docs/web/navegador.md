@@ -43,7 +43,7 @@ y lo despierta ([`protocol.ts`](../../app/ui/src/lib/browser/protocol.ts)). `pos
 para la respuesta, porque un worker bloqueado no recibe mensajes.
 
 La memoria compartida exige que la página esté aislada: el servidor tiene que enviar estas cabeceras
-(`pnpm preview:web` y `pnpm dev:web` ya lo hacen):
+(`pnpm preview:web`, `pnpm dev:web` y [`netlify.toml`](../../netlify.toml) ya lo hacen):
 
 ```
 Cross-Origin-Opener-Policy: same-origin
@@ -94,7 +94,7 @@ el escritorio no se usa: la dirección no se ve.
 - Cerrar una pestaña sustituye su entrada del historial en vez de añadir otra.
 - Por eso la web se compila desde la raíz (`base: '/'` en `vite.config.ts`) y **el servidor tiene que
   devolver `index.html` en cualquier dirección** (`pnpm preview:web` y `pnpm dev:web` ya lo hacen; en
-  Netlify, `/* /index.html 200` en `_redirects`; Cloudflare Pages lo hace solo). Para servirla en una
+  Netlify, la regla `[[redirects]]` de `netlify.toml`; Cloudflare Pages lo hace solo). Para servirla en una
   subcarpeta hay que cambiar `base`.
 
 ### Pantalla de carga
@@ -133,9 +133,35 @@ Pyodide, numpy y los demás se sirven desde la propia web, sin CDN en tiempo de 
 
 La primera visita baja unos 16 MB comprimidos (después salen de la caché del navegador), y el OCR, otros 34 MB la primera vez que se usa.
 
+## Publicar en Netlify
+
+Se publica en [Netlify](https://www.netlify.com), que deja poner las cabeceras COOP y COEP (GitHub
+Pages no). Toda la configuración está en [`netlify.toml`](../../netlify.toml), en la raíz del repositorio:
+
+| Qué | Cómo |
+|---|---|
+| Compilar | Desde `app/ui`: `prepare.py` (solo usa la biblioteca estándar, así que no hace falta uv) y `vite build --mode browser`. Es lo mismo que `pnpm build:web` |
+| Publicar | La carpeta `app/ui/dist-web` |
+| Herramientas | Node 24 y pnpm 11.22.0 (`NODE_VERSION`, `PNPM_VERSION`); Netlify ejecuta `pnpm install` con `pnpm-lock.yaml` |
+| Rutas | `/*` → `/index.html` (200): `/ver/…`, `/ajustes`… cargan la app (`shell/router.ts`). Solo se aplica si no existe un archivo con ese nombre |
+| Cabeceras | COOP/COEP, `nosniff`, `no-referrer`, `frame-ancestors 'none'` y `X-Frame-Options: DENY`; `assets/` en caché para siempre (llevan un hash en el nombre) |
+
+### Conectarla la primera vez
+
+1. En Netlify: **Add new project → Import an existing project → GitHub** y elegir el repositorio.
+2. Netlify lee `netlify.toml`: no hay que escribir nada en los campos de compilación.
+3. En **Project configuration → Build & deploy → Branches**, la rama de producción (`main`). Cada pull
+   request recibe además su propia dirección de prueba (*deploy preview*).
+4. **Deploy**. La primera compilación tarda unos minutos (baja Pyodide, numpy y pypdfium2).
+
+### Comprobarla
+
+- En la consola del navegador, `crossOriginIsolated` tiene que dar `true`; si da `false`, no llegan las
+  cabeceras y Python no arranca.
+- Abrir un PDF, buscar, el OCR, Combinar y Proteger, y recargar en una ruta (`/ajustes`).
+- En local, lo mismo que en Netlify: `pnpm build:web && pnpm preview:web` (puerto 5174).
+
 ## Pendiente
 
-- **Publicarla.** GitHub Pages no deja poner las cabeceras COOP y COEP: haría falta un service worker
-  que las añada, o usar Cloudflare Pages o Netlify, que sí las admiten.
 - **Probar en Firefox y Safari**, que no se han probado, e imprimir en un navegador real.
 - **Funcionar sin conexión** (PWA) y recordar los archivos recientes en Chrome y Edge.

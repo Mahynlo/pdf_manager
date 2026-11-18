@@ -1,0 +1,44 @@
+# Versión de navegador en Netlify (docs/web/navegador.md, «Publicar en Netlify»).
+# Netlify lee este archivo al compilar cada push del repositorio conectado.
+
+[build]
+  base = "app/ui"
+  publish = "dist-web"
+  # prepare.py (solo biblioteca estándar) deja Pyodide, los wheels, el OCR y backend.zip en
+  # public-web/; después Vite compila a dist-web/. Es `pnpm build:web` sin uv.
+  command = "python3 ../../installer/browser/prepare.py && pnpm exec vite build --mode browser"
+
+[build.environment]
+  NODE_VERSION = "24"
+  PNPM_VERSION = "11.22.0"
+
+# Cualquier dirección de la app (/ver/contrato.pdf, /ajustes…: shell/router.ts) carga index.html.
+# Netlify solo la aplica si no existe un archivo con ese nombre.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # Aislar la página: sin esto no hay memoria compartida y Python no arranca (navegador.md).
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Embedder-Policy = "require-corp"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
+    # La CSP completa va en <meta> (app/ui/csp.ts). frame-ancestors solo vale como cabecera; dos
+    # políticas se suman, así que esta solo añade que ninguna web meta la app en un marco.
+    Content-Security-Policy = "frame-ancestors 'none'"
+    X-Frame-Options = "DENY"
+
+# Los archivos de assets/ llevan un hash en el nombre: no cambian nunca.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*.mjs"
+  [headers.values]
+    Content-Type = "text/javascript; charset=utf-8"
