@@ -1,5 +1,58 @@
 # Changelog
 
+## [0.1.30-beta-web] - 2026-11-17
+
+Segunda versión de pruebas de la versión web. **La última versión estable sigue siendo la 0.1.28**
+(Flet). Esta sirve para probar con uso real los cambios grandes de abajo antes de una versión
+estable; qué conviene probar y cómo avisar de un fallo: ver el
+[README](README.md#-qué-está-en-fase-de-pruebas).
+
+### Added
+- **Sellos y firmas** en el visor: sellos estándar, sellos de texto editables, sellos propios (imágenes guardadas) y firmas dibujadas, que se pueden guardar o usar solo en la sesión.
+- **Asistente IA con proveedores**: Gemini u OpenAI con su clave de API, o una IA local (Ollama, LM Studio…) con su dirección y modelo. Lee todo el documento (no solo las primeras páginas) y el panel es un chat con acciones rápidas (resumen, datos clave, datos sensibles).
+- **Pestañas reordenables**: se arrastran con el ratón o con el dedo; Ctrl+Mayús+RePág/AvPág las mueve con el teclado.
+- **Diseño adaptable**: la ventana se adapta a anchos pequeños (desde 420 px) y a pantallas grandes; los controles que no caben pasan a menús.
+- **Versión para navegador** (Pyodide): el mismo código en una página web. Todavía no está publicada.
+
+### Changed
+- **Un solo motor de PDF**: todo usa PDFium (`pypdfium2` en Python y EmbedPDF en la ventana); se retiró PyMuPDF (licencia AGPL).
+- **El visor es dueño del documento**: girar, mover, insertar, duplicar y eliminar páginas, guardar, imprimir y el texto del OCR se hacen en el visor sin recargar el PDF. Más rápido y con menos memoria en documentos grandes.
+- **Imprimir** usa el diálogo de impresión de Windows (WebView2): vista previa, impresora, copias, doble cara, en vectorial. Ya no hay orden inverso ni orientación automática por página.
+- **Censura**: las marcas también borran el texto reconocido por OCR.
+- La interfaz pasó a TypeScript y todos sus textos están en un catálogo (`app/ui/src/texts/es`).
+
+### Security
+- Política de seguridad de contenido (CSP), la ventana no navega fuera de la app y los enlaces externos pasan por un único filtro.
+- Las claves de API se guardan cifradas con DPAPI de Windows (las que estaban en texto plano se migran solas) y nunca salen en los mensajes de error.
+- La instancia única ya no usa `pickle` y el servidor interno de bytes solo responde a su propia dirección.
+
+### Documentation
+- Arquitectura con diagramas (`docs/web/arquitectura.md`, `docs/web/como-funciona.md`), seguridad (`docs/web/seguridad.md`), versión de navegador y diseño adaptable.
+
+## [0.1.29-web] - 2026-10-30
+
+Primera versión web, en pruebas. Sustituye a la versión Flet, cuya última versión es la 0.1.28
+(rama `Flet`). Qué está todavía en pruebas: ver el [README](README.md#-qué-está-en-fase-de-pruebas).
+
+### Changed
+- **Nueva interfaz web**: Svelte dentro de una ventana de escritorio (pywebview + WebView2), con el backend en Python (`app/`). Ver [docs/web](docs/web/README.md).
+- **Instalador propio** (`ExtraerPDFs_Web_Setup_<versión>.exe`), que puede convivir con el de la versión Flet.
+- Más escalas de zoom, mejoras visuales en los botones de cerrar pestaña y pantalla de inicio (*splash*).
+
+### Documentation
+- Documentación de la versión web (`docs/web/`), capturas y GIF de muestra en el README.
+
+## [0.1.28] - 2026-06-23
+
+Última versión con Flet.
+
+### Changed
+- Los archivos de ayuda se leen también en la app instalada (producción).
+- Limpieza de librerías que ya no se usaban.
+
+### Documentation
+- Manuales de usuario de la pestaña «Ayuda».
+
 ## [0.1.27-Parte_1] - 2026-06-20
 
 ### Added

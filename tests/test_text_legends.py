@@ -1,11 +1,11 @@
-"""Tests para `pdf_viewer._text_legends` — persistencia de leyendas (textos).
+"""Tests para `pdf_core.legends` — persistencia de leyendas (textos).
 
 Se aísla el archivo JSON con un tmp_path por test para no tocar el del usuario.
 """
 from __future__ import annotations
 
-import pdf_viewer._text_legends as legends_mod
-from pdf_viewer._text_legends import LegendManager, TextLegend
+import pdf_core.legends as legends_mod
+from pdf_core.legends import LegendManager, TextLegend
 
 
 def _mgr(tmp_path, monkeypatch) -> LegendManager:
@@ -138,7 +138,7 @@ def test_bump_usage_increments_and_persists(tmp_path, monkeypatch):
 
 def test_most_used_orders_by_count(tmp_path, monkeypatch):
     mgr = _mgr(tmp_path, monkeypatch)
-    a = mgr.create("A", "a")
+    mgr.create("A", "a")
     b = mgr.create("B", "b")
     c = mgr.create("C", "c")
     for _ in range(3):

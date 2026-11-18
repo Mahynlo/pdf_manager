@@ -8,21 +8,16 @@ authors = [
     { name = "Malcom Navarro", email = "you@example.com" }
 ]
 dependencies = [
-  "flet[all]==0.28.3",
-  #"langchain>=0.3.28",
-  #"langchain-community>=0.3.31",
-  #"langchain-google-genai>=2.1.12",
-  #"langchain-openai>=0.3.35",
   "markdown-it-py>=4.0",
   "numpy>=2.0",
   # OCR: modelos de PaddleOCR (src/assets/ocr_models) con onnxruntime y NumPy.
   # Sin onnxtr ni OpenCV/SciPy (~200 MB menos en el ejecutable): ver pdf_core/ocr/paddle.py.
   "onnxruntime>=1.20.1",
+  # Asistente IA: el cliente oficial de la API de OpenAI, que también hablan Gemini y los
+  # servidores locales (Ollama, LM Studio…). Ver pdf_core/agent/providers.py.
+  "openai>=3.45,<4",
   "pydantic>=2.12.5",
-  "pymupdf>=1.26.5",
-  #"pymupdf4llm>=0.0.27",
-  "pyside6>=6.10.3",
-  "pytest-qt>=4.5.0",
+  "pypdfium2>=5.14",
   "python-dotenv>=1.2.1",
   # NOTA: pywin32 se eliminó del empaquetado (~17 MB). No se importa en ningún
   # sitio: el único uso de Win32 (GetCommandLineW en main._win32_cmdline_args)
@@ -31,66 +26,35 @@ dependencies = [
   "pywebview>=6.2",
 ]
 
-[tool.flet]
-# org name in reverse domain name notation, e.g. "com.mycompany".
-# Combined with project.name to build bundle ID for iOS and Android apps
-org = "com.mycompany"
-
-# project display name that is used as an app title on Android and iOS home screens,
-# shown in window titles and about app dialogs on desktop.
-product = "extraer-pdfs"
-
-# company name to display in about app dialogs
-company = "Flet"
-
-# copyright text to display in about app dialogs
-copyright = "Copyright (C) 2026 by MHNL"
-
-[tool.flet.app]
-path = "src"
-
-[tool.flet.splash]
-# Splash nativo (Flutter-level): cubre el periodo entre el lanzamiento del exe
-# y la primera conexión de Python. Muestra el logo sobre fondo blanco antes de
-# que el código Python pueda renderizar cualquier control.
-color = "#FFFFFF"
-image = "PM.png"
-
 [dependency-groups]
 dev = [
     "pytest>=8.4.2",
 ]
 
+[tool.uv]
+# Solo versiones publicadas hace al menos una semana: una versión maliciosa subida a PyPI
+# (como litellm 1.82.7/1.82.8 y 1.107.0 en 2026) suele detectarse y retirarse antes.
+exclude-newer = "7 days"
+
 [tool.poetry]
 package-mode = false
 
 [tool.poetry.group.dev.dependencies]
-flet = {extras = ["all"], version = "0.28.3"}
 pytest = ">=8.4.2"
 
 [tool.pytest.ini_options]
 # src/ no es un paquete instalable; añadirlo al sys.path para que los tests
-# puedan hacer `import pdf_viewer.renderer`, `import recent_files`, etc.
+# puedan hacer `import pdf_core`.
 pythonpath = ["src", "."]
 testpaths  = ["tests"]
 # -q: salida concisa, -ra: resumen de tests no-pass al final
 addopts = "-q -ra"
 
 [tool.ruff]
-# App HTML, cliente PySide6 y módulos compartidos sin interfaz. La UI Flet (src/*/tab.py,
-# src/pdf_viewer/_*_mixin.py…) queda fuera hasta que se migre o se retire.
 include = [
     "app/**/*.py",
-    "tests/test_app_backend.py",
-    "src_qt/**/*.py",
-    "src/text_utils.py",
-    "src/page_ranges.py",
     "src/pdf_core/**/*.py",
-    "src/recent_files.py",
-    "src/pdf_extractor/engine.py",
-    "src/pdf_extractor/model.py",
-    "src/pdf_merge/engine.py",
-    "src/pdf_merge/model.py",
+    "tests/**/*.py",
 ]
 line-length = 120
 target-version = "py310"
@@ -101,4 +65,4 @@ src = ["src", "."]
 select = ["F", "E9", "I", "B", "UP"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["app", "pdf_core", "src_qt", "pdf_viewer", "pdf_extractor", "pdf_merge", "pdf_security", "recent_files", "text_utils", "page_ranges", "agent"]
+known-first-party = ["app", "pdf_core"]

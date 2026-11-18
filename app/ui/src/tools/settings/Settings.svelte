@@ -13,7 +13,7 @@
   /** `app.about`. */
   interface About {
     app: string;
-    pymupdf: string;
+    pdfium: string;
     pywebview: string;
     python: string;
   }

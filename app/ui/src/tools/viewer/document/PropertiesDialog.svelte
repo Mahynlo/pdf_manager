@@ -1,4 +1,4 @@
-<!-- Propiedades del documento (viewer.properties): título y filas etiqueta/valor. -->
+<!-- Propiedades del documento (properties.ts): título y filas etiqueta/valor. -->
 <script lang="ts">
   import Dialog from '$lib/components/Dialog.svelte';
   import { t } from '$texts';

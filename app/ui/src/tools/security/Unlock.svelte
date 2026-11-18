@@ -78,15 +78,17 @@
           <p class="hint note">{T.passwordNote}</p>
         {/if}
       {/if}
-      <hr class="divider" />
-      <p class="label">{T.permissions}</p>
-      <ul class="perm-list">
-        {#each audit.permissions as p (p.label)}
-          <li class={p.allowed ? 'tone-success' : 'tone-danger'}>
-            <Icon name={p.allowed ? 'check' : 'x'} size={14} /><span>{p.label}</span>
-          </li>
-        {/each}
-      </ul>
+      {#if audit.permissions.length}
+        <hr class="divider" />
+        <p class="label">{T.permissions}</p>
+        <ul class="perm-list">
+          {#each audit.permissions as p (p.label)}
+            <li class={p.allowed ? 'tone-success' : 'tone-danger'}>
+              <Icon name={p.allowed ? 'check' : 'x'} size={14} /><span>{p.label}</span>
+            </li>
+          {/each}
+        </ul>
+      {/if}
     </div>
   {/if}
   <Fieldset legend={T.passwordLegend} hidden={!file?.protected}>

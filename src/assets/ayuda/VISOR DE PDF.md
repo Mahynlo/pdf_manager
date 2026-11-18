@@ -77,3 +77,21 @@ El panel de búsqueda avanzada te permite encontrar palabras o frases específic
 * **Resultados por página:** En la parte inferior se despliega una lista agrupada por páginas (ej. *Pag. 1*). A la derecha de cada elemento se indica el número exacto de coincidencias encontradas en esa página específica. Puedes hacer clic en estos elementos para navegar directamente a dicha sección.
 
 ![alt text](/ayuda_svg/Panel_de_Buscar.svg)
+### Detalles del Panel Asistente IA
+El asistente responde preguntas sobre el documento abierto, genera un resumen, extrae los datos clave y detecta datos sensibles que puedes enviar a **Censura**. Sin un proveedor configurado responde en **modo básico** (búsqueda de palabras, metadatos y patrones de datos personales), sin enviar nada fuera del equipo.
+
+El panel funciona como un chat:
+
+* **Al empezar**, el panel propone cuatro acciones: resumen ejecutivo, datos clave, datos sensibles y «¿De qué trata?».
+* **Acciones rápidas:** una vez empezada la conversación, los botones **Resumen**, **Datos clave** y **Datos sensibles** quedan sobre el cuadro de texto. **Datos sensibles** pregunta antes la sensibilidad (baja, media o alta).
+* **Escribir:** **Intro** envía la pregunta y **Mayús+Intro** añade un salto de línea. Mientras el asistente responde se ven tres puntos y los segundos que lleva (los modelos locales pueden tardar).
+* **Respuestas:** el botón de copiar aparece al pasar el ratón. Si el proveedor falla, el error ofrece **Reintentar**. Si subes en la conversación, una flecha te lleva al último mensaje.
+
+Para configurarlo, pulsa el botón de engranaje del panel (**Proveedor de IA**):
+
+* **Google Gemini u OpenAI:** escribe tu clave de API. Se guarda cifrada en este equipo y solo se envía al servidor del proveedor. El texto del documento se envía a ese servidor para responder.
+* **IA local:** usa un modelo que corre en tu equipo o en tu red con [Ollama](https://ollama.com) o LM Studio; el documento no sale de ahí.
+    * **Dirección del servidor:** Ollama usa `http://localhost:11434/v1` y LM Studio `http://localhost:1234/v1`. Un servidor fuera de tu equipo o de tu red local tiene que usar `https://`.
+    * **Clave de API:** opcional; solo si tu servidor la pide.
+    * **Contexto del modelo:** el mismo que tenga el servidor (en Ollama, `num_ctx`; en LM Studio, *Context Length*). Si el documento no cabe entero, el modelo recibe los pasajes de todo el documento que más tienen que ver con la pregunta.
+* **Modelo:** pulsa **Buscar** para ver la lista de modelos del servidor y elige uno. En la IA local es obligatorio.

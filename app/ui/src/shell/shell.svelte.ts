@@ -1,9 +1,12 @@
-// Estado de la ventana principal (equivale a src_qt/ui/shell/main_window.py): Inicio
+// Estado de la ventana principal: Inicio
 // fijo, una pestaña única por herramienta y una pestaña de visor por PDF. App.svelte
-// pinta la cabecera y las vistas a partir de `shell.tabs`.
+// pinta la cabecera (TabStrip.svelte, en el orden de `shell.tabs`, que el usuario puede cambiar)
+// y las vistas (`shell.views`, en el orden en que se abrieron: así no se mueven en la página).
 //
 // Cada pestaña monta su componente y guarda su instancia (bind:this) para llamar a las
 // funciones que exporte: canClose(), onKey(ev) y onShow() (ver tools.ts).
+//
+// En la versión de navegador la dirección de la página sigue a la pestaña activa (router.ts).
 import { call, on, type ApiError } from '$lib/api.ts';
 import { fileName } from '$lib/dom.ts';
 import type { MenuItem } from '$lib/menu.svelte.ts';
@@ -11,6 +14,7 @@ import type { DocumentInfo } from '$lib/types.ts';
 import { askChoice, askPassword, setStatus, toast } from '$lib/ui.ts';
 import type { Component } from 'svelte';
 import { t } from '$texts';
+import { ROUTED, Router, type Route } from './router.ts';
 import { getTool, loadViewer, TOOLS } from './tools.ts';
 
 export const HOME = 'home';
@@ -27,11 +31,14 @@ export interface TabInstance {
   onShow?(): void;
 }
 
+let opened = 0; // cuántas pestañas se han abierto: el orden de las vistas
+
 class Tab {
   key: string;
   icon: string;
   closable: boolean;
   viewer: boolean;
+  readonly serial = opened++;
   title = $state('');
   path = $state<string | null>(null);
   modified = $state(false);
@@ -71,11 +78,15 @@ class Shell {
   history: string[] = []; // claves en orden de uso, para volver a la anterior al cerrar
   opening = new Set<string>(); // rutas que se están abriendo (evita pestañas duplicadas)
   toggleTheme: () => void = () => {};
+  router: Router | null = null;
 
   start(toggleTheme: () => void): void {
     this.toggleTheme = toggleTheme;
+    this.router = ROUTED ? new Router(T.header.appName, (key, route) => this.follow(key, route)) : null;
+    const initial = this.router?.current() ?? null;
     this.tabs.push(new Tab(HOME, T.home.title, 'home', { closable: false }));
     this.activate(HOME);
+    if (initial) this.follow(null, initial);
     // Aperturas pedidas por el backend (Abrir PDF, resultados de otras herramientas…).
     on<{ path: string; password: string | null }>('document:open', ({ path, password }) => this.openDocument(path, password));
     // Se cerró la ventana con documentos sin guardar o trabajos en curso (como closeEvent en Qt).
@@ -84,6 +95,12 @@ class Shell {
 
   get(key: string): Tab | undefined {
     return this.tabs.find((tab) => tab.key === key);
+  }
+
+  /** Las pestañas en el orden en que se abrieron, para pintar sus vistas: reordenar las pestañas
+   * no mueve las vistas en la página (perderían su desplazamiento). */
+  get views(): Tab[] {
+    return [...this.tabs].sort((a, b) => a.serial - b.serial);
   }
 
   async confirmQuit(documents: string[], jobs: string[]): Promise<void> {
@@ -166,7 +183,9 @@ class Shell {
   /** Marca de cambios sin guardar y, tras «Guardar como», la nueva ruta (como _refresh_viewer_tab en Qt). */
   _updateDocumentTab(key: string, { name, path, modified }: Pick<DocumentInfo, 'name' | 'path' | 'modified'>): void {
     const tab = this.get(key);
-    if (tab) Object.assign(tab, { title: name, path, modified });
+    if (!tab) return;
+    Object.assign(tab, { title: name, path, modified });
+    if (key === this.current) this.router?.show(tab, { replace: true }); // su dirección lleva el nombre
   }
 
   _documentTab(path: string): Tab | undefined {
@@ -192,10 +211,26 @@ class Shell {
     }
   }
 
-  activate(key: string): void {
+  activate(key: string, { replace = false } = {}): void {
     this.current = key;
     this.history = [...this.history.filter((k) => k !== key), key];
-    this.get(key)?.instance?.onShow?.();
+    const tab = this.get(key);
+    if (tab) this.router?.show(tab, { replace });
+    tab?.instance?.onShow?.();
+  }
+
+  /**
+   * Va adonde lleva una entrada del historial del navegador (o la dirección al cargar la página):
+   * a la pestaña `key` si sigue abierta; si no, a la herramienta de `route`. Un documento no se
+   * puede volver a abrir desde su dirección: se avisa y se queda en la pestaña activa.
+   */
+  follow(key: string | null, route: Route): void {
+    if (key && this.get(key)) this.activate(key);
+    else if (route && 'tool' in route) void this.open(route.tool);
+    else {
+      if (route) toast(T.reopen(route.document), 'warning', 8000);
+      this.activate(this.current, { replace: true });
+    }
   }
 
   /** Cierra la pestaña; la herramienta puede impedirlo con `canClose()` (p. ej. trabajo en curso). */
@@ -206,7 +241,7 @@ class Shell {
     if (!this.get(key)) return;
     this.tabs = this.tabs.filter((tab) => tab.key !== key); // desmontar el componente libera sus recursos
     this.history = this.history.filter((k) => k !== key);
-    if (this.current === key) this.activate(this.history.at(-1) ?? HOME);
+    if (this.current === key) this.activate(this.history.at(-1) ?? HOME, { replace: true });
   }
 
   /** Cierra varias pestañas por clave, de la última a la primera (como Qt). */
@@ -220,6 +255,27 @@ class Shell {
     this.activate(keys[next]);
   }
 
+  /** Si la pestaña se puede mover (Inicio va siempre la primera). */
+  movable(key: string): boolean {
+    return key !== HOME && Boolean(this.get(key));
+  }
+
+  /** Pone la pestaña `key` en la posición `index` (sin pasar por delante de Inicio). */
+  moveTab(key: string, index: number): void {
+    const from = this.tabs.findIndex((tab) => tab.key === key);
+    if (from < 0 || !this.movable(key)) return;
+    const to = Math.max(1, Math.min(index, this.tabs.length - 1));
+    if (to === from) return;
+    const tabs = [...this.tabs];
+    tabs.splice(to, 0, ...tabs.splice(from, 1));
+    this.tabs = tabs;
+  }
+
+  /** Mueve la pestaña `key` un sitio a la izquierda (`-1`) o a la derecha (`1`). */
+  shiftTab(key: string, step: -1 | 1): void {
+    this.moveTab(key, this.tabs.findIndex((tab) => tab.key === key) + step);
+  }
+
   onKey(ev: KeyboardEvent): void {
     if (document.querySelector('dialog[open]')) return; // los diálogos modales gestionan su teclado
     const key = ev.key.toLowerCase();
@@ -227,6 +283,12 @@ class Shell {
     if (ev.ctrlKey && key === 'o') this.openPdfDialog();
     else if (ev.ctrlKey && key === 'f4') this.close(this.current); // Ctrl+W queda para «ajustar al ancho» del visor
     else if (ev.ctrlKey && key === 'tab') this.cycle(ev.shiftKey ? -1 : 1);
+    // Como en los navegadores: Ctrl+Re Pág / Av Pág cambian de pestaña y, con Mayús, la mueven.
+    else if (ev.ctrlKey && (key === 'pageup' || key === 'pagedown')) {
+      const step = key === 'pageup' ? -1 : 1;
+      if (ev.shiftKey) this.shiftTab(this.current, step);
+      else this.cycle(step);
+    }
     else handled = Boolean(this.get(this.current)?.instance?.onKey?.(ev));
     if (handled) ev.preventDefault();
   }
@@ -257,11 +319,18 @@ class Shell {
   tabContextMenu(key: string): MenuItem[] {
     const keys = this.tabs.filter((tab) => tab.closable).map((tab) => tab.key);
     const index = keys.indexOf(key);
+    const position = this.tabs.findIndex((tab) => tab.key === key);
     const { path } = this.get(key)!; // se lee al abrir el menú: puede cambiar con «Guardar como»
     const items: MenuItem[] = [
       { label: T.tab.close, icon: 'x', onSelect: () => this.close(key) },
       { label: T.tab.closeOthers, icon: 'x', onSelect: () => this.closeMany(keys.filter((k) => k !== key)) },
       { label: T.tab.closeRight, icon: 'arrow-right', onSelect: () => this.closeMany(keys.slice(index + 1)) },
+      'separator',
+      { label: T.tab.moveLeft, icon: 'chevron-left', disabled: position <= 1, onSelect: () => this.shiftTab(key, -1) },
+      {
+        label: T.tab.moveRight, icon: 'chevron-right', disabled: position >= this.tabs.length - 1,
+        onSelect: () => this.shiftTab(key, 1),
+      },
     ];
     if (path) {
       items.push('separator',

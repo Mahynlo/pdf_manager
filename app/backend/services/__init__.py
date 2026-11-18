@@ -15,6 +15,7 @@ from app.backend.services.merge import MergeService
 from app.backend.services.ocr import OcrService
 from app.backend.services.redact import RedactService
 from app.backend.services.security import SecurityService
+from app.backend.services.stamps import StampsService
 from app.backend.services.viewer import ViewerService
 from app.backend.settings import Settings
 
@@ -34,6 +35,7 @@ def build_registry(host: Host, settings: Settings) -> tuple[Registry, dict[str, 
         "ocr": OcrService(host, viewer),
         "redact": RedactService(viewer),
         "security": SecurityService(host, documents),
+        "stamps": StampsService(),
         "viewer": viewer,
     }
     registry = Registry()

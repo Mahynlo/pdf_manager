@@ -10,9 +10,8 @@ import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
-import fitz
-
 from pdf_core.page_ranges import parse_pages
+from pdf_core.pdf import Document
 
 # ── per-PDF accent color ──────────────────────────────────────────────────────
 
@@ -66,16 +65,16 @@ def parse_range(text: str, total: int) -> list[bool]:
 class PDFEntry:
     """One source PDF added to the merge list.
 
-    Owns the open `fitz.Document` while the entry is in the list; `close()`
+    Owns the open `Document` while the entry is in the list; `close()`
     releases it when the entry is removed or the tab is closed.
     """
 
-    def __init__(self, path: str, doc: fitz.Document, password: str | None = None):
+    def __init__(self, path: str, doc: Document, password: str | None = None):
         self.path     = path
         self.filename = Path(path).name
         self.doc      = doc
         self.password = password
-        self.is_encrypted = doc.is_encrypted
+        self.is_encrypted = doc.encrypted
         self.total    = len(self.doc)
         # `selected` es la pertenencia (incluida/excluida) indexada por página
         # original; `order` es la secuencia EXPLÍCITA de salida de las páginas

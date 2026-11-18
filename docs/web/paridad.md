@@ -1,7 +1,6 @@
 # Paridad: versión Qt → versión web
 
-Lista de todo lo que hace la versión Qt (`src_qt/`) y su estado en la versión web (`app/`).
-Cuando no quede nada pendiente, la versión Qt se puede retirar.
+Lista de todo lo que hacía la versión Qt, ya retirada, y su estado en la versión web (`app/`).
 
 ✅ hecho · 🟡 parcial · ⬜ pendiente
 
@@ -38,7 +37,7 @@ Cuando no quede nada pendiente, la versión Qt se puede retirar.
 | Selección de páginas, rangos, Todas/Ninguna/Invertir | ✅ | |
 | Girar, mover, quitar, ordenar A-Z, invertir orden | ✅ | |
 | Vista previa reordenable e intercalable, visor ampliado | ✅ | |
-| Marcadores, dúplex, optimizar, destino, progreso | ✅ | |
+| Marcadores, dúplex, destino, progreso | ✅ | Sin «Optimizar»: PDFium no recomprime al guardar |
 | Ver PDF combinado / abrir carpeta | ✅ | |
 
 ## Seguridad
@@ -100,8 +99,8 @@ Cuando no quede nada pendiente, la versión Qt se puede retirar.
 | Texto libre (editable en la página, doble clic), notas adhesivas, sellos rápidos y leyendas guardadas (gestor) | ✅ | Leyendas en el mismo archivo que Qt y Flet |
 | Puntero de objetos y edición de anotaciones: mover, redimensionar, color, relleno, grosor, tamaño de letra, duplicar (Ctrl+D), orden, borrar (Supr), flechas | ✅ | «Traer al frente» y «Enviar al fondo» en la barra de propiedades (con las imágenes no: no se pueden volver a crear). Nuevo: girar formas y texto, mover los extremos de una flecha. Varias se seleccionan con Ctrl+clic |
 | Leyendas y sellos guardados | ✅ | Ver «Texto libre, notas…»; también «Gestionar Leyendas y Sellos…» en el menú ⋮ |
-| OCR: página actual, por lotes, área, métricas; copiar y guardar TXT | ✅ | Pestaña «OCR» del panel derecho (botón de la barra). El texto reconocido se puede seleccionar, buscar y exportar; el modelo se libera tras 12 s sin uso. Al girar una página se descarta su OCR (ya no coincide con lo que se ve) |
+| OCR: página actual, por lotes, área, métricas; copiar y guardar TXT | ✅ | Panel «OCR» del lateral derecho (su icono en la barra vertical). El texto reconocido se puede seleccionar, buscar y exportar; el modelo se libera tras 12 s sin uso. Al girar una página se descarta su OCR (ya no coincide con lo que se ve) |
 | Censura: términos, patrones (DNI, correos, tarjetas…), perfiles, vista previa, aplicar | ✅ | Pestaña «Censura»; también desde la barra de la selección y desde «Buscar». Con EmbedPDF, cada coincidencia es una marca en la página que se revisa, se mueve, se borra o se deshace; nuevo: «Marcar» un texto o un área a mano. Incluye el texto de OCR (y al censurar se borran también esas palabras). Un documento censurado solo se guarda como copia (`_censurado.pdf`). «Aa» distingue mayúsculas de verdad (en Qt no tenía efecto en frases) |
-| Imprimir: rango, orden inverso, intercalar, vista previa | ✅ | Menú ⋮ y Ctrl+P. Diálogo propio (páginas, subconjunto, orden inverso, orientación automática por página, color, escala y vista previa) y después el diálogo de impresión del sistema (impresora, copias, intercalar, doble cara). Se imprimen también las anotaciones; las páginas las dibuja PDFium (EmbedPDF), como se ven |
+| Imprimir: rango, orden inverso, intercalar, vista previa | ✅ | Menú ⋮ y Ctrl+P: el diálogo de WebView2 (vista previa, impresora, copias, páginas, pares/impares, orientación, color, márgenes, escala, doble cara) con el PDF y sus anotaciones, en vectorial. Sin orden inverso ni orientación automática por página (estaban en el diálogo propio retirado) |
 | Exportar texto (.txt) y extraer imágenes | ✅ | Las páginas sin texto nativo exportan su texto de OCR |
-| Panel de IA: resumen, datos clave, datos sensibles, chat | ✅ | Pestaña «IA» y «Explicar con Agente IA» en la barra de la selección. Con proveedor (Gemini u OpenAI) y clave configurados usa el agente; si no, modo básico con el texto del documento (incluido el de OCR). Los datos sensibles se envían a «Censura». En Qt el agente nunca llegaba a crearse (le faltaba la clave) y siempre respondía en modo básico. **Las dependencias del agente no están instaladas** (comentadas en `pyproject.toml`): hoy solo funciona el modo básico |
+| Panel de IA: resumen, datos clave, datos sensibles, chat | ✅ | Pestaña «IA» y «Explicar con Agente IA» en la barra de la selección. Con proveedor configurado usa el agente: Gemini u OpenAI con clave, o una IA local (Ollama, LM Studio…) con dirección y modelo, todos con el SDK `openai`; si no, modo básico con el texto del documento (incluido el de OCR). Los datos sensibles se envían a «Censura». En Qt el agente nunca llegaba a crearse (le faltaba la clave) y siempre respondía en modo básico. En el navegador, solo modo básico |

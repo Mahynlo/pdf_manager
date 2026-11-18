@@ -5,25 +5,30 @@ extracción por palabras clave, combinación y seguridad.
 
 ![Visor PDF](docs/web/imagenes/visor.png)
 
-> **Versión web 0.1.29-web (en pruebas).** La interfaz ahora usa tecnología web (Svelte) dentro de
-> una ventana de escritorio (pywebview + WebView2), con el backend en Python. La versión **Flet** se
-> descarta: la 0.1.28 fue la última y queda respaldada en la rama `Flet`. Su código sigue en `src/`
-> solo por compatibilidad y se retirará más adelante. Ver [docs/README.md](docs/README.md).
+> **Versión web 0.1.30-beta-web: segunda versión de pruebas (beta).** La interfaz ahora usa tecnología web
+> (Svelte) dentro de una ventana de escritorio (pywebview + WebView2), con el backend en Python. Todo
+> el trabajo con PDF usa un solo motor, PDFium (licencia Apache/BSD). **La última versión estable
+> sigue siendo la 0.1.28** (Flet), que queda en la rama `Flet`. Ver [docs/README.md](docs/README.md).
 
 ## Arquitectura
 
 ```
 app/            aplicación: ventana (pywebview), arranque y servicios Python que llama la interfaz
 app/ui/         interfaz en Svelte (compilada con Vite); el visor dibuja los PDF con EmbedPDF (PDFium)
-src/pdf_core/   lógica de PDF sin interfaz (PyMuPDF, OCR, censura, combinar, seguridad...)
+src/pdf_core/   lógica de PDF sin interfaz (PDFium, OCR, censura, combinar, seguridad...)
 installer/web/  ejecutable (PyInstaller) e instalador (Inno Setup)
 docs/web/       documentación de la versión web
 ```
 
-La interfaz llama a los servicios de Python con `call('servicio.metodo', ...)`. EmbedPDF dibuja las
-páginas y edita las anotaciones en la ventana; Python guarda el archivo y hace lo pesado (operaciones
-de página, OCR, censura, IA, combinar y seguridad). Detalle en
-[docs/web/arquitectura.md](docs/web/arquitectura.md).
+La interfaz llama a los servicios de Python con `call('servicio.metodo', ...)`. EmbedPDF es dueño
+del documento abierto en el visor: dibuja las páginas y edita anotaciones, páginas y censura en la
+ventana. Python lee y escribe los archivos y hace lo que EmbedPDF no puede (OCR, IA, orientación del
+escaneo) y las herramientas de archivos (combinar, extraer y seguridad).
+
+- **[Cómo funciona, paso a paso](docs/web/como-funciona.md)**: diagramas de cada flujo (arranque,
+  abrir, guardar, OCR, censura, la versión de navegador…). El mejor sitio para empezar.
+- [Arquitectura y reglas](docs/web/arquitectura.md) y el resto de la
+  [documentación técnica](docs/web/README.md).
 
 ## Características
 
@@ -35,11 +40,16 @@ Accesos a cada herramienta y archivos recientes. Cada PDF y cada herramienta se 
 ### 📖 Visor de PDF
 - Zoom, scroll continuo, doble página o página única, miniaturas, índice y modo noche.
 - Selección de texto (también entre páginas) y búsqueda con lista de resultados.
-- **Anotaciones:** resaltar, subrayar, tachar, formas, flechas, pluma, texto libre, notas, imágenes y
-  sellos. Se mueven, se redimensionan y se cambian de color, grosor y orden.
+- **Anotaciones:** resaltar, subrayar, tachar, formas, flechas, pluma, texto libre, notas e imágenes.
+  Se mueven, se redimensionan y se cambian de color, grosor y orden.
+- **Sellos:** estándar (Aprobado, Borrador, Confidencial…), de texto (tus leyendas, editables como
+  texto libre) y propios, creados desde una imagen (PNG, JPG, SVG) o desde anotaciones de la página.
+- **Firmas:** dibujadas, escritas o desde una imagen, con iniciales opcionales. Se pueden guardar en
+  el equipo para reutilizarlas. Es una firma visual, sin certificado digital.
 - **Páginas:** girar, mover (también arrastrando miniaturas), duplicar, insertar, eliminar y extraer.
 - Deshacer y rehacer (Ctrl+Z / Ctrl+Y) tanto las anotaciones como las operaciones de página.
-- Imprimir con vista previa: páginas, orden, orientación, color y escala.
+- Imprimir con el diálogo de Windows/Edge (vista previa, páginas, orientación, color, márgenes,
+  escala y doble cara), con las anotaciones y en calidad vectorial.
 - Exportar el texto y las imágenes del documento.
 
 📚 [Cómo está hecho el visor](docs/web/embedpdf.md)
@@ -65,9 +75,9 @@ orientación. El texto reconocido se puede seleccionar, buscar, censurar y expor
 Chat sobre el documento, resumen, datos clave y detección de datos sensibles (que se envían a
 Censura). Sin clave de API responde en modo básico.
 
-> ⚠️ El agente de IA está **en fase de pruebas** y todavía no está probado del todo. Sus
-> dependencias no se instalan por defecto (están comentadas en `pyproject.toml`); sin ellas solo
-> funciona el modo básico.
+> ⚠️ El agente de IA está **en fase de pruebas** y todavía no está probado del todo. Necesita un
+> proveedor configurado en el panel del asistente (Gemini u OpenAI con su clave de API, o una IA local como Ollama);
+> sin él solo funciona el modo básico.
 
 ### 📄 Combinar PDF
 Une varios PDF eligiendo, girando y reordenando las páginas, con vista previa del resultado.
@@ -88,17 +98,38 @@ encontradas.
 
 ## 🧪 Qué está en fase de pruebas
 
-La 0.1.29-web es una versión de prueba. Funciona en general, pero estas partes todavía no se han
-probado del todo con uso real:
+La 0.1.30-beta-web es la **segunda versión de pruebas** (la primera fue la 0.1.29-web). Funciona en
+general y pasa las pruebas automáticas, pero cambió mucho por dentro: el visor ahora es dueño del
+documento y PyMuPDF se sustituyó por PDFium. Para trabajo importante, usa la 0.1.28 o guarda una
+copia del PDF antes de editarlo.
 
-| Aspecto | Estado |
+Qué conviene probar con uso real:
+
+| Aspecto | Qué probar |
 |---|---|
-| **Agente de IA** | En pruebas, no probado del todo. Sin sus dependencias (comentadas en `pyproject.toml`) ni clave de API responde en modo básico |
-| **Censura con marcas** | Nueva: las marcas se revisan en la página y Python las aplica. Conviene revisar el resultado antes de compartir la copia censurada |
-| **Deshacer operaciones de página** | Nuevo: Ctrl+Z / Ctrl+Y sobre girar, mover, insertar, duplicar y eliminar páginas, junto con las anotaciones |
-| **Anotaciones** | Edición con EmbedPDF (mover, redimensionar, orden, texto libre). Probadas en pruebas automáticas, falta uso real con PDF variados |
-| **Imprimir** | Nueva: las páginas las dibuja el visor (PDFium). Falta probar con distintas impresoras |
-| **Instalador** | Probados la instalación, «Abrir con» y el OCR. Falta más uso en otros equipos |
+| **Abrir y guardar** | PDF variados (escaneados, de Word, grandes, con contraseña, con formularios). Guardar, «Guardar como» y volver a abrir: que no falte nada y que la contraseña se conserve |
+| **Páginas** | Girar, mover (también arrastrando miniaturas), insertar, duplicar, eliminar y extraer, con Ctrl+Z / Ctrl+Y en medio, y guardar al final |
+| **Anotaciones, sellos y firmas** | Crearlas, editarlas, guardarlas y abrir el PDF en otro lector (Edge, Acrobat) para ver que se ven igual |
+| **Censura** | Marcar, aplicar y guardar la copia; comprobar en otro lector que el texto tapado ya no se puede copiar ni buscar (tampoco el del OCR) |
+| **OCR** | Página, área y documento entero en escaneos reales; corregir orientación; buscar y exportar el texto reconocido |
+| **Imprimir** | Distintas impresoras y «Microsoft Print to PDF», con anotaciones y páginas giradas |
+| **Asistente IA** | Con Gemini u OpenAI (clave de API) o con una IA local (Ollama, LM Studio). Sin proveedor responde en modo básico |
+| **Combinar, Extraer y Seguridad** | Los diálogos de Windows para elegir archivos y carpetas, el progreso y los PDF que generan |
+| **Sistema** | Instalar sobre la 0.1.29-web, «Abrir con», arrastrar PDF desde el Explorador, varias pestañas y reordenarlas, ventana pequeña |
+
+Ya se sabe que:
+
+- Imprimir ya no tiene orden inverso ni orientación automática por página (lo hace ahora el diálogo de Windows).
+- El instalador no está firmado: Windows SmartScreen puede avisar al instalarlo («Más información» → «Ejecutar de todas formas»).
+
+### Cómo avisar de un fallo
+
+Abre un [issue](https://github.com/Mahynlo/pdf_manager/issues) con:
+
+1. qué hiciste, qué esperabas y qué pasó (una captura ayuda);
+2. la versión (se ve en **Ajustes**);
+3. el registro de la app, `%USERPROFILE%\.pdf_manager\app.log` (o en **Ajustes → Ver Registro de Diagnóstico…**);
+4. si se puede, el PDF que falla (o uno parecido sin datos privados).
 
 ## Instalación
 
@@ -135,32 +166,22 @@ detalles en [docs/web/svelte.md](docs/web/svelte.md).
 ```
 
 El instalador necesita Inno Setup 6. En GitHub lo genera el workflow `build-web.yml` al subir una
-etiqueta `v*-web` (por ejemplo `v0.1.29-web`). Detalle en
+etiqueta `v*-web` (por ejemplo `v0.1.30-beta-web`). Detalle en
 [docs/web/instalador.md](docs/web/instalador.md).
 
+## Versiones
 
-## Seguir usando la versión Flet
+Los cambios de cada versión están en [CHANGELOG.md](CHANGELOG.md). Su sección se genera a partir de
+los commits (`uv run python installer/changelog.py add`) y es también el texto de la Release de GitHub.
+Cómo publicar una versión y cómo escribir los commits: [docs/web/versiones.md](docs/web/versiones.md).
 
-> ⚠️ **No se recomienda.** La versión Flet ya no recibirá cambios ni versiones nuevas; se mantiene
-> solo por compatibilidad y más adelante se retirará de esta rama. Para uso normal, usa la versión web.
 
-Si aun así la necesitas, sigue disponible:
+## Versión Flet
 
-- **En esta rama:** su código sigue en `src/` (con la lógica compartida de `src/pdf_core/`). Se
-  arranca y se compila igual que antes:
+Se retiró de esta rama. Sigue disponible:
 
-  ```bash
-  uv sync
-  uv run flet run          # arrancar
-  .\build.ps1              # exe + «Abrir con» + instalador (PowerShell, necesita Inno Setup)
-  ```
-
-  Ojo: aquí comparte `pdf_core` con la versión web, que ha cambiado desde la 0.1.28 (por ejemplo,
-  los modelos de OCR), así que puede comportarse distinto que la versión publicada.
 - **Instalador:** `v0.1.28`, la última versión de Flet, en
   [Releases](https://github.com/Mahynlo/pdf_manager/releases/tag/v0.1.28). Se puede instalar junto a
   la versión web, porque cada una tiene su propia carpeta e instalación.
 - **Código tal como quedó en la 0.1.28:** rama [`Flet`](https://github.com/Mahynlo/pdf_manager/tree/Flet)
   (`git clone -b Flet https://github.com/Mahynlo/pdf_manager.git`).
-
-Su documentación está en [docs/flet/](docs/flet/README.md).

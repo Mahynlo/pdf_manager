@@ -1,7 +1,6 @@
 """Ordenación de palabras en orden de lectura (columnas y líneas).
 
-Independiente de la interfaz: la usan la capa de texto de ``text_layer`` (visor HTML)
-y la selección de texto del visor Qt. Cada palabra es una tupla ``(fitz.Rect, texto,
+Independiente de la interfaz: la usa la capa de texto de ``text_layer``. Cada palabra es una tupla ``(Rect, texto,
 inicio_de_palabra[, línea])``.
 """
 

@@ -1,8 +1,8 @@
 # Versión web
 
 Interfaz en **Svelte** (`app/ui`, compilada con Vite) y backend en **Python**, unidos por pywebview
-(WebView2 en Windows). El visor dibuja los PDF con **EmbedPDF** (motor PDFium en el navegador). Es la versión que se publica desde la 0.1.29-web (en pruebas); Flet queda descartada (la 0.1.28
-fue su última versión). Las funciones se trajeron desde la versión Qt (`src_qt/`), que sirvió de referencia.
+(WebView2 en Windows). El visor dibuja los PDF con **EmbedPDF** (motor PDFium en el navegador). Es la versión que se publica desde la 0.1.29-web; la 0.1.30-beta-web es la segunda versión de pruebas y la última estable sigue siendo la 0.1.28,
+la última de Flet (ya descartada). Las funciones se trajeron desde la versión Qt, ya retirada.
 
 ```
 uv run python -m app.main            # arrancar (recompila la interfaz si cambió)
@@ -15,12 +15,17 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
 
 | Documento | Contenido |
 |---|---|
+| [como-funciona.md](como-funciona.md) | **Empieza aquí.** Cómo funciona cada parte, paso a paso y con diagramas: arranque, llamadas, abrir, guardar, OCR, censura, trabajos largos y la versión de navegador |
 | [arquitectura.md](arquitectura.md) | Estructura de `app/`, comunicación JS ↔ Python, reglas y cómo migrar una herramienta |
-| [modulos-python.md](modulos-python.md) | Módulos de Python que usa la web (`src/pdf_core`), reglas y plan de retirada de Qt y Flet |
-| [paridad.md](paridad.md) | Lista función por función de la versión Qt y su estado en la web |
+| [modulos-python.md](modulos-python.md) | Módulos de Python (`src/pdf_core`), motor de PDF y reglas |
+| [paridad.md](paridad.md) | Lista función por función de la versión Qt (retirada) y su estado en la web |
 | [instalador.md](instalador.md) | Ejecutable (PyInstaller), instalador (Inno Setup), «Abrir con» e instancia única |
 | [svelte.md](svelte.md) | La interfaz en Svelte (`app/ui`): estructura, compilación y cómo escribir componentes |
 | [embedpdf.md](embedpdf.md) | Migración del visor a EmbedPDF paso a paso: plan, estado y cómo está hecho cada paso |
+| [navegador.md](navegador.md) | La app en un navegador: el mismo Python en wasm (Pyodide) |
+| [responsive.md](responsive.md) | Adaptación a cada pantalla: cortes, reglas y cómo comprobarlo |
+| [versiones.md](versiones.md) | Publicar una versión: el changelog generado de los commits, cómo escribirlos y la Release |
+| [seguridad.md](seguridad.md) | Seguridad: amenazas, medidas (CSP, servidor local, clave de la IA…), riesgos aceptados y cómo comprobarlo |
 
 ## Estado
 
@@ -30,7 +35,7 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
   - Inicio fija, una pestaña por herramienta y una por PDF, menú de marca, tema claro/oscuro;
   - atajos y barra de estado;
   - aviso de cambios sin guardar al cerrar una pestaña o la ventana.
-- **Inicio**: herramientas y archivos recientes (compartidos con Flet y Qt).
+- **Inicio**: herramientas y archivos recientes.
 - **Combinar, Seguridad y Extraer**: completas, con trabajos en segundo plano, contraseñas y progreso.
 - **Ajustes y Ayuda**: tema, recientes, registro de diagnóstico, atajos y manuales.
 - **Visor de PDF** (páginas dibujadas por EmbedPDF, ver [embedpdf.md](embedpdf.md)):
@@ -49,8 +54,8 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
   - Censura: términos, patrones de datos personales, selecciones, áreas marcadas a mano y perfiles
     guardados; cada coincidencia es una marca que se revisa en la página antes de la aplicación
     irreversible (solo se guarda como copia).
-  - Imprimir: páginas, orden inverso, orientación, color y escala con vista previa; impresora,
-    copias y doble cara en el diálogo del sistema.
+  - Imprimir: el diálogo de WebView2 (vista previa, impresora, copias, páginas, orientación, color,
+    márgenes, escala y doble cara) con el PDF y sus anotaciones;
   - Asistente IA: chat, resumen, datos clave y datos sensibles (que se envían a «Censura»). Sin
     las dependencias del agente ni clave de API responde en modo básico.
   - Exportar: texto e imágenes.
@@ -61,9 +66,9 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
 
 ### Pendiente
 
-- **Pruebas de la 0.1.29-web**: uso real del instalador antes de darla por estable.
-- **Asistente IA con agente**: en fase de pruebas, no está probado del todo. Sus dependencias están
-  comentadas en `pyproject.toml`; sin ellas responde en modo básico.
+- **Pruebas de la 0.1.30-beta-web** (segunda versión de pruebas): uso real del visor, ahora dueño del documento, y del instalador antes de sacar una versión estable.
+- **Asistente IA con agente**: en fase de pruebas, no está probado del todo. Sin un proveedor
+  configurado (clave de API o IA local) responde en modo básico.
 - **En pruebas con uso real**: censura con marcas, deshacer las operaciones de página, anotaciones,
   impresión e instalador (lista completa en el [README](../../README.md#-qué-está-en-fase-de-pruebas)).
 

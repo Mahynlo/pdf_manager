@@ -1,5 +1,5 @@
 <!--
-  Pestaña «Índice»: árbol de marcadores del PDF. `toc` es la lista plana de PyMuPDF
+  Pestaña «Índice»: árbol de marcadores del PDF. `toc` es la lista plana de marcadores
   [{ level, title, page }]; `nodes` (uso interno) son los hijos ya anidados.
 -->
 <script lang="ts">

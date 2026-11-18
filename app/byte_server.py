@@ -10,6 +10,11 @@ segundos en base64. Por aquí viajan en binario:
 - Solo escucha en 127.0.0.1, en un puerto libre que elige el sistema.
 - Cada dato tiene un código aleatorio largo: no se puede adivinar desde otra página o programa.
 - Se sirve (o se recibe) una sola vez y caduca a los :data:`TTL` segundos.
+- Solo atiende peticiones dirigidas a ``127.0.0.1:<puerto>`` (cabecera ``Host``): una web que
+  hiciera que su dominio apuntara a 127.0.0.1 («DNS rebinding») no llega a los datos.
+- Una subida no puede pasar de :data:`MAX_UPLOAD` bytes, y solo se lee si se esperaba.
+
+Ver docs/web/seguridad.md.
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ log = logging.getLogger(__name__)
 
 TTL = 120.0  # s que espera un dato a que lo descarguen (o a que lo suban)
 UPLOAD = "up"  # prefijo de las URL de subida
+MAX_UPLOAD = 2 * 1024**3  # bytes: un PDF muy grande cabe; más, no se lee
 
 
 class ByteServer:
@@ -105,7 +111,22 @@ class ByteServer:
 
 def _handler(server: ByteServer) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
+        def _local(self) -> bool:
+            """Si la petición va a esta dirección (no a un dominio que apunte aquí); si no, 403."""
+            if self.headers.get("Host") == f"127.0.0.1:{self.server.server_port}":
+                return True
+            self.send_error(403)
+            return False
+
+        def _common_headers(self) -> None:
+            # La interfaz se sirve desde otro puerto (pywebview o Vite); el código ya protege el dato.
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Cache-Control", "no-store")
+
         def do_GET(self) -> None:  # noqa: N802 (nombre de http.server)
+            if not self._local():
+                return
             item = server.take(self.path.lstrip("/"))
             if item is None:
                 self.send_error(404)
@@ -114,21 +135,30 @@ def _handler(server: ByteServer) -> type[BaseHTTPRequestHandler]:
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "no-store")
-            # La interfaz se sirve desde otro puerto (pywebview o Vite); el código ya protege el dato.
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self._common_headers()
             self.end_headers()
             self.wfile.write(data)
 
         def do_POST(self) -> None:  # noqa: N802 (nombre de http.server)
+            if not self._local():
+                return
             prefix, _, token = self.path.lstrip("/").partition("/")
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = -1
             # Solo se lee lo que se espera: nadie puede llenar la memoria con subidas a ciegas.
-            ok = prefix == UPLOAD and server.expecting(token)
-            if ok:
-                ok = server.store(token, self.rfile.read(int(self.headers.get("Content-Length") or 0)))
-            self.send_response(204 if ok else 404)
-            self.send_header("Access-Control-Allow-Origin", "*")
+            status = 404
+            if not 0 <= length <= MAX_UPLOAD:
+                status = 413 if length > MAX_UPLOAD else 400
+            elif prefix == UPLOAD and server.expecting(token) and server.store(token, self.rfile.read(length)):
+                status = 204
+            self.send_response(status)
+            self._common_headers()
             self.send_header("Content-Length", "0")
+            if status != 204:
+                self.send_header("Connection", "close")  # lo que no se leyó no queda en la conexión
+                self.close_connection = True
             self.end_headers()
 
         def log_message(self, format: str, *args: object) -> None:  # noqa: A002 (firma de http.server)

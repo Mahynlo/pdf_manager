@@ -52,7 +52,8 @@
       {:else}
         <button class="menu__item" class:is-checked={item.checked} type="button" role="menuitem"
                 disabled={Boolean(item.disabled)} onclick={() => select(item)}>
-          {#if item.icon}<Icon name={item.icon} />{:else}<span class="menu__spacer"></span>{/if}
+          {#if item.color}<span class="menu__swatch" style:--swatch={item.color}></span>
+          {:else if item.icon}<Icon name={item.icon} />{:else}<span class="menu__spacer"></span>{/if}
           <span class="ellipsis">{item.label}</span>
         </button>
       {/if}

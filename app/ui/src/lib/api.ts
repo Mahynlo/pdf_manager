@@ -1,5 +1,5 @@
-// Puente con el backend Python (pywebview). Es el único módulo que lo conoce: para
-// otro transporte (p. ej. la versión de navegador) solo habría que cambiar este archivo.
+// Puente con el backend Python. Es el único módulo que sabe dónde está: en el escritorio, detrás
+// de pywebview; en la versión de navegador (`vite --mode browser`), en un worker (lib/browser/).
 //
 //   const state = await call('merge.state');
 //   const off = on('merge:progress', ({ done, total }) => ...);
@@ -27,10 +27,17 @@ window.pdfm = {
   },
 };
 
-const ready = new Promise<void>((resolve) => {
-  if (window.pywebview?.api) resolve();
-  else window.addEventListener('pywebviewready', () => resolve(), { once: true });
-});
+let browser: typeof import('./browser/client.ts') | null = null; // solo en la versión de navegador
+
+const ready: Promise<void> = import.meta.env.MODE === 'browser'
+  ? import('./browser/client.ts').then((client) => {
+    browser = client;
+    return client.start();
+  })
+  : new Promise<void>((resolve) => {
+    if (window.pywebview?.api) resolve();
+    else window.addEventListener('pywebviewready', () => resolve(), { once: true });
+  });
 
 export class ApiError extends Error {
   code: string;
@@ -44,9 +51,21 @@ export class ApiError extends Error {
 /** Llama a "servicio.metodo" del backend; rechaza con ApiError si el backend falla. */
 export async function call<T = any>(method: string, ...args: unknown[]): Promise<T> {
   await ready;
-  const res = await window.pywebview!.api.call(method, args);
+  const res = await (browser ? browser.call(method, args) : window.pywebview!.api.call(method, args));
   if (res.ok) return res.value as T;
   throw new ApiError(res.error.code, res.error.message);
+}
+
+/** Sube `body` a una URL de subida del backend. */
+export async function upload(url: string, body: ArrayBuffer): Promise<{ ok: boolean; status: number }> {
+  if (!browser) return fetch(url, { method: 'POST', body });
+  browser.upload(url, body);
+  return { ok: true, status: 200 };
+}
+
+/** PDF soltados en la ventana. En el escritorio no hace nada: los recibe la ventana pywebview. */
+export function openDropped(transfer: DataTransfer): void {
+  void browser?.openDropped(transfer);
 }
 
 /** Escucha un evento del backend; devuelve la función para dejar de escucharlo. */

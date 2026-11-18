@@ -1,0 +1,10 @@
+allowBuilds:
+  protobufjs: false
+
+# Avisos de `pnpm audit` aceptados (docs/web/seguridad.md, «Riesgos aceptados»). Quitar cada uno en
+# cuanto haya versión corregida.
+auditConfig:
+  ignoreGhsas:
+    # picomatch <=4.0.7, ReDoS: solo lo usan Vite y svelte-check al compilar, con patrones propios;
+    # no va dentro de la app. Sin versión corregida (2026-11-17).
+    - GHSA-fc5q-39xc-vjpf

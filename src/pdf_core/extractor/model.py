@@ -1,4 +1,4 @@
-"""Data model and pure helpers for the extraction feature — no Flet, no I/O.
+"""Data model and pure helpers for the extraction feature — no I/O.
 
 Holds the match record (`PageMatch`) and the small pure transforms that parse
 page ranges, tokenize text, and split the keyword input.
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pdf_core.page_ranges import parse_pages  # noqa: F401  (reexportado: lo usan engine y el cliente Qt)
+from pdf_core.page_ranges import parse_pages  # noqa: F401  (reexportado: lo usa engine)
 
 
 @dataclass

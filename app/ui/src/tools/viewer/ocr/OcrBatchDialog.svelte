@@ -15,8 +15,10 @@
 
   const T = t.viewer.ocr.batchDialog;
 
-  let { docId, total, setBusy, onPage, done }: {
+  let { docId, recognize, total, setBusy, onPage, done }: {
     docId: number;
+    /** OCR de una página (recognize.ts). */
+    recognize: (index: number) => Promise<OcrResult>;
     total: number;
     setBusy: (busy: boolean) => void;
     onPage: (index: number, result: OcrResult) => void;
@@ -54,7 +56,7 @@
       for (const [step, index] of pages.entries()) {
         if (stopped) return;
         status = T.processing(index + 1, total);
-        const pageResult = await call<OcrResult>('ocr.page', docId, index);
+        const pageResult = await recognize(index);
         parts.push(`${T.pageHeader(index + 1)}\n${pageResult.text}`);
         onPage(index, pageResult);
         progress = ((step + 1) / pages.length) * 100;

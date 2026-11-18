@@ -13,9 +13,8 @@
 //   · juntar en un solo paso de deshacer lo que se crea a la vez (`batch`: p. ej. las marcas de
 //     censura de un término, ver redaction.ts);
 //   · traer al frente y enviar al fondo (`reorder`), que EmbedPDF no sabe hacer;
-//   · pasar las anotaciones a Python (`sync`) antes de guardar, imprimir o cambiar las
-//     páginas: se sube la copia de EmbedPDF y Python toma de ella las anotaciones
-//     (viewer.sync_annotations). Y avisarle de que hay cambios sin guardar.
+//   · avisar de cada cambio (`onChanged`): hay cambios sin guardar y Python aún no los tiene (la
+//     copia que se le pasa es la de document/copy.ts).
 //
 // Las coordenadas de EmbedPDF son de la página sin girar (canvas.toView / toPage las pasan
 // a las de la página tal como se ve).
@@ -27,13 +26,12 @@ import type { PluginRegistry } from '@embedpdf/core';
 import {
   applyInsertUpright, type AnnotationEvent, type AnnotationPlugin, type AnnotationScope,
 } from '@embedpdf/plugin-annotation';
-import type { ExportPlugin } from '@embedpdf/plugin-export';
 import type { Command, HistoryPlugin, HistoryScope } from '@embedpdf/plugin-history';
-import { call } from '$lib/api.ts';
 import { askText } from '$lib/ui.ts';
 import { t } from '$texts';
 import { ANNOTATION_TOOL, TOOLS, type PageCanvas } from '../canvas/canvas.ts';
 import { KINDS, MANUAL_LABEL, type SelectionPart } from '../redact/redaction.ts';
+import { TEXT_STAMP, textStampSize, type TextStamp } from '../stamps/stamp-pdf.ts';
 import { DEFAULT_STYLE, type AnnotationStyle } from './palette.ts';
 
 /**
@@ -54,7 +52,7 @@ export interface HistoryFlags {
 /** Lo que el visor (Viewer.svelte) hace con los avisos de las anotaciones. */
 export interface AnnotationsHost {
   onHistory(state: HistoryFlags): void;
-  /** Hay cambios sin guardar. */
+  /** Cambiaron las anotaciones: hay cambios sin guardar y Python aún no los tiene. */
   onChanged(): void;
   /** Cambió la selección (anotaciones de EmbedPDF). */
   onSelect(items: Annot[]): void;
@@ -94,10 +92,8 @@ const TEXT_EDITS: Record<TextEdit, { intent: string; title: string; label: strin
 // Tras crear con estas herramientas se pasa al puntero con lo creado seleccionado (como Qt).
 const AUTO_POINTER = new Set<string>([
   TOOLS.RECT, TOOLS.ELLIPSE, TOOLS.LINE, TOOLS.ARROW, TOOLS.POLYLINE, TOOLS.POLYGON,
-  TOOLS.TEXT, TOOLS.CALLOUT, TOOLS.NOTE, TOOLS.IMAGE,
+  TOOLS.TEXT, TOOLS.CALLOUT, TOOLS.NOTE, TOOLS.IMAGE, TOOLS.PLACE,
 ]);
-// Sello (como add_stamp_legend en Qt): texto centrado con marco, sobre blanco.
-const STAMP = { minWidth: 105, minHeight: 29, border: 1.5, padding: 16 };
 // Fuera del orden de dibujo: no se apilan con las demás (enlaces, formularios, ventanas de nota).
 const UNSTACKED = new Set<PdfAnnotationSubtype>([T.LINK, T.WIDGET, T.POPUP]);
 const HISTORY_TOPIC = 'annotations'; // el de las órdenes de EmbedPDF (ANNOTATION_HISTORY_TOPIC)
@@ -140,19 +136,15 @@ function toolDefaults(tool: string, style: AnnotationStyle): Record<string, unkn
 
 export class Annotations {
   canvas: PageCanvas;
-  docId: number;
   host: AnnotationsHost;
   style: AnnotationStyle = { ...DEFAULT_STYLE };
-  version = 0; // cambios hechos en el documento a la vista
-  synced = 0; // `version` que ya tiene Python
   seen = new Set<string>(); // anotaciones ya creadas (rehacer no vuelve a pedir el texto de la nota)
   watchers = new Set<() => void>(); // avisar de cualquier cambio en las anotaciones (`watch`)
   measure: CanvasRenderingContext2D | null = null; // para medir el texto libre (_fitText)
 
-  /** `docId`: documento del servicio "viewer"; `host`: lo que el visor hace con los avisos. */
-  constructor(canvas: PageCanvas, docId: number, host: AnnotationsHost) {
+  /** `host`: lo que el visor hace con los avisos. */
+  constructor(canvas: PageCanvas, host: AnnotationsHost) {
     this.canvas = canvas;
-    this.docId = docId;
     this.host = host;
     canvas.loading.then(() => this._connect());
   }
@@ -163,10 +155,8 @@ export class Annotations {
     return () => this.watchers.delete(fn);
   }
 
-  /** Lo llama el lienzo al poner a la vista una versión nueva (viene de Python: ya la tiene). */
+  /** Lo llama el lienzo al poner a la vista una versión nueva del documento (empieza sin historial). */
   documentShown(): void {
-    this.version = 0;
-    this.synced = 0;
     this.seen.clear();
     this.host.onHistory({ canUndo: false, canRedo: false });
     this.host.onSelect([]);
@@ -225,6 +215,15 @@ export class Annotations {
       history.onHistoryChange(({ documentId, state }) => {
         if (ours(documentId)) this.host.onHistory(state.global);
       }),
+      // Se dejó de colocar un sello o una firma sin crearlo (p. ej. con Esc): se vuelve a
+      // seleccionar texto. Al crearlo, `_created` ya pasó al puntero (este aviso puede llegar
+      // antes o después de la creación: por eso se mira en la siguiente vuelta).
+      annotation.onActiveToolChange(({ documentId, tool }) => {
+        if (!ours(documentId) || tool) return;
+        setTimeout(() => {
+          if (this.canvas.tool === TOOLS.PLACE) this.host.setTool(TOOLS.SELECT);
+        });
+      }),
     );
   }
 
@@ -235,7 +234,6 @@ export class Annotations {
       this.host.onRendered([event.pageIndex]);
       return;
     }
-    this.version++;
     this.host.onChanged();
     if (event.type === 'update' && 'contents' in event.patch && event.annotation.type === T.FREETEXT) {
       this._fitText(event.pageIndex, event.annotation.id);
@@ -363,7 +361,7 @@ export class Annotations {
    * Los grupos (como reemplazar texto) se mueven enteros. Devuelve las nuevas de `items`, o null
    * si habría que volver a crear una imagen (su objeto no lleva la imagen).
    */
-  reorder(items: Annot[], front: boolean): Annot[] | null {
+  async reorder(items: Annot[], front: boolean): Promise<Annot[] | null> {
     const scope = this.scope();
     if (!scope || !items.length) return items;
     const state = scope.getState();
@@ -382,7 +380,10 @@ export class Annotations {
       restore.push(...withGroups(page, page.slice(page.indexOf(some[0]))));
     }
     if (!moved.length) return items;
-    if (restore.some((object) => object.type === T.STAMP)) return null;
+    // Un sello (también una imagen o una firma escrita) se vuelve a crear con su dibujo: su objeto
+    // no lo lleva, así que se exporta antes (un PDF de una página, como al colocarlo).
+    const appearances = await this._appearances(restore.filter((object) => object.type === T.STAMP));
+    if (!appearances) return null;
     const current = new Map<string, Annot>(); // id de antes -> objeto de ahora
     const now = (object: Annot) => current.get(object.id) ?? object;
     const toEnd = (objects: Annot[]) => this._quietly(() => {
@@ -393,12 +394,33 @@ export class Annotations {
         const copy: Annot = { ...object, id: ids.get(object.id)! };
         if (object.inReplyToId && ids.has(object.inReplyToId)) copy.inReplyToId = ids.get(object.inReplyToId);
         this.seen.add(copy.id); // no es de una herramienta
-        scope.createAnnotation(object.pageIndex, copy);
+        const appearance = appearances.get(objects[k].id);
+        // El contexto depende del tipo de anotación (el de un sello es su dibujo).
+        scope.createAnnotation(object.pageIndex, copy, (appearance ? { appearance } : undefined) as never);
         current.set(objects[k].id, copy);
       });
     });
     this._historyInternals().register({ execute: () => toEnd(moved), undo: () => toEnd(restore) }, HISTORY_TOPIC, this.canvas.shown ?? undefined);
     return items.map(now);
+  }
+
+  /** Dibujo de cada sello (id → PDF de una página) o null si no se pudo exportar alguno. */
+  async _appearances(stamps: Annot[]): Promise<Map<string, ArrayBuffer> | null> {
+    const appearances = new Map<string, ArrayBuffer>();
+    if (!stamps.length) return appearances;
+    await this.commit(); // el dibujo sale del PDF de EmbedPDF
+    const registry = this._registry();
+    const doc = registry.getStore().getState().core.documents[this.canvas.shown!]?.document;
+    if (!doc) return null;
+    try {
+      for (const stamp of stamps) {
+        const pdf = await registry.getEngine().exportAnnotationAppearanceAsPdf(doc, doc.pages[stamp.pageIndex], stamp).toPromise();
+        appearances.set(stamp.id, pdf);
+      }
+    } catch {
+      return null;
+    }
+    return appearances;
   }
 
   /** Hace `fn()` sin que EmbedPDF apunte nada en su historial (quien llama apunta lo suyo). */
@@ -423,6 +445,27 @@ export class Annotations {
       const [x, y] = [[dx, dy], [dy, -dx], [-dx, -dy], [-dy, dx]][rotation as number];
       scope.moveAnnotation(item.pageIndex, item.id, { x, y }, 'delta');
     }
+  }
+
+  /**
+   * Sello de texto (leyenda) centrado en `at` (página vista): texto libre con marco del color y
+   * fondo blanco, editable como cualquier texto libre. Mide lo mismo que su miniatura.
+   */
+  textStamp(stamp: TextStamp, at: { index: number; x: number; y: number }): Annot[] {
+    const [pw, ph]: [number, number] = this.canvas.sizes[at.index];
+    const size = textStampSize(stamp);
+    const w = Math.min(pw, size.width);
+    const h = Math.min(ph, size.height);
+    const x0 = Math.max(0, Math.min(pw - w, at.x - w / 2));
+    const y0 = Math.max(0, Math.min(ph - h, at.y - h / 2));
+    const { rotation } = this.canvas.pageInfo(at.index);
+    const annotation = applyInsertUpright({
+      type: T.FREETEXT, pageIndex: at.index, rect: this.canvas.toPage(at.index, [x0, y0, x0 + w, y0 + h]),
+      contents: stamp.text, fontSize: stamp.font_size, fontColor: stamp.color, fontFamily: PdfStandardFont.Helvetica_Bold,
+      opacity: 1, textAlign: PdfTextAlignment.Center, verticalAlign: PdfVerticalAlignment.Middle,
+      color: '#FFFFFF', backgroundColor: '#FFFFFF', strokeColor: stamp.color, strokeWidth: TEXT_STAMP.border,
+    } as unknown as PdfAnnotationObject, rotation, true);
+    return this.create([annotation as AnnotDraft]);
   }
 
   /** Crea anotaciones `[{ pageIndex, ...objeto }]`; devuelve las creadas (con su `id`). */
@@ -480,25 +523,6 @@ export class Annotations {
     return [caret];
   }
 
-  /** Sello o leyenda: texto libre centrado en `at` (página vista), con marco y fondo blanco. */
-  stamp({ text, color, font_size: size }: { text: string; color: string; font_size: number },
-        at: { index: number; x: number; y: number }): Annot[] {
-    const [pw, ph]: [number, number] = this.canvas.sizes[at.index];
-    const lines = text.split('\n');
-    const longest = Math.max(...lines.map((line) => line.length));
-    const w = Math.min(pw, Math.max(STAMP.minWidth, longest * size * 0.62 + STAMP.padding));
-    const h = Math.min(ph, Math.max(STAMP.minHeight, lines.length * size * 1.25 + 12));
-    const x0 = Math.max(0, Math.min(pw - w, at.x - w / 2));
-    const y0 = Math.max(0, Math.min(ph - h, at.y - h / 2));
-    const { rotation } = this.canvas.pageInfo(at.index);
-    const annotation = applyInsertUpright({
-      type: T.FREETEXT, pageIndex: at.index, rect: this.canvas.toPage(at.index, [x0, y0, x0 + w, y0 + h]),
-      contents: text, fontSize: size, fontColor: color, fontFamily: PdfStandardFont.Helvetica, opacity: 1,
-      textAlign: PdfTextAlignment.Center, verticalAlign: PdfVerticalAlignment.Middle,
-      color: '#FFFFFF', backgroundColor: '#FFFFFF', strokeColor: color, strokeWidth: STAMP.border,
-    } as unknown as PdfAnnotationObject, rotation, true);
-    return this.create([annotation as AnnotDraft]);
-  }
 
   undo(): void {
     if (this.canvas.shown) this._history().undo();
@@ -508,32 +532,13 @@ export class Annotations {
     if (this.canvas.shown) this._history().redo();
   }
 
-  /** Escribe en el PDF de EmbedPDF lo pendiente (para dibujar las páginas con las anotaciones al día). */
+  /**
+   * Escribe en el PDF de EmbedPDF lo pendiente (para dibujar las páginas con las anotaciones al
+   * día y antes de sacar una copia: document/copy.ts).
+   */
   async commit(): Promise<void> {
     this.canvas.finishEditing(); // el texto que se está escribiendo también cuenta
     await this.scope()?.commit().toPromise();
-  }
-
-  // ── Python ─────────────────────────────────────────────────────────────
-  /**
-   * Pasa a Python las anotaciones si cambiaron desde la última vez: sube la copia del
-   * documento de EmbedPDF y Python toma de ella las anotaciones. Llamarlo antes de todo lo
-   * que necesita el documento al día en Python. Resuelve `{ modified }` o null si no hacía falta.
-   */
-  async sync(): Promise<{ modified: boolean } | null> {
-    this.canvas.finishEditing(); // el texto que se está escribiendo también cuenta
-    const documentId: string | null = this.canvas.shown;
-    const version = this.version;
-    if (!documentId || version === this.synced) return null;
-    const plugin = this._plugin().provides().forDocument(documentId);
-    await plugin.commit().toPromise(); // lo pendiente, ya escrito en el PDF de EmbedPDF
-    const buffer = await this._registry().getPlugin<ExportPlugin>('export')!.provides().forDocument(documentId).saveAsCopy().toPromise();
-    const url = await call<string>('viewer.upload_url');
-    const response = await fetch(url, { method: 'POST', body: buffer });
-    if (!response.ok) throw new Error(TX.syncError(response.status));
-    const result = await call<{ modified: boolean }>('viewer.sync_annotations', this.docId, url);
-    if (documentId === this.canvas.shown) this.synced = Math.max(this.synced, version);
-    return result;
   }
 }
 

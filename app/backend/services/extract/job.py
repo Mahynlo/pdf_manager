@@ -1,4 +1,4 @@
-"""Trabajo de extracción en segundo plano (equivale a ``ExtractorWorker`` de la versión Qt).
+"""Trabajo de extracción en segundo plano.
 
 Ejecuta ``pdf_core.extractor.engine`` en un hilo y avisa al frontend con eventos
 ``extract:*`` (registro, progreso, coincidencias). Al terminar deja ``result`` o
@@ -15,16 +15,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import fitz
-
 from pdf_core.extractor import engine
 from pdf_core.extractor.engine import ExtractPasswordRequiredError, ExtractPermissionDeniedError, MatchOptions, Reporter
 from pdf_core.extractor.model import PageMatch, collect_keywords, parse_pages
+from pdf_core.pdf import Document
 
 Emit = Callable[[str, Any], None]
 AskPassword = Callable[[str], "str | None"]  # ruta -> contraseña o None si se omite
 
-# El motor colorea sus mensajes con colores fijos (o nombres de Flet); el frontend usa tonos del tema.
+# El motor colorea sus mensajes con colores fijos (o nombres de tono); el frontend usa tonos del tema.
 _TONES = {
     "#D32F2F": "danger",
     "#ED6C02": "warning",
@@ -179,7 +178,7 @@ class ExtractJob:
                 break
         return set()
 
-    def _open_target(self, path: str) -> fitz.Document | None:
+    def _open_target(self, path: str) -> Document | None:
         """Abre un PDF objetivo pidiendo contraseña si hace falta; None si se omite."""
         name = Path(path).name
         try:

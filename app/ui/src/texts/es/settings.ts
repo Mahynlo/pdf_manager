@@ -24,7 +24,8 @@ export default {
         ['Guardar como…', [['Ctrl', 'Shift', 'S']]],
         ['Imprimir', [['Ctrl', 'P']]],
         ['Cerrar pestaña', [['Ctrl', 'F4']]],
-        ['Cambiar de pestaña', [['Ctrl', 'Tab'], ['Ctrl', 'Shift', 'Tab']]],
+        ['Cambiar de pestaña', [['Ctrl', 'Tab'], ['Ctrl', 'Shift', 'Tab'], ['Ctrl', 'Re Pág'], ['Ctrl', 'Av Pág']]],
+        ['Mover la pestaña', [['Ctrl', 'Shift', 'Re Pág'], ['Ctrl', 'Shift', 'Av Pág']]],
       ]],
       ['Navegación', [
         ['Página anterior', [['↑'], ['Re Pág']]],
@@ -62,8 +63,8 @@ export default {
     recent: 'Historial de archivos recientes:',
     clearRecent: 'Vaciar historial',
     recentCleared: 'El historial de archivos recientes ha sido eliminado.',
-    about: (v: { app: string; pymupdf: string; pywebview: string; python: string }) =>
-      `Extraer PDFs v${v.app} · Motor PDF: PyMuPDF v${v.pymupdf} | Entorno: pywebview v${v.pywebview} (WebView2) · Python ${v.python}`,
+    about: (v: { app: string; pdfium: string; pywebview: string; python: string }) =>
+      `Extraer PDFs v${v.app} · Motor PDF: PDFium ${v.pdfium} | Entorno: ${v.pywebview === '?' ? 'navegador (Pyodide)' : `pywebview v${v.pywebview} (WebView2)`} · Python ${v.python}`,
     showLog: 'Ver Registro de Diagnóstico...',
   },
   log: {

@@ -32,12 +32,15 @@ app/ui/
       menu.svelte.ts    openMenu(botón, opciones) / openMenuAt(x, y, opciones)
       theme.svelte.ts   tema claro/oscuro compartido (theme.dark, theme.toggle())
       thumbs.ts         miniaturas bajo demanda (ThumbLoader y la acción use:thumb)
+      strip.ts, fit.ts  tiras que no caben: use:strip (rueda y bordes difuminados) y use:fit
+                        (barras que se compactan por niveles)
       Icon.svelte       iconos del juego común (assets/icons.json)
       dom.ts, icons.ts  h() e ic(): solo para el código imperativo del lienzo
       components/       Dialog y los diálogos de ui.ts; controles: PasswordField, Checkbox,
                         RadioGroup, Fieldset, Banner, SubTabs, SectionCard, ToolHeader, Menu
-    shell/              shell.svelte.ts (estado de las pestañas), tools.ts (registro de
-                        herramientas), Home y RecentFiles (Inicio), dropzone.ts
+    shell/              shell.svelte.ts (estado de las pestañas), TabStrip.svelte y
+                        tab-drag.ts (la tira de pestañas y reordenarlas), tools.ts (registro de
+                        herramientas), Home y RecentFiles (Inicio), dropzone.ts, router.ts
     tools/
       settings/  help/  security/  merge/  extract/
       viewer/           Viewer.svelte y sus piezas (ver abajo)
@@ -50,8 +53,12 @@ app/ui/
 - **Componentes:**
   - barras (`toolbars/`): `Toolbar`, `ToolsBar`;
   - miniaturas: `panels/Thumbnails`;
-  - panel lateral: `panels/TocTree`, `panels/SearchPanel`, `ocr/OcrPanel`, `redact/RedactPanel`, `panels/AiPanel`;
-  - diálogos: imprimir, propiedades, leyendas, perfiles de censura y OCR por lotes.
+  - panel lateral, que se elige en la barra vertical de iconos del borde derecho (agrupada:
+    Buscar e Índice; Sellos, Censura y OCR; IA; un clic en el panel abierto lo cierra):
+    `panels/SearchPanel`, `panels/TocTree`, `stamps/StampsPanel`, `redact/RedactPanel`,
+    `ocr/OcrPanel`, `panels/AiPanel`;
+  - diálogos: propiedades, leyendas, nueva firma, perfiles de censura y OCR por lotes (imprimir usa el
+    de WebView2: `document/print.ts`).
 - **Lienzo, en código imperativo:** `canvas/canvas.ts`, `canvas/selection.ts`, `annotations/annotations.ts` y
   `annotations/editing.ts`. Qué hay en cada carpeta: `app/ui/src/tools/viewer/README.md`.
   - Las páginas, el scroll y el zoom son de EmbedPDF (`embed.ts`, `EmbedRoot.svelte`, `PdfPages.svelte`, `PdfPage.svelte`), y también la selección de texto, la búsqueda y las anotaciones;
@@ -77,7 +84,7 @@ desarrollar; el ejecutable ya lleva la interfaz compilada).
   ventana contra él y lo detiene al cerrar la app. Al guardar un `.svelte`, la ventana se actualiza sola.
 - **Dependencias:** si falta `node_modules`, ejecuta antes `pnpm install`.
 - **`--dev-server URL`:** abre un servidor de Vite que hayas arrancado tú.
-- **En un navegador:** la URL de `pnpm dev` no sirve sola, porque la interfaz necesita el backend
+- **En un navegador** (para la versión de navegador, ver [navegador.md](navegador.md)): la URL de `pnpm dev` no sirve sola, porque la interfaz necesita el backend
   de Python, que solo existe dentro de la ventana. La página lo explica en vez de quedarse en blanco.
 
 El instalador (`installer/web/build.ps1`) comprueba los tipos (`pnpm check`) y compila la

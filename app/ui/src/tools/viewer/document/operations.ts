@@ -1,16 +1,24 @@
 // Operaciones sobre el documento del visor: guardar, rotar, insertar, duplicar,
 // eliminar, mover y exportar (equivale a _page_ops_mixin.py y _file_ops_mixin.py en
-// Qt). Cada operación del backend devuelve la información actualizada del
-// documento; aquí se decide a qué página ir después, como hace Qt.
+// Qt). Aquí se decide a qué página ir después de cada una, como hace Qt.
 //
-// Las anotaciones las edita EmbedPDF: antes de cada operación que necesita el documento al
-// día en Python (guardar, cambiar páginas, censurar, exportar una página) se le pasan (`sync`).
+// El documento es de EmbedPDF: las operaciones de página y la censura las hace su motor en el
+// documento abierto (pages.ts, redact/apply.ts), y al guardar o extraer una página Python escribe tal
+// cual la copia que saca el motor (copy.ts). Python no tiene el documento: lo que lee de él es el
+// texto de las páginas, que le pasa el visor antes (text.ts).
 import { call, type ApiError } from '$lib/api.ts';
 import { fileName } from '$lib/dom.ts';
 import type { MenuItem } from '$lib/menu.svelte.ts';
-import type { DocumentInfo } from '$lib/types.ts';
+import type { DocumentInfo, DocumentState } from '$lib/types.ts';
 import { askChoice, confirmDialog, progressDialog, setStatus, toast } from '$lib/ui.ts';
 import { t, tip } from '$texts';
+import type { PageCanvas } from '../canvas/canvas.ts';
+import type { PageRecognizer } from '../ocr/recognize.ts';
+import { applyMarks } from '../redact/apply.ts';
+import type { RedactionMarks } from '../redact/redaction.ts';
+import { send, type DocumentCopy } from './copy.ts';
+import type { PageEditor } from './pages.ts';
+import type { DocumentText } from './text.ts';
 
 const T = t.viewer.document;
 
@@ -18,29 +26,39 @@ const T = t.viewer.document;
 export interface DocumentView {
   /** Página actual. */
   page(): number;
-  /** Pasa las anotaciones a Python. */
-  sync(): Promise<unknown>;
+  /** Escribe en el documento de EmbedPDF las anotaciones pendientes (antes de cambiar páginas). */
+  commit(): Promise<void>;
   /** Muestra el documento actualizado e ir a `page`. */
   apply(info: DocumentInfo, page: number): void;
 }
 
-/** Cambio del documento: [info nueva, página a la que ir], o null si no se hizo nada. */
-export type Change = [DocumentInfo, number] | null;
-
-/** Resultado de las operaciones de deshacer y rehacer páginas. */
-interface PagesUndo {
-  info: DocumentInfo;
-  page: number | null;
+/** Las partes del documento con las que trabajan las operaciones (las crea Viewer.svelte). */
+export interface DocumentParts {
+  canvas: PageCanvas; // el documento a la vista
+  pages: PageEditor; // las páginas en el motor, con su deshacer
+  copy: DocumentCopy; // las copias que salen del visor
+  text: DocumentText; // el texto que recibe Python
+  recognizer: PageRecognizer; // el OCR y la orientación
 }
 
 export class DocumentActions {
   info: DocumentInfo;
   view: DocumentView;
+  canvas: PageCanvas;
+  pages: PageEditor;
+  copy: DocumentCopy;
+  text: DocumentText;
+  recognizer: PageRecognizer;
   queue: Promise<unknown> = Promise.resolve(); // las operaciones se encadenan: cada una ve el resultado de la anterior
 
-  constructor(info: DocumentInfo, view: DocumentView) {
-    this.info = info;
+  constructor(info: DocumentInfo, view: DocumentView, { canvas, pages, copy, text, recognizer }: DocumentParts) {
     this.view = view;
+    this.canvas = canvas;
+    this.pages = pages;
+    this.copy = copy;
+    this.text = text;
+    this.recognizer = recognizer;
+    this.info = this._withState(info);
   }
 
   get modified(): boolean {
@@ -53,111 +71,104 @@ export class DocumentActions {
 
   // ── Páginas ────────────────────────────────────────────────────────────
   rotate(angle: number, allPages = false) {
-    return this._change(async (page) => [
-      await call<DocumentInfo>('viewer.rotate', this.info.id, angle, allPages ? null : page), page,
-    ]);
+    return this._pages((page) => {
+      const indices = allPages ? this.info.pages.map((_, i) => i) : [page];
+      return this.pages.rotate(indices, angle, page);
+    });
   }
 
   insertBlank() {
-    return this._change(async (page) => [await call<DocumentInfo>('viewer.insert_blank', this.info.id, page), page + 1]);
+    return this._pages((page) => this.pages.insertBlank(page));
   }
 
   duplicate() {
-    return this._change(async (page) => [await call<DocumentInfo>('viewer.duplicate', this.info.id, page), page + 1]);
+    return this._pages((page) => this.pages.duplicate(page));
   }
 
   remove() {
-    return this._change(async (page) => {
+    return this._pages(async (page) => {
       if (this.pageCount <= 1) {
         toast(T.onlyPage, 'warning');
         return null;
       }
       if (!(await confirmDialog(T.removeTitle, T.removeQuestion(page + 1)))) return null;
-      return [await call<DocumentInfo>('viewer.delete_page', this.info.id, page), Math.max(0, page - 1)];
+      return this.pages.remove(page);
     });
   }
 
   /** Mueve la página `src` a la posición final `dst` (por defecto, desde la actual). */
   move(dst: number, src: number | null = null) {
-    return this._change(async (page) => {
+    return this._pages(async (page) => {
       const from = src ?? page;
       if (from === dst || dst < 0 || dst >= this.pageCount) return null;
-      return [await call<DocumentInfo>('viewer.move_page', this.info.id, from, dst), dst];
+      return this.pages.move(from, dst);
     });
   }
 
   /** Deshace la última operación de página (girar, insertar, duplicar, borrar, mover). */
   undoPages() {
-    return this._change(async (page) => {
-      const { info, page: target } = await call<PagesUndo>('viewer.undo_pages', this.info.id);
-      return [info, target ?? page];
-    });
+    return this._pages(() => this.pages.undo());
   }
 
   redoPages() {
-    return this._change(async (page) => {
-      const { info, page: target } = await call<PagesUndo>('viewer.redo_pages', this.info.id);
-      return [info, target ?? page];
-    });
+    return this._pages(() => this.pages.redo());
   }
 
   get canUndoPages(): boolean {
-    return Boolean(this.info.page_undo);
+    return this.pages.canUndo;
   }
 
   get canRedoPages(): boolean {
-    return Boolean(this.info.page_redo);
+    return this.pages.canRedo;
   }
 
   /** Detecta la orientación de la página actual (escaneo o texto girado) y la corrige. */
   fixOrientation() {
-    return this._change(async (page) => {
-      const { angle, info } = await call<{ angle: number; info: DocumentInfo | null }>('ocr.orientation', this.info.id, page);
-      if (!info) {
+    return this._pages(async (page) => {
+      const angle = await this.recognizer.orientation(page);
+      if (!angle) {
         toast(T.orientationOk, 'info');
         return null;
       }
       toast(T.orientationFixed(angle), 'success');
-      return [info, page];
+      return this.pages.rotate([page], angle, page);
     });
   }
 
   /** Corrige la orientación de todas las páginas, con progreso y «Cancelar». */
   fixOrientationAll() {
-    return this._change(async (page) => {
+    return this._pages(async (page) => {
       const total = this.pageCount;
       const progress = progressDialog(T.orientationTitle, T.orientationAnalyzing);
-      let last: DocumentInfo | null = null;
-      let corrected = 0;
+      const turns: [number, number][] = []; // [página, ángulo]
       try {
         for (let index = 0; index < total && !progress.cancelled; index++) {
           progress.update(index, total, T.orientationProgress(index + 1, total));
-          const { info } = await call<{ info: DocumentInfo | null }>('ocr.orientation', this.info.id, index);
-          if (info) {
-            last = info;
-            corrected++;
-          }
+          const angle = await this.recognizer.orientation(index);
+          if (angle) turns.push([index, angle]);
         }
       } finally {
         progress.close();
       }
-      setStatus(corrected ? T.orientationDone(corrected) : T.orientationNone);
-      return last && [last, page];
+      // Cada giro se deshace por separado, como si se hubiera hecho a mano.
+      for (const [index, angle] of turns) await this.pages.rotate([index], angle, page);
+      setStatus(turns.length ? T.orientationDone(turns.length) : T.orientationNone);
+      return turns.length ? page : null;
     });
   }
 
-  /** Ejecuta `fn(página)` → [info, página destino] | null en la cola del documento (p. ej. la censura). */
-  change(fn: (page: number) => Promise<Change>) {
-    return this._change(fn);
-  }
-
-  /** Ejecuta `fn(página)` → [info, página destino] | null, en orden y avisando de los errores. */
-  _change(fn: (page: number) => Promise<Change>): Promise<void> {
+  /**
+   * Ejecuta en la cola del documento `fn(página)`, que cambia las páginas con el editor y
+   * devuelve a cuál ir (null si no hizo nada), y muestra el resultado.
+   */
+  _pages(fn: (page: number) => Promise<number | null>): Promise<void> {
     const task = this.queue.then(async () => {
       try {
-        await this.view.sync();
-        const result = await fn(this.view.page());
-        if (result) this._apply(...result);
+        await this.view.commit(); // las anotaciones van con su página
+        const target = await fn(this.view.page());
+        if (target === null) return;
+        const info = { ...this.info, pages: this.pages.sizes, keys: this.pages.keys, toc: await this.pages.toc() };
+        this._apply(info, target);
       } catch (err) {
         toast((err as Error).message, 'danger');
       }
@@ -166,59 +177,81 @@ export class DocumentActions {
     return task;
   }
 
+  // ── Censura ────────────────────────────────────────────────────────────
+  /** Aplica las marcas de censura (redact/apply.ts). Resuelve cuántas, o false si no había o falló. */
+  redact(marks: RedactionMarks): Promise<number | false> {
+    return this._file(async () => {
+      const done = await applyMarks({ docId: this.info.id, canvas: this.canvas, pages: this.pages, text: this.text,
+                                      marks, commit: () => this.view.commit() });
+      if (!done) return false;
+      this._apply(this._current(done.state), this.view.page());
+      return done.count;
+    });
+  }
+
+  /** `info` con el estado que dio Python y las páginas como están en el visor. */
+  _current(state: Partial<DocumentState>): DocumentInfo {
+    return { ...this.info, ...state, pages: this.pages.sizes, keys: this.pages.keys };
+  }
+
   _apply(info: DocumentInfo, page: number): void {
-    this.info = info;
-    this.view.apply(info, Math.min(page, info.pages.length - 1));
+    this.info = this._withState(info);
+    this.view.apply(this.info, Math.min(page, info.pages.length - 1));
+  }
+
+  /**
+   * `info` con «cambios sin guardar» al día: anotaciones o censura (lo dice Python) o una
+   * estructura de páginas distinta de la guardada (la lleva el editor).
+   */
+  _withState(info: DocumentInfo): DocumentInfo {
+    return { ...info, modified: info.annotated || info.redacted || this.pages.changedWith(info.keys) };
   }
 
   // ── Guardar ────────────────────────────────────────────────────────────
   /** Guarda sobre el original (Ctrl+S). Resuelve true si se guardó. */
   save(): Promise<boolean> {
     return this._file(async () => {
-      await this.view.sync();
       try {
-        return this._saved(await call<DocumentInfo>('viewer.save', this.info.id));
+        return await this._write('viewer.save');
       } catch (err) {
         // Sin permiso de escritura, o con censura aplicada (nunca se sobrescribe el original).
         const { code, message } = err as ApiError;
         if (code !== 'permission_denied' && code !== 'redacted') throw err;
         toast(message, code === 'redacted' ? 'info' : 'warning');
-        return this._saveAs();
+        return this._write('viewer.save_as');
       }
     });
   }
 
   /** Guarda una copia en otra ruta (Ctrl+Shift+S); la pestaña pasa a ser ese archivo. */
   saveAs(): Promise<boolean> {
-    return this._file(async () => {
-      await this.view.sync();
-      return this._saveAs();
-    });
+    return this._file(() => this._write('viewer.save_as'));
   }
 
-  async _saveAs(): Promise<boolean> {
-    const info = await call<DocumentInfo | null>('viewer.save_as', this.info.id);
-    return info ? this._saved(info) : false;
-  }
-
-  _saved(info: DocumentInfo): boolean {
-    this._apply(info, this.view.page());
-    setStatus(T.saved(info.name));
+  /**
+   * Sube la copia del documento y Python la escribe en el archivo con `method`. Resuelve false si
+   * se canceló el diálogo de «Guardar como».
+   */
+  async _write(method: 'viewer.save' | 'viewer.save_as'): Promise<boolean> {
+    const copy = await this.copy.upload();
+    const state = await call<DocumentState | null>(method, this.info.id, copy.url, copy.keys);
+    if (!state) return false;
+    this.pages.markSaved();
+    this._apply(this._current(state), this.view.page());
+    setStatus(T.saved(state.name));
     return true;
   }
 
-  /** Ejecuta `fn` en la cola del documento (p. ej. pasar las anotaciones), avisando de los errores. */
+  /** Ejecuta `fn` en la cola del documento (p. ej. pasar el documento a Python), avisando de los errores. */
   run<R>(fn: () => Promise<R>): Promise<R | false> {
     return this._file(fn);
   }
 
   /** Cambiaron las anotaciones: Python lo apunta (aviso de cambios sin guardar al cerrar). */
   annotationsChanged(): Promise<unknown> {
-    if (this.info.modified) return Promise.resolve();
-    this.info = { ...this.info, modified: true }; // no se vuelve a avisar hasta guardar
-    return this._file(async () => {
-      this.info = { ...this.info, ...(await call<Partial<DocumentInfo>>('viewer.annotations_changed', this.info.id)) };
-    });
+    if (this.info.annotated) return Promise.resolve(); // no se vuelve a avisar hasta guardar
+    this.info = this._withState({ ...this.info, annotated: true });
+    return this._file(() => call('viewer.annotations_changed', this.info.id));
   }
 
   /** Como `_change`, pero resuelve el valor de `fn` (false si falla). */
@@ -253,17 +286,19 @@ export class DocumentActions {
   }
 
   // ── Exportar ───────────────────────────────────────────────────────────
+  /** Guarda la página actual (con sus anotaciones) como un PDF nuevo: lo saca el motor y Python lo escribe. */
   extractPage() {
     return this._file(async () => {
-      await this.view.sync(); // la página extraída lleva sus anotaciones
       const page = this.view.page();
-      const path = await call<string | null>('viewer.extract_page', this.info.id, page);
+      const url = await send(await this.copy.page(page));
+      const path = await call<string | null>('viewer.extract_page', this.info.id, page, url);
       if (path) setStatus(T.pageExtracted(page + 1, fileName(path)));
     });
   }
 
   exportText() {
     return this._file(async () => {
+      await this.text.sync(); // el texto de todas las páginas, como están ahora
       const path = await call<string | null>('viewer.export_text', this.info.id);
       if (path) setStatus(T.textExported(fileName(path)));
     });
@@ -271,7 +306,8 @@ export class DocumentActions {
 
   exportImages() {
     return this._file(async () => {
-      const result = await call<{ folder: string; count: number } | null>('viewer.export_images', this.info.id);
+      const copy = await this.copy.upload(); // Python saca las imágenes del PDF
+      const result = await call<{ folder: string; count: number } | null>('viewer.export_images', this.info.id, copy.url);
       if (!result) return;
       if (result.count) setStatus(T.imagesExported(result.count, result.folder));
       else toast(T.noImages, 'info');

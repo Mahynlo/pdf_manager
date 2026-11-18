@@ -1,8 +1,9 @@
 <!--
   Pestaña «OCR» del panel lateral (ocr_panel.py y ocr_worker.py en Qt): OCR de la
   página actual, de un recorte y por lotes, cajas del texto reconocido en el lienzo y
-  texto extraído. El reconocimiento lo hace el servicio `ocr`; las palabras quedan en
-  el documento abierto y entran en su capa de texto, así se pueden seleccionar y buscar.
+  texto extraído. Reconoce `recognizer` (recognize.ts: el motor dibuja, Python reconoce);
+  las palabras quedan escritas en el documento, así se pueden seleccionar y buscar, y en
+  Python, en la capa de texto de la página.
 -->
 <script lang="ts">
   import { call, type ApiError } from '$lib/api.ts';
@@ -13,19 +14,23 @@
   import { TOOLS, type PageCanvas } from '../canvas/canvas.ts';
   import OcrBatchDialog from './OcrBatchDialog.svelte';
   import OcrResultDialog from './OcrResultDialog.svelte';
-  import type { Box, OcrResult, PageText } from './types.ts';
+  import type { PageRecognizer } from './recognize.ts';
+  import type { Box, OcrResult } from './types.ts';
 
   const T = t.viewer.ocr;
   const MIN_AREA = 4; // pt: un recorte más pequeño es un clic, no un rectángulo
 
   /**
    * `page`: página actual; `active`: la pestaña está a la vista (solo entonces se pide el
-   * texto de cada página); `changed(index)`: el texto de la página cambió (selección y
-   * búsqueda lo releen); `orient()`: corregir la orientación de la página actual.
+   * texto de cada página); `changed(index)`: el texto de la página cambió (la búsqueda lo
+   * relee); `orient()`: corregir la orientación de la página actual.
    */
-  let { canvas, docId, page, active, close, setTool, changed, orient }: {
+  let { canvas, docId, recognizer, page, active, close, setTool, changed, orient, syncText }: {
     canvas: PageCanvas;
     docId: number;
+    recognizer: PageRecognizer;
+    /** Python recibe las páginas al día y el texto de `pages` (sin ellas, de todas) antes de leerlo. */
+    syncText: (pages?: number[] | null) => Promise<unknown>;
     page: number;
     active: boolean;
     close: () => void;
@@ -70,7 +75,8 @@
   async function load(index = page) {
     const mine = ++run;
     try {
-      const result = await call<PageText>('ocr.page_text', docId, index);
+      await syncText([index]);
+      const result = await recognizer.pageText(index);
       if (mine !== run) return;
       kind = result.kind;
       segments = String(result.segments);
@@ -111,7 +117,8 @@
   function runPage() {
     const index = page;
     withBusy(T.processing, async () => {
-      const result = await call<OcrResult>('ocr.page', docId, index);
+      await syncText([index]);
+      const result = await recognizer.page(index);
       showResult(result, T.modeOf(result.mode ?? ''));
       kind = result.kind ?? '-';
       if (index === page) text = result.text || T.noTextFound;
@@ -177,7 +184,8 @@
       const rect = rectOf(done);
       if (rect[2] - rect[0] < MIN_AREA || rect[3] - rect[1] < MIN_AREA) return;
       withBusy(T.areaMode, async () => {
-        const result = await call<OcrResult>('ocr.area', docId, done.index, rect);
+        await syncText([done.index]);
+        const result = await recognizer.area(done.index, rect);
         showResult(result, T.areaDone);
         text = result.text.trim() ? result.text : T.areaEmpty;
       });
@@ -202,8 +210,10 @@
   // ── Lotes ──────────────────────────────────────────────────────────────
   async function openBatch() {
     if (busy) return;
+    await syncText(); // mientras está abierto, las páginas no cambian
     const result = await openModal<string>(OcrBatchDialog, {
       docId,
+      recognize: (index: number) => recognizer.page(index),
       total: canvas.pageCount,
       setBusy: (value: boolean) => (busy = value),
       onPage(index: number, pageResult: OcrResult) {

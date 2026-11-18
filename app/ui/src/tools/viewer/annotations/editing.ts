@@ -144,8 +144,8 @@ export class AnnotationEditor {
   }
 
   /** Traer al frente o enviar al fondo (como el menú de las anotaciones en Qt). */
-  order(front: boolean): void {
-    const moved = this.annotations.reorder(this.items, front);
+  async order(front: boolean): Promise<void> {
+    const moved = await this.annotations.reorder(this.items, front);
     if (!moved) {
       toast(TX.bar.cantReorder, 'warning');
       return;

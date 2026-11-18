@@ -16,9 +16,9 @@ DEFAULT_STAMPS: list[tuple[str, str]] = [
     ("REVISADO", "#00838F"),
 ]
 
-STAMP_FONT_SIZE = 13  # pt, como add_stamp_legend en Qt
+STAMP_FONT_SIZE = 13  # pt
 STAMP_BORDER = 1.5  # pt
-STAMP_SIZE = (105.0, 29.0)  # pt (210×58 en la escena de Qt, a 2 unidades por punto)
+STAMP_SIZE = (105.0, 29.0)  # pt
 
 
 def rgb_to_hex(rgb: tuple[float, float, float] | list[float]) -> str:

@@ -23,7 +23,7 @@
   let { tool }: { tool: Tool } = $props();
 
   let merge = $state.raw<MergeState>({ entries: [], preview: [], output: null, busy: false, last_result: null });
-  let options = $state({ bookmarks: true, duplex: false, optimize: true });
+  let options = $state({ bookmarks: true, duplex: false });
   let merging = $state(false);
   let progress = $state(0);
 
@@ -141,7 +141,6 @@
       <div class="merge__options">
         <Checkbox label={T.result.bookmarks} bind:checked={options.bookmarks} title={T.result.bookmarksTip} />
         <Checkbox label={T.result.duplex} bind:checked={options.duplex} title={T.result.duplexTip} />
-        <Checkbox label={T.result.optimize} bind:checked={options.optimize} title={T.result.optimizeTip} />
       </div>
       <div class="merge__output">
         <Icon name="save" />

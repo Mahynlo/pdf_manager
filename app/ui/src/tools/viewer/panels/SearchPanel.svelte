@@ -46,7 +46,12 @@
    * `canvas`: el lienzo (su documento en EmbedPDF y sus capas de marcas);
    * `redact(query)`: enviar el término buscado a la censura.
    */
-  let { canvas, close, redact }: { canvas: PageCanvas; close: () => void; redact: (query: string) => void } = $props();
+  let { canvas, close, redact, navigated }: {
+    canvas: PageCanvas;
+    close: () => void;
+    redact: (query: string) => void;
+    navigated: () => void; // el usuario eligió un resultado: va a la página
+  } = $props();
 
   let input: HTMLInputElement;
   let list: HTMLDivElement;
@@ -256,7 +261,7 @@
   <div class="search-results" role="listbox" aria-label={T.results} bind:this={list}>
     {#each matches.slice(0, shown) as match, i (i)}
       <button class="search-result" class:is-active={i === current} type="button" role="option" aria-selected={i === current}
-              onclick={() => select(i)}>
+              onclick={() => { void select(i); navigated(); }}>
         <span class="search-result__page">{T.page(match.page + 1)}</span>
         <span class="search-result__text">{match.cutLeft ? '…' : ''}{match.before ? `${match.before} ` : ''}<mark>{match.match}</mark>{match.after ? ` ${match.after}` : ''}{match.cutRight ? '…' : ''}</span>
       </button>

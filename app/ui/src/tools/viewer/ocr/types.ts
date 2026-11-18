@@ -1,4 +1,5 @@
 // Respuestas del servicio `ocr` (app/backend/services/ocr.py).
+import type { OcrWord } from '$lib/pdf-engine/index.ts';
 
 /** Rectángulo `[x0, y0, x1, y1]` en puntos de la página tal como se ve. */
 export type Box = [number, number, number, number];
@@ -20,6 +21,7 @@ export interface OcrResult {
   segments: number;
   boxes: Box[];
   elapsed_ms: number;
+  words: OcrWord[]; // las reconocidas (recognize.ts las escribe en el documento)
   mode?: string; // solo `page`
   kind?: string; // solo `page`
 }

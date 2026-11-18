@@ -2,7 +2,6 @@
 
 Nueva interfaz de PDF Manager: **frontend en Svelte** (HTML/CSS/JS compilado con Vite) y
 **backend en Python**, unidos por pywebview (WebView2 de Edge en Windows, que ya viene con el sistema).
-La versión Qt (`src_qt/`) es la referencia de funciones y aspecto hasta completar la migración.
 
 ```
 uv run python -m app.main            # arrancar (compila la interfaz si cambió)
@@ -11,6 +10,30 @@ uv run python -m app.main --debug    # con herramientas de desarrollo (F12)
 ```
 
 Hacen falta Node.js y pnpm para compilar la interfaz; ver [svelte.md](svelte.md).
+
+> Este documento es la referencia: la estructura y las reglas. Para ver **cómo se mueve todo** (quién
+> llama a quién y en qué orden, con diagramas), empieza por [como-funciona.md](como-funciona.md).
+
+```mermaid
+flowchart LR
+    subgraph V["Ventana (WebView2)"]
+        UI["Interfaz Svelte<br/>app/ui/src"]
+        EP["EmbedPDF<br/>dibuja y edita el PDF del visor"]
+        UI <--> EP
+    end
+    subgraph P["Proceso de Python"]
+        SV["Servicios<br/>app/backend/services"]
+        CORE["pdf_core<br/>src/pdf_core"]
+        HOST["WebviewHost<br/>app/host.py"]
+        SV --> CORE
+        SV --> HOST
+    end
+    UI -- "call('servicio.metodo')" --> SV
+    HOST -- "emit('evento')" --> UI
+    UI <-. "datos grandes, en binario<br/>(ByteServer, 127.0.0.1)" .-> HOST
+    CORE <--> DISK[("Archivos")]
+    HOST <--> DISK
+```
 
 ## Estructura
 
@@ -23,7 +46,7 @@ app/
   single_instance.py      una sola ventana: las nuevas instancias le pasan sus PDF («Abrir con»)
   webview_cache.py        descarta la caché de WebView2 cuando cambia el frontend
   host.py                 WebviewHost: diálogos, abrir carpetas y enlaces, eventos → JS (lo único que usa pywebview)
-  backend/                Python sin interfaz: no importa Qt ni pywebview
+  backend/                Python sin interfaz: no importa pywebview
     rpc.py                @exposed, Registry, UserError, Api (punto de entrada único)
     host.py               protocolo Host que usan los servicios
     settings.py           preferencias en ~/.pdf_manager/settings.json
@@ -34,12 +57,12 @@ app/
                           help (manuales Markdown → HTML seguro), viewer (PDFs abiertos en el visor),
                           ocr (OCR y orientación sobre los documentos del visor), redact (censura),
                           ai (asistente IA),
-                          legends (sellos y leyendas)
+                          legends (sellos de texto y leyendas), stamps (sellos propios y firmas)
   ui/                     la interfaz, en Svelte (compila a ui/dist con pnpm build): ver svelte.md
     src/main.ts           arranque: estilos, tema guardado y App
-    src/styles/           tokens.css (colores del tema, mismos valores que src_qt/core/theme.py),
+    src/styles/           tokens.css (colores del tema),
                           base.css, components.css y uno por área
-    src/assets/icons.json trazos de los iconos (también los usa la versión Qt)
+    src/assets/icons.json trazos de los iconos
     src/App.svelte        ventana: cabecera con pestañas, vistas, barra de estado, avisos y menú
     src/lib/              api.ts (puente con Python), ui.ts (avisos, barra de estado y diálogos),
                           menu.svelte.ts (menús emergentes), theme.svelte.ts, thumbs.ts
@@ -58,6 +81,8 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
 
 ## Cómo se comunican
 
+Con diagramas de secuencia: [como-funciona.md](como-funciona.md), secciones 3, 4 y 11.
+
 - **JS → Python:** `await call('merge.toggle', id, pagina)`. Solo se pueden llamar métodos
   marcados con `@exposed` de un servicio registrado. Errores previstos: `raise UserError("mensaje")`
   → la promesa se rechaza con ese mensaje (se muestra como aviso).
@@ -65,7 +90,10 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
 - **El estado vive en el backend.** Cada acción devuelve el estado completo y la vista se repinta
   a partir de él; el frontend no duplica lógica (rangos, selección, permisos…).
 - pywebview ejecuta cada llamada en su propio hilo: los servicios protegen su estado con un candado
-  (`fitz.Document` no admite acceso concurrente).
+  (además, PDFium no admite hilos: `pdf_core.pdf` lo serializa todo con un candado global).
+- **Python → motor de la ventana:** `host.run_engine('redact', pdf, args)` para lo que solo sabe
+  hacer el PDFium de EmbedPDF: emite `engine:task`, la ventana hace la tarea (`lib/engine.ts`) y sube
+  el resultado. Ver [embedpdf.md](embedpdf.md), «Un solo motor».
 
 ## Reglas
 
@@ -73,7 +101,6 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
   el backend ya genera seguro (manuales y respuestas de la IA). El código imperativo del lienzo crea
   sus elementos con `h()` (`lib/dom.ts`).
 - **Colores solo desde `tokens.css`** (`var(--accent)`…). El tema cambia con `data-theme` en `<html>`.
-  Si cambia una paleta de Qt, hay que regenerar `tokens.css` (un test compara ambos).
 - **Iconos**: `<Icon name="nombre" />` (o `ic('nombre')` en el código del lienzo). Usan
   `currentColor`, así que siguen el tema solos. Un icono nuevo se añade a `app/ui/src/assets/icons.json`.
 - **Listas con clave**: `{#each lista as item (item.id)}`, así Svelte reutiliza los elementos al
@@ -91,10 +118,14 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
 - **Imágenes bajo demanda**: miniaturas solo para lo visible (`IntersectionObserver`), por lotes,
   en JPEG y con caché acotada (`lib/thumbs.ts`). Las páginas del visor las dibuja
   EmbedPDF en el navegador, solo las que están a la vista y en mosaico a la resolución del zoom, a
-  partir de los bytes del documento abierto en Python (`viewer.document_url`, ver [embedpdf.md](embedpdf.md)).
+  partir del documento que tiene abierto (el archivo lo da `viewer.document_url`, ver [embedpdf.md](embedpdf.md)).
 - **Datos grandes hacia el frontend**: el puente de pywebview pasa los valores como texto JSON. Para
   datos grandes (un PDF entero), `host.share_bytes(datos, tipo)` da una URL de un solo uso en
-  127.0.0.1 (`app/byte_server.py`) y el frontend los descarga en binario con `fetch`.
+  127.0.0.1 (`app/byte_server.py`) y el frontend los descarga en binario con `fetch`. El visor abre su
+  archivo con `host.file_url(ruta)`, que en el navegador es una URL del archivo que tiene la ventana.
+- **Archivos del visor**: el visor lee y escribe sus documentos con el `Host` (`read_file`,
+  `write_file`, `file_size`, `file_url`), nunca con rutas; las herramientas abren rutas con `pdf_core`.
+  En el navegador así el visor no guarda copia en Python (ver [navegador.md](navegador.md)).
 - **Atajos de una pestaña**: su componente exporta `onKey(ev)`; el shell se lo pasa solo cuando
   es la pestaña activa y no hay un diálogo abierto.
 - **Cambios en el documento del visor**: cada operación de `viewer.*` devuelve la información
@@ -103,21 +134,20 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
   cargar el documento en EmbedPDF.
 - **Texto del visor**:
   - la selección es del complemento Selection de EmbedPDF, con el texto que PDFium lee del
-    documento. El texto reconocido por OCR va en el documento que recibe EmbedPDF como texto
-    invisible (`viewer.document_url`), así que se selecciona igual; tras un OCR el lienzo recarga
-    el documento (`canvas.reload`);
+    documento. El texto reconocido por OCR lo escribe el visor en su documento como texto invisible
+    (`canvas.writeOcrText`), así que se selecciona igual, sin volver a abrir el documento;
   - la búsqueda también es de EmbedPDF (complemento Search, en `SearchPanel.svelte`), sobre ese
     mismo documento;
   - el asistente IA y el panel de OCR leen la capa de texto del backend (`pdf_core/text_layer.py`,
     `viewer.text_of`): el texto en orden de lectura, con el nativo y el de OCR;
   - lo que se dibuja sobre una página (selección, coincidencias) va en su capa de marcas
     (`canvas.addMark`), en puntos de la página tal como se ve y medido en porcentaje.
-- **Anotaciones**: las dibuja y edita EmbedPDF (complementos Annotation y History) en su copia del
-  documento, con deshacer y rehacer en el navegador. Antes de lo que necesita el documento al día en
-  Python (guardar, exportar una página, cambiar páginas, censurar, OCR), el visor sube su
-  copia (`viewer.sync_annotations`, por el servidor local de datos) y Python toma de ella solo las
-  anotaciones (`pdf_core/annot_transfer.py`); el contenido, el cifrado, los formularios y los
-  enlaces siguen siendo los suyos. Ver [embedpdf.md](embedpdf.md).
+- **Anotaciones, páginas y censura**: las hace EmbedPDF (complementos Annotation y History, y el
+  motor de la app) en su documento, con deshacer y rehacer en el navegador. Python no tiene el
+  documento: recibe la clave y el texto de cada página que le falta (`document/text.ts`,
+  `viewer.set_pages` y `viewer.add_texts`, por el servidor local de datos) y, al guardar o extraer
+  una página, la copia que saca el motor sin el texto del OCR (`document/copy.ts`), que escribe tal
+  cual. Ver [embedpdf.md](embedpdf.md), etapa 4.
 - **Ratón en el lienzo**: cada página va en un `PagePointerProvider` de EmbedPDF, que pasa el ratón
   a la selección de texto (solo con las herramientas de texto, por los modos del gestor de
   interacción) y a las anotaciones (seleccionar, mover, dibujar con su herramienta activa). Los
@@ -126,27 +156,35 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
   WebView2 podría seguir usando JS/CSS de una versión anterior aunque se reinicie la app. Al
   arrancar, `app/webview_cache.py` compara una huella de la interfaz (`app/ui/dist`) con la del arranque
   anterior y, si cambió, borra la caché HTTP de WebView2 (no las preferencias).
-- **OCR**: el servicio `ocr` rasteriza la página con el candado del visor y hace la inferencia sin él
-  (el lienzo sigue respondiendo); una inferencia a la vez y el modelo se libera tras 12 s sin uso. Las
-  palabras se guardan en el documento abierto por clave de página (`ViewerService.set_ocr_words`) y
-  entran en su capa de texto: selección, búsqueda y exportar texto las ven sin cambios. Los lotes los
-  recorre el frontend página a página (`ocr.page`), así se puede cancelar entre una y otra.
+- **OCR**: el visor dibuja con su motor lo que hay que reconocer y lo sube (`ocr/recognize.ts`); el
+  servicio `ocr` solo hace la inferencia, sin el candado del visor (el lienzo sigue respondiendo). Una
+  inferencia a la vez y el modelo se libera tras 12 s sin uso. Las palabras se guardan en el
+  documento abierto por clave de página (`ViewerService.set_ocr_words`), entran en su capa de texto
+  (IA, exportar texto) y el visor las escribe en su documento: selección y búsqueda las ven sin
+  cambios. Los lotes los recorre el frontend página a página (`ocr.page`), así se puede cancelar
+  entre una y otra. La orientación la dice el texto de la página o, en un escaneo, el clasificador
+  de Python con dos imágenes de ella. Ver [embedpdf.md](embedpdf.md), etapa 3.
 - **Censura**: lo que se censura son las marcas de EmbedPDF (anotaciones `Redact`, ver
   `redaction.ts`), que se revisan en la página. El servicio `redact` busca dónde aparece cada término
   (`find`) y guarda las opciones, el color y el perfil activo en el propio documento abierto
-  (`_OpenDocument.extras`). Al aplicar, las marcas llegan con las anotaciones y
-  `ViewerService.apply_redaction_marks` las aplica: borra el contenido de debajo (también las
-  palabras de OCR) y sube la revisión de esas páginas, así su clave cambia y el lienzo no reutiliza
-  la imagen anterior. Un documento censurado (`redacted`) solo se guarda como copia.
-- **Imprimir**: sin Qt ni pywin32, con la impresión del navegador. El diálogo propio elige las páginas
-  (`viewer.print_selection`) y las opciones; PDFium dibuja esas páginas con sus anotaciones a 150 ppp
-  en el navegador (`canvas.pageImages`), se colocan en `#print-root` (lo único visible con `@media print`, una hoja
-  por página con `page: pm-portrait | pm-landscape`) y `window.print()` abre el diálogo del sistema.
-  Las medidas `vw`/`vh` de impresión son las de la hoja vertical por defecto: las hojas horizontales
-  las intercambian. La capa se borra con `afterprint`.
+  (`_OpenDocument.extras`). Al aplicar, el motor del visor borra el contenido de debajo en su
+  documento (`redact/apply.ts`) y sube la revisión de esas páginas, así su clave cambia y nada
+  reutiliza su imagen ni su texto anteriores; `redact.apply` le dice a Python qué páginas, y el
+  visor le da su texto nuevo y las palabras de OCR que quedan. Un documento censurado (`redacted`)
+  solo se guarda como copia.
+- **Imprimir**: el diálogo de impresión de WebView2 con el PDF y sus anotaciones
+  en un iframe oculto (`document/print.ts`). Ver embedpdf.md, «Imprimir».
 - **Asistente IA**: el servicio `ai` copia lo necesario del documento con el candado del visor y
-  consulta sin él (las respuestas tardan segundos). Usa `pdf_core.agent.PDFAgent` si sus dependencias
-  están instaladas y hay clave; si no, responde en modo básico. Las respuestas llegan también como
+  consulta sin él (las respuestas tardan segundos). Usa `pdf_core.agent.PDFAgent` si su cliente
+  (`openai`) está instalado y hay un proveedor listo: Gemini u OpenAI con clave, o una IA local
+  (Ollama, LM Studio…) con dirección y modelo; si no, responde en modo básico. Todos hablan la API
+  de OpenAI. El agente recibe el texto que tiene el visor (`AgentDocument`) y siempre una ficha
+  (metadatos e inicio de la primera página). Si el documento no cabe en el contexto del modelo
+  (4096 tokens por defecto en la IA local; ~130 000 en la nube), el chat envía los pasajes de todo
+  el documento relacionados con la pregunta (`rag.py`: por palabras con su raíz y, en la nube,
+  también por significado), y el resumen una versión condensada del documento entero. Si un
+  modelo de Gemini u OpenAI no responde (503) o no existe, se prueba otro y la respuesta lo dice.
+  `ai.models` pide al servidor su lista de modelos de conversación. Las respuestas llegan también como
   HTML de Markdown sin HTML crudo, imágenes ni enlaces, que el frontend inserta tal cual.
 - **Arrastrar PDFs y «Abrir con»**: el navegador no da la ruta de un archivo soltado; `WebviewHost`
   escucha el `drop` desde Python (pywebview añade `pywebviewFullPath`) y abre los PDF con
@@ -160,7 +198,7 @@ anotaciones…): es lo único de `src/` que importa `app/`. Mapa y reglas en [mo
 ## Añadir una herramienta
 
 1. Backend: `app/backend/services/<nombre>.py` con métodos `@exposed` que usen la lógica de `pdf_core`
-   (si aún está en un módulo de Flet, moverla antes a `pdf_core`, ver [modulos-python.md](modulos-python.md));
+   (ver [modulos-python.md](modulos-python.md));
    registrarlo en `services/__init__.py`.
 2. Frontend: `app/ui/src/tools/<nombre>/<Nombre>.svelte`, que recibe la entrada del registro como
    prop `tool` y libera lo que use con `onDestroy`. Los estilos nuevos, en su bloque `<style>`.

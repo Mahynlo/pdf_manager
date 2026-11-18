@@ -1,13 +1,16 @@
-// Lienzo del visor: las páginas con zoom, modos de vista y modo noche (equivale a
-// src_qt/ui/viewer/canvas/view.py). Desde el paso 2 de docs/web/embedpdf.md las páginas,
+// Lienzo del visor: las páginas con zoom, modos de vista y modo noche.
+// Desde el paso 2 de docs/web/embedpdf.md las páginas,
 // el scroll, el zoom y el mosaico son de EmbedPDF (embed.ts, PdfPages.svelte); esta
 // clase da al resto del visor la misma API que antes. El registro de EmbedPDF es uno para
 // toda la app: cada visor abre en él su documento y solo atiende los avisos de ese documento.
 //
-// - Python es el dueño de las páginas: cuando cambian (girar, mover, insertar, censurar…) se
-//   vuelve a abrir en EmbedPDF la versión que él tiene (`viewer.document_url`). Mientras se
-//   carga, la vista sigue con la anterior. Las anotaciones, en cambio, las edita EmbedPDF en
-//   su copia (annotations.ts las pasa a Python antes de cada operación).
+// - El documento es del visor: se abre una vez en EmbedPDF (`viewer.document_url` da el archivo)
+//   y después lo cambia su motor. Las operaciones de página (girar, mover, insertar, duplicar,
+//   borrar: document/pages.ts) y la censura (redact/apply.ts) se hacen en el documento abierto y
+//   `showPages` las muestra sin volver a abrirlo.
+// - El texto reconocido por OCR lo escribe el motor en el documento abierto como texto invisible
+//   (`writeOcrText`), que EmbedPDF selecciona y busca como el nativo: al abrirlo, el que guarda
+//   Python, y tras cada OCR, el nuevo.
 // - Cada página tiene una capa del visor (`slots[i]`) donde otros módulos dibujan en
 //   porcentaje de la página las marcas (`marks(i)`) de selección, búsqueda, OCR o censura.
 //   Las capas existen siempre, aunque EmbedPDF solo monte las páginas a la vista; se
@@ -17,8 +20,8 @@
 //   herramientas de texto (modo TEXT_MODE del gestor de interacción). Las de dibujo, texto
 //   libre y notas activan su herramienta de anotación de EmbedPDF (ANNOTATION_TOOL).
 import { flushSync, mount, unmount } from 'svelte';
-import { refreshPages, type IPlugin, type PluginRegistry } from '@embedpdf/core';
-import { transformRect, type Rect, type Rotation, type Size } from '@embedpdf/models';
+import type { IPlugin, PluginRegistry } from '@embedpdf/core';
+import { transformRect, type PdfDocumentObject, type PdfPageObject, type Rect, type Rotation, type Size } from '@embedpdf/models';
 import type { AnnotationPlugin } from '@embedpdf/plugin-annotation';
 import type { DocumentManagerPlugin } from '@embedpdf/plugin-document-manager';
 import type { HistoryPlugin } from '@embedpdf/plugin-history';
@@ -30,8 +33,13 @@ import type { ViewportPlugin } from '@embedpdf/plugin-viewport';
 import { ZoomMode, type ZoomLevel, type ZoomPlugin } from '@embedpdf/plugin-zoom';
 import { call } from '$lib/api.ts';
 import { h } from '$lib/dom.ts';
+import type { OcrText, OcrWord } from '$lib/pdf-engine/index.ts';
 import { t } from '$texts';
-import { OTHER_MODE, PAGED, registry, TEXT_MODE, UNIT, VIEWPORT_GAP, ZOOM_MAX, ZOOM_MIN, type ViewerScroll } from './embed.ts';
+import {
+  OTHER_MODE, PAGED, reading, refreshPageText, registry, showPageList, TEXT_MODE, UNIT, VIEWPORT_GAP, ZOOM_MAX, ZOOM_MIN,
+  type ViewerScroll,
+} from './embed.ts';
+import { pageUids } from '../document/pages.ts';
 import { MODES, pageStep, type Mode } from './layout.ts';
 import PdfPages from './PdfPages.svelte';
 
@@ -66,6 +74,8 @@ export const TOOLS = {
   MARKER: 'marker', // trazo libre translúcido (rotulador)
   DRAW: 'draw', // trazo fino
   IMAGE: 'image',
+  PLACE: 'place', // colocar un sello o una firma: la herramienta de EmbedPDF la pone stamps/
+  PLACE_TEXT: 'place-text', // colocar un sello de texto (texto libre): lo hace StampsPanel.svelte
   AREA_OCR: 'area-ocr', // rectángulo para reconocer texto
   REDACT: 'redact', // marcar para censurar: texto (arrastrando sobre él) o un área
 } as const;
@@ -113,12 +123,17 @@ const LAYOUTS: Record<Mode, { strategy: string; spread: SpreadMode }> = {
 const ZOOM_STEP = 1.25;
 const WHEEL_NOTCH = 100; // deltaY de un paso de la rueda del ratón
 const THUMB_BOX = [230, 290]; // px de la miniatura (115×145 en pantalla, a doble densidad)
-const PRINT_QUALITY = 0.9; // JPEG de las páginas para imprimir
 const WHEEL_FLIP_COOLDOWN = 350; // ms entre cambios de página con la rueda (modo paginado)
 
 const ANNOTATION_LAYER = '#annotation-layer'; // capa de anotaciones de EmbedPDF (PdfPage.svelte)
 const ANNOTATION = `${ANNOTATION_LAYER} > *`; // sus elementos
 const sameKeys = (a: string[] | null, b: string[]) => a?.length === b.length && a.every((key, i) => key === b[i]);
+
+/** Tamaño de la página tal como se ve, en puntos (EmbedPDF lo da sin girar). */
+export function shownSize({ size, rotation }: PdfPageObject): [number, number] {
+  const round = (value: number) => Math.round(value * 100) / 100;
+  return rotation % 2 ? [round(size.height), round(size.width)] : [round(size.width), round(size.height)];
+}
 
 /** Rectángulo `[x0, y0, x1, y1]` en puntos de la página tal como se ve. */
 export type Box = [number, number, number, number];
@@ -144,6 +159,14 @@ export interface CanvasEvents {
   onDocument?(documentId: string): void;
 }
 
+/** Una versión del documento que da Python para abrirla en EmbedPDF (viewer.document_url). */
+interface DocumentVersion {
+  url: string;
+  keys: string[]; // la clave de cada página
+  password: string | null;
+  ocr: { index: number; words: OcrWord[] }[]; // las palabras del OCR de cada página que las tiene
+}
+
 /** Al montarse una página: (página, documento) → lo que se llama al desmontarla. */
 type MountHook = (index: number, documentId: string | null) => (() => void) | undefined | void;
 
@@ -165,6 +188,8 @@ export class PageCanvas {
   registry: PluginRegistry | null = null;
   shown: string | null = null; // id en EmbedPDF del documento a la vista
   shownKeys: string[] | null = null; // claves de página de esa versión
+  password: string | null = null; // la de esa versión, si está cifrada
+  ocrPages = new Set<number>(); // `uid` de las páginas que llevan el texto del OCR (invisible)
   ready = false; // EmbedPDF ya colocó sus páginas
   target = { index: 0, atBottom: false }; // adónde ir en cuanto se pueda
   mounted = new Map<number, HTMLElement>(); // página -> capa enganchada a una página montada
@@ -203,51 +228,70 @@ export class PageCanvas {
     return this.registry!.getPlugin('scroll') as unknown as ViewerScroll;
   }
 
-  /** Nuevas páginas tras una operación (rotar, insertar, mover…); el llamador elige a cuál ir. */
+  /**
+   * Las páginas del documento (`keys`: la clave de cada una). Si no son las que se ven (otra versión
+   * del archivo), se vuelve a abrir en EmbedPDF; los cambios del visor ya llegan con `showPages`.
+   */
   setPages(sizes: [number, number][], keys: string[]): void {
-    if (this._turnInPlace(sizes, keys)) return;
+    if (sameKeys(this.keys, keys) && sameKeys(this.shownKeys, keys)) {
+      this.sizes = sizes;
+      return;
+    }
     this._setSlots(sizes, keys);
     this.current = Math.min(this.current, this.pageCount - 1);
     if (this.registry && !sameKeys(this.shownKeys, keys)) this.loading = this._load().catch((err) => this._fail(err));
   }
 
-  /**
-   * Si solo cambió el giro de algunas páginas (la clave `xref:giro:revisión`), se giran sin
-   * volver a cargar el documento en EmbedPDF, que costaba casi un segundo y una copia más del
-   * PDF en memoria. EmbedPDF abre los documentos con el giro aparte («normalizado»): todo lo
-   * calcula en la página sin girar y el giro solo lo usa para mostrarla, así que basta con
-   * cambiarlo en su estado, redibujar esas páginas y recolocar las demás. Devuelve si lo hizo.
-   */
-  _turnInPlace(sizes: [number, number][], keys: string[]): boolean {
-    const id = this.shown;
-    if (!id || !this.registry || !sameKeys(this.shownKeys, this.keys) || keys.length !== this.keys.length) return false;
-    const turns = new Map<number, Rotation>();
-    for (const [i, key] of keys.entries()) {
-      const [xref, rotation, revision] = key.split(':');
-      const [oldXref, oldRotation, oldRevision] = this.keys[i].split(':');
-      if (xref !== oldXref || revision !== oldRevision) return false;
-      if (rotation !== oldRotation) turns.set(i, ((Number(rotation) / 90) % 4) as Rotation);
-    }
-    const store = this.registry.getStore();
-    const pages = store.getState().core.documents[id]?.document?.pages;
-    if (!turns.size || !pages) return false;
-    // EmbedPDF no tiene una acción para girar una página: se cambia en su estado y se avisa.
-    for (const [i, rotation] of turns) pages[i].rotation = rotation;
-    store.dispatchToCore(refreshPages(id, [...turns.keys()]));
-    this._scrollPlugin().refreshDocumentLayout(id);
-    // Como al volver a cargarlo, el historial de EmbedPDF empieza de nuevo: Ctrl+Z deshace
-    // primero lo que hay en él y después las operaciones de página (ver Viewer.svelte).
-    this._plugin<HistoryPlugin>('history').provides().forDocument(id).purgeByMetadata(() => true);
-    Object.assign(this, { sizes, keys, shownKeys: keys });
-    return true;
+  /** El documento a la vista tal como lo tiene EmbedPDF (para las operaciones del motor). */
+  get documentObject(): PdfDocumentObject | null {
+    return this.shown ? this._documentOf(this.shown) : null;
+  }
+
+  _documentOf(documentId: string): PdfDocumentObject | null {
+    return this.registry?.getStore().getState().core.documents[documentId]?.document ?? null;
+  }
+
+  /** Como `documentObject`, pero falla si aún no hay ninguno a la vista. */
+  shownDocument(): PdfDocumentObject {
+    const doc = this.documentObject;
+    if (!doc) throw new Error(t.viewer.document.notShown);
+    return doc;
   }
 
   /**
-   * Vuelve a abrir el documento aunque no cambien las páginas (el OCR añadió texto). Las
-   * anotaciones tienen que estar ya en Python (annotations.ts `sync`): se reabre su versión.
+   * Muestra `pages`, las páginas que tiene ahora en el motor el documento a la vista (tras
+   * girar, mover, insertar…: document/pages.ts), sin volver a abrirlo. `keys`: la clave de cada una.
    */
-  reload(): void {
-    if (this.registry) this.loading = this._load().catch((err) => this._fail(err));
+  showPages(pages: PdfPageObject[], keys: string[]): void {
+    const id = this.shown!;
+    showPageList(this.registry!, id, pages);
+    // Como al volver a abrirlo, el historial de EmbedPDF empieza de nuevo: Ctrl+Z deshace
+    // primero lo que hay en él y después las operaciones de página (ver Viewer.svelte).
+    this._plugin<HistoryPlugin>('history').provides().forDocument(id).purgeByMetadata(() => true);
+    // Las capas de cada página se conservan (son por posición; las vuelve a dibujar cada módulo).
+    const slots = pages.map((_, i) => this.slots[i] ?? h('div', { class: 'pdf-page__layers' }));
+    Object.assign(this, { sizes: pages.map(shownSize), keys, shownKeys: keys, slots });
+    this.current = Math.min(this.current, this.pageCount - 1);
+  }
+
+  /**
+   * Escribe en el documento a la vista las palabras del OCR (texto invisible, para seleccionarlas
+   * y buscarlas) y hace que EmbedPDF vuelva a leer esas páginas.
+   */
+  async writeOcrText(pages: OcrText[]): Promise<void> {
+    const id = this.shown;
+    const changed = await (await reading()).writeOcrText(this.shownDocument(), pages);
+    if (id !== this.shown) return; // llegó otra versión, que ya trae ese texto de Python
+    this._addOcrPages(pages, this.keys);
+    if (changed.length) refreshPageText(this.registry!, id!, changed);
+  }
+
+  /** Apunta qué páginas llevan el texto del OCR (las copias que salen del visor se lo quitan). */
+  _addOcrPages(pages: OcrText[], keys: string[]): void {
+    const uids = pageUids(keys);
+    for (const { index, words } of pages) {
+      if (words.length) this.ocrPages.add(uids[index]);
+    }
   }
 
   /**
@@ -313,29 +357,6 @@ export class PageCanvas {
       const { rotation } = this.pageInfo(index);
       const options = { scaleFactor: scale, rotation, dpr: 1, imageQuality: 0.8, withAnnotations: true };
       const blob = await render.renderPage({ pageIndex: index, options }).toPromise();
-      result[index] = URL.createObjectURL(blob);
-    }
-    return result;
-  }
-
-  /**
-   * Páginas `pages` como imágenes para imprimir: `{ página: url blob: }` (liberarlas con
-   * `release`), a `dpi` y con las anotaciones, dibujadas por PDFium como en el lienzo. `gray`:
-   * en escala de grises (se pasa por un canvas: así sale igual en cualquier impresora).
-   */
-  async pageImages(pages: number[], dpi: number, gray = false): Promise<Record<number, string>> {
-    await this.loading;
-    const id = this.shown;
-    if (!id) return {};
-    const render = this._plugin<RenderPlugin>('render').provides().forDocument(id);
-    const result: Record<number, string> = {};
-    for (const index of pages) {
-      const { rotation } = this.pageInfo(index);
-      const options = {
-        scaleFactor: dpi / 72, rotation, dpr: 1, imageType: 'image/jpeg' as const, imageQuality: PRINT_QUALITY, withAnnotations: true,
-      };
-      let blob = await render.renderPage({ pageIndex: index, options }).toPromise();
-      if (gray) blob = await grayscale(blob);
       result[index] = URL.createObjectURL(blob);
     }
     return result;
@@ -454,6 +475,7 @@ export class PageCanvas {
   _applyTool(id: string): void {
     // Activar una herramienta de anotación cambia el modo del gestor de interacción (y quitarla
     // vuelve al predeterminado, el de texto).
+    if (this.tool === TOOLS.PLACE) return; // ya la activó stamps/ (activateStampPlacement…)
     const annotationTool = ANNOTATION_TOOL[this.tool];
     const annotation = this._plugin<AnnotationPlugin>('annotation').provides().forDocument(id);
     if (annotationTool) {
@@ -465,6 +487,15 @@ export class PageCanvas {
     const mode = TEXT_TOOLS.has(this.tool) ? TEXT_MODE : OTHER_MODE;
     const interaction = this._plugin<InteractionManagerPlugin>('interaction-manager').provides().forDocument(id);
     if (interaction.getActiveMode() !== mode) interaction.activate(mode);
+  }
+
+  /**
+   * Hace del documento a la vista el activo de EmbedPDF. Se abren sin activarlos (cada visor usa
+   * `forDocument`), pero plugin-stamp y plugin-signature ponen su herramienta en el activo, sea
+   * cual sea el documento que se les pida: sin esto iba al primero que se abrió.
+   */
+  activate(): void {
+    this._plugin<DocumentManagerPlugin>('document-manager').provides().setActiveDocument(this.shown!);
   }
 
   /** Centra en la vista el rectángulo `[x0, y0, x1, y1]` (puntos) de la página `index`. */
@@ -529,12 +560,6 @@ export class PageCanvas {
     const box = this.pageRect(index);
     const [pw, ph] = this.sizes[index];
     return [((clientX - box.left) / box.width) * pw, ((clientY - box.top) / box.height) * ph];
-  }
-
-  /** Centro de la vista: la página que se ve ahí y ese punto (para insertar sellos). */
-  viewCenter(): { index: number; x: number; y: number } | null {
-    const box = this.el.getBoundingClientRect();
-    return this.pageAt(box.left + this.el.clientWidth / 2, box.top + this.el.clientHeight / 2);
   }
 
   /** Capa de marcas de la página `index` (se crea al pedirla; se pierde con `setPages`). */
@@ -640,19 +665,30 @@ export class PageCanvas {
     ];
   }
 
-  /** Abre en EmbedPDF la versión del documento que tiene Python y la pone a la vista. */
+  /** Abre el archivo en EmbedPDF (`viewer.document_url`) y lo pone a la vista. */
   async _load(): Promise<void> {
     const seq = ++this.seq;
-    const { url, keys } = await call<{ url: string; keys: string[] }>('viewer.document_url', this.docId);
+    const { url, keys, password, ocr } = await call<DocumentVersion>('viewer.document_url', this.docId);
     const response = await fetch(url);
     if (!response.ok) throw new Error(t.viewer.canvas.downloadError(response.status));
     const buffer = await response.arrayBuffer();
     if (this.closed || seq !== this.seq) return; // llegó otra versión más nueva
+    this.password = password;
     const docs = this._plugin<DocumentManagerPlugin>('document-manager').provides();
     const { documentId, task } = await docs.openDocumentBuffer({
       buffer, name: `documento-${this.docId}.pdf`, documentId: `viewer-${this.docId}-${seq}`, autoActivate: false,
+      password: password ?? undefined,
+      // Los permisos del PDF los comprueba Python al guardar, como con cualquier otro.
+      permissions: { enforceDocumentPermissions: false },
     }).toPromise();
     await task.toPromise();
+    // El texto del OCR que guarda Python, antes de que EmbedPDF lea las páginas. Si fallara, el
+    // documento se ve igual (sin poder seleccionar ese texto).
+    const text: OcrText[] = ocr.map(({ index, words }) => ({ index, words, replace: false }));
+    const opened = this._documentOf(documentId);
+    if (text.length && opened && !this.closed && seq === this.seq) {
+      await (await reading()).writeOcrText(opened, text).catch((err) => console.error('No se pudo escribir el texto del OCR', err));
+    }
     if (this.closed || seq !== this.seq) {
       docs.closeDocument(documentId);
       return;
@@ -660,7 +696,8 @@ export class PageCanvas {
     if (this._live()) this.target = { index: this.current, atBottom: false };
     const previous = this.shown;
     this.finishEditing(); // mientras el documento anterior sigue abierto
-    Object.assign(this, { shown: documentId, shownKeys: keys, ready: false });
+    Object.assign(this, { shown: documentId, shownKeys: keys, ready: false, ocrPages: new Set<number>() });
+    this._addOcrPages(text, keys);
     this._applyMode(documentId);
     this._applyTool(documentId);
     this.pages!.show(documentId);
@@ -723,8 +760,8 @@ export class PageCanvas {
     this.el.addEventListener('pointerdown', (ev) => {
       const box = this.el.getBoundingClientRect();
       const onScrollbar = ev.clientX - box.left >= this.el.clientWidth || ev.clientY - box.top >= this.el.clientHeight;
-      // Sobre una anotación, el arrastre es suyo (moverla).
-      if (ev.button !== 0 || onScrollbar || this.tool !== TOOLS.HAND || (ev.target as Element | null)?.closest?.(ANNOTATION)) return;
+      // Con el dedo desplaza el navegador. Sobre una anotación, el arrastre es suyo (moverla).
+      if (ev.pointerType === 'touch' || ev.button !== 0 || onScrollbar || this.tool !== TOOLS.HAND || (ev.target as Element | null)?.closest?.(ANNOTATION)) return;
       start = { x: ev.clientX, y: ev.clientY, left: this.el.scrollLeft, top: this.el.scrollTop };
       this.el.setPointerCapture(ev.pointerId);
       this.el.classList.add('is-panning');
@@ -741,15 +778,4 @@ export class PageCanvas {
     this.el.addEventListener('pointerup', stop);
     this.el.addEventListener('pointercancel', stop);
   }
-}
-
-/** `blob` (imagen) en escala de grises, como JPEG. */
-async function grayscale(blob: Blob): Promise<Blob> {
-  const bitmap = await createImageBitmap(blob);
-  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-  const context = canvas.getContext('2d')!;
-  context.filter = 'grayscale(1)';
-  context.drawImage(bitmap, 0, 0);
-  bitmap.close();
-  return canvas.convertToBlob({ type: 'image/jpeg', quality: PRINT_QUALITY });
 }

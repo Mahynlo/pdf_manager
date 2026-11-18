@@ -5,12 +5,13 @@ los modelos reales (``src/assets/ocr_models``) sobre un escaneo generado.
 """
 from __future__ import annotations
 
-import fitz
 import numpy as np
 import pytest
+from pdfkit import add_image, add_page, add_text
 
 from pdf_core.ocr import OCRProcessor
 from pdf_core.ocr.paddle import MODELS_DIR, REC_MODEL, connected_boxes, resize
+from pdf_core.pdf import Document
 
 LINES = [
     "Factura número 2024 del año pasado",
@@ -19,16 +20,16 @@ LINES = [
 ] * 6
 
 
-def _scan(rotation: int = 0) -> fitz.Document:
+def _scan(rotation: int = 0) -> Document:
     """PDF de una página que solo es una imagen (como un escaneo), con ``/Rotate``."""
-    text = fitz.open()
-    page = text.new_page(width=595, height=842)
-    for i, line in enumerate(LINES):
-        page.insert_text((60, 80 + i * 38), line, fontsize=16, fontname="helv")
-    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
-    scan = fitz.open()
-    out = scan.new_page(width=595, height=842)
-    out.insert_image(out.rect, pixmap=pix)
+    with Document.new() as text:
+        page = add_page(text)
+        for i, line in enumerate(LINES):
+            add_text(page, 60, 80 + i * 38, line, 16)
+        image = page.render(2)
+    scan = Document.new()
+    out = add_page(scan)
+    add_image(out, out.rect, image)
     if rotation:
         out.set_rotation(rotation)
     return scan
@@ -84,14 +85,14 @@ def test_reads_spanish_words_with_boxes(processor):
 def test_orientation_classifier_gives_the_correction(processor, rotation):
     with _scan(rotation) as doc:
         page = doc[0]
-        img = processor._pixmap_to_ndarray(page.get_pixmap(matrix=fitz.Matrix(0.8, 0.8), alpha=False))
+        img = page.render(0.8)
         angle, confidence = processor.classify_orientation(img)
         assert angle == (360 - rotation) % 360 and confidence > 0.9
         assert processor.correction_angle(page) == (360 - rotation) % 360
 
 
 def test_release_and_reload(processor):
-    processor.predictor
+    assert processor.predictor is not None
     processor.release_predictor()
     processor.release_orientation_predictor()
     assert processor._predictor is None and processor._orientation_predictor is None

@@ -5,6 +5,10 @@ export default {
   boot: {
     waiting: 'Esperando al backend de Python… Esta interfaz se abre desde la app: '
       + 'ejecuta «uv run python -m app.main --dev» desde la raíz del proyecto.',
+    /** Pasos de la pantalla de carga, en orden (`boot:progress`). */
+    steps: ['Preparando el entorno…', 'Cargando el motor de PDF…', 'Abriendo la aplicación…'],
+    privacy: 'Tus PDF se procesan en este equipo: no se suben a ningún servidor.',
+    notIsolated: 'Esta página necesita las cabeceras COOP y COEP para usar memoria compartida.',
     failed: (message: string) => `Error al iniciar la interfaz: ${message}`,
   },
   header: {
@@ -14,6 +18,8 @@ export default {
     closeTab: { label: 'Cerrar pestaña', shortcut: 'Ctrl+F4' },
     openPdf: { label: 'Abrir documento PDF', shortcut: 'Ctrl+O' },
     tabsList: 'Lista de pestañas abiertas',
+    scrollTabsStart: 'Ver las pestañas anteriores',
+    scrollTabsEnd: 'Ver las pestañas siguientes',
     theme: 'Cambiar tema claro / oscuro',
   },
   /** Menú de la marca (shell.brandMenu); los nombres de las herramientas están en `tools`. */
@@ -26,11 +32,17 @@ export default {
     close: 'Cerrar pestaña',
     closeOthers: 'Cerrar las otras pestañas',
     closeRight: 'Cerrar pestañas a la derecha',
+    moveLeft: 'Mover a la izquierda (Ctrl+Shift+Re Pág)',
+    moveRight: 'Mover a la derecha (Ctrl+Shift+Av Pág)',
     copyPath: 'Copiar ruta del archivo',
     pathCopied: 'Ruta copiada al portapapeles',
     reveal: 'Abrir carpeta en el Explorador',
   },
+  /** Barra de estado (lib/feedback.svelte.ts): lo que muestra cuando no hay ningún mensaje. */
+  status: { idle: 'Listo • Extraer PDFs' },
   opened: (name: string) => `Abierto: ${name}`,
+  /** La dirección de la página es la de un documento que ya no está abierto (al recargar, o atrás). */
+  reopen: (name: string) => `${name} ya no está abierto: ábrelo de nuevo para verlo.`,
   openFailed: (tool: string, message: string) => `No se pudo abrir ${tool}: ${message}`,
   /** Al cerrar la ventana con cambios sin guardar o trabajos en curso. */
   quit: {

@@ -1,9 +1,9 @@
-"""Extraction logic — PyMuPDF (`fitz`) + the OCR processor, never Flet.
+"""Extraction logic — PDFium (`pdf_core.pdf`) + the OCR processor.
 
 Opens/authenticates source PDFs, runs the per-page OCR + keyword/similarity
 scoring, and writes the combined output. Progress and log lines are emitted
 through a `Reporter` of plain callbacks, so the engine knows nothing about the
-UI driving it ([tab.py]).
+UI driving it.
 """
 from __future__ import annotations
 
@@ -13,8 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-import fitz
-
+from pdf_core.pdf import UNRESTRICTED, Document, PasswordError
 from pdf_core.text_utils import fold_accents
 
 from .model import PageMatch, doc_kind_label, normalize_words, parse_pages
@@ -54,33 +53,28 @@ class Reporter:
 
 def can_extract_permissions(permissions: int) -> bool:
     """Return True when permissions allow content copying (PDF_PERM_COPY = 16)."""
-    if permissions < 0:
-        return True
-    return bool(permissions & _PDF_PERM_COPY)
+    return permissions == UNRESTRICTED or bool(permissions & _PDF_PERM_COPY)
 
 
-def open_source_doc(path: str, password: str | None = None) -> fitz.Document:
+def open_source_doc(path: str, password: str | None = None) -> Document:
     """Open a document for extraction, authenticating if needed.
 
     Raises `ExtractPasswordRequiredError` / `ExtractInvalidPasswordError` /
     `ExtractPermissionDeniedError`. The returned document is the caller's to close.
     """
-    doc = fitz.open(path)
     try:
-        if doc.is_encrypted:
-            if not password:
-                raise ExtractPasswordRequiredError("PDF protegido requiere contraseña")
-            if not doc.authenticate(password):
-                raise ExtractInvalidPasswordError("Contraseña incorrecta")
-            if not can_extract_permissions(doc.permissions):
-                raise ExtractPermissionDeniedError("El PDF no permite copia/extracción de contenido")
-        return doc
-    except Exception:
+        doc = Document.open(path, password)
+    except PasswordError as ex:
+        if not password:
+            raise ExtractPasswordRequiredError("PDF protegido requiere contraseña") from ex
+        raise ExtractInvalidPasswordError("Contraseña incorrecta") from ex
+    if not can_extract_permissions(doc.permissions):
         doc.close()
-        raise
+        raise ExtractPermissionDeniedError("El PDF no permite copia/extracción de contenido")
+    return doc
 
 
-def extract_page_text(processor, doc: fitz.Document, page_index: int) -> tuple[str, str, float, bool]:
+def extract_page_text(processor, doc: Document, page_index: int) -> tuple[str, str, float, bool]:
     """Return (text, mode_label, elapsed_ms, used_ocr) for one page."""
     page = doc[page_index]
     needs_ocr = processor.page_needs_ocr(page)
@@ -180,7 +174,7 @@ def extract_reference_tokens(
 
 
 def process_document(
-    doc: fitz.Document,
+    doc: Document,
     *,
     path: str,
     fname: str,
@@ -284,15 +278,11 @@ def process_document(
 
 # ── output ─────────────────────────────────────────────────────────────────
 
-def write_pages(src_doc: fitz.Document, page_indices, out_path: Path) -> None:
+def write_pages(src_doc: Document, page_indices, out_path: Path) -> None:
     """Copia ``page_indices`` (0-based, en orden) de ``src_doc`` a un PDF nuevo."""
-    out_doc = fitz.open()
-    try:
-        for pidx in sorted(set(page_indices)):
-            out_doc.insert_pdf(src_doc, from_page=pidx, to_page=pidx)
-        out_doc.save(str(out_path), garbage=4, deflate=True)
-    finally:
-        out_doc.close()
+    with Document.new() as out_doc:
+        out_doc.insert_pages(src_doc, sorted(set(page_indices)))
+        out_doc.save(out_path)
 
 
 def save_matches(
@@ -330,13 +320,9 @@ def save_matches(
         return out_path
 
     out_path = dest / f"{prefix}_{stamp}.pdf"
-    out_doc = fitz.open()
-    try:
+    with Document.new() as out_doc:
         for src_path, pages in grouped.items():
             with open_source_doc(src_path, password=_password(src_path)) as src_doc:
-                for pidx in sorted(set(pages)):
-                    out_doc.insert_pdf(src_doc, from_page=pidx, to_page=pidx)
-        out_doc.save(str(out_path), garbage=4, deflate=True)
-    finally:
-        out_doc.close()
+                out_doc.insert_pages(src_doc, sorted(set(pages)))
+        out_doc.save(out_path)
     return out_path

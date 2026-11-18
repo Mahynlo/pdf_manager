@@ -1,8 +1,7 @@
 """Rutas PDF recibidas al lanzar la app ("Abrir con", línea de comandos, launcher).
 
-Equivale a ``_collect_initial_paths`` de la versión Flet: acepta rutas directas
-en ``argv`` y la variable ``EXTRAR_PDF_PATH`` (rutas separadas por ``|``) que
-fija ``launcher/launcher.c``. Los flags (``--algo``) se ignoran.
+Acepta rutas directas en ``argv`` y la variable ``EXTRAR_PDF_PATH`` (rutas separadas por ``|``).
+Los flags (``--algo``) se ignoran.
 """
 
 from __future__ import annotations

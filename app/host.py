@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import itertools
 import json
 import logging
 import os
@@ -11,17 +12,21 @@ import sys
 import threading
 import webbrowser
 from collections.abc import Callable
+from concurrent.futures import Future
 from pathlib import Path
 from typing import Any
 
 import webview
 from webview.dom import DOMEventHandler
 
+from app.backend.host import is_external_url
 from app.backend.services.app_service import QUIT_REQUESTED
 from app.byte_server import ByteServer
 
 log = logging.getLogger(__name__)
 
+ENGINE_TASK = "engine:task"
+ENGINE_TIMEOUT = 300  # segundos
 PDF_TYPES = ("Archivos PDF (*.pdf)",)
 TEXT_TYPES = ("Archivos de Texto (*.txt)",)
 _DWMWA_USE_IMMERSIVE_DARK_MODE = 20
@@ -34,6 +39,8 @@ class WebviewHost:
         self._on_drop_files: Callable[[list[str]], Any] | None = None
         self._quitting = False
         self._bytes = ByteServer()  # datos grandes con el frontend (ver share_bytes y upload_url)
+        self._task_ids = itertools.count(1)
+        self._tasks: dict[int, Future[str | None]] = {}  # tareas de run_engine en curso
 
     def attach(
         self,
@@ -107,6 +114,9 @@ class WebviewHost:
         result = self.window.create_file_dialog(webview.FileDialog.OPEN, allow_multiple=True, file_types=PDF_TYPES)
         return list(result or [])
 
+    def pick_documents(self) -> list[str]:
+        return self.pick_pdfs()
+
     def pick_pdf(self) -> str | None:
         result = self.window.create_file_dialog(webview.FileDialog.OPEN, file_types=PDF_TYPES)
         return result[0] if result else None
@@ -114,6 +124,9 @@ class WebviewHost:
     def pick_folder(self) -> str | None:
         result = self.window.create_file_dialog(webview.FileDialog.FOLDER)
         return result[0] if result else None
+
+    def pick_output_folder(self) -> str | None:
+        return self.pick_folder()
 
     def save_pdf(self, suggested_path: str) -> str | None:
         return self._save_dialog(suggested_path, PDF_TYPES)
@@ -133,6 +146,20 @@ class WebviewHost:
             return None
         return result if isinstance(result, str) else result[0]
 
+    # ── Documentos del visor: los archivos del disco ─────────────────────────
+    def read_file(self, path: str) -> bytes:
+        return Path(path).read_bytes()
+
+    def write_file(self, path: str, data: bytes) -> None:
+        Path(path).write_bytes(data)
+
+    def file_size(self, path: str) -> int | None:
+        file = Path(path)
+        return file.stat().st_size if file.is_file() else None
+
+    def file_url(self, path: str) -> str:
+        return self.share_bytes(self.read_file(path), "application/pdf")
+
     # ── Escritorio ───────────────────────────────────────────────────────────
     def open_folder(self, path: str) -> None:
         if not Path(path).is_dir():
@@ -146,13 +173,17 @@ class WebviewHost:
     def reveal_file(self, path: str) -> None:
         file = Path(path)
         if os.name == "nt" and file.exists():
-            subprocess.Popen(["explorer", "/select,", os.path.normpath(file)])
+            # Con la ruta completa: sin ella, Windows buscaría también un explorer.exe en la carpeta actual.
+            explorer = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "explorer.exe"
+            subprocess.Popen([str(explorer), "/select,", os.path.normpath(file)])  # noqa: S603
         else:
             self.open_folder(str(file.parent))
 
     def open_url(self, url: str) -> None:
-        if url.startswith(("http://", "https://", "mailto:")):
-            webbrowser.open(url)
+        if is_external_url(url):
+            webbrowser.open(url.strip())
+        else:
+            log.warning("Enlace no permitido: %.80r", url)
 
     # ── Ventana ──────────────────────────────────────────────────────────────
     def show(self) -> None:
@@ -196,6 +227,35 @@ class WebviewHost:
 
     def uploaded(self, url: str) -> bytes | None:
         return self._bytes.received(url)
+
+    def run_engine(self, task: str, data: bytes, args: dict[str, Any]) -> bytes:
+        task_id = next(self._task_ids)
+        upload = self.upload_url()
+        done: Future[str | None] = Future()
+        self._tasks[task_id] = done
+        try:
+            self.emit(ENGINE_TASK, {
+                "id": task_id, "task": task, "args": args, "upload": upload,
+                "url": self.share_bytes(data, "application/pdf"),
+            })
+            try:
+                error = done.result(timeout=ENGINE_TIMEOUT)
+            except TimeoutError as ex:
+                raise RuntimeError("El motor del visor no respondió.") from ex
+        finally:
+            del self._tasks[task_id]
+        if error:
+            raise RuntimeError(error)
+        result = self.uploaded(upload)
+        if result is None:
+            raise RuntimeError("No llegó el resultado del motor del visor.")
+        return result
+
+    def engine_done(self, task_id: int, error: str | None) -> None:
+        """La ventana terminó la tarea ``task_id`` de :meth:`run_engine`."""
+        done = self._tasks.get(task_id)
+        if done is not None:
+            done.set_result(error)
 
     def close(self) -> None:
         """Al cerrar la ventana: detiene el servidor de datos."""

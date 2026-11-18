@@ -24,14 +24,14 @@ class DocumentService:
 
     def open(self, path: str, password: str | None = None) -> None:
         """Pide al frontend abrir ``path`` en el visor (con ``password`` si ya se conoce)."""
-        if not Path(path).is_file():
+        if self._host.file_size(path) is None:
             raise UserError(f"No se encontró el archivo: {Path(path).name}", "not_found")
         self._host.emit(OPEN_REQUESTED, {"path": path, "password": password})
 
     @exposed
     def open_dialog(self) -> list[str]:
         """Diálogo «Abrir PDF» (uno o varios); devuelve las rutas elegidas."""
-        paths = self._host.pick_pdfs()
+        paths = self._host.pick_documents()
         for path in paths:
             self.open(path)
         return paths
