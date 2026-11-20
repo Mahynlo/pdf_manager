@@ -12,6 +12,12 @@ Los usa `src/pdf_core/ocr/paddle.py` con onnxruntime; no hace falta PaddlePaddle
 
 Cada `.onnx` es el `inference.onnx` de su repositorio, renombrado.
 
+Si el instalador no los lleva (instalación compacta), la app los descarga de **esta carpeta**: de la
+Release de su versión en GitHub (el workflow `build-web.yml` sube aquí los `.onnx`) o, si no están, de
+esta carpeta en la etiqueta de la versión. Solo acepta archivos con la suma SHA-256 de `MODELS` en
+`src/pdf_core/ocr/models.py`: al cambiar un modelo aquí, actualizar también su suma y tamaño allí (una
+prueba lo comprueba).
+
 ## Reconocedor *tiny* (equipos con pocos recursos)
 
 [PP-OCRv6_tiny_rec_onnx](https://huggingface.co/PaddlePaddle/PP-OCRv6_tiny_rec_onnx) ocupa 4,5 MB en lugar de 21 MB

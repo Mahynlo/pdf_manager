@@ -40,6 +40,12 @@ export default {
   },
   /** Barra de estado (lib/feedback.svelte.ts): lo que muestra cuando no hay ningún mensaje. */
   status: { idle: 'Listo • Extraer PDFs' },
+  /** Si el instalador no llevaba los modelos del OCR, se descargan la primera vez (evento ocr:download). */
+  ocrDownload: {
+    start: (megabytes: number) => `Descargando los modelos de OCR (${megabytes} MB). Solo hace falta la primera vez.`,
+    progress: (percent: number) => `Descargando modelos de OCR… ${percent} %`,
+    done: 'Modelos de OCR descargados',
+  },
   opened: (name: string) => `Abierto: ${name}`,
   /** La dirección de la página es la de un documento que ya no está abierto (al recargar, o atrás). */
   reopen: (name: string) => `${name} ya no está abierto: ábrelo de nuevo para verlo.`,

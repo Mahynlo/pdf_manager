@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.30-beta.2-web] - 2026-11-20
+
+### Added
+- Agregar configuración de auditoría para ignorar avisos de seguridad específicos en pnpm
+- Agregar configuración de Netlify para la publicación de la app web y cabeceras de seguridad
+- Mejorar la lógica de lectura de texto OCR en EmbedPDF y actualizar la documentación correspondiente
+- Mejorar la gestión de archivos recientes en el navegador y actualizar la documentación correspondiente
+- Implementar descarga de modelos OCR y actualizar la lógica de servicios relacionados
+- Mejorar la descarga de modelos OCR desde GitHub y actualizar la lógica de verificación
+
 ## [0.1.30-beta-web] - 2026-11-17
 
 Segunda versión de pruebas de la versión web. **La última versión estable sigue siendo la 0.1.28**

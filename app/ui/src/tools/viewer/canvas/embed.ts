@@ -3,7 +3,8 @@
 // página, la selección de texto, la búsqueda, las anotaciones (con su historial para deshacer),
 // las marcas de censura, los sellos y las firmas (sus bibliotecas: stamps/). También lo que hace
 // falta para cambiar las páginas de un documento abierto (`showPageList`), que EmbedPDF 2.15.1 no
-// contempla, y volver a leer el texto de una página que cambió (`refreshPageText`: el del OCR). Las
+// contempla, y que la selección vuelva a leer el texto de una página (`refreshPageText`: el del
+// OCR, sin volver a dibujarla). Las
 // copias del documento (guardar, imprimir, pasarlo a Python) las saca el motor de la app
 // (`copies`), no el complemento de exportación; lo que necesita el OCR, también (`reading`).
 //
@@ -132,9 +133,26 @@ export async function reading(): Promise<PageReading> {
   return appEngine!.reading;
 }
 
-/** Cambió el texto de las páginas `indices` (el del OCR): EmbedPDF las vuelve a leer y a dibujar. */
+/**
+ * Lo interno de SelectionPlugin que vuelve a leer el texto de una página: lo que hace él mismo al
+ * recibir REFRESH_PAGES. Es privado en EmbedPDF 2.15.1: revisarlo al actualizarlo.
+ */
+interface SelectionGeometry {
+  getNewPageGeometryAndCache(documentId: string, pageIndex: number): { wait(done: () => void, failed: () => void): void };
+  notifyPage(documentId: string, pageIndex: number): void;
+}
+
+/**
+ * Cambió el texto invisible de las páginas `indices` (el del OCR): la selección vuelve a leerlo.
+ * No se usa `refreshPages`: sube la versión de la página, y PdfPages.svelte la monta de nuevo
+ * (imagen, mosaico y anotaciones), así que la página se quedaba en blanco un momento. El texto
+ * invisible no cambia lo que se ve; la búsqueda lo lee del motor en cada consulta.
+ */
 export function refreshPageText(embed: PluginRegistry, documentId: string, indices: number[]): void {
-  (embed.getStore() as unknown as CoreStore).dispatchToCore(refreshPages(documentId, indices));
+  const selection = embed.getPlugin('selection') as unknown as SelectionGeometry;
+  for (const index of indices) {
+    selection.getNewPageGeometryAndCache(documentId, index).wait(() => selection.notifyPage(documentId, index), () => {});
+  }
 }
 
 // ── Cambiar las páginas de un documento abierto ──────────────────────────────

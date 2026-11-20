@@ -91,6 +91,13 @@ class Shell {
     on<{ path: string; password: string | null }>('document:open', ({ path, password }) => this.openDocument(path, password));
     // Se cerró la ventana con documentos sin guardar o trabajos en curso (como closeEvent en Qt).
     on<{ documents: string[]; jobs: string[] }>('app:quit-requested', ({ documents, jobs }) => this.confirmQuit(documents, jobs));
+    // Descarga de los modelos del OCR la primera vez que se usa (si el instalador no los llevaba).
+    on<{ percent?: number; megabytes?: number; done?: boolean; failed?: boolean }>('ocr:download', (event) => {
+      const D = T.ocrDownload;
+      if (event.megabytes) toast(D.start(event.megabytes), 'info', 8000);
+      if (event.done) toast(D.done, 'success');
+      else if (!event.failed && event.percent !== undefined) setStatus(D.progress(event.percent));
+    });
   }
 
   get(key: string): Tab | undefined {

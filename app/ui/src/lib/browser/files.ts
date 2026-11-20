@@ -7,15 +7,21 @@
 //
 // Chrome y Edge dejan abrir y guardar sobre el archivo real (File System Access). Firefox y Safari
 // no: se abre con el selector de archivos y lo que se guarda se descarga.
+//
+// Los archivos reales se recuerdan entre visitas (IndexedDB, `remember`), con la misma ruta: así
+// los recientes de Inicio se pueden abrir después de recargar (la primera vez el navegador pide
+// permiso para leerlo). Sin archivo real (Firefox, Safari) no hay nada que recordar.
 
 interface PickerType {
   description: string;
   accept: Record<string, string[]>;
 }
 
+type Access = { mode: 'read' | 'readwrite' };
+
 interface WritableHandle {
-  queryPermission(options: { mode: 'readwrite' }): Promise<PermissionState>;
-  requestPermission(options: { mode: 'readwrite' }): Promise<PermissionState>;
+  queryPermission(options: Access): Promise<PermissionState>;
+  requestPermission(options: Access): Promise<PermissionState>;
 }
 
 type FileHandle = FileSystemFileHandle & WritableHandle;
@@ -41,6 +47,7 @@ declare global {
 interface UserFile {
   handle?: FileSystemFileHandle;
   content?: Blob;
+  size?: number; // de un archivo recordado: hasta tener permiso para leerlo no se sabe el actual
 }
 
 /** Contenido de un archivo, para Python. */
@@ -60,15 +67,109 @@ const folders = new Map<string, FolderHandle>();
 let folderCount = 0;
 
 const newFolder = () => `/files/${++folderCount}`;
+const folderOf = (path: string) => Number(path.split('/')[2]) || 0;
 const isPdf = (name: string) => name.toLowerCase().endsWith('.pdf');
 const cancelled = (err: unknown) => (err as Error).name === 'AbortError';
 const writable = (handle: FileSystemFileHandle): handle is FileHandle => 'requestPermission' in handle;
 
-/** Da una ruta a `file` (en una carpeta nueva) y lo recuerda. */
+/** Da una ruta a `file` (en una carpeta nueva) y lo recuerda; si es un archivo real, también en la próxima visita. */
 function adopt(file: File, handle?: FileSystemFileHandle): string {
   const path = `${newFolder()}/${file.name}`;
   files.set(path, handle ? { handle } : { content: file });
+  if (handle) void remember(path, handle, file.size);
   return path;
+}
+
+// ── Recordar los archivos reales entre visitas ─────────────────────────────
+
+const DB_NAME = 'extraer-pdfs-files';
+const DB_STORE = 'files';
+const REMEMBERED_MAX = 50; // los más recientes; Inicio muestra 20
+
+interface Remembered {
+  path: string;
+  handle: FileSystemFileHandle;
+  size: number;
+  at: number;
+}
+
+function request<T>(req: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function finished(tx: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = tx.onabort = () => reject(tx.error);
+  });
+}
+
+/** La base de datos; `null` sin IndexedDB (p. ej. ventana privada): entonces solo se recuerda mientras está abierta. */
+const database: Promise<IDBDatabase | null> = (() => {
+  try {
+    const open = indexedDB.open(DB_NAME, 1);
+    open.onupgradeneeded = () => open.result.createObjectStore(DB_STORE, { keyPath: 'path' });
+    return request(open).catch(() => null);
+  } catch {
+    return Promise.resolve(null);
+  }
+})();
+
+/** Los archivos de visitas anteriores vuelven con su ruta (y las carpetas nuevas siguen detrás). */
+async function restore(): Promise<void> {
+  const db = await database;
+  if (!db) return;
+  const saved = await request(db.transaction(DB_STORE).objectStore(DB_STORE).getAll() as IDBRequest<Remembered[]>);
+  saved.sort((a, b) => b.at - a.at);
+  const tx = db.transaction(DB_STORE, 'readwrite');
+  saved.forEach(({ path, handle, size }, i) => {
+    if (i >= REMEMBERED_MAX) {
+      tx.objectStore(DB_STORE).delete(path);
+      return;
+    }
+    if (!files.has(path)) files.set(path, { handle, size });
+    folderCount = Math.max(folderCount, folderOf(path));
+  });
+  await finished(tx);
+}
+
+/** Todo lo que usa `files` o crea rutas espera a tener los archivos recordados. */
+const restored = restore().catch((err) => console.error('No se pudieron recuperar los archivos recordados', err));
+
+async function remember(path: string, handle: FileSystemFileHandle, size: number): Promise<void> {
+  try {
+    const db = await database;
+    if (!db) return;
+    const tx = db.transaction(DB_STORE, 'readwrite');
+    tx.objectStore(DB_STORE).put({ path, handle, size, at: Date.now() } satisfies Remembered);
+    await finished(tx);
+  } catch (err) {
+    console.error('No se pudo recordar el archivo', err); // p. ej. un navegador que no guarda handles
+  }
+}
+
+async function forget(path: string): Promise<void> {
+  files.delete(path);
+  try {
+    const db = await database;
+    if (!db) return;
+    const tx = db.transaction(DB_STORE, 'readwrite');
+    tx.objectStore(DB_STORE).delete(path);
+    await finished(tx);
+  } catch (err) {
+    console.error('No se pudo olvidar el archivo', err);
+  }
+}
+
+/** Si se puede leer `handle`; con `ask`, lo pide (hace falta un clic reciente del usuario, como abrir un reciente). */
+async function readable(handle: FileSystemFileHandle, ask: boolean): Promise<boolean> {
+  if (!writable(handle)) return true; // sin permisos que pedir
+  const mode = { mode: 'read' } as const;
+  if (await handle.queryPermission(mode) === 'granted') return true;
+  return ask && await handle.requestPermission(mode).catch(() => 'denied') === 'granted';
 }
 
 /** Selector de archivos clásico (lo hay en todos los navegadores). */
@@ -85,6 +186,7 @@ function chooseFiles(setup: (input: HTMLInputElement) => void): Promise<File[]> 
 
 /** Elige PDF: sus rutas. */
 export async function pickPdfs(multiple: boolean): Promise<string[]> {
+  await restored;
   if (window.showOpenFilePicker) {
     try {
       const chosen = await window.showOpenFilePicker({ multiple, types: [TYPES.pdf] });
@@ -104,6 +206,7 @@ export async function pickPdfs(multiple: boolean): Promise<string[]> {
 export async function droppedPdfs(transfer: DataTransfer): Promise<string[]> {
   const items = [...transfer.items].filter((item) => item.kind === 'file');
   const entries = items.map((item) => ({ file: item.getAsFile(), handle: item.getAsFileSystemHandle?.() }));
+  await restored;
   const paths: string[] = [];
   for (const { file, handle } of entries) {
     if (!file || !isPdf(file.name)) continue;
@@ -130,6 +233,7 @@ async function readFolder(folder: FileSystemDirectoryHandle & { values: FolderHa
  * donde escribir: sin File System Access no hay dónde elegir y lo que se escriba se descargará.
  */
 export async function pickFolder(output: boolean): Promise<{ path: string; files: string[] } | null> {
+  await restored;
   const path = newFolder();
   if (window.showDirectoryPicker) {
     try {
@@ -157,6 +261,7 @@ export async function pickFolder(output: boolean): Promise<{ path: string; files
 
 /** Dónde guardar: una ruta nueva, unida al archivo que elija el usuario si el navegador deja elegir. */
 export async function pickSave(name: string, kind: string): Promise<string | null> {
+  await restored;
   const path = `${newFolder()}/${name}`;
   if (!window.showSaveFilePicker) return path;
   try {
@@ -171,11 +276,23 @@ export async function pickSave(name: string, kind: string): Promise<string | nul
 
 // ── Contenido ──────────────────────────────────────────────────────────────
 
-/** El contenido de `path`; `null` si no es un archivo que tenga la ventana. */
+/**
+ * El contenido de `path`; `null` si no es un archivo que tenga la ventana, si no dan permiso para
+ * leerlo o si ya no está (entonces se olvida).
+ */
 async function contentOf(path: string): Promise<Blob | null> {
+  await restored;
   const file = files.get(path);
   if (!file) return null;
-  return file.content ?? await file.handle!.getFile();
+  if (file.content || !file.handle) return file.content ?? null;
+  if (!await readable(file.handle, true)) return null;
+  try {
+    return await file.handle.getFile();
+  } catch (err) {
+    if ((err as Error).name === 'NotFoundError') await forget(path); // lo movieron o lo borraron
+    else console.error('No se pudo leer el archivo', err);
+    return null;
+  }
 }
 
 /** El contenido de los archivos `paths` que tiene la ventana (los demás no vienen). */
@@ -188,8 +305,14 @@ export async function readFiles(paths: string[]): Promise<FileData[]> {
   return found;
 }
 
-/** El tamaño de `path` en bytes; `null` si no lo tiene la ventana. */
+/**
+ * El tamaño de `path` en bytes; `null` si no lo tiene la ventana. No pide permiso: de un archivo
+ * recordado que aún no se puede leer da el tamaño que tenía (Inicio lo pregunta por cada reciente).
+ */
 export async function fileSize(path: string): Promise<number | null> {
+  await restored;
+  const file = files.get(path);
+  if (file?.handle && !file.content && !await readable(file.handle, false)) return file.size ?? null;
   return (await contentOf(path))?.size ?? null;
 }
 
@@ -235,6 +358,7 @@ function download(path: string, data: Uint8Array<ArrayBuffer>): void {
  * Si la ventana tiene ese archivo, se queda con lo nuevo.
  */
 export async function writeBack(path: string, data: Uint8Array<ArrayBuffer>): Promise<void> {
+  await restored;
   const file = files.get(path);
   const content = new Blob([data]);
   if (file) file.content = content; // ya, antes de esperar: lo que Python pida después es lo nuevo
@@ -245,6 +369,7 @@ export async function writeBack(path: string, data: Uint8Array<ArrayBuffer>): Pr
       await output.write(data);
       await output.close();
       if (file?.content === content) file.content = undefined; // ya está en el archivo real
+      if (file?.handle) void remember(path, file.handle, data.length); // «Guardar como»: un reciente más
       return;
     }
   } catch (err) {
@@ -254,7 +379,8 @@ export async function writeBack(path: string, data: Uint8Array<ArrayBuffer>): Pr
 }
 
 /** Escribe `path`, del que Python no tiene copia (un documento del visor): la ventana se lo queda. */
-export function writeFile(path: string, data: Uint8Array<ArrayBuffer>): Promise<void> {
+export async function writeFile(path: string, data: Uint8Array<ArrayBuffer>): Promise<void> {
+  await restored;
   if (!files.has(path)) files.set(path, {});
   return writeBack(path, data);
 }
