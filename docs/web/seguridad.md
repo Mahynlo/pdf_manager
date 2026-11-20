@@ -126,9 +126,9 @@ Se lanzan sin shell y con listas de argumentos. «Mostrar en carpeta» usa la ru
 - **Una semana de espera** para las versiones nuevas de Python (`exclude-newer = "7 days"` en
   `pyproject.toml`): `uv lock` no elige nada publicado hace menos de 7 días. Una versión maliciosa
   subida a PyPI suele detectarse y retirarse antes (así pasó con litellm 1.82.7/1.82.8 y 1.107.0).
-- **Modelos de OCR descargados** (instalación compacta): solo por HTTPS desde Hugging Face, en un
-  commit fijado, y se usan solo si su SHA-256 coincide con el del instalador (`pdf_core/ocr/models.py`);
-  una descarga cortada o distinta se borra.
+- **Modelos de OCR descargados** (instalación compacta): solo por HTTPS y solo de este repositorio (la
+  Release de la versión instalada o su etiqueta), y se usan solo si su SHA-256 coincide con el del
+  instalador (`pdf_core/ocr/models.py`); una descarga cortada o distinta se borra.
 - [`security.yml`](../../.github/workflows/security.yml) las audita en cada pull request, en cada
   push a `main` y cada lunes: `pip-audit` (Python) y `pnpm audit` (falla con avisos altos o críticos).
 

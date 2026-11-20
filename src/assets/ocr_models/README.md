@@ -10,9 +10,13 @@ Los usa `src/pdf_core/ocr/paddle.py` con onnxruntime; no hace falta PaddlePaddle
 | `PP-OCRv6_small_rec_dict.txt` | Alfabeto del reconocedor, un carácter por línea | `PostProcess.character_dict` del `inference.yml` del mismo repositorio |
 | `PP-LCNet_x1_0_doc_ori.onnx` | Orientación de documento (0/90/180/270°) | [PaddlePaddle/PP-LCNet_x1_0_doc_ori_onnx](https://huggingface.co/PaddlePaddle/PP-LCNet_x1_0_doc_ori_onnx) |
 
-Cada `.onnx` es el `inference.onnx` de su repositorio, renombrado. Si el instalador no los lleva, la app
-los descarga de esos repositorios al usar el OCR (`src/pdf_core/ocr/models.py`, con el commit y la suma
-SHA-256 de cada uno): al cambiar un modelo aquí, actualizar también `MODELS` allí.
+Cada `.onnx` es el `inference.onnx` de su repositorio, renombrado.
+
+Si el instalador no los lleva (instalación compacta), la app los descarga de **esta carpeta**: de la
+Release de su versión en GitHub (el workflow `build-web.yml` sube aquí los `.onnx`) o, si no están, de
+esta carpeta en la etiqueta de la versión. Solo acepta archivos con la suma SHA-256 de `MODELS` en
+`src/pdf_core/ocr/models.py`: al cambiar un modelo aquí, actualizar también su suma y tamaño allí (una
+prueba lo comprueba).
 
 ## Reconocedor *tiny* (equipos con pocos recursos)
 

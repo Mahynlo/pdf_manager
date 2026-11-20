@@ -54,8 +54,11 @@ Antes ocupaba 420 MB: onnxtr arrastraba OpenCV (99 MB) y SciPy (~89 MB). El OCR 
 **Sin los modelos de OCR** (unos 38 MB menos) la app los descarga la primera vez que se usa el OCR, en el
 visor o en Extraer (`pdf_core/ocr/models.py`, `services/ocr_models.py`):
 - a `%USERPROFILE%\.pdf_manager\ocr_models`, porque en Archivos de programa no se puede escribir;
-- desde los repositorios de PaddlePaddle en Hugging Face, en un commit fijado y comprobando la suma
-  SHA-256 de cada archivo (son los mismos que lleva el instalador; una prueba lo comprueba);
+- de este repositorio y de la versión instalada: primero de su Release en GitHub (el workflow sube ahí
+  los `.onnx` de `src/assets/ocr_models` junto al instalador) y, si no están, de esa carpeta en la
+  etiqueta de la versión (`raw.githubusercontent.com`). Así cada versión tiene siempre sus modelos;
+- comprobando la suma SHA-256 de cada archivo: tiene que ser el mismo que lleva el instalador (una
+  prueba compara `MODELS` con `src/assets/ocr_models`);
 - la ventana muestra el progreso en la barra de estado; sin conexión, avisa y el OCR se puede volver a
   intentar.
 
