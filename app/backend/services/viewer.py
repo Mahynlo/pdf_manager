@@ -468,7 +468,8 @@ class ViewerService:
         return entry
 
     def _push_recent(self, path: str) -> None:
-        recent_files.push(path)
+        # Si existe lo dice el host: en el navegador el archivo lo tiene la ventana, no el disco.
+        recent_files.push(path, lambda p: self._host.file_size(p) is not None)
         self._host.emit(RECENT_CHANGED)
 
     def _info(self, doc_id: int) -> dict[str, Any]:

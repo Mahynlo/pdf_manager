@@ -106,7 +106,11 @@ muestra ahí mismo.
 
 ## Lo que cambia frente al escritorio
 
-- **Recientes:** los archivos solo viven mientras la página está abierta, así que al recargar la lista queda vacía.
+- **Recientes:** en Chrome y Edge se recuerdan entre visitas: la ventana guarda el archivo real
+  (`FileSystemFileHandle`) en IndexedDB con su ruta (`lib/browser/files.ts`, los 50 últimos) y, al abrir
+  un reciente tras recargar, el navegador pide permiso para leerlo. En Firefox y Safari no hay archivo
+  real: un reciente vale mientras la página sigue abierta. Python pregunta al host si un reciente
+  existe (`host.file_size`), no a su disco. Inicio no muestra la carpeta (la ruta es interna).
 - **Abrir carpeta y mostrar el archivo:** no hacen nada.
 - **«Abrir con» y barra de título:** no existen.
 - **Asistente IA:** solo el modo básico, porque los clientes de los proveedores no están en Pyodide.
@@ -164,4 +168,5 @@ Pages no). Toda la configuración está en [`netlify.toml`](../../netlify.toml),
 ## Pendiente
 
 - **Probar en Firefox y Safari**, que no se han probado, e imprimir en un navegador real.
-- **Funcionar sin conexión** (PWA) y recordar los archivos recientes en Chrome y Edge.
+- **Funcionar sin conexión** (PWA).
+- Al vaciar o quitar recientes, la ventana no olvida enseguida el archivo recordado (sale de los 50 últimos).

@@ -24,7 +24,7 @@ class DocumentService:
 
     def open(self, path: str, password: str | None = None) -> None:
         """Pide al frontend abrir ``path`` en el visor (con ``password`` si ya se conoce)."""
-        if self._host.file_size(path) is None:
+        if not self._exists(path):
             raise UserError(f"No se encontró el archivo: {Path(path).name}", "not_found")
         self._host.emit(OPEN_REQUESTED, {"path": path, "password": password})
 
@@ -36,9 +36,14 @@ class DocumentService:
             self.open(path)
         return paths
 
+    def _exists(self, path: str) -> bool:
+        """Si ``path`` es un archivo que se puede abrir: lo dice el host (en el navegador, los
+        archivos los tiene la ventana, no el disco de Python)."""
+        return self._host.file_size(path) is not None
+
     @exposed
     def recent(self) -> list[dict[str, Any]]:
-        return [{"path": p, "name": Path(p).name, "folder": str(Path(p).parent)} for p in recent_files.load()]
+        return [{"path": p, "name": Path(p).name, "folder": str(Path(p).parent)} for p in recent_files.load(self._exists)]
 
     @exposed
     def remove_recent(self, path: str) -> list[dict[str, Any]]:

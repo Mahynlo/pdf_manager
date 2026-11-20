@@ -9,6 +9,8 @@
   import { t } from '$texts';
 
   const T = t.shell.recent;
+  // En el navegador la ruta es interna (/files/3/…): no se muestra su carpeta, ni hay carpeta que abrir.
+  const BROWSER = import.meta.env.MODE === 'browser';
 
   let files = $state<RecentFile[]>([]);
 
@@ -31,8 +33,10 @@
     ev.preventDefault();
     openMenuAt(ev.clientX, ev.clientY, [
       { label: T.menu.open, icon: 'folder-open', onSelect: () => open(file) },
-      { label: T.menu.reveal, icon: 'folder', onSelect: () => call('documents.reveal', file.path) },
-      { label: T.menu.copyPath, icon: 'copy', onSelect: () => navigator.clipboard.writeText(file.path) },
+      ...(BROWSER ? [] : [
+        { label: T.menu.reveal, icon: 'folder', onSelect: () => call('documents.reveal', file.path) },
+        { label: T.menu.copyPath, icon: 'copy', onSelect: () => navigator.clipboard.writeText(file.path) },
+      ]),
       'separator',
       { label: T.menu.remove, icon: 'x', onSelect: () => remove(file) },
     ]);
@@ -49,12 +53,12 @@
   </div>
   <div class="recent__list">
     {#each files as file (file.path)}
-      <div class="recent-row" role="button" tabindex="0" title={file.path} onclick={() => open(file)}
+      <div class="recent-row" role="button" tabindex="0" title={BROWSER ? file.name : file.path} onclick={() => open(file)}
            onkeydown={(ev) => ev.key === 'Enter' && open(file)} oncontextmenu={(ev) => contextMenu(ev, file)}>
         <span class="recent-row__badge"><Icon name="file-text" size={18} /></span>
         <span class="recent-row__info">
           <span class="recent-row__name ellipsis">{file.name}</span>
-          <span class="caption ellipsis">{file.folder}</span>
+          {#if !BROWSER}<span class="caption ellipsis">{file.folder}</span>{/if}
         </span>
         <button class="btn btn--icon btn--sm" type="button" title={T.remove}
                 onclick={(ev) => { ev.stopPropagation(); remove(file); }}>

@@ -93,6 +93,19 @@ class TestRecentFiles:
         )
         assert rf.load() == [good]
 
+    def test_exists_decides_which_files_count(self, isolated_store, tmp_path):
+        """With *exists*, files that are not on disk (the browser's) are listed and kept."""
+        held = {str((tmp_path / "w" / name).resolve()) for name in ("a.pdf", "b.pdf")}
+        a, b = sorted(held)
+        rf.push(a, held.__contains__)
+        rf.push(b, held.__contains__)
+        assert rf.load(held.__contains__) == [b, a]
+        assert rf.load() == []  # on disk they do not exist
+        rf.remove(b)  # removing does not drop the others, even if they are not on disk
+        assert rf.load(held.__contains__) == [a]
+        rf.push(str(tmp_path / "w" / "c.pdf"), held.__contains__)  # one the host does not have
+        assert rf.load(held.__contains__) == [a]
+
     def test_push_is_persistent(self, isolated_store, tmp_path):
         """After push(), the JSON file exists with the pushed path."""
         p = _make_pdf(tmp_path, "x.pdf")

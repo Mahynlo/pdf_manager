@@ -539,6 +539,24 @@ def test_viewer_only_touches_its_files_through_the_host(tmp_path):
         svc.close()
 
 
+def test_recent_files_the_window_holds_are_remembered(tmp_path):
+    """En el navegador el archivo lo tiene la ventana, no el disco: los recientes se lo preguntan al host."""
+    folder = tmp_path / "ventana"  # no existe en disco
+    first, second = str(folder / "uno.pdf"), str(folder / "dos.pdf")
+    data = pdf_bytes([[(72, 72, "uno")]])
+    host = WindowFilesHost({first: data, second: data})
+    docs, viewer = DocumentService(host), ViewerService(host)
+    try:
+        for path in (first, second):
+            viewer.open(path)
+    finally:
+        viewer.close()
+    assert [f["name"] for f in docs.recent()] == ["dos.pdf", "uno.pdf"]
+    del host.files[first]  # la ventana ya no lo tiene (p. ej. otra visita sin el archivo real)
+    assert [f["name"] for f in docs.recent()] == ["dos.pdf"]
+    assert not folder.exists()
+
+
 def test_viewer_save_as_moves_the_tab_to_the_new_file(tmp_path):
     pdf = _make_pdf(tmp_path / "original.pdf", 2)
     copy = tmp_path / "copia"  # sin extensión: se añade .pdf
