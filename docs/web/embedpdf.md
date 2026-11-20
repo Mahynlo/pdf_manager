@@ -616,9 +616,9 @@ escribe el texto reconocido en el documento a la vista.
      (`ocr.page(id, página, url, regiones, hechos)` u `ocr.area(id, página, url, región)`): guarda
      las palabras para su capa de texto y las devuelve (`words`);
   4. el motor las escribe en el documento como texto invisible (`canvas.writeOcrText`: el de la
-     página sustituye al que tenía; el de un recorte se suma) y EmbedPDF vuelve a leer esa página
-     (`refreshPageText`, la acción `REFRESH_PAGES` del núcleo: la selección y el dibujo; la búsqueda
-     la vuelve a lanzar el visor).
+     página sustituye al que tenía; el de un recorte se suma) y la selección de EmbedPDF vuelve a
+     leer su texto (`refreshPageText`), sin volver a dibujarla: el texto es invisible, no cambia lo
+     que se ve. La búsqueda la vuelve a lanzar el visor.
 - **Antes:** Python dibujaba la página de su copia y, tras cada OCR, el visor volvía a pedir el
   documento entero (Python lo generaba con el texto invisible) y lo abría otra vez en EmbedPDF.
 - **Al abrir una versión** (al principio y tras censurar), `document_url` da el PDF sin el texto del
@@ -868,6 +868,11 @@ Al cambiar las páginas de un documento abierto (operaciones de página), que Em
 - **Imágenes de las anotaciones por número de página (`plugin-annotation`):** su caché y la capa de cada
   página no se vuelven a pedir si solo cambia el contenido; la nota de una página duplicada no se veía.
   Se vacía la caché (`showPageList`) y la página se vuelve a montar (`{#key}` en `PdfPages.svelte`).
+- **`REFRESH_PAGES` vuelve a montar la página:** sube su versión, y el `{#key}` de `PdfPages.svelte`
+  monta de nuevo la página entera (imagen, mosaico y anotaciones): se queda en blanco un momento. Solo
+  se usa cuando cambia lo que hay en esa posición (operaciones de página). Para el texto del OCR,
+  `refreshPageText` llama solo a lo que hace la selección con esa acción (`getNewPageGeometryAndCache`
+  y `notifyPage`, privados en 2.15.1); antes parpadeaba la página tras cada OCR.
 - **Agrupación de páginas (`plugin-spread`):** solo se calcula al abrir; `showPageList` la vuelve a pedir.
 - **Anotaciones de una copia con el mismo `/NM`:** EmbedPDF identifica cada anotación por él; al
   duplicar una página, `AppNative` les da uno nuevo.

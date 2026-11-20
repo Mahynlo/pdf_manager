@@ -276,7 +276,7 @@ export class PageCanvas {
 
   /**
    * Escribe en el documento a la vista las palabras del OCR (texto invisible, para seleccionarlas
-   * y buscarlas) y hace que EmbedPDF vuelva a leer esas páginas.
+   * y buscarlas) y hace que la selección de EmbedPDF vuelva a leer su texto (sin volver a dibujarlas).
    */
   async writeOcrText(pages: OcrText[]): Promise<void> {
     const id = this.shown;
