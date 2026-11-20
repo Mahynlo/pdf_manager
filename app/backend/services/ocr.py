@@ -58,10 +58,11 @@ def _images(data: bytes, shapes: list[dict[str, Any]]) -> list[np.ndarray]:
 
 
 class OcrService:
-    def __init__(self, host: Host, viewer: ViewerService, processor: Any = None) -> None:
+    def __init__(self, host: Host, viewer: ViewerService, processor: Any = None, models: Any = None) -> None:
         self._host = host
         self._viewer = viewer
         self._processor = processor  # OCRProcessor; se crea al primer uso (carga onnx)
+        self._models = models  # OcrModels: descarga los modelos si no se instalaron (None: no hace falta)
         self._busy = threading.Lock()  # una inferencia a la vez (el modelo no es reentrante)
         self._release_timer: threading.Timer | None = None
 
@@ -70,6 +71,8 @@ class OcrService:
         if self._processor is None:
             from pdf_core.ocr import OCRProcessor
 
+            if self._models:
+                self._models.ensure()
             self._processor = OCRProcessor(str(PROJECT_ROOT))
         return self._processor
 

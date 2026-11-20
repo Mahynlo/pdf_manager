@@ -50,10 +50,11 @@ def _check_password(path: str, password: str) -> None:
 
 
 class ExtractService:
-    def __init__(self, host: Host, documents: DocumentService, processor: Any = None) -> None:
+    def __init__(self, host: Host, documents: DocumentService, processor: Any = None, models: Any = None) -> None:
         self._host = host
         self._documents = documents
         self._processor = processor  # OCRProcessor; se crea al primer uso (carga onnx)
+        self._models = models  # OcrModels: descarga los modelos si no se instalaron (None: no hace falta)
         self._lock = threading.RLock()
         self._reference: dict[str, Any] | None = None  # {path, name, kind, password}
         self._targets: list[str] = []
@@ -82,6 +83,8 @@ class ExtractService:
         if self._processor is None:
             from pdf_core.ocr import OCRProcessor
 
+            if self._models:
+                self._models.ensure()
             self._processor = OCRProcessor(str(PROJECT_ROOT))
         return self._processor
 

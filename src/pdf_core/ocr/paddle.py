@@ -10,7 +10,8 @@ configuración de cada modelo (``inference.yml`` de su repositorio):
   PALABRA salen de la posición de cada carácter en la salida CTC.
 - **Orientación** (``PP-LCNet_x1_0_doc_ori``): clasifica la página en 0/90/180/270°.
 
-Los modelos están en ``src/assets/ocr_models`` (ver su README). Para equipos con
+Los modelos están en ``src/assets/ocr_models`` (ver su README) o, si el instalador no los
+llevaba, se descargan a la carpeta del usuario (:mod:`pdf_core.ocr.models`). Para equipos con
 pocos recursos se puede usar el reconocedor *tiny* cambiando :data:`REC_MODEL`.
 """
 
@@ -21,7 +22,9 @@ from pathlib import Path
 
 import numpy as np
 
-MODELS_DIR = Path(__file__).resolve().parents[2] / "assets" / "ocr_models"
+from pdf_core.ocr.models import BUNDLED_DIR, model_file
+
+MODELS_DIR = BUNDLED_DIR
 DET_MODEL = "PP-OCRv6_small_det"
 REC_MODEL = "PP-OCRv6_small_rec"  # más rápido y algo menos preciso: "PP-OCRv6_tiny_rec"
 ORI_MODEL = "PP-LCNet_x1_0_doc_ori"
@@ -63,7 +66,9 @@ def _session(name: str, models_dir: Path):
 
     options = ort.SessionOptions()
     options.log_severity_level = 3  # los modelos exportados avisan de inicializadores sin usar
-    return ort.InferenceSession(str(models_dir / f"{name}.onnx"), options, providers=["CPUExecutionProvider"])
+    # Con la carpeta de la app, el modelo puede estar también descargado (models.model_file).
+    path = model_file(name) if models_dir == MODELS_DIR else models_dir / f"{name}.onnx"
+    return ort.InferenceSession(str(path), options, providers=["CPUExecutionProvider"])
 
 
 def resize(img: np.ndarray, width: int, height: int) -> np.ndarray:

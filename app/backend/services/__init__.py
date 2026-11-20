@@ -13,6 +13,7 @@ from app.backend.services.help import HelpService
 from app.backend.services.legends import LegendsService
 from app.backend.services.merge import MergeService
 from app.backend.services.ocr import OcrService
+from app.backend.services.ocr_models import OcrModels
 from app.backend.services.redact import RedactService
 from app.backend.services.security import SecurityService
 from app.backend.services.stamps import StampsService
@@ -20,19 +21,24 @@ from app.backend.services.viewer import ViewerService
 from app.backend.settings import Settings
 
 
-def build_registry(host: Host, settings: Settings) -> tuple[Registry, dict[str, object]]:
-    """Crea los servicios y los registra; devuelve también los servicios por nombre (para cerrarlos al salir)."""
+def build_registry(host: Host, settings: Settings, download_ocr_models: bool = True) -> tuple[Registry, dict[str, object]]:
+    """Crea los servicios y los registra; devuelve también los servicios por nombre (para cerrarlos al salir).
+
+    ``download_ocr_models``: si faltan los modelos del OCR, se descargan al usarlo (escritorio; en
+    el navegador los sirve la web).
+    """
     documents = DocumentService(host)
     viewer = ViewerService(host)
+    ocr_models = OcrModels(host) if download_ocr_models else None
     services: dict[str, object] = {
         "ai": AiService(viewer),
         "app": AppService(host, settings),
         "documents": documents,
-        "extract": ExtractService(host, documents),
+        "extract": ExtractService(host, documents, models=ocr_models),
         "help": HelpService(),
         "legends": LegendsService(),
         "merge": MergeService(host, documents),
-        "ocr": OcrService(host, viewer),
+        "ocr": OcrService(host, viewer, models=ocr_models),
         "redact": RedactService(viewer),
         "security": SecurityService(host, documents),
         "stamps": StampsService(),

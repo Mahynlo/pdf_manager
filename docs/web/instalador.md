@@ -24,7 +24,7 @@
 |---|---|---|
 | `app\ui\dist` | `app\ui\dist` | La ventana (`app.UI_DIST_DIR`) |
 | `src\assets\ayuda`, `ayuda_img`, `ayuda_svg` | Las mismas | Pestaña Ayuda (`services/help.py`) |
-| `src\assets\ocr_models` | `assets\ocr_models` | Modelos de OCR de PaddleOCR (`pdf_core/ocr/paddle.py` los busca dos carpetas por encima de su archivo) |
+| `src\assets\ocr_models` | `assets\ocr_models` | Modelos de OCR de PaddleOCR (`pdf_core/ocr/models.py` los busca dos carpetas por encima de su archivo). Los `.onnx` son un componente opcional del instalador |
 | Módulos de `pdf_core` | Dentro del ejecutable | Todo el backend |
 
 Empaquetada, `app.PROJECT_ROOT` es la carpeta `_internal`, dentro de Archivos de programa, donde no se
@@ -42,6 +42,30 @@ El ejecutable ocupa unos 158 MB. Lo que más pesa:
 
 Antes ocupaba 420 MB: onnxtr arrastraba OpenCV (99 MB) y SciPy (~89 MB). El OCR ya no los usa
 (ver [modulos-python.md](modulos-python.md)).
+
+## Opciones del instalador
+
+| Página | Opciones |
+|---|---|
+| Bienvenida | Imagen propia y qué hace la app; si la versión lleva `beta`, avisa de que es de pruebas |
+| Componentes | **Completa** (por defecto: con los modelos de OCR, funciona sin internet), **Compacta** (sin ellos) o **Personalizada** |
+| Tareas | Acceso directo en el escritorio (desmarcado) y «Abrir con» para los PDF (marcado) |
+
+**Sin los modelos de OCR** (unos 38 MB menos) la app los descarga la primera vez que se usa el OCR, en el
+visor o en Extraer (`pdf_core/ocr/models.py`, `services/ocr_models.py`):
+- a `%USERPROFILE%\.pdf_manager\ocr_models`, porque en Archivos de programa no se puede escribir;
+- desde los repositorios de PaddlePaddle en Hugging Face, en un commit fijado y comprobando la suma
+  SHA-256 de cada archivo (son los mismos que lleva el instalador; una prueba lo comprueba);
+- la ventana muestra el progreso en la barra de estado; sin conexión, avisa y el OCR se puede volver a
+  intentar.
+
+Los modelos se buscan primero junto a la app y después en la carpeta del usuario. Reinstalar sin el
+componente borra los de una instalación completa anterior (`[InstallDelete]`); desinstalar no borra los
+descargados, igual que las preferencias.
+
+Las imágenes del asistente están en `installer/web/images/` (100 % y 200 % de escala). Se generan con
+`uv run --no-project --with pillow python installer/web/make_images.py` a partir del logo y del rojo
+de la marca; solo hay que regenerarlas si cambian.
 
 ## «Abrir con» e instancia única
 

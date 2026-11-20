@@ -54,7 +54,8 @@ class Backend:
         channel = JsChannel(worker)
         onnx.install(onnx.channel_ask(channel))
         self._host = BrowserHost(channel, Files())
-        self._registry, self._services = build_registry(self._host, Settings())
+        # Los modelos del OCR los sirve la web (onnx.py): no hay nada que descargar.
+        self._registry, self._services = build_registry(self._host, Settings(), download_ocr_models=False)
         self._warnings = quit_warnings
 
     def _poll(self, ms: int) -> bool:
