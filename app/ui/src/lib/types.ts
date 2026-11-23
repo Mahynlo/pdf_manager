@@ -30,6 +30,7 @@ export interface DocumentState {
   modified: boolean; // cambios sin guardar (en el visor lo calcula operations.ts)
   annotated: boolean; // anotaciones cambiadas sin guardar
   redacted: boolean; // con censura aplicada: solo se guarda como copia
+  untitled?: boolean; // documento nuevo sin archivo (viewer.create): se guarda con «Guardar como»
 }
 
 /**

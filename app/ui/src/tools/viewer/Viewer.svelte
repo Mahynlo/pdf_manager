@@ -16,6 +16,7 @@
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { call } from '$lib/api.ts';
   import Icon from '$lib/Icon.svelte';
+  import type { ImagePage } from '$lib/images/images.ts';
   import type { MenuItem } from '$lib/menu.svelte.ts';
   import type { DocumentInfo } from '$lib/types.ts';
   import { openModal, setStatus, toast } from '$lib/ui.ts';
@@ -59,11 +60,13 @@
   ];
 
   /**
-   * `info`: el documento abierto (`viewer.open`); `close()`: cerrar la pestaña; `update(info)`:
-   * cambió el documento (cambios sin guardar, ruta tras «Guardar como»).
+   * `info`: el documento abierto (`viewer.open`, o `viewer.create` si es nuevo); `images`: las
+   * páginas del documento nuevo hechas con imágenes (para «Ajustar imagen…»); `close()`: cerrar
+   * la pestaña; `update(info)`: cambió el documento (cambios sin guardar, ruta tras «Guardar como»).
    */
-  let { info, close, update }: {
+  let { info, images = [], close, update }: {
     info: DocumentInfo;
+    images?: ImagePage[];
     close: () => void;
     update: (info: DocumentInfo) => void;
   } = $props();
@@ -151,6 +154,7 @@
       showHistory();
     },
   }, { canvas, pages: new PageEditor(canvas), copy, text, recognizer });
+  untrack(() => actions.registerImages(images, doc.keys.map((_, i) => actions.pages.uidAt(i))));
 
   // Deshacer y rehacer: primero lo de EmbedPDF (anotaciones); si no queda, las operaciones de
   // página (pages.ts). Tras una operación de página EmbedPDF empieza un historial nuevo, así que
@@ -457,6 +461,7 @@
     clearTimeout(thumbsTimer);
     releasePrint();
     actions.pages.dispose();
+    void actions.releaseImages();
     canvas.destroy();
     call('viewer.close_document', docId).catch(() => {});
   });

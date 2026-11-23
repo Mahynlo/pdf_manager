@@ -70,7 +70,7 @@ async function serve(kind: string, json: string, data: Uint8Array | null): Promi
   const request = JSON.parse(json);
   try {
     if (kind === 'pick') {
-      answer(await pickPdfs(request.multiple));
+      answer(await pickPdfs(request.multiple, request.images));
     } else if (kind === 'folder') {
       answer(await pickFolder(request.output));
     } else if (kind === 'read') {
@@ -178,7 +178,7 @@ export function upload(url: string, body: ArrayBuffer): void {
   post({ type: 'upload', url, data: new Uint8Array(body) });
 }
 
-/** PDF soltados en la ventana: se abren en el visor, que los lee de aquí (files.ts). */
+/** PDF e imágenes soltados en la ventana: se abren en el visor, que los lee de aquí (files.ts). */
 export async function openDropped(transfer: DataTransfer): Promise<void> {
   const paths = await droppedPdfs(transfer);
   if (paths.length) post({ type: 'open', paths: JSON.stringify(paths) });

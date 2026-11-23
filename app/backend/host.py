@@ -36,8 +36,8 @@ class Host(Protocol):
         """Diálogo para elegir uno o varios PDF; lista vacía si se cancela."""
 
     def pick_documents(self) -> list[str]:
-        """Diálogo «Abrir PDF» del visor (uno o varios); lista vacía si se cancela. Los archivos
-        se leen con :meth:`read_file` y :meth:`file_url`."""
+        """Diálogo «Abrir» del visor: PDF o imágenes (uno o varios); lista vacía si se cancela. Los
+        archivos se leen con :meth:`read_file` y :meth:`file_url`."""
 
     def pick_pdf(self) -> str | None:
         """Diálogo para elegir un solo PDF; ``None`` si se cancela."""

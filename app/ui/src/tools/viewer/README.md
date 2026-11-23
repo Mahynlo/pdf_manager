@@ -10,7 +10,7 @@ carpeta agrupa una parte del visor:
 | `stamps/` | Sellos y firmas: las bibliotecas (`library.svelte.ts`, `standard.ts`), el PDF de cada sello (`stamp-pdf.ts`), las firmas (`signatures.svelte.ts`), el panel (`StampsPanel.svelte`) y los diálogos de firma y de leyendas |
 | `redact/` | Censura: las marcas (`redaction.ts`), aplicarlas en el documento con el motor (`apply.ts`), el panel (`RedactPanel.svelte`) y los perfiles (`ProfilesDialog.svelte`) |
 | `ocr/` | OCR: el panel y sus diálogos de lote y resultado, y el reconocimiento de páginas, recortes y su orientación (`recognize.ts`: el motor dibuja, Python reconoce, el motor escribe el texto) |
-| `document/` | Acciones sobre el archivo: guardar, páginas y exportar (`operations.ts`), las operaciones de página con el motor de EmbedPDF y su deshacer (`pages.ts`), la copia del documento que sale del visor a un archivo, a la impresora o a Python (`copy.ts`), el texto de las páginas que recibe Python (`text.ts`; las tres sobre `$lib/pdf-engine`), imprimir con el diálogo de WebView2 (`print.ts`) y las propiedades (`properties.ts`, `PropertiesDialog.svelte`) |
+| `document/` | Acciones sobre el archivo: guardar, páginas y exportar (`operations.ts`), las operaciones de página con el motor de EmbedPDF y su deshacer (`pages.ts`), la copia del documento que sale del visor a un archivo, a la impresora o a Python (`copy.ts`), el texto de las páginas que recibe Python (`text.ts`; las tres sobre `$lib/pdf-engine`), imprimir con el diálogo de WebView2 (`print.ts`), las propiedades (`properties.ts`, `PropertiesDialog.svelte`) y exportar las páginas como imágenes (`ExportImagesDialog.svelte`) |
 | `toolbars/` | La barra superior (`Toolbar.svelte`) y la de herramientas del lienzo (`ToolsBar.svelte`) |
 | `panels/` | Los demás paneles: miniaturas (`Thumbnails.svelte`), índice, búsqueda y asistente IA |
 
@@ -21,5 +21,10 @@ Reglas:
 - Importaciones relativas entre carpetas (`../canvas/canvas.ts`) y `$lib/...` para lo común.
 - Los textos van en el catálogo (`t.viewer`, en `src/texts/es/viewer.ts`) y las respuestas de Python
   de una parte, en su `types.ts` (`ocr/types.ts`).
+
+Imágenes: el diálogo «Imágenes a PDF» y el PDF que se escribe con ellas están en `$lib/images`
+(también los usa Inicio). El visor inserta sus páginas o rehace la de una imagen con el motor
+(`pages.ts` `insertPdf` / `replaceWithPdf`) y recuerda, por `uid`, qué páginas salieron de una imagen
+en esta sesión (`DocumentActions.imagePages`: «Ajustar imagen…»).
 
 Cómo funciona por dentro (EmbedPDF y Python): [docs/web/embedpdf.md](../../../../../docs/web/embedpdf.md).

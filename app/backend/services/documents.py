@@ -1,8 +1,12 @@
-"""Servicio ``documents``: abrir PDFs y la lista de archivos recientes.
+"""Servicio ``documents``: abrir PDFs e imágenes y la lista de archivos recientes.
 
 Todas las aperturas pasan por :meth:`DocumentService.open` (también las que
 piden otras herramientas): emite ``document:open`` y el frontend abre la pestaña
 del visor, que carga el PDF con el servicio ``viewer`` (y lo añade a recientes).
+
+Las imágenes (:meth:`DocumentService.open_many`, desde «Abrir» o arrastradas) no se abren: emite
+``images:open`` con todas juntas y el frontend las convierte en un PDF nuevo con el diálogo
+«Imágenes a PDF» (lee cada una con :meth:`DocumentService.image_url`).
 """
 
 from __future__ import annotations
@@ -16,6 +20,13 @@ from pdf_core import recent_files
 
 RECENT_CHANGED = "recent:changed"
 OPEN_REQUESTED = "document:open"
+IMAGES_REQUESTED = "images:open"
+# Las que sabe dibujar la ventana (WebView2 y los navegadores): el diálogo «Imágenes a PDF».
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".svg")
+
+
+def is_image(path: str) -> bool:
+    return Path(path).suffix.lower() in IMAGE_SUFFIXES
 
 
 class DocumentService:
@@ -28,13 +39,31 @@ class DocumentService:
             raise UserError(f"No se encontró el archivo: {Path(path).name}", "not_found")
         self._host.emit(OPEN_REQUESTED, {"path": path, "password": password})
 
+    def open_many(self, paths: list[str]) -> None:
+        """Abre cada PDF de ``paths`` en el visor; las imágenes, todas juntas en un PDF nuevo."""
+        images = [path for path in paths if is_image(path)]
+        for path in paths:
+            if not is_image(path):
+                self.open(path)
+        if images:
+            self._host.emit(IMAGES_REQUESTED, {"paths": images})
+
     @exposed
     def open_dialog(self) -> list[str]:
-        """Diálogo «Abrir PDF» (uno o varios); devuelve las rutas elegidas."""
+        """Diálogo «Abrir» (PDF o imágenes, uno o varios); devuelve las rutas elegidas."""
         paths = self._host.pick_documents()
-        for path in paths:
-            self.open(path)
+        self.open_many(paths)
         return paths
+
+    @exposed
+    def image_url(self, path: str) -> str:
+        """URL de un solo uso con la imagen ``path`` (de ``images:open``), para leerla en la ventana."""
+        if not is_image(path):
+            raise UserError(f"No es una imagen: {Path(path).name}", "not_image")
+        try:
+            return self._host.file_url(path)
+        except OSError as ex:
+            raise UserError(f"No se pudo leer {Path(path).name}: {ex}", "open_failed") from ex
 
     def _exists(self, path: str) -> bool:
         """Si ``path`` es un archivo que se puede abrir: lo dice el host (en el navegador, los

@@ -1,0 +1,45 @@
+/* ── Imágenes a PDF (lib/images/ImagesDialog.svelte) ─────────────────────── */
+.images-dialog .dialog__body { width: min(760px, 94vw); }
+.images-dialog__main { display: flex; gap: 16px; min-height: 320px; }
+.images-dialog__side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.images-dialog__settings { width: 280px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; }
+.images-dialog__field { display: flex; flex-direction: column; gap: 4px; }
+.images-dialog__preview {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  height: 280px; border-radius: var(--radius); background: var(--bg-subtle);
+}
+.images-dialog__preview canvas { box-shadow: var(--shadow-2); }
+.images-dialog__turn { position: absolute; top: 6px; right: 6px; background: var(--bg-card); }
+
+.images-list {
+  flex: 1; min-height: 160px; max-height: 360px; overflow-y: auto; margin: 0; padding: 4px; list-style: none;
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.images-list__item { display: flex; align-items: center; gap: 4px; padding: 2px; border-radius: var(--radius-sm); }
+.images-list__item:hover { background: var(--bg-hover); }
+.images-list__item.is-active { background: var(--bg-selected); }
+.images-list__pick {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 2px 4px;
+  border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.images-list__item.is-active .images-list__name { color: var(--accent); }
+.images-list__thumb {
+  width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  overflow: hidden; border-radius: var(--radius-sm); background: var(--bg-subtle);
+}
+.images-list__thumb img { max-width: 40px; max-height: 40px; object-fit: contain; transition: transform 0.15s; }
+.images-list__name { flex: 1; min-width: 0; }
+.images-list__tools { display: flex; gap: 2px; flex-shrink: 0; }
+.images-list__empty { padding: 16px 8px; text-align: center; }
+
+/* ── Exportar páginas como imágenes (viewer/document/ExportImagesDialog.svelte) ── */
+.export-images .dialog__body { width: min(480px, 94vw); }
+.export-images__grid { display: grid; grid-template-columns: auto 1fr; gap: 10px 16px; align-items: start; }
+.export-images__grid .radio-group, .export-images__pages { display: flex; flex-direction: column; gap: 6px; }
+
+@media (max-width: 639.98px) {
+  .images-dialog__main { flex-direction: column; }
+  .images-dialog__settings { width: auto; }
+  .images-dialog__preview { height: 200px; }
+  .export-images__grid { grid-template-columns: 1fr; }
+}

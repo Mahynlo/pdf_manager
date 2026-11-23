@@ -22,7 +22,12 @@ da el ``id`` de cada página. Python no tiene el PDF abierto. Guarda de cada doc
 
 Al guardar, el visor sube su copia y Python la escribe tal cual (:meth:`save`); al extraer una
 página, sube ese PDF (:meth:`extract_page`); para exportar sus imágenes, una copia que se usa y se
-suelta (:meth:`export_images`).
+suelta (:meth:`export_images`); para exportar las páginas como imágenes, cada imagen que dibuja su
+motor (:meth:`save_page_image`).
+
+Un documento nuevo (el PDF que crea el visor con unas imágenes: :meth:`create`) no tiene archivo
+hasta guardarlo: Python guarda sus bytes para dárselos a EmbedPDF, su ruta es la sugerida para
+«Guardar como» y no entra en recientes. Guardarlo es siempre «Guardar como».
 
 Los archivos se leen y se escriben con el ``Host`` (``read_file``, ``write_file``, ``file_url``),
 nunca con rutas directamente: en el navegador los tiene la ventana, no Python.
@@ -92,16 +97,22 @@ class _OpenDocument:
     redacted: bool = False  # censura aplicada sin guardar: solo se guarda como copia
     annotated: bool = False  # anotaciones cambiadas en el visor sin guardar
     extras: dict[str, Any] = field(default_factory=dict)  # estado de otros servicios (p. ej. la censura en curso)
+    data: bytes | None = None  # documento nuevo, sin archivo: sus bytes (create)
+
+    @property
+    def untitled(self) -> bool:
+        return self.data is not None
 
     def mark_saved(self) -> None:
         self.file_keys = list(self.keys)
         self.baseline = _structure(self.keys)
         self.redacted = False
         self.annotated = False
+        self.data = None
 
     @property
     def modified(self) -> bool:
-        return self.redacted or self.annotated or _structure(self.keys) != self.baseline
+        return self.untitled or self.redacted or self.annotated or _structure(self.keys) != self.baseline
 
 
 class ViewerService:
@@ -110,6 +121,7 @@ class ViewerService:
         self._docs: dict[int, _OpenDocument] = {}
         self._ids = itertools.count(1)
         self._lock = threading.Lock()
+        self._export_folders: set[str] = set()  # carpetas elegidas para exportar páginas como imágenes
 
     # ── Abrir / cerrar ───────────────────────────────────────────────────
     @exposed
@@ -153,6 +165,40 @@ class ViewerService:
         return info
 
     @exposed
+    def create(self, name: str, upload: str) -> dict[str, Any]:
+        """Abre como documento nuevo, sin archivo, el PDF que subió el visor a ``upload`` (el que
+        crea con unas imágenes). ``name`` es el nombre sugerido (``Imágenes.pdf``)."""
+        data = self.received(upload)
+        try:
+            with Document.open(data) as doc:
+                keys = [f"{page.uid}:{page.rotation}:0" for page in doc]
+                layout = _file_layout(doc)
+        except PdfError as ex:
+            raise UserError(f"No se pudo crear el documento: {ex}", "open_failed") from ex
+        with self._lock:
+            entry = _OpenDocument(self._untitled_path(name), None, keys, list(keys), layout)
+            entry.mark_saved()
+            entry.data = data
+            doc_id = next(self._ids)
+            self._docs[doc_id] = entry
+            return self._file_info(doc_id)
+
+    def _untitled_path(self, name: str) -> str:
+        """Ruta sugerida para guardar un documento nuevo: ``name`` en Documentos, con «(2)»… si ya
+        hay otro abierto con ella."""
+        stem = Path(Path(name).name).stem or "Documento"
+        folder = Path.home() / "Documents"
+        if not folder.is_dir():
+            folder = Path.home()
+        taken = {d.path.lower() for d in self._docs.values()}
+        n = 1
+        while True:
+            candidate = str(folder / (f"{stem}.pdf" if n == 1 else f"{stem} ({n}).pdf"))
+            if candidate.lower() not in taken:
+                return candidate
+            n += 1
+
+    @exposed
     def close_document(self, doc_id: int) -> None:
         with self._lock:
             self._docs.pop(doc_id, None)
@@ -180,10 +226,10 @@ class ViewerService:
         """
         with self._lock:
             entry = self._doc(doc_id)
-            path, password, keys = entry.path, entry.password, list(entry.file_keys)
+            path, password, keys, data = entry.path, entry.password, list(entry.file_keys), entry.data
             ocr = [{"index": i, "words": list(entry.ocr[key])} for i, key in enumerate(keys) if entry.ocr.get(key)]
         try:
-            url = self._host.file_url(path)
+            url = self._host.share_bytes(data, "application/pdf") if data is not None else self._host.file_url(path)
         except OSError as ex:
             raise UserError(f"No se pudo leer {Path(path).name}: {ex}", "open_failed") from ex
         return {"url": url, "keys": keys, "password": password, "ocr": ocr}
@@ -326,6 +372,8 @@ class ViewerService:
         with self._lock:
             entry = self._doc(doc_id)
             self._check_can_save(entry)
+            if entry.untitled:
+                raise UserError("El documento aún no tiene archivo: elige dónde guardarlo.", "untitled")
             if entry.redacted:
                 raise UserError(
                     "Este documento tiene censura aplicada.\nElige dónde guardar la copia para conservar el original.",
@@ -446,6 +494,33 @@ class ViewerService:
             raise UserError(f"No se pudieron extraer las imágenes: {ex}", "export_failed") from ex
         return {"folder": folder, "count": count}
 
+    @exposed
+    def pick_images_folder(self, doc_id: int) -> dict[str, str] | None:
+        """Carpeta donde exportar las páginas como imágenes (las dibuja el visor y las pasa con
+        :meth:`save_page_image`). Devuelve ``{folder, stem}`` o ``None`` si se cancela."""
+        with self._lock:
+            stem = Path(self._doc(doc_id).path).stem
+        folder = self._host.pick_output_folder()
+        if not folder:
+            return None
+        with self._lock:
+            self._export_folders.add(folder)
+        return {"folder": folder, "stem": stem}
+
+    @exposed
+    def save_page_image(self, folder: str, name: str, upload: str) -> None:
+        """Escribe en ``folder`` (una de :meth:`pick_images_folder`) la imagen de página ``name``
+        (``.png`` o ``.jpg``) que subió el visor a ``upload``."""
+        with self._lock:
+            known = folder in self._export_folders
+        if not known or Path(name).name != name or Path(name).suffix.lower() not in (".png", ".jpg"):
+            raise UserError("No se puede escribir ahí la imagen.", "export_failed")
+        data = self.received(upload)
+        try:
+            self._host.write_file(str(Path(folder) / name), data)  # en el navegador, la carpeta la tiene la ventana
+        except OSError as ex:
+            raise UserError(f"No se pudo guardar {name}: {ex}", "export_failed") from ex
+
     def _write(self, path: str, data: bytes) -> None:
         try:
             self._host.write_file(path, data)
@@ -457,7 +532,10 @@ class ViewerService:
     def file_size(self, doc_id: int) -> int | None:
         """Tamaño del archivo, en bytes (diálogo de propiedades; lo demás lo da el visor)."""
         with self._lock:
-            path = self._doc(doc_id).path
+            entry = self._doc(doc_id)
+            if entry.data is not None:
+                return len(entry.data)
+            path = entry.path
         return self._host.file_size(path)
 
     # ── Auxiliares ───────────────────────────────────────────────────────
@@ -482,6 +560,7 @@ class ViewerService:
             "modified": entry.modified,
             "annotated": entry.annotated,
             "redacted": entry.redacted,
+            "untitled": entry.untitled,
         }
 
     def _file_info(self, doc_id: int) -> dict[str, Any]:

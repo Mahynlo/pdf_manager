@@ -6,6 +6,7 @@ export default {
   yes: 'Sí',
   no: 'No',
   close: 'Cerrar',
+  uploadError: (status: number) => `No se pudo pasar el archivo a Python (${status})`,
   /** Contraseña de un PDF (PasswordDialog.svelte, askPassword). */
   password: {
     title: 'PDF protegido',

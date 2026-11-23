@@ -16,7 +16,7 @@ export default {
     brandMenu: 'Menú de la aplicación',
     tabs: 'Pestañas abiertas',
     closeTab: { label: 'Cerrar pestaña', shortcut: 'Ctrl+F4' },
-    openPdf: { label: 'Abrir documento PDF', shortcut: 'Ctrl+O' },
+    openPdf: { label: 'Abrir PDF o imágenes', shortcut: 'Ctrl+O' },
     tabsList: 'Lista de pestañas abiertas',
     scrollTabsStart: 'Ver las pestañas anteriores',
     scrollTabsEnd: 'Ver las pestañas siguientes',
@@ -24,7 +24,8 @@ export default {
   },
   /** Menú de la marca (shell.brandMenu); los nombres de las herramientas están en `tools`. */
   brand: {
-    openPdf: 'Abrir PDF (Ctrl+O)',
+    openPdf: 'Abrir PDF o imágenes (Ctrl+O)',
+    imagesToPdf: 'Imágenes a PDF…',
     theme: 'Alternar tema claro / oscuro',
   },
   /** Menú contextual de una pestaña. */
@@ -101,5 +102,6 @@ export default {
   /** Tarjetas de Inicio que hacen una acción en vez de abrir una herramienta. */
   actions: {
     openPdf: { title: 'OCR de PDF', text: 'Abre un PDF y ejecuta\nreconocimiento de texto' },
+    imagesToPdf: { title: 'Imágenes a PDF', text: 'Convierte fotos y escaneos\nen un documento PDF' },
   },
 };

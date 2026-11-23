@@ -149,6 +149,74 @@ export class PageEditor {
     }
   }
 
+  /**
+   * Pone las páginas del PDF `data` (las que crea el visor con unas imágenes) detrás de `after`.
+   * Devuelve la página a la que ir y el `uid` de cada página nueva.
+   */
+  async insertPdf(after: number, data: ArrayBuffer): Promise<{ page: number; uids: number[] }> {
+    const engine = await structure();
+    const { stash, count } = await engine.stashPdf(data);
+    const uids = Array.from({ length: count }, () => this.takeUid());
+    const keys = uids.map((uid) => formatKey({ uid, rotation: 0, revision: 0 }));
+    const at = after + 1;
+    const dispose = () => void engine.dropStash(stash);
+    try {
+      const page = await this.record({
+        redo: () => this.change((e, doc) => e.restorePages(doc, stash, at), insertingAll(at, keys)),
+        undo: () => this.change((e, doc) => removeAll(e, doc, at, count), (current) => current.filter((_, i) => i < at || i >= at + count)),
+        page: at,
+        undoPage: after,
+        dispose,
+      });
+      return { page, uids };
+    } catch (err) {
+      dispose();
+      throw err;
+    }
+  }
+
+  /**
+   * Cambia la página `index` por la (única) del PDF `data`: rehacer la página de una imagen con
+   * otros ajustes. La anterior se guarda para deshacerlo. Devuelve el `uid` de la nueva.
+   */
+  async replaceWithPdf(index: number, data: ArrayBuffer): Promise<number> {
+    const engine = await structure();
+    const { stash, count } = await engine.stashPdf(data);
+    const old = await engine.stashPage(this.canvas.shownDocument(), index).catch(async (err) => {
+      await engine.dropStash(stash);
+      throw err;
+    });
+    const dispose = () => {
+      void engine.dropStash(stash);
+      void engine.dropStash(old);
+    };
+    if (count !== 1) {
+      dispose();
+      throw new Error('El PDF de la imagen no tiene una sola página');
+    }
+    const uid = this.takeUid();
+    const oldKey = this.canvas.keys[index];
+    const newKey = formatKey({ uid, rotation: 0, revision: 0 });
+    const swap = (from: string, to: string) => async () => {
+      await this.change(async (e, doc) => {
+        await e.removePage(doc, index);
+        return e.restorePages(doc, to === newKey ? stash : old, index);
+      }, (keys) => keys.map((key, i) => (i === index && key === from ? to : key)));
+    };
+    try {
+      await this.record({ redo: swap(oldKey, newKey), undo: swap(newKey, oldKey), page: index, undoPage: index, dispose });
+      return uid;
+    } catch (err) {
+      dispose();
+      throw err;
+    }
+  }
+
+  /** El `uid` de la página `index`. */
+  uidAt(index: number): number {
+    return parseKey(this.canvas.keys[index]).uid;
+  }
+
   /** Lleva la página `from` a la posición final `to`. */
   move(from: number, to: number): Promise<number> {
     return this.record({
@@ -228,6 +296,14 @@ export class PageEditor {
 // ── Claves tras cada operación ──────────────────────────────────────────────
 const inserting = (at: number, key: string) => (keys: string[]) => [...keys.slice(0, at), key, ...keys.slice(at)];
 const removing = (at: number) => (keys: string[]) => keys.filter((_, i) => i !== at);
+const insertingAll = (at: number, added: string[]) => (keys: string[]) => [...keys.slice(0, at), ...added, ...keys.slice(at)];
+
+/** Quita `count` páginas desde `at`; devuelve las que quedan. */
+async function removeAll(engine: PageStructure, doc: PdfDocumentObject, at: number, count: number): Promise<PdfPageObject[]> {
+  let pages = await engine.pageList(doc);
+  for (let i = 0; i < count; i++) pages = await engine.removePage(doc, at);
+  return pages;
+}
 const revising = (indices: number[]) => (keys: string[]) => keys.map((key, i) => {
   if (!indices.includes(i)) return key;
   const parsed = parseKey(key);

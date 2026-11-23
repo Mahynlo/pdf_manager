@@ -312,6 +312,38 @@ export class AppNative extends PdfiumNative {
     return id;
   }
 
+  /**
+   * Guarda aparte las páginas del PDF `data` (las que crea el visor con unas imágenes) para
+   * ponerlas en el documento con `restorePages`. Devuelve su id y cuántas son.
+   */
+  stashPdf(data: ArrayBuffer): { stash: string; count: number } {
+    const { pdfiumModule: m, memoryManager } = this.internals;
+    const bytes = new Uint8Array(data);
+    const buffer = memoryManager.malloc(bytes.length); // PDFium lo lee mientras está abierto
+    try {
+      m.pdfium.HEAPU8.set(bytes, buffer);
+      const source = m.FPDF_LoadMemDocument(buffer, bytes.length, '');
+      if (!source) throw new Error('No se pudo leer el PDF de las imágenes');
+      try {
+        const count = m.FPDF_GetPageCount(source);
+        const ptr = m.FPDF_CreateNewDocument();
+        if (!ptr) throw new Error('No se pudieron guardar las páginas');
+        const indices = Array.from({ length: count }, (_, i) => i);
+        if (!this.withIndices(indices, (list) => m.FPDF_ImportPagesByIndex(ptr, source, list, count, 0))) {
+          m.FPDF_CloseDocument(ptr);
+          throw new Error('No se pudieron guardar las páginas');
+        }
+        const stash = `stash-${++this.stashCount}`;
+        this.stashes.set(stash, { ptr, count });
+        return { stash, count };
+      } finally {
+        m.FPDF_CloseDocument(source);
+      }
+    } finally {
+      memoryManager.free(buffer);
+    }
+  }
+
   /** Devuelve las páginas guardadas en `stash` a la posición `at` (la copia se conserva). */
   restorePages(doc: PdfDocumentObject, stash: string, at: number): PdfPageObject[] {
     const ctx = this.context(doc);
@@ -338,6 +370,6 @@ export class AppNative extends PdfiumNative {
 
 /** Los métodos que añade AppNative (los llama la ventana por su nombre: index.ts). */
 export type StructureMethod = 'pageList' | 'rotatePages' | 'movePage' | 'removePage' | 'insertBlankPage' | 'duplicatePage'
-  | 'stashPage' | 'restorePages' | 'dropStash';
+  | 'stashPage' | 'stashPdf' | 'restorePages' | 'dropStash';
 export type CopyMethod = 'saveCopy' | 'extractCopy' | 'documentFacts';
 export type ReadingMethod = 'pageFacts' | 'pageImage' | 'writeOcrText' | 'pageTexts';

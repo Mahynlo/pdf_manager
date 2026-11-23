@@ -21,6 +21,7 @@ from webview.dom import DOMEventHandler
 
 from app.backend.host import is_external_url
 from app.backend.services.app_service import QUIT_REQUESTED
+from app.backend.services.documents import IMAGE_SUFFIXES, is_image
 from app.byte_server import ByteServer
 
 log = logging.getLogger(__name__)
@@ -28,6 +29,8 @@ log = logging.getLogger(__name__)
 ENGINE_TASK = "engine:task"
 ENGINE_TIMEOUT = 300  # segundos
 PDF_TYPES = ("Archivos PDF (*.pdf)",)
+_IMAGES = ";".join(f"*{suffix}" for suffix in IMAGE_SUFFIXES)
+DOCUMENT_TYPES = (f"PDF e imágenes (*.pdf;{_IMAGES})", *PDF_TYPES, f"Imágenes ({_IMAGES})")
 TEXT_TYPES = ("Archivos de Texto (*.txt)",)
 _DWMWA_USE_IMMERSIVE_DARK_MODE = 20
 
@@ -50,7 +53,7 @@ class WebviewHost:
     ) -> None:
         """``close_blocker`` devuelve ``None`` si la ventana puede cerrarse, o los datos del
         evento ``QUIT_REQUESTED`` con los que el frontend pregunta antes de salir.
-        ``on_drop_files`` recibe las rutas de los PDF arrastrados a la ventana."""
+        ``on_drop_files`` recibe las rutas de los PDF e imágenes arrastrados a la ventana."""
         self._window = window
         self._close_blocker = close_blocker
         self._on_drop_files = on_drop_files
@@ -88,9 +91,9 @@ class WebviewHost:
     def _on_drop(self, event: dict[str, Any]) -> None:
         files = (event.get("dataTransfer") or {}).get("files") or []
         paths = [f.get("pywebviewFullPath") for f in files]
-        pdfs = [p for p in paths if p and p.lower().endswith(".pdf") and Path(p).is_file()]
-        if pdfs and self._on_drop_files is not None:
-            self._on_drop_files(pdfs)
+        found = [p for p in paths if p and (p.lower().endswith(".pdf") or is_image(p)) and Path(p).is_file()]
+        if found and self._on_drop_files is not None:
+            self._on_drop_files(found)
 
     def _on_closing(self) -> bool:
         if self._quitting or self._close_blocker is None:
@@ -115,7 +118,8 @@ class WebviewHost:
         return list(result or [])
 
     def pick_documents(self) -> list[str]:
-        return self.pick_pdfs()
+        result = self.window.create_file_dialog(webview.FileDialog.OPEN, allow_multiple=True, file_types=DOCUMENT_TYPES)
+        return list(result or [])
 
     def pick_pdf(self) -> str | None:
         result = self.window.create_file_dialog(webview.FileDialog.OPEN, file_types=PDF_TYPES)

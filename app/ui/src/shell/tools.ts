@@ -35,7 +35,7 @@ export interface Tool {
 /** Tarjeta de Inicio que ejecuta una acción en vez de abrir una herramienta. */
 export interface HomeAction {
   after: string; // clave de la herramienta tras la que va
-  action: 'open-pdf';
+  action: 'open-pdf' | 'images-to-pdf';
   emoji: string;
   color: string;
   card: Card;
@@ -81,6 +81,9 @@ export const loadViewer: Loader = () => import('../tools/viewer/Viewer.svelte');
 export const HOME_ACTIONS: HomeAction[] = [
   {
     after: 'merge', action: 'open-pdf', emoji: '📄', color: '#E65100', card: t.shell.actions.openPdf,
+  },
+  {
+    after: 'merge', action: 'images-to-pdf', emoji: '🖼️', color: '#00897B', card: t.shell.actions.imagesToPdf,
   },
 ];
 

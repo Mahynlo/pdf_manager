@@ -21,6 +21,7 @@ const { init } = await import(url(path.join(modules, 'pdfium', 'dist', 'index.js
 const { AppNative } = await import(url(path.join(ui, 'src', 'lib', 'pdf-engine', 'native.ts')));
 const { PdfAnnotationSubtype } = await import(url(path.join(modules, 'models', 'dist', 'index.js')));
 const { runTask } = await import(url(path.join(ui, 'src', 'lib', 'engine-tasks.ts')));
+const { imagesPdf } = await import(url(path.join(ui, 'src', 'lib', 'images', 'images.ts')));
 
 const [task, rawArgs, input, output] = process.argv.slice(2);
 const args = JSON.parse(rawArgs);
@@ -80,7 +81,16 @@ if (task === 'mark') {
       else if (op === 'remove') engine.removePage(doc, ...rest);
       else if (op === 'blank') engine.insertBlankPage(doc, ...rest);
       else if (op === 'duplicate') engine.duplicatePage(doc, ...rest);
-      else if (op === 'remove-restore') {
+      else if (op === 'insert-pdf' || op === 'replace-pdf') {
+        // Las páginas del PDF de unas imágenes (args: posición y archivo), como pages.ts insertPdf
+        // (detrás de la página) y replaceWithPdf (en su lugar).
+        const [at, file] = rest;
+        const bytes = fs.readFileSync(file);
+        const { stash } = engine.stashPdf(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+        if (op === 'replace-pdf') engine.removePage(doc, at);
+        engine.restorePages(doc, stash, op === 'replace-pdf' ? at : at + 1);
+        engine.dropStash(stash);
+      } else if (op === 'remove-restore') {
         const stash = engine.stashPage(doc, rest[0]);
         engine.removePage(doc, rest[0]);
         engine.restorePages(doc, stash, rest[0]);
@@ -88,6 +98,15 @@ if (task === 'mark') {
       } else throw new Error(`Operación desconocida: ${op}`);
     }
   });
+} else if (task === 'images') {
+  // El PDF de unas imágenes JPG (lib/images/images.ts): args.images, [{ file, width, height,
+  // rotation, options }] con el tamaño tal como se ve. El archivo de entrada no se usa.
+  const pages = args.images.map(({ file, width, height, rotation, options }) => ({
+    image: { name: path.basename(file), blob: new Blob([fs.readFileSync(file)], { type: 'image/jpeg' }), url: '', width, height },
+    rotation,
+    options,
+  }));
+  result = new Uint8Array(await imagesPdf(pages));
 } else if (task === 'copy' || task === 'extract') {
   // Las copias que saca el visor (como document/copy.ts): args.withoutText, args.decrypt y,
   // para extraer, args.indices.
