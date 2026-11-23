@@ -58,20 +58,26 @@ Inicio va siempre la primera. Las vistas no cambian de sitio en la página al re
 
 ## La barra de anotaciones
 
+Empieza cerrada y se abre con **Anotar** en la barra superior (también al elegir una de sus
+herramientas con un atajo; al cerrarla se vuelve a la selección de texto, o a la mano en pantallas
+táctiles). La mano, la selección de texto y el puntero están en la barra superior, entre «Página
+única» y deshacer; los sellos y la firma, en el panel lateral. Va centrada (`justify-content: safe
+center`: si no cabe, se desplaza desde el principio sin cortarse).
+
 Se compacta por niveles para caber (`use:fit`, `lib/fit.ts`, patrón «priority+»): mide el contenido de
 verdad, así vale con ratón o con dedo y con el panel lateral abierto o cerrado.
 
 | Nivel | Qué cambia |
 |---|---|
 | 0 | Todo a la vista |
-| 1 | Los colores, en un botón con su menú; «Sellos» y «Firma», solo con su icono |
+| 1 | Los colores, en un botón con su menú |
 | 2 | Marcar texto, formas y trazos: un botón por grupo (la última herramienta usada; la flecha abre las demás) |
-| 3 | También navegar e insertar (que suma los sellos y la firma) |
+| 3 | También insertar |
 
 ## El visor en un móvil
 
 - La página se abre **ajustada al ancho**, y se reajusta al girar el móvil.
-- Las herramientas de anotación empiezan ocultas: se abren con el lápiz de la barra.
+- En una pantalla estrecha, «Anotar» queda solo con su icono (un lápiz).
 - En una pantalla táctil la herramienta inicial es la **mano**. Arrastrar desplaza con cualquier
   herramienta, salvo las de texto y las de dibujo: arrastrar selecciona o dibuja, porque es lo que se
   ha pedido al elegirlas.

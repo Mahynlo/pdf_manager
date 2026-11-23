@@ -12,21 +12,23 @@ Esta es la primera barra de botones, justo debajo de las pestañas. Contiene con
 * **Paginación (`<`, `>`, `[ 1 ] / 14`):** Avanza o retrocede entre las páginas del documento, o escribe un número para saltar directamente a una página específica.
 * **Zoom (`-`, `+`, `100%`):** Acerca o aleja el documento para una mejor lectura. También puedes usar el menú desplegable para ajustar el PDF al ancho o alto de tu pantalla.
 * **Modos de visualización:** Alterna entre vista de una sola página, desplazamiento continuo o ajuste de página.
+* **Mano, Selección de texto y Puntero:** La mano desplaza la página, la selección de texto sirve para copiar o resaltar, y el puntero selecciona, mueve y transforma las anotaciones.
 * **Deshacer / Rehacer:** Revierte o repite tus últimas anotaciones.
+* **Anotar (lápiz):** Muestra u oculta la barra de anotaciones.
 * **Búsqueda rápida (Lupa):** Encuentra rápidamente palabras.
 * **Modo Oscuro (Luna):** Cambia la interfaz y el documento a tonos oscuros para reducir la fatiga visual.
 * **Botón de OCR:** Realiza OCR sobre la hoja actual del documento.
 * **Botón de detección de OCR:** Observa las zonas de detección del OCR en la página.
 
 ## 3. Barra de Herramientas de Anotación
-La segunda barra contiene todas las utilidades para marcar y editar el contenido del PDF:
-* **Selección (Flecha):** Herramienta principal para interactuar con los elementos.
+Se abre con el botón **Anotar** de la barra principal y aparece centrada debajo de ella. Al cerrarla se vuelve a la selección de texto. Contiene las utilidades para marcar y editar el contenido del PDF:
 * **Marcador de texto:** Resalta, subraya (`U`) o tacha (`T` con línea) el texto seleccionado.
 * **Formas:** Inserta cuadrados, círculos/elipses, líneas y flechas para señalar partes importantes del documento.
 * **Dibujo libre (Lápiz):** Realiza trazos a mano alzada.
 * **Texto (`T`):** Añade cuadros de texto en cualquier lugar de la página.
 * **Paleta de Colores:** Personaliza el color de tus resaltados, formas y textos.
 * **Notas (Sticky note):** Agrega notas emergentes con comentarios sin ocupar espacio en el documento.
+* **Sellos y firma:** Están en el panel lateral derecho.
 
 ![alt text](/ayuda_svg/Partes_del_visor.svg)
 

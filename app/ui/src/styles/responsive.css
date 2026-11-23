@@ -84,6 +84,8 @@ button, a, [role="tab"] { touch-action: manipulation; }
   .help-docs__list { width: auto; max-height: 240px; }
 
   .tb-wide { display: none !important; }
+  .tb-annotate__label { display: none; }
+  .tb-annotate { padding: 0 7px; }
 
   /* Sobre la página: así no la encoge. */
   .viewer__body { position: relative; }
@@ -130,6 +132,8 @@ button, a, [role="tab"] { touch-action: manipulation; }
 
   /* Visor: la página a todo el ancho y los controles abajo, donde llega el pulgar. */
   .tb-zoom-group, .tb-dock-toggle { display: none !important; }
+  .tb-nav { display: none; }
+  .tb-nav-split { display: flex; flex: none; }
   .sel-bar, .prop-bar { flex-wrap: wrap; max-width: calc(100vw - 16px); }
   .tb-sep { margin: 0 2px; }
   .tb-page { width: 46px; }

@@ -23,7 +23,8 @@ export default {
     undo: { label: 'Deshacer', shortcut: 'Ctrl+Z' },
     redo: { label: 'Rehacer', shortcut: 'Ctrl+Y' },
     thumbnails: 'Mostrar/Ocultar miniaturas',
-    tools: 'Mostrar/Ocultar herramientas de anotación',
+    annotate: 'Anotar',
+    tools: 'Anotar: mostrar/ocultar la barra de anotaciones (resaltar, subrayar, formas, texto…)',
     night: 'Modo noche (Invertir colores del lienzo)',
     dock: 'Expandir/Colapsar panel lateral',
   },
@@ -67,10 +68,6 @@ export default {
       note: 'Nota adhesiva (comentario)',
     },
     color: (name: string) => `Color ${name}`,
-    stamps: 'Sellos',
-    stampsTip: 'Sellos: estándar, de texto y propios',
-    signatures: 'Firma',
-    signaturesTip: 'Firmar: dibuja, escribe o sube tu firma y colócala en la página',
   },
   /** Menú ⋮ y avisos de las operaciones del documento (document/operations.ts). */
   document: {

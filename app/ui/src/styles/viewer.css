@@ -17,6 +17,10 @@
 .tb-btn { height: 32px; border: 1px solid transparent; border-radius: 6px; }
 .tb-btn.is-checked { background: var(--bg-selected); color: var(--accent); border-color: var(--accent-light); }
 .tb-btn:disabled { opacity: 1; color: var(--text-muted); }
+/* Mano, selección de texto y puntero; en el móvil, en un botón (.tb-nav-split, responsive.css). */
+.tb-nav { display: flex; align-items: center; gap: 2px; flex: none; }
+/* «Anotar»: abre la barra de anotaciones (ToolsBar.svelte); en pantallas estrechas, solo el icono. */
+.tb-annotate { flex: none; gap: 6px; padding: 0 9px; font-weight: 600; font-size: 12.5px; }
 .tb-sep { flex: none; width: 1px; height: 22px; margin: 0 6px; background: var(--border); }
 .tb-page { width: 58px; height: 30px; padding: 0 6px; text-align: center; }
 .tb-total { padding: 0 6px 0 4px; font-size: 13px; }
@@ -229,12 +233,18 @@
 .properties dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
 
 /* ── Barra de herramientas del lienzo (AnnotSubBar en Qt) ─────────────────── */
-/* Se compacta por niveles para caber (lib/fit.ts, `data-level`; ver ToolsBar.svelte) y, si ni así,
-   se desplaza. */
-.viewer-toolbar--tools { height: 42px; padding: 2px 8px; overflow-x: auto; scrollbar-width: none; }
+/* Centrada; se compacta por niveles para caber (lib/fit.ts, `data-level`; ver ToolsBar.svelte) y,
+   si ni así, se desplaza desde el principio («safe»: no se corta por la izquierda). */
+.viewer-toolbar--tools {
+  height: 42px;
+  padding: 2px 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  justify-content: safe center;
+}
 .viewer-toolbar--tools::-webkit-scrollbar { display: none; }
 .viewer-toolbar--tools > * { flex: none; }
-.tb-group, .tb-group__all, .tb-swatches, .tb-insert-extra { display: flex; align-items: center; }
+.tb-group, .tb-group__all, .tb-swatches { display: flex; align-items: center; }
 .tb-group__all { gap: 2px; }
 
 /* Un grupo en un botón: la herramienta y, en la flecha, las demás del grupo. */
@@ -257,16 +267,14 @@
 .tb-split__more:hover { background: var(--bg-hover); color: var(--text-primary); }
 .tb-palette { display: none; }
 
-/* Nivel 1: los colores en un botón; sellos y firma, solo el icono. */
-.viewer-toolbar--tools[data-level]:not([data-level="0"]) :is(.tb-swatches, .tb-label) { display: none; }
+/* Nivel 1: los colores en un botón. */
+.viewer-toolbar--tools[data-level]:not([data-level="0"]) .tb-swatches { display: none; }
 .viewer-toolbar--tools[data-level]:not([data-level="0"]) .tb-palette { display: inline-flex; }
-.viewer-toolbar--tools[data-level]:not([data-level="0"]) .tb-text-btn { padding: 0 7px; margin-left: 0; }
-/* Niveles 2 y 3: cada grupo en un botón (navegar e insertar, solo en el 3). */
+/* Niveles 2 y 3: cada grupo en un botón (insertar, solo en el 3). */
 .viewer-toolbar--tools:is([data-level="2"], [data-level="3"]) [data-collapse="2"] > .tb-group__all,
 .viewer-toolbar--tools[data-level="3"] [data-collapse="3"] > .tb-group__all { display: none; }
 .viewer-toolbar--tools:is([data-level="2"], [data-level="3"]) [data-collapse="2"] > .tb-split,
 .viewer-toolbar--tools[data-level="3"] [data-collapse="3"] > .tb-split { display: flex; }
-.viewer-toolbar--tools[data-level="3"] .tb-insert-extra { display: none; }
 .viewer-toolbar--tools[data-level="3"] { padding-inline: 4px; }
 .viewer-toolbar--tools[data-level="3"] .tb-sep { margin: 0 1px; }
 .tb-swatch {
@@ -281,7 +289,6 @@
   cursor: pointer;
 }
 .tb-swatch:hover { transform: scale(1.12); }
-.tb-text-btn { gap: 6px; padding: 0 8px; margin-left: 6px; font-weight: 600; font-size: 12.5px; }
 
 /* ── Barra de propiedades de la anotación seleccionada ───────────────────── */
 /* Texto libre en edición (EmbedPDF): se ve todo lo escrito, cada línea entera, aunque aún no
