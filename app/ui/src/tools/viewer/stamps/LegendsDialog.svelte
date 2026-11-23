@@ -6,6 +6,7 @@
   import { call } from '$lib/api.ts';
   import Dialog from '$lib/components/Dialog.svelte';
   import Icon from '$lib/Icon.svelte';
+  import { standardFontText } from '$lib/standard-font.ts';
   import { toast } from '$lib/ui.ts';
   import { t } from '$texts';
   import { DEFAULT_COLOR, DEFAULT_SIZE, type Legend } from './library.svelte.ts';
@@ -23,6 +24,8 @@
   let result: TextStamp | null = null;
 
   const fontSize = $derived(Number(size) || DEFAULT_SIZE);
+  // Lo que la letra de la leyenda en el PDF no tiene (emojis…): no se guarda ni se inserta.
+  const unsupported = $derived(standardFontText(text).removed);
 
   async function run(request: Promise<Legend[]>) {
     try {
@@ -46,12 +49,12 @@
   }
 
   function create() {
-    if (text.trim()) run(call<Legend[]>('legends.create', text, color, fontSize));
+    if (text.trim() && !unsupported.length) run(call<Legend[]>('legends.create', text, color, fontSize));
   }
 
   function insert() {
     const value = text.trim();
-    if (!value) return;
+    if (!value || unsupported.length) return;
     if (selected?.text === value) call('legends.used', selected.id).catch(() => {});
     result = { text: value, color: color.toUpperCase(), font_size: fontSize };
     dialog.close();
@@ -80,8 +83,10 @@
     <div class="legends__editor">
       <h3 class="section-title">{T.editor}</h3>
       <label class="legends__row"><span>{T.text}</span>
-        <input bind:value={text} class="input" type="text" placeholder={T.textPlaceholder} />
+        <input bind:value={text} class="input" class:is-invalid={unsupported.length > 0} type="text"
+               placeholder={T.textPlaceholder} aria-invalid={unsupported.length > 0} />
       </label>
+      {#if unsupported.length}<p class="field-error" role="alert">{T.unsupported(unsupported.join(' '))}</p>{/if}
       <label class="legends__row"><span>{T.size}</span>
         <input bind:value={size} class="input legends__size" type="number" min="8" max="72" />
       </label>
@@ -90,8 +95,8 @@
       </label>
       <div class="legends__preview" style:color style:border-color={color} style:font-size="{fontSize}px">{text.trim() || T.preview}</div>
       <div class="dialog__actions">
-        <button class="btn" type="button" onclick={create}><Icon name="plus" />{T.create}</button>
-        <button class="btn btn--primary" type="button" onclick={insert}><Icon name="tag" />{T.insert}</button>
+        <button class="btn" type="button" disabled={unsupported.length > 0} onclick={create}><Icon name="plus" />{T.create}</button>
+        <button class="btn btn--primary" type="button" disabled={unsupported.length > 0} onclick={insert}><Icon name="tag" />{T.insert}</button>
       </div>
     </div>
   </div>

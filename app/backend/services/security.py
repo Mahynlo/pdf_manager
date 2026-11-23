@@ -13,7 +13,7 @@ from typing import Any
 from app.backend.host import Host
 from app.backend.rpc import UserError, exposed
 from app.backend.services.documents import DocumentService
-from pdf_core.security import PDFSecurityError, PDFSecurityInfo, PDFSecurityManager
+from pdf_core.security import PDFSecurityError, PDFSecurityInfo, PDFSecurityManager, password_problem
 
 # Permisos que se pueden conceder al proteger (clave del motor, texto de la casilla).
 PERMISSIONS: tuple[tuple[str, str], ...] = (
@@ -138,6 +138,10 @@ class SecurityService:
         """Cifra con AES-256 y los permisos marcados; devuelve la ruta o ``None`` si se cancela."""
         if not user_password:
             raise UserError("Ingresa una contraseña para el documento", "empty_password")
+        for label, password in (("de apertura", user_password), ("de propietario", owner_password)):
+            problem = password and password_problem(password)
+            if problem:
+                raise UserError(f"Contraseña {label}: {problem}", "invalid_password")
         dest = self._host.save_pdf(_suggested(path, "protegido"))
         if not dest:
             return None

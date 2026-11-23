@@ -1,9 +1,12 @@
 """Seguridad de los PDF: detectar el cifrado, desbloquear y leer permisos.
 
 Cifrar lo hace el motor de EmbedPDF en la ventana (``SecurityService.protect``): este PDFium no
-sabe escribir el cifrado. Aquí se calcula la máscara de permisos que se le pasa.
+sabe escribir el cifrado. Aquí se calcula la máscara de permisos que se le pasa y se comprueba que
+las contraseñas nuevas sirven (:func:`password_problem`).
 """
 
+import stringprep
+import unicodedata
 from dataclasses import dataclass
 
 from pdf_core.pdf import UNRESTRICTED, Document, PasswordError, PdfError
@@ -233,3 +236,47 @@ class PDFSecurityManager:
                 "allow_print_hq": True,
             }
         }
+
+
+# ── Contraseñas nuevas ────────────────────────────────────────────────────────
+MAX_PASSWORD_BYTES = 127  # AES-256 (revisión 6) usa los primeros 127 bytes en UTF-8: el resto no cuenta
+
+
+def password_problem(password: str) -> str | None:
+    """Por qué ``password`` no sirve para cifrar un PDF, o ``None`` si sirve.
+
+    El cifrado AES-256 de PDF (ISO 32000-2, revisión 6) prepara la contraseña con SASLprep
+    (RFC 4013), con las tablas de Unicode 3.2 de ``stringprep``. Un carácter que SASLprep no
+    admite (emojis y otros símbolos posteriores, controles, invisibles…) puede hacer que otro
+    lector, como Acrobat, no abra el PDF, y los invisibles ni siquiera se ven al escribirla. Solo
+    se comprueban las contraseñas que se crean: para abrir un PDF vale la que tenga.
+    """
+    if not password:
+        return "La contraseña está vacía."
+    invisible = [c for c in password if stringprep.in_table_b1(c)]
+    mapped = "".join(" " if stringprep.in_table_c12(c) else c for c in password if not stringprep.in_table_b1(c))
+    text = unicodedata.normalize("NFKC", mapped)
+    if invisible or any(_prohibited(c) for c in text):
+        return "La contraseña tiene caracteres de control o invisibles. Escríbela de nuevo sin pegarla."
+    if any(stringprep.in_table_a1(c) for c in text):
+        return "La contraseña no puede llevar emojis ni símbolos especiales: otros lectores de PDF no podrían abrirlo."
+    if any(stringprep.in_table_d1(c) for c in text) and (
+        any(stringprep.in_table_d2(c) for c in text)
+        or not (stringprep.in_table_d1(text[0]) and stringprep.in_table_d1(text[-1]))
+    ):
+        return "La contraseña mezcla escritura de derecha a izquierda (árabe, hebreo) con otra: usa solo una."
+    if text != password:
+        # El motor cifra la contraseña tal cual; un lector que la normalice leería otra.
+        return ("La contraseña tiene caracteres que otros lectores leen distinto (espacios especiales o letras "
+                "de ancho completo). Escríbela de nuevo con el teclado.")
+    if len(text.encode("utf-8")) > MAX_PASSWORD_BYTES:
+        return f"La contraseña es demasiado larga: como mucho {MAX_PASSWORD_BYTES} bytes (unos 100 caracteres)."
+    return None
+
+
+def _prohibited(char: str) -> bool:
+    """Prohibidos por SASLprep (RFC 4013, 2.3), salvo el espacio no ASCII, que se cambia por uno normal."""
+    return any(check(char) for check in (
+        stringprep.in_table_c21_c22, stringprep.in_table_c3, stringprep.in_table_c4, stringprep.in_table_c5,
+        stringprep.in_table_c6, stringprep.in_table_c7, stringprep.in_table_c8, stringprep.in_table_c9,
+    ))

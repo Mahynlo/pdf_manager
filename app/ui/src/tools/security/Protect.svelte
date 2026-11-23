@@ -6,6 +6,7 @@
   import Fieldset from '$lib/components/Fieldset.svelte';
   import PasswordField from '$lib/components/PasswordField.svelte';
   import { fileName } from '$lib/dom.ts';
+  import { passwordProblem } from '$lib/passwords.ts';
   import Icon from '$lib/Icon.svelte';
   import type { Tone } from '$lib/ui.ts';
   import { t } from '$texts';
@@ -24,6 +25,9 @@
   let msg = $state<Message>({ text: '', tone: 'success' });
 
   const show = (text: string, tone: Tone = 'success') => (msg = { text, tone });
+  // Aviso al escribir; Python lo comprueba de verdad al cifrar (pdf_core.security.password_problem).
+  const userProblem = $derived(passwordProblem(userPwd.trim()));
+  const ownerProblem = $derived(passwordProblem(ownerPwd.trim()));
 
   // Los niveles rápidos solo rellenan las casillas: se cifra con lo que esté marcado.
   function applyPreset(key: string) {
@@ -47,7 +51,10 @@
   async function protect() {
     if (!file) return show(t.security.pickFirst, 'danger');
     try {
-      const dest = await call<string | null>('security.protect', file.path, userPwd.trim(), ownerPwd.trim(), { ...checked });
+      if (userProblem || ownerProblem) return show(userProblem || ownerProblem, 'danger');
+      // NFC: la «é» del teclado, no «e» + tilde (que la norma de PDF leería distinto)
+      const [user, owner] = [userPwd, ownerPwd].map((value) => value.trim().normalize('NFC'));
+      const dest = await call<string | null>('security.protect', file.path, user, owner, { ...checked });
       if (!dest) return;
       show(T.saved(fileName(dest)));
       userPwd = '';
@@ -81,10 +88,12 @@
     <p>• <b>{T.infoOwner}</b> {T.infoOwnerText}</p>
   </div>
   <Fieldset legend={T.userLegend}>
-    <PasswordField bind:value={userPwd} placeholder={T.userPlaceholder} />
+    <PasswordField bind:value={userPwd} placeholder={T.userPlaceholder} invalid={!!userProblem} />
+    {#if userProblem}<p class="field-error" role="alert">{userProblem}</p>{/if}
   </Fieldset>
   <Fieldset legend={T.ownerLegend}>
-    <PasswordField bind:value={ownerPwd} placeholder={T.ownerPlaceholder} />
+    <PasswordField bind:value={ownerPwd} placeholder={T.ownerPlaceholder} invalid={!!ownerProblem} />
+    {#if ownerProblem}<p class="field-error" role="alert">{ownerProblem}</p>{/if}
   </Fieldset>
   <button class="btn btn--primary btn--lg btn--block" type="button" onclick={protect}><Icon name="lock" />{T.encrypt}</button>
   <Banner message={msg.text} tone={msg.tone} />

@@ -27,7 +27,8 @@ import {
   applyInsertUpright, type AnnotationEvent, type AnnotationPlugin, type AnnotationScope,
 } from '@embedpdf/plugin-annotation';
 import type { Command, HistoryPlugin, HistoryScope } from '@embedpdf/plugin-history';
-import { askText } from '$lib/ui.ts';
+import { standardFontText } from '$lib/standard-font.ts';
+import { askText, toast } from '$lib/ui.ts';
 import { t } from '$texts';
 import { ANNOTATION_TOOL, TOOLS, type PageCanvas } from '../canvas/canvas.ts';
 import { KINDS, MANUAL_LABEL, type SelectionPart } from '../redact/redaction.ts';
@@ -236,6 +237,7 @@ export class Annotations {
     }
     this.host.onChanged();
     if (event.type === 'update' && 'contents' in event.patch && event.annotation.type === T.FREETEXT) {
+      if (this._standardText(event.pageIndex, event.annotation.id)) return; // vuelve a llegar con el texto limpio
       this._fitText(event.pageIndex, event.annotation.id);
     }
     if (event.type === 'create' && !this.seen.has(event.annotation.id)) {
@@ -269,6 +271,21 @@ export class Annotations {
    * todas las líneas. Nunca encoge: se respeta la caja que el usuario agrandó. Las cajas
    * giradas (texto derecho en páginas giradas) se dejan como están.
    */
+  /**
+   * Quita del texto libre lo que sus fuentes (las estándar de PDF) no pueden dibujar: con un emoji,
+   * la anotación entera quedaría en blanco ($lib/standard-font.ts). Avisa de lo quitado. True si cambió.
+   */
+  _standardText(pageIndex: number, id: string): boolean {
+    const scope = this.scope();
+    const object = scope?.getAnnotationById(id)?.object as Annot | undefined;
+    if (!scope || !object?.contents) return false;
+    const { text, removed } = standardFontText(object.contents);
+    if (!removed.length) return false;
+    scope.updateAnnotation(pageIndex, id, { contents: text });
+    toast(TX.unsupportedChars(removed.join(' ')), 'warning', 8000);
+    return true;
+  }
+
   _fitText(pageIndex: number, id: string): void {
     const scope = this.scope();
     const object = scope?.getAnnotationById(id)?.object as Annot | undefined;
@@ -461,7 +478,7 @@ export class Annotations {
     const { rotation } = this.canvas.pageInfo(at.index);
     const annotation = applyInsertUpright({
       type: T.FREETEXT, pageIndex: at.index, rect: this.canvas.toPage(at.index, [x0, y0, x0 + w, y0 + h]),
-      contents: stamp.text, fontSize: stamp.font_size, fontColor: stamp.color, fontFamily: PdfStandardFont.Helvetica_Bold,
+      contents: standardFontText(stamp.text).text, fontSize: stamp.font_size, fontColor: stamp.color, fontFamily: PdfStandardFont.Helvetica_Bold,
       opacity: 1, textAlign: PdfTextAlignment.Center, verticalAlign: PdfVerticalAlignment.Middle,
       color: '#FFFFFF', backgroundColor: '#FFFFFF', strokeColor: stamp.color, strokeWidth: TEXT_STAMP.border,
     } as unknown as PdfAnnotationObject, rotation, true);

@@ -37,6 +37,9 @@ log = logging.getLogger(__name__)
 SESSION = "ai"  # clave en ``_OpenDocument.extras``
 CLIENT = "openai"  # el cliente de todos los proveedores (no está en la versión de navegador)
 LEVELS = ("low", "medium", "high")
+MAX_KEY = 512  # las claves de API son mucho más cortas
+_KEY_CHARS = re.compile(r"[!-~]+")  # ASCII visible: así son todas las claves de API
+
 BASIC_NOTE = "Modo básico (sin IA): configura un proveedor (clave de API o IA local) para respuestas del agente."
 MAX_SNIPPETS = 4
 SNIPPET = 200
@@ -86,6 +89,8 @@ class AiService:
         known = _provider(provider)
         if known.local and base_url is not None and base_url.strip():
             base_url = _checked_url(base_url)
+        if api_key is not None and api_key.strip():
+            _check_key(api_key)
         if known.local and context is not None and not (
                 isinstance(context, int) and MIN_CONTEXT <= context <= MAX_CONTEXT):
             raise UserError(f"El contexto tiene que estar entre {MIN_CONTEXT} y {MAX_CONTEXT} tokens.", "bad_context")
@@ -111,6 +116,8 @@ class AiService:
             url = _checked_url(base_url)
         else:
             url = agent_config.get_base_url(provider)
+        if api_key and api_key.strip():
+            _check_key(api_key)
         key = (api_key or "").strip() or agent_config.get_api_key(provider)
         if known.needs_key and not key:
             raise UserError("Escribe la clave de API para ver los modelos.", "no_key")
@@ -345,3 +352,12 @@ def _suggestions_text(suggestions: list[dict]) -> str:
 def _without_key(text: str, key: str) -> str:
     """``text`` sin la clave de API (si aparece), para mostrarlo o registrarlo."""
     return text.replace(key, "•••") if key else text
+
+
+def _check_key(api_key: str) -> None:
+    """Una clave de API solo tiene caracteres ASCII visibles. Un emoji, un espacio o un carácter
+    invisible en medio (al copiarla y pegarla) se rechaza antes de guardarla o enviarla."""
+    key = api_key.strip()
+    if len(key) > MAX_KEY or not _KEY_CHARS.fullmatch(key):
+        raise UserError("La clave de API solo puede tener letras, números y símbolos del teclado, sin espacios, "
+                        "emojis ni caracteres invisibles. Cópiala de nuevo desde la página del proveedor.", "bad_key")

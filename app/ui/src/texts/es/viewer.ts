@@ -392,6 +392,7 @@ export default {
   /** Anotaciones (annotations/). */
   annotations: {
     noteTitle: 'Añadir Nota de Texto',
+    unsupportedChars: (chars: string) => `Se quitaron caracteres que el texto del PDF no puede mostrar: ${chars}. Se admiten letras con acentos, números y signos habituales.`,
     noteLabel: 'Texto de la nota:',
     insertTitle: 'Insertar texto',
     insertLabel: 'Texto a insertar:',
@@ -468,6 +469,7 @@ export default {
       editor: 'Crear / Editar Sello:',
       text: 'Texto:',
       textPlaceholder: 'Ej: PAGADO, ANULADO...',
+      unsupported: (chars: string) => `No se puede usar en una leyenda: ${chars} (la letra del PDF no lo tiene).`,
       size: 'Tamaño (pt):',
       color: 'Color:',
       colorLabel: 'Color',

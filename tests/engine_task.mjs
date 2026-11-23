@@ -19,7 +19,8 @@ const url = (file) => pathToFileURL(file).href;
 
 const { init } = await import(url(path.join(modules, 'pdfium', 'dist', 'index.js')));
 const { AppNative } = await import(url(path.join(ui, 'src', 'lib', 'pdf-engine', 'native.ts')));
-const { PdfAnnotationSubtype } = await import(url(path.join(modules, 'models', 'dist', 'index.js')));
+const { PdfAnnotationSubtype, PdfStandardFont, PdfTextAlignment, PdfVerticalAlignment } = await import(url(path.join(modules, 'models', 'dist', 'index.js')));
+const { standardFontText } = await import(url(path.join(ui, 'src', 'lib', 'standard-font.ts')));
 const { runTask } = await import(url(path.join(ui, 'src', 'lib', 'engine-tasks.ts')));
 const { imagesPdf } = await import(url(path.join(ui, 'src', 'lib', 'images', 'images.ts')));
 
@@ -68,6 +69,20 @@ if (task === 'mark') {
   // Aplica las marcas de censura, como el visor en su documento (redact/apply.ts).
   result = await edit(async (doc) => {
     for (const page of doc.pages) await engine.applyAllRedactions(doc, page).toPromise();
+  });
+} else if (task === 'freetext') {
+  // Textos libres en la página 1 como los crea el visor (annotations.ts), uno debajo de otro:
+  // args.texts; con args.clean, antes se quita lo que la fuente no tiene (lib/standard-font.ts).
+  result = await edit(async (doc) => {
+    for (const [i, raw] of args.texts.entries()) {
+      const box = { origin: { x: 40, y: 40 + i * 60 }, size: { width: 400, height: 40 } };
+      await engine.createPageAnnotation(doc, doc.pages[0], {
+        type: PdfAnnotationSubtype.FREETEXT, id: `texto-${i}`, pageIndex: 0, rect: box,
+        contents: args.clean ? standardFontText(raw).text : raw, fontSize: 20, fontColor: '#000000',
+        fontFamily: PdfStandardFont.Helvetica, opacity: 1, textAlign: PdfTextAlignment.Left,
+        verticalAlign: PdfVerticalAlignment.Top, color: '#FFFFFF', backgroundColor: '#FFFFFF',
+      }).toPromise();
+    }
   });
 } else if (task === 'meta') {
   result = await edit((doc) => engine.setMetadata(doc, args.metadata).toPromise());

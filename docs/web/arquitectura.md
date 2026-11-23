@@ -200,6 +200,15 @@ Con diagramas de secuencia: [como-funciona.md](como-funciona.md), secciones 3, 4
   - **La selección:** se devuelve donde hay contenido para leer o copiar (`base.css`: Ayuda, mensajes del
     asistente y de los diálogos, avisos, registros, propiedades); los campos se seleccionan siempre.
   - **Al actualizar pywebview:** revisar `load_url` y que el menú siga saliendo (`tests/test_native_menu.py` prueba el filtro).
+- **Texto libre, leyendas y sellos de texto**: se escriben con las fuentes estándar de PDF, que solo
+  tienen WinAnsi (letras latinas con acentos, €, comillas tipográficas…). Probado con el motor: un
+  emoji, ✓, griego o chino dejan toda la anotación en blanco. `lib/standard-font.ts`
+  (`standardFontText`) quita esos caracteres:
+  - en el texto libre, al editarlo (`Annotations._standardText`), con un aviso;
+  - en las leyendas, el diálogo no deja guardarlas ni insertarlas y dice por qué.
+
+  Los GIF del panel de emojis de Windows se ven mientras se escribe y no se guardan
+  (EmbedPDF toma el `innerText`). Inofensivo.
 - **Tareas largas con progreso**: `progressDialog()` de `lib/ui.ts` (barra y «Cancelar»).
 - **Cerrar con cambios sin guardar**: el componente de la pestaña lo pregunta en `canClose()`. Al cerrar la ventana,
   `WebviewHost` cancela el cierre si hay documentos modificados y emite `app:quit-requested`; el

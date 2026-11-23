@@ -8,6 +8,7 @@
 //   const pdf = await imageStampPdf(file);
 
 import { deflate, num, PdfWriter } from '$lib/pdf-writer.ts';
+import { standardFontText, winAnsiCode } from '$lib/standard-font.ts';
 
 /** Sello de texto: lo mismo que una leyenda (servicio `legends`). */
 export interface TextStamp {
@@ -24,25 +25,17 @@ const MEASURE_FONT = 'bold {size}px Arial'; // mismas medidas que Helvetica
 // Imagen: lado mayor del sello en puntos y de la imagen en píxeles (las SVG se dibujan a este tamaño).
 const IMAGE = { maxPoints: 200, maxPixels: 1200 };
 
-// WinAnsiEncoding: Latin-1 salvo estos caracteres (0x80-0x9F); el resto no se puede escribir.
-const WIN_ANSI: Record<string, number> = {
-  '€': 0x80, '‚': 0x82, 'ƒ': 0x83, '„': 0x84, '…': 0x85, '†': 0x86, '‡': 0x87, 'ˆ': 0x88, '‰': 0x89,
-  'Š': 0x8a, '‹': 0x8b, 'Œ': 0x8c, 'Ž': 0x8e, '‘': 0x91, '’': 0x92, '“': 0x93, '”': 0x94, '•': 0x95,
-  '–': 0x96, '—': 0x97, '˜': 0x98, '™': 0x99, 'š': 0x9a, '›': 0x9b, 'œ': 0x9c, 'ž': 0x9e, 'Ÿ': 0x9f,
-};
-
 /** Color `#RRGGBB` → «r g b» (0..1) para el contenido del PDF. */
 function rgb(hex: string): string {
   const value = parseInt(hex.slice(1), 16);
   return [value >> 16, (value >> 8) & 0xff, value & 0xff].map((c) => (c / 255).toFixed(3)).join(' ');
 }
 
-/** Texto como cadena literal del PDF, en WinAnsi (lo que no cabe en WinAnsi pasa a «?»). */
+/** Texto como cadena literal del PDF, en WinAnsi (lo que no cabe se quita antes: `standardFontText`). */
 function pdfString(text: string): string {
   let out = '(';
   for (const char of text) {
-    const code = char.codePointAt(0)!;
-    const byte = WIN_ANSI[char] ?? (code >= 0x20 && code <= 0xff && !(code >= 0x7f && code < 0xa0) ? code : 0x3f);
+    const byte = winAnsiCode(char) ?? 0x3f;
     if (byte === 0x28 || byte === 0x29 || byte === 0x5c) out += '\\' + String.fromCharCode(byte);
     else if (byte < 0x80) out += String.fromCharCode(byte);
     else out += '\\' + byte.toString(8).padStart(3, '0');
@@ -67,7 +60,7 @@ async function onePagePdf(pdf: PdfWriter, width: number, height: number, content
  * previa al colocarlo y el texto libre que se crea en la página, así miden lo mismo.
  */
 export function textStampSize({ text, font_size: size }: TextStamp): { width: number; height: number; lines: string[]; widths: number[] } {
-  const lines = text.split('\n').map((line) => line.trimEnd());
+  const lines = standardFontText(text).text.split('\n').map((line) => line.trimEnd());
   const context = new OffscreenCanvas(1, 1).getContext('2d')!;
   const widths = lines.map((line) => measure(context, line, size));
   const width = Math.max(TEXT.minWidth, Math.max(...widths) + 2 * TEXT.padX);

@@ -60,6 +60,8 @@
 }
 .input::placeholder { color: var(--text-muted); }
 .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+.input.is-invalid { border-color: var(--danger); }
+.field-error { margin: 4px 0 0; color: var(--danger); font-size: 12.5px; }
 .input--sm { height: 26px; font-size: 12.5px; }
 
 .field-row { display: flex; gap: 6px; align-items: center; }
