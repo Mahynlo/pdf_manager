@@ -9,6 +9,7 @@ Bienvenido a **Extraer PDFs**, tu aplicación integral para la gestión de docum
 * **Buscar texto:** Encuentra rápidamente lo que necesitas dentro de un PDF (**Ctrl + F**).
 * **Extraer información:** Obtén palabras clave o realiza reconocimiento de texto (OCR) en múltiples PDFs.
 * **Combinar PDFs:** Une varios documentos en un solo archivo.
+* **Imágenes a PDF:** Convierte fotos y escaneos en un PDF, y guarda las páginas como imágenes.
 * **Proteger con contraseña:** Asegura tu información sensible.
 * **Censurar/Redactar:** Oculta información confidencial de forma permanente.
 

@@ -27,6 +27,7 @@ import {
   applyInsertUpright, type AnnotationEvent, type AnnotationPlugin, type AnnotationScope,
 } from '@embedpdf/plugin-annotation';
 import type { Command, HistoryPlugin, HistoryScope } from '@embedpdf/plugin-history';
+import { standardFontText } from '$lib/standard-font.ts';
 import { askText } from '$lib/ui.ts';
 import { t } from '$texts';
 import { ANNOTATION_TOOL, TOOLS, type PageCanvas } from '../canvas/canvas.ts';
@@ -461,7 +462,7 @@ export class Annotations {
     const { rotation } = this.canvas.pageInfo(at.index);
     const annotation = applyInsertUpright({
       type: T.FREETEXT, pageIndex: at.index, rect: this.canvas.toPage(at.index, [x0, y0, x0 + w, y0 + h]),
-      contents: stamp.text, fontSize: stamp.font_size, fontColor: stamp.color, fontFamily: PdfStandardFont.Helvetica_Bold,
+      contents: standardFontText(stamp.text).text, fontSize: stamp.font_size, fontColor: stamp.color, fontFamily: PdfStandardFont.Helvetica_Bold,
       opacity: 1, textAlign: PdfTextAlignment.Center, verticalAlign: PdfVerticalAlignment.Middle,
       color: '#FFFFFF', backgroundColor: '#FFFFFF', strokeColor: stamp.color, strokeWidth: TEXT_STAMP.border,
     } as unknown as PdfAnnotationObject, rotation, true);

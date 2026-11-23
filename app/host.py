@@ -21,6 +21,7 @@ from webview.dom import DOMEventHandler
 
 from app.backend.host import is_external_url
 from app.backend.services.app_service import QUIT_REQUESTED
+from app.backend.services.documents import IMAGE_SUFFIXES, is_image
 from app.byte_server import ByteServer
 
 log = logging.getLogger(__name__)
@@ -28,8 +29,76 @@ log = logging.getLogger(__name__)
 ENGINE_TASK = "engine:task"
 ENGINE_TIMEOUT = 300  # segundos
 PDF_TYPES = ("Archivos PDF (*.pdf)",)
+_IMAGES = ";".join(f"*{suffix}" for suffix in IMAGE_SUFFIXES)
+DOCUMENT_TYPES = (f"PDF e imágenes (*.pdf;{_IMAGES})", *PDF_TYPES, f"Imágenes ({_IMAGES})")
 TEXT_TYPES = ("Archivos de Texto (*.txt)",)
 _DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+
+
+# Lo que el menú de WebView2 trae de navegador y en la app sobra (nombres de CoreWebView2ContextMenuItem).
+_BROWSER_MENU_ITEMS = frozenset({
+    "back", "forward", "reload", "saveAs", "print", "createQrCode", "share", "webCapture", "inspectElement",
+    "openLinkInNewWindow", "copyLinkLocation", "saveLinkAs", "copyLinkToHighlight", "openImageInNewWindow",
+    "saveImageAs", "copyImageLocation", "saveMediaAs", "loop", "showAllControls", "readAloud", "translate",
+    "openInDefaultBrowser", "moreTools", "other",
+})
+
+
+def _filter_menu(args: Any) -> None:
+    """``ContextMenuRequested``: menú solo en campos de texto o sobre texto seleccionado, y sin lo de navegador."""
+    try:
+        target = args.ContextMenuTarget
+        if not (target.IsEditable or target.HasSelection):
+            args.Handled = True  # sin menú
+            return
+        items = args.MenuItems
+        for i in range(items.Count - 1, -1, -1):
+            if items[i].Name in _BROWSER_MENU_ITEMS:
+                items.RemoveAt(i)
+        # Sin separadores al principio, al final ni dos seguidos (los de lo que se quitó).
+        for i in range(items.Count - 1, -1, -1):
+            separator = str(items[i].Kind) == "Separator"
+            if separator and (i == 0 or i == items.Count - 1 or str(items[i - 1].Kind) == "Separator"):
+                items.RemoveAt(i)
+        log.debug("Menú del botón derecho: %s", [items[i].Name for i in range(items.Count)])
+    except Exception:
+        log.debug("No se pudo filtrar el menú del botón derecho", exc_info=True)
+
+
+def _enable_native_menus() -> None:
+    """El menú del botón derecho de WebView2 donde sirve: en los campos de texto (las sugerencias
+    del corrector, cortar, copiar, pegar) y sobre texto seleccionado (copiar). En el resto de la
+    ventana sigue sin salir, y los menús propios (pestañas, recientes, visor) no cambian: cancelan
+    el del navegador.
+
+    pywebview lo quita fuera de ``--debug`` al crear WebView2, y el ajuste solo vale desde la
+    siguiente navegación (la app es una sola página: no vuelve a navegar). Por eso se activa justo
+    antes de cargar la página, envolviendo ``EdgeChrome.load_url`` (pywebview 6.2: lo llama después
+    de poner sus ajustes). Revisarlo al actualizar pywebview. Solo WebView2."""
+    if os.name != "nt":
+        return
+    try:
+        from webview.platforms import edgechromium
+    except Exception:
+        log.debug("Sin WebView2: no se activa el menú del botón derecho", exc_info=True)
+        return
+    original = edgechromium.EdgeChrome.load_url
+    if getattr(original, "native_menus", False):
+        return
+
+    def load_url(browser: Any, url: str) -> None:
+        try:
+            core = browser.webview.CoreWebView2
+            core.Settings.AreDefaultContextMenusEnabled = True
+            if not getattr(browser, "menu_filtered", False):
+                core.ContextMenuRequested += lambda _sender, args: _filter_menu(args)
+                browser.menu_filtered = True
+        except Exception:
+            log.debug("No se pudo activar el menú del botón derecho de WebView2", exc_info=True)
+        original(browser, url)
+
+    load_url.native_menus = True  # type: ignore[attr-defined]
+    edgechromium.EdgeChrome.load_url = load_url
 
 
 class WebviewHost:
@@ -50,7 +119,7 @@ class WebviewHost:
     ) -> None:
         """``close_blocker`` devuelve ``None`` si la ventana puede cerrarse, o los datos del
         evento ``QUIT_REQUESTED`` con los que el frontend pregunta antes de salir.
-        ``on_drop_files`` recibe las rutas de los PDF arrastrados a la ventana."""
+        ``on_drop_files`` recibe las rutas de los PDF e imágenes arrastrados a la ventana."""
         self._window = window
         self._close_blocker = close_blocker
         self._on_drop_files = on_drop_files
@@ -58,6 +127,7 @@ class WebviewHost:
         window.events.minimized += lambda: self._memory_target(low=True)
         window.events.restored += lambda: self._memory_target(low=False)
         window.events.maximized += lambda: self._memory_target(low=False)
+        _enable_native_menus()
         if on_drop_files is not None:
             window.events.loaded += self._listen_drops
 
@@ -88,9 +158,9 @@ class WebviewHost:
     def _on_drop(self, event: dict[str, Any]) -> None:
         files = (event.get("dataTransfer") or {}).get("files") or []
         paths = [f.get("pywebviewFullPath") for f in files]
-        pdfs = [p for p in paths if p and p.lower().endswith(".pdf") and Path(p).is_file()]
-        if pdfs and self._on_drop_files is not None:
-            self._on_drop_files(pdfs)
+        found = [p for p in paths if p and (p.lower().endswith(".pdf") or is_image(p)) and Path(p).is_file()]
+        if found and self._on_drop_files is not None:
+            self._on_drop_files(found)
 
     def _on_closing(self) -> bool:
         if self._quitting or self._close_blocker is None:
@@ -115,7 +185,8 @@ class WebviewHost:
         return list(result or [])
 
     def pick_documents(self) -> list[str]:
-        return self.pick_pdfs()
+        result = self.window.create_file_dialog(webview.FileDialog.OPEN, allow_multiple=True, file_types=DOCUMENT_TYPES)
+        return list(result or [])
 
     def pick_pdf(self) -> str | None:
         result = self.window.create_file_dialog(webview.FileDialog.OPEN, file_types=PDF_TYPES)

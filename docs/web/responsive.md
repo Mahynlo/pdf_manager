@@ -56,7 +56,32 @@ y, si no caben, la tira se desplaza. La activa siempre queda a la vista, tambié
 Inicio va siempre la primera. Las vistas no cambian de sitio en la página al reordenar las pestañas
 (`shell.views`, por orden de apertura): así no pierden su desplazamiento.
 
+## La barra superior del visor
+
+Lleva menú ⋮ · páginas · zoom · mano, selección de texto y puntero · modos de vista · deshacer y
+rehacer · **Anotar** · **Páginas ▾** (insertar, ajustar, duplicar, eliminar y mover páginas) ·
+**Exportar ▾** (la página actual a un PDF, el texto, las páginas como imágenes, las imágenes) ·
+miniaturas · modo noche. Se compacta igual que la de anotaciones (`use:fit`, ver `Toolbar.svelte`):
+
+| Nivel | Qué cambia |
+|---|---|
+| 0 | Todo a la vista |
+| 1 | «Anotar», «Páginas» y «Exportar», solo con su icono |
+| 2 | Mano, selección y puntero en un botón (la última usada; la flecha abre las tres); los menús, sin flecha |
+| 3 | Primera/última página, modos de vista y modo noche, al menú ⋮ → **Vista** (`toolbar.collapsed()`) |
+| 4 | También «Páginas» y «Exportar», al menú ⋮ como submenús (`toolbar.menusCollapsed()`) |
+
+Lo que sale de la barra va al menú ⋮ en **submenús** (`submenu` en `lib/menu.svelte.ts`: se abren en
+el mismo sitio, con «volver» arriba), así el menú cabe en la pantalla: en un móvil tiene 10 entradas
+en vez de 33.
+
 ## La barra de anotaciones
+
+Empieza cerrada y se abre con **Anotar** en la barra superior (también al elegir una de sus
+herramientas con un atajo; al cerrarla se vuelve a la selección de texto, o a la mano en pantallas
+táctiles). La mano, la selección de texto y el puntero están en la barra superior, entre el zoom y
+los modos de vista; los sellos y la firma, en el panel lateral. Va centrada (`justify-content: safe
+center`: si no cabe, se desplaza desde el principio sin cortarse).
 
 Se compacta por niveles para caber (`use:fit`, `lib/fit.ts`, patrón «priority+»): mide el contenido de
 verdad, así vale con ratón o con dedo y con el panel lateral abierto o cerrado.
@@ -64,14 +89,19 @@ verdad, así vale con ratón o con dedo y con el panel lateral abierto o cerrado
 | Nivel | Qué cambia |
 |---|---|
 | 0 | Todo a la vista |
-| 1 | Los colores, en un botón con su menú; «Sellos» y «Firma», solo con su icono |
+| 1 | Los colores, en un botón con su menú |
 | 2 | Marcar texto, formas y trazos: un botón por grupo (la última herramienta usada; la flecha abre las demás) |
-| 3 | También navegar e insertar (que suma los sellos y la firma) |
+| 3 | También insertar |
 
 ## El visor en un móvil
 
 - La página se abre **ajustada al ancho**, y se reajusta al girar el móvil.
-- Las herramientas de anotación empiezan ocultas: se abren con el lápiz de la barra.
+- **Anotar** va en la barra de abajo, la primera (junto al pulgar; la barra de anotaciones se abre
+  justo debajo). Las miniaturas, en ⋮ → Vista. Así la barra de arriba cabe en 360 px.
+- El menú ⋮ agrupa girar, vista, páginas y exportar en submenús («Girar y orientación» también en
+  horizontal, donde hay poca altura). «Doble página» no se ofrece: no caben dos páginas.
+- En una pantalla táctil los menús y descripciones no muestran atajos de teclado (`tip()` en
+  `texts/index.ts`), y las flechas de los botones con grupo miden 28 px de ancho.
 - En una pantalla táctil la herramienta inicial es la **mano**. Arrastrar desplaza con cualquier
   herramienta, salvo las de texto y las de dibujo: arrastrar selecciona o dibuja, porque es lo que se
   ha pedido al elegirlas.

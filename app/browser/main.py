@@ -81,9 +81,8 @@ class Backend:
         self._worker.dirty(self._warnings(self._services) is not None)
 
     def open_files(self, paths: str) -> None:
-        """PDF soltados en la ventana (los tiene la ventana: el visor los lee al abrirlos)."""
-        for path in json.loads(paths):
-            self._services["documents"].open(path)
+        """PDF e imágenes soltados en la ventana (los tiene la ventana: el visor los lee al abrirlos)."""
+        self._services["documents"].open_many(json.loads(paths))
 
     def upload(self, url: str, data: Any) -> None:
         self._host.receive(url, data.to_bytes())

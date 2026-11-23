@@ -78,6 +78,8 @@ podía ejecutar código. Solo se abren rutas de archivos que existen.
 - El archivo se escribe de forma atómica (`config.py`).
 - La clave nunca vuelve a la ventana (solo si hay una: `has_key`), y **se quita de los mensajes de
   error** antes de mostrarlos o registrarlos (algunos clientes la ponen en la URL de sus errores).
+- **Solo ASCII visible** y como mucho 512 caracteres (`ai._check_key`), antes de guardarla o enviarla:
+  un espacio, un emoji o un carácter invisible pegado con ella se rechaza en vez de guardarse.
 
 ### El asistente IA
 
@@ -100,6 +102,23 @@ podía ejecutar código. Solo se abren rutas de archivos que existen.
 
 AES-256 (`security.protect`, motor de EmbedPDF). Sin contraseña de propietario se pone una aleatoria:
 si estuviera vacía, cualquiera quitaría las restricciones.
+
+**Contraseñas nuevas** (`pdf_core.security.password_problem`, en Python antes de cifrar; la ventana
+avisa al escribir con `lib/passwords.ts`):
+
+- **Qué exige la norma:** prepara la contraseña con SASLprep (RFC 4013, tablas de Unicode 3.2).
+- **Qué se rechaza:**
+  - lo que SASLprep no admite: emojis y símbolos posteriores a Unicode 3.2, controles, invisibles
+    (espacio de ancho cero, guion suave), uso privado, y mezclar escritura de derecha a izquierda
+    con otra;
+  - lo que SASLprep cambiaría (espacio de no separación, letras de ancho completo). El motor cifra
+    la contraseña tal cual, así que un lector que la normalice (Acrobat) leería otra y no abriría el PDF;
+  - más de 127 bytes en UTF-8, que no cuentan.
+- **Qué se admite:** acentos, ñ y otros alfabetos (cirílico, chino…). La ventana pasa la contraseña a NFC
+  (la «é» del teclado).
+- **Contraseñas para abrir un PDF:** no se restringen. Ese PDF pudo crearse en otro programa con cualquiera.
+- **Campos de contraseña:** van sin corrector ni autocorrección (`PasswordField`). Al mostrarla son un campo
+  de texto, y el corrector (en algunos navegadores, en la nube) la leería.
 
 ### Procesos
 

@@ -6,6 +6,8 @@
 //
 // `call<T>()` y `on<T>()` aceptan el tipo de la respuesta o del evento; sin él es `any`.
 
+import { t } from '$texts';
+
 /** Respuesta de `api.call` en Python (app/backend/rpc.py). */
 type RpcResult = { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } };
 
@@ -63,7 +65,16 @@ export async function upload(url: string, body: ArrayBuffer): Promise<{ ok: bool
   return { ok: true, status: 200 };
 }
 
-/** PDF soltados en la ventana. En el escritorio no hace nada: los recibe la ventana pywebview. */
+/** Sube `data` (un PDF, el texto de unas páginas, una imagen) para un servicio de Python; devuelve
+ *  la URL con que se lo pasa (`viewer.upload_url`). */
+export async function send(data: ArrayBuffer): Promise<string> {
+  const url = await call<string>('viewer.upload_url');
+  const response = await upload(url, data);
+  if (!response.ok) throw new Error(t.common.uploadError(response.status));
+  return url;
+}
+
+/** PDF e imágenes soltados en la ventana. En el escritorio no hace nada: los recibe la ventana pywebview. */
 export function openDropped(transfer: DataTransfer): void {
   void browser?.openDropped(transfer);
 }

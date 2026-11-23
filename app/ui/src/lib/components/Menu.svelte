@@ -1,9 +1,12 @@
 <!-- Menú emergente abierto con openMenu()/openMenuAt() (ver menu.svelte.ts). -->
 <script lang="ts">
   import Icon from '../Icon.svelte';
-  import { closeMenu, menu, type MenuOption } from '../menu.svelte.ts';
+  import { closeMenu, menu, type MenuItem, type MenuOption } from '../menu.svelte.ts';
 
   let el = $state<HTMLDivElement>();
+  // Menús de los que se ha entrado a un submenú: «volver» saca el último.
+  let parents: MenuItem[][] = [];
+  const BACK: MenuOption = { label: '', icon: 'chevron-left', back: true };
 
   // Lo mantiene dentro de la ventana y enfoca la primera opción.
   $effect(() => {
@@ -18,7 +21,10 @@
 
   // Se escucha tras el clic que abrió el menú, para no cerrarlo en el acto.
   $effect(() => {
-    if (!menu.items) return;
+    if (!menu.items) {
+      parents = [];
+      return;
+    }
     const onOutside = (ev: PointerEvent) => el && !el.contains(ev.target as Node) && closeMenu();
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key !== 'Escape') return;
@@ -39,8 +45,15 @@
   });
 
   function select(item: MenuOption) {
-    closeMenu();
-    item.onSelect?.();
+    if (item.submenu) {
+      parents.push(menu.items!);
+      menu.items = [{ ...BACK, label: item.label }, 'separator', ...item.submenu()];
+    } else if (item.back && parents.length) {
+      menu.items = parents.pop()!;
+    } else {
+      closeMenu();
+      item.onSelect?.();
+    }
   }
 </script>
 
@@ -55,6 +68,7 @@
           {#if item.color}<span class="menu__swatch" style:--swatch={item.color}></span>
           {:else if item.icon}<Icon name={item.icon} />{:else}<span class="menu__spacer"></span>{/if}
           <span class="ellipsis">{item.label}</span>
+          {#if item.submenu}<span class="menu__more"><Icon name="chevron-right" size={14} /></span>{/if}
         </button>
       {/if}
     {/each}

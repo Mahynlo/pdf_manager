@@ -130,6 +130,8 @@ button, a, [role="tab"] { touch-action: manipulation; }
 
   /* Visor: la página a todo el ancho y los controles abajo, donde llega el pulgar. */
   .tb-zoom-group, .tb-dock-toggle { display: none !important; }
+  .tb-nav, .tb-menus, .tb-phone-hidden { display: none !important; }
+  .tb-nav-split { display: flex; flex: none; }
   .sel-bar, .prop-bar { flex-wrap: wrap; max-width: calc(100vw - 16px); }
   .tb-sep { margin: 0 2px; }
   .tb-page { width: 46px; }
@@ -200,7 +202,7 @@ button, a, [role="tab"] { touch-action: manipulation; }
   .tb-page, .tb-zoom { height: 40px; }
   .tb-zoom__menu { width: 32px; }
   .tb-swatch { width: 28px; height: 28px; margin: 0 4px; }
-  .tb-split__more { width: 20px; height: 40px; }
+  .tb-split__more { width: 28px; height: 40px; } /* que se pueda tocar con el dedo */
   .viewer-rail { width: 52px; }
   .viewer-rail__tab { width: 40px; height: 40px; }
   .menu__item { height: 44px; }

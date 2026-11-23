@@ -38,6 +38,11 @@ img { display: block; }
 .caption { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .ellipsis { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
 
+/* Texto que se lee y se copia (seleccionar, botón derecho → Copiar). En el escritorio pywebview
+   quita la selección de toda la ventana (body), como en una app: aquí se devuelve donde hay
+   contenido. Los campos de texto se seleccionan siempre. */
+.markdown, .ai-msg, .dialog__message, .dialog__error, .toast, .log, .properties dd { user-select: text; cursor: auto; }
+
 /* Barras de desplazamiento finas que siguen el tema */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }

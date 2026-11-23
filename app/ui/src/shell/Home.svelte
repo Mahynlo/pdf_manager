@@ -19,7 +19,7 @@
     <div class="home__cards">
       {#each cards as item (item.card.title)}
         <button class="card home-card" type="button"
-                onclick={() => (item.tool ? shell.open(item.tool) : shell.openPdfDialog())}>
+                onclick={() => (item.tool ? shell.open(item.tool) : item.action === 'images-to-pdf' ? shell.imagesToPdf() : shell.openPdfDialog())}>
           <span class="home-card__icon" style:--c={item.color} aria-hidden="true">{item.emoji}</span>
           <span class="home-card__title">{item.card.title}</span>
           <span class="home-card__text">{item.card.text}</span>

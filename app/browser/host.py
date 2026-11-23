@@ -72,8 +72,8 @@ class BrowserHost:
             self._files.add(path, data)
         return paths
 
-    def _pick(self, multiple: bool) -> list[str]:
-        value, _ = self._ask("pick", {"multiple": multiple})
+    def _pick(self, multiple: bool, images: bool = False) -> list[str]:
+        value, _ = self._ask("pick", {"multiple": multiple, "images": images})
         return value
 
     # ── Diálogos ─────────────────────────────────────────────────────────────
@@ -81,7 +81,7 @@ class BrowserHost:
         return self._copy(self._pick(multiple=True))
 
     def pick_documents(self) -> list[str]:
-        return self._pick(multiple=True)
+        return self._pick(multiple=True, images=True)
 
     def pick_pdf(self) -> str | None:
         return next(iter(self._copy(self._pick(multiple=False))), None)

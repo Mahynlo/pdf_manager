@@ -109,6 +109,10 @@ export class PageStructure {
     return this.call('stashPage', doc, index);
   }
 
+  stashPdf(data: ArrayBuffer): Promise<{ stash: string; count: number }> {
+    return this.call('stashPdf', data);
+  }
+
   restorePages(doc: PdfDocumentObject, stash: string, at: number): Promise<PdfPageObject[]> {
     return this.call('restorePages', doc, stash, at);
   }

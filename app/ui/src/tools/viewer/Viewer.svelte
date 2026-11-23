@@ -16,6 +16,7 @@
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { call } from '$lib/api.ts';
   import Icon from '$lib/Icon.svelte';
+  import type { ImagePage } from '$lib/images/images.ts';
   import type { MenuItem } from '$lib/menu.svelte.ts';
   import type { DocumentInfo } from '$lib/types.ts';
   import { openModal, setStatus, toast } from '$lib/ui.ts';
@@ -44,7 +45,7 @@
   import { TextSelection } from './canvas/selection.ts';
   import TocTree from './panels/TocTree.svelte';
   import Toolbar from './toolbars/Toolbar.svelte';
-  import ToolsBar from './toolbars/ToolsBar.svelte';
+  import ToolsBar, { BAR_TOOLS } from './toolbars/ToolsBar.svelte';
 
   const T = t.viewer;
   const INPUTS = 'input, textarea, select, [contenteditable]';
@@ -59,11 +60,13 @@
   ];
 
   /**
-   * `info`: el documento abierto (`viewer.open`); `close()`: cerrar la pestaña; `update(info)`:
-   * cambió el documento (cambios sin guardar, ruta tras «Guardar como»).
+   * `info`: el documento abierto (`viewer.open`, o `viewer.create` si es nuevo); `images`: las
+   * páginas del documento nuevo hechas con imágenes (para «Ajustar imagen…»); `close()`: cerrar
+   * la pestaña; `update(info)`: cambió el documento (cambios sin guardar, ruta tras «Guardar como»).
    */
-  let { info, close, update }: {
+  let { info, images = [], close, update }: {
     info: DocumentInfo;
+    images?: ImagePage[];
     close: () => void;
     update: (info: DocumentInfo) => void;
   } = $props();
@@ -73,10 +76,11 @@
   // ── Estado que pinta la interfaz ───────────────────────────────────────
   let view = $state({
     page: 0, count: doc.pages.length, zoom: 1, mode: MODES.CONTINUOUS as Mode,
-    canUndo: false, canRedo: false, night: false, sidebar: !viewport.narrow && !viewport.reading, dock: false, tools: !viewport.reading,
+    canUndo: false, canRedo: false, night: false, sidebar: !viewport.narrow && !viewport.reading, dock: false, tools: false,
   });
   // Con el dedo, arrastrar tiene que desplazar la página: seleccionar texto hay que pedirlo.
-  let tool = $state<string>(viewport.touch ? TOOLS.HAND : TOOLS.SELECT);
+  const BASE_TOOL = viewport.touch ? TOOLS.HAND : TOOLS.SELECT;
+  let tool = $state<string>(BASE_TOOL);
   let dockTab = $state<DockTab>('toc');
   let toc = $state.raw(doc.toc);
   let revision = $state(0); // cambia con cada operación sobre las páginas
@@ -151,6 +155,7 @@
       showHistory();
     },
   }, { canvas, pages: new PageEditor(canvas), copy, text, recognizer });
+  untrack(() => actions.registerImages(images, doc.keys.map((_, i) => actions.pages.uidAt(i))));
 
   // Deshacer y rehacer: primero lo de EmbedPDF (anotaciones); si no queda, las operaciones de
   // página (pages.ts). Tras una operación de página EmbedPDF empieza un historial nuevo, así que
@@ -215,6 +220,7 @@
     if (!EDIT_TOOLS.has(next)) editor.clear();
     canvas.setTool(next);
     tool = next;
+    if (BAR_TOOLS.has(next)) view.tools = true; // también con un atajo: se ve cuál está activa
   }
 
   /** Color de la paleta: lo usan las siguientes anotaciones y, como en Qt, también recolorea las seleccionadas. */
@@ -222,12 +228,6 @@
     Object.assign(annotations.style, { penColor: color, shapeColor: color, highlightColor: color });
     if (editor.items.length) editor.setColor(color);
     canvas.setTool(canvas.tool); // la herramienta activa toma el color nuevo
-  }
-
-  /** Panel de sellos (0) o de firmas (1). */
-  function openStamps(index: number) {
-    openDockTab('stamps');
-    stamps!.show(index);
   }
 
   /** Imprimir: el diálogo de WebView2 con el PDF y sus anotaciones tal como están en el visor. */
@@ -284,12 +284,13 @@
     if (target >= 0) goTo(target);
   };
 
-  /** Lo que no cabe en la barra superior en una pantalla estrecha. */
+  /** Lo que no cabe en la barra superior en una pantalla estrecha: el submenú «Vista» del menú ⋮. */
   function hiddenControls(): MenuItem[] {
-    if (!viewport.narrow) return [];
+    if (!viewport.narrow && !toolbar?.collapsed()) return [];
     const B = T.toolbar;
+    const short = (label: string) => label.replace(/\s*\(.*\)$/, ''); // sin la explicación de la descripción
     const mode = (label: string, icon: string, value: Mode): MenuItem => ({
-      label, icon, checked: view.mode === value, onSelect: () => canvas.setMode(value),
+      label: short(label), icon, checked: view.mode === value, onSelect: () => canvas.setMode(value),
     });
     return [
       ...(viewport.compact ? [
@@ -300,38 +301,49 @@
       { label: B.fitPage, icon: 'file', onSelect: () => canvas.fitPage() },
       'separator',
       mode(B.continuous, 'rows', MODES.CONTINUOUS),
-      mode(B.double, 'book-open', MODES.DOUBLE),
+      // En un móvil no caben dos páginas a la vez.
+      ...(viewport.compact ? [] : [mode(B.double, 'book-open', MODES.DOUBLE)]),
       mode(B.single, 'file', MODES.SINGLE),
-      { label: B.night, icon: 'moon', checked: view.night, onSelect: toolbarActions.toggleNight },
+      { label: short(B.night), icon: 'moon', checked: view.night, onSelect: toolbarActions.toggleNight },
+      ...(viewport.compact ? [{ label: T.more.thumbnails, icon: 'panel-left', checked: view.sidebar, onSelect: toolbarActions.toggleSidebar }] : []),
       'separator',
       { label: tip(B.first), icon: 'chevrons-left', disabled: view.page <= 0, onSelect: () => goTo(0) },
       { label: tip(B.last), icon: 'chevrons-right', disabled: view.page >= view.count - 1, onSelect: () => goTo(total() - 1) },
-      'separator',
     ];
   }
 
   // Al cambiar de tamaño (girar el móvil, estrechar la ventana) se recolocan las barras.
   $effect(() => {
-    view.tools = !viewport.reading;
-  });
-  $effect(() => {
     view.sidebar = !viewport.narrow && !viewport.reading;
   });
 
   const toolbarActions = {
+    // Lo que no cabe en la barra va en submenús («Vista», «Páginas», «Exportar»; en el móvil, también
+    // en horizontal, «Girar»): así el menú cabe en la pantalla.
     moreMenu: (): MenuItem[] => {
-      const [save, saveAs, ...rest] = actions.menuItems();
+      const [save, saveAs, , ...rotations] = actions.menuItems();
+      const viewItems = hiddenControls();
+      const menus = viewport.compact || Boolean(toolbar?.menusCollapsed()); // responsive.css y Toolbar.svelte: .tb-menus
+      const sub = (label: string, icon: string, items: MenuItem[]): MenuItem => ({ label, icon, submenu: () => items });
+      const B = T.toolbar;
+      const grouped: MenuItem[] = [
+        ...(viewItems.length ? [sub(T.more.view, 'eye', viewItems)] : []),
+        ...(menus ? [sub(B.pages, 'files', actions.pageItems()), sub(B.export, 'download', actions.exportItems())] : []),
+      ];
       return [
         save, saveAs,
         { label: tip(T.more.print), icon: 'printer', onSelect: print },
         { label: T.more.properties, icon: 'info', onSelect: showProperties },
-        ...rest,
         'separator',
-        ...hiddenControls(),
+        ...(viewport.reading ? [sub(T.more.rotate, 'rotate-cw', rotations)] : [...rotations, 'separator' as const]),
+        ...grouped,
+        ...(grouped.length || viewport.reading ? ['separator' as const] : []),
         { label: T.more.legends, icon: 'tag', onSelect: () => stamps!.manageLegends() },
         { label: T.more.close, icon: 'x', onSelect: close },
       ];
     },
+    pagesMenu: () => actions.pageItems(),
+    exportMenu: () => actions.exportItems(),
     first: () => goTo(0),
     prev,
     next,
@@ -351,7 +363,11 @@
       view.sidebar = !view.sidebar;
       if (view.sidebar) leavePanel();
     },
-    toggleTools: () => (view.tools = !view.tools),
+    toggleTools: () => {
+      view.tools = !view.tools;
+      if (!view.tools && BAR_TOOLS.has(tool)) setTool(BASE_TOOL); // cerrada, no se sigue dibujando
+    },
+    setTool,
     undo,
     redo,
     toggleDock: () => (view.dock = !view.dock),
@@ -457,14 +473,15 @@
     clearTimeout(thumbsTimer);
     releasePrint();
     actions.pages.dispose();
+    void actions.releaseImages();
     canvas.destroy();
     call('viewer.close_document', docId).catch(() => {});
   });
 </script>
 
 <div class="viewer">
-  <Toolbar bind:this={toolbar} {view} actions={toolbarActions} />
-  <ToolsBar {tool} {setTool} {setColor} visible={view.tools} stamps={() => openStamps(0)} signatures={() => openStamps(1)} />
+  <Toolbar bind:this={toolbar} {view} {tool} actions={toolbarActions} />
+  <ToolsBar {tool} {setTool} {setColor} visible={view.tools} />
   <div class="viewer__body">
     <Thumbnails {docId} count={view.count} current={view.page} {revision} {versions} visible={view.sidebar}
                 fetchThumbs={(pages) => canvas.thumbnails(pages)} release={(url) => URL.revokeObjectURL(url)} onSelect={thumbSelected} onMove={(src, dst) => actions.move(dst, src)} />
@@ -514,6 +531,14 @@
       </div>
     </aside>
     <div class="viewer-rail" role="tablist" aria-orientation={viewport.compact ? 'horizontal' : 'vertical'} aria-label={T.toolbar.dock}>
+      {#if viewport.compact}
+        <!-- En el móvil, «Anotar» aquí: junto al pulgar y a la barra de anotaciones, que se abre debajo. -->
+        <button class="viewer-rail__tab viewer-rail__annotate" class:is-active={view.tools} type="button"
+                aria-pressed={view.tools} title={T.toolbar.tools} aria-label={T.toolbar.tools}
+                onclick={toolbarActions.toggleTools}>
+          <Icon name="pen-line" size={18} />
+        </button>
+      {/if}
       {#each DOCK_GROUPS as group, i (i)}
         {#if i}<span class="viewer-rail__sep" aria-hidden="true"></span>{/if}
         {#each group as { key, icon } (key)}

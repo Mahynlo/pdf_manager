@@ -1,0 +1,60 @@
+/* ── Imágenes a PDF (lib/images/ImagesDialog.svelte) ─────────────────────── */
+.images-dialog .dialog__body { width: min(880px, 96vw); }
+.images-dialog__options { display: grid; grid-template-columns: 1.1fr 1.2fr 1fr 1fr; gap: 10px; }
+.images-dialog__field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.images-dialog__main { display: flex; gap: 16px; min-height: 380px; }
+.images-dialog__side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.images-dialog__side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.images-dialog__page { width: 340px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; }
+.images-dialog__preview {
+  display: flex; align-items: center; justify-content: center;
+  height: 330px; border-radius: var(--radius); background: var(--bg-subtle);
+}
+.images-dialog__preview canvas, .images-grid__sheet canvas { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25); }
+.images-dialog__nav { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.images-dialog__info { text-align: center; }
+.images-dialog__info strong { color: var(--text-primary); font-weight: 600; }
+.images-dialog__page-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.images-dialog__buttons { display: flex; gap: 2px; margin-left: auto; }
+
+.segmented { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.segmented__item {
+  padding: 4px 9px; border: 0; background: transparent; color: inherit; font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.segmented__item + .segmented__item { border-left: 1px solid var(--border); }
+.segmented__item:hover { background: var(--bg-hover); }
+.segmented__item.is-checked { background: var(--bg-selected); color: var(--accent); font-weight: 600; }
+
+.images-grid {
+  flex: 1; min-height: 200px; max-height: 400px; overflow-y: auto; margin: 0; padding: 8px; list-style: none;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; align-content: start;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-subtle);
+}
+.images-grid__item { border-radius: var(--radius); }
+.images-grid__page {
+  width: 100%; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 4px;
+  border: 2px solid transparent; border-radius: var(--radius); background: transparent; color: inherit; font: inherit; cursor: pointer;
+}
+.images-grid__page:hover { background: var(--bg-hover); }
+.images-grid__item.is-active .images-grid__page { border-color: var(--accent); background: var(--bg-selected); }
+.images-grid__sheet { position: relative; height: 100px; display: flex; align-items: center; justify-content: center; }
+.images-grid__badge {
+  position: absolute; top: -4px; right: -6px; width: 16px; height: 16px; display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; background: var(--accent); color: var(--accent-text);
+}
+.images-grid__name { max-width: 100%; font-size: 12px; }
+.images-grid__item.is-active .images-grid__name { color: var(--accent); }
+.images-grid__empty { grid-column: 1 / -1; padding: 24px 8px; text-align: center; }
+
+/* ── Exportar páginas como imágenes (viewer/document/ExportImagesDialog.svelte) ── */
+.export-images .dialog__body { width: min(480px, 94vw); }
+.export-images__grid { display: grid; grid-template-columns: auto 1fr; gap: 10px 16px; align-items: start; }
+.export-images__grid .radio-group, .export-images__pages { display: flex; flex-direction: column; gap: 6px; }
+
+@media (max-width: 759.98px) {
+  .images-dialog__options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .images-dialog__main { flex-direction: column; }
+  .images-dialog__page { width: auto; }
+  .images-dialog__preview { height: 240px; }
+  .export-images__grid { grid-template-columns: 1fr; }
+}

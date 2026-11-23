@@ -93,17 +93,15 @@ def main(argv: list[str] | None = None) -> int:
     documents = services["documents"]
 
     def _open_dropped(paths: list[str]) -> None:
-        """PDFs arrastrados desde el Explorador: se abren como con «Abrir PDF»."""
-        for path in paths:
-            documents.open(path)
+        """PDF e imágenes arrastrados desde el Explorador: se abren como con «Abrir»."""
+        documents.open_many(paths)
 
     # Con cambios sin guardar o trabajos en curso, el frontend pregunta antes de salir (y llama a ``app.quit``).
     host.attach(window, lambda: quit_warnings(services), _open_dropped)
 
     def _open_from_other_instance(paths: list[str]) -> None:
         """«Abrir con» (u otro lanzamiento) con la app ya abierta."""
-        for path in paths:
-            documents.open(path)
+        documents.open_many(paths)
         host.bring_to_front()
 
     instance.listen(_open_from_other_instance)

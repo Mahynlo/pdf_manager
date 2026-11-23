@@ -1,35 +1,41 @@
 <!--
-  Barra de herramientas del lienzo (AnnotSubBar en Qt): mano, selección de texto,
-  puntero, anotaciones de texto, formas, trazos, texto e imagen, colores, sellos y firma.
+  Barra de anotaciones (AnnotSubBar en Qt): marcar texto, formas, trazos, texto e imagen y
+  colores, centrada. Se abre con «Anotar» en la barra superior, donde están también la mano, la
+  selección de texto y el puntero (Toolbar.svelte). Los sellos y la firma, en el panel lateral.
 
   Se compacta para caber (lib/fit.ts, `data-level` en styles/viewer.css):
     0  todo a la vista;
-    1  los colores en un botón y «Sellos» y «Firma» solo con su icono;
+    1  los colores en un botón;
     2  marcar texto, formas y trazos: un botón por grupo (la última herramienta usada y, en la
        flecha, las demás);
-    3  también navegar e insertar (que suma los sellos y la firma).
+    3  también insertar.
   Si ni así cabe, se desplaza (lib/strip.ts).
 -->
+<script lang="ts" module>
+  import { TOOLS } from '../canvas/canvas.ts';
+
+  /** Las herramientas de esta barra: al elegir una se abre; al cerrarla se deja la que hubiera. */
+  export const BAR_TOOLS = new Set<string>([
+    TOOLS.HIGHLIGHT, TOOLS.UNDERLINE, TOOLS.STRIKEOUT, TOOLS.SQUIGGLY, TOOLS.INSERT_TEXT, TOOLS.REPLACE_TEXT,
+    TOOLS.RECT, TOOLS.ELLIPSE, TOOLS.LINE, TOOLS.ARROW, TOOLS.POLYLINE, TOOLS.POLYGON,
+    TOOLS.PEN, TOOLS.MARKER, TOOLS.DRAW, TOOLS.TEXT, TOOLS.CALLOUT, TOOLS.NOTE, TOOLS.IMAGE,
+  ]);
+</script>
+
 <script lang="ts">
   import Icon from '$lib/Icon.svelte';
   import { fit } from '$lib/fit.ts';
   import { openMenu, type MenuItem } from '$lib/menu.svelte.ts';
   import { strip } from '$lib/strip.ts';
-  import { TOOLS } from '../canvas/canvas.ts';
   import { PALETTE } from '../annotations/palette.ts';
   import { t } from '$texts';
 
-  /**
-   * `tool`: herramienta activa; `setTool(t)`, `setColor(hex)`; `stamps()`, `signatures()`: abrir
-   * el panel de sellos o el de firmas; `visible`: en el móvil, la barra se abre al pedirla.
-   */
-  let { tool, setTool, setColor, stamps, signatures, visible }: {
+  /** `tool`: herramienta activa; `setTool(t)`, `setColor(hex)`; `visible`: abierta con «Anotar». */
+  let { tool, setTool, setColor, visible }: {
     visible: boolean;
     tool: string;
     setTool: (tool: string) => void;
     setColor: (color: string) => void;
-    stamps: () => void;
-    signatures: () => void;
   } = $props();
 
   const T = t.viewer.tools;
@@ -49,13 +55,6 @@
   }
 
   const GROUPS: ToolGroup[] = [
-    {
-      id: 'navigate', label: T.groups.navigate, collapse: 3, tools: [
-        { key: TOOLS.HAND, icon: 'hand', title: T.hand },
-        { key: TOOLS.SELECT, icon: 'text-cursor', title: T.select },
-        { key: TOOLS.POINTER, icon: 'pointer', title: T.pointer },
-      ],
-    },
     {
       id: 'markup', label: T.groups.markup, collapse: 2, tools: [
         { key: TOOLS.HIGHLIGHT, icon: 'highlighter', title: T.highlight },
@@ -123,16 +122,10 @@
     return { label, icon: button.icon, checked: tool === button.key, onSelect: () => setTool(button.key) };
   }
 
-  /** Las herramientas de un grupo compactado; insertar suma las variantes del texto, los sellos y la firma. */
+  /** Las herramientas de un grupo compactado; insertar suma las variantes del texto. */
   function groupMenu(ev: MouseEvent & { currentTarget: HTMLElement }, group: ToolGroup) {
     const items: MenuItem[] = group.id === 'insert'
-      ? [
-        ...TEXT_VARIANTS.map((b) => toolItem(b)),
-        toolItem(BUTTONS.get(TOOLS.IMAGE)!),
-        'separator',
-        { label: T.stampsTip, icon: 'stamp', onSelect: stamps },
-        { label: T.signaturesTip, icon: 'signature', onSelect: signatures },
-      ]
+      ? [...TEXT_VARIANTS.map((b) => toolItem(b)), toolItem(BUTTONS.get(TOOLS.IMAGE)!)]
       : group.tools.map((b) => toolItem(b));
     openMenu(ev.currentTarget.parentElement!, items);
   }
@@ -176,14 +169,4 @@
           aria-haspopup="menu" onclick={paletteMenu}>
     <Icon name="palette" size={18} />
   </button>
-  <div class="tb-insert-extra">
-    <button class="btn btn--ghost tb-btn tb-text-btn" class:is-checked={tool === TOOLS.PLACE} type="button"
-            title={T.stampsTip} aria-label={T.stampsTip} onclick={stamps}>
-      <Icon name="stamp" size={18} /><span class="tb-label">{T.stamps}</span>
-    </button>
-    <button class="btn btn--ghost tb-btn tb-text-btn" type="button" title={T.signaturesTip} aria-label={T.signaturesTip}
-            onclick={signatures}>
-      <Icon name="signature" size={18} /><span class="tb-label">{T.signatures}</span>
-    </button>
-  </div>
 </div>

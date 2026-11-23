@@ -59,7 +59,16 @@ export interface FileData {
 const TYPES: Record<string, PickerType> = {
   pdf: { description: 'Archivos PDF', accept: { 'application/pdf': ['.pdf'] } },
   txt: { description: 'Archivos de texto', accept: { 'text/plain': ['.txt'] } },
+  // Las que dibuja la ventana: el diálogo «Imágenes a PDF» (documents.py IMAGE_SUFFIXES)
+  images: {
+    description: 'Imágenes',
+    accept: {
+      'image/png': ['.png'], 'image/jpeg': ['.jpg', '.jpeg'], 'image/webp': ['.webp'], 'image/bmp': ['.bmp'],
+      'image/gif': ['.gif'], 'image/svg+xml': ['.svg'],
+    },
+  },
 };
+const IMAGE_SUFFIXES = Object.values(TYPES.images.accept).flat();
 const URL_LIFETIME_MS = 120_000;
 
 const files = new Map<string, UserFile>();
@@ -69,6 +78,7 @@ let folderCount = 0;
 const newFolder = () => `/files/${++folderCount}`;
 const folderOf = (path: string) => Number(path.split('/')[2]) || 0;
 const isPdf = (name: string) => name.toLowerCase().endsWith('.pdf');
+const isImage = (name: string) => IMAGE_SUFFIXES.some((suffix) => name.toLowerCase().endsWith(suffix));
 const cancelled = (err: unknown) => (err as Error).name === 'AbortError';
 const writable = (handle: FileSystemFileHandle): handle is FileHandle => 'requestPermission' in handle;
 
@@ -184,32 +194,33 @@ function chooseFiles(setup: (input: HTMLInputElement) => void): Promise<File[]> 
   });
 }
 
-/** Elige PDF: sus rutas. */
-export async function pickPdfs(multiple: boolean): Promise<string[]> {
+/** Elige PDF (con `images`, también imágenes): sus rutas. */
+export async function pickPdfs(multiple: boolean, images = false): Promise<string[]> {
   await restored;
   if (window.showOpenFilePicker) {
     try {
-      const chosen = await window.showOpenFilePicker({ multiple, types: [TYPES.pdf] });
+      const types = images ? [{ description: 'PDF e imágenes', accept: { ...TYPES.pdf.accept, ...TYPES.images.accept } }, TYPES.pdf, TYPES.images] : [TYPES.pdf];
+      const chosen = await window.showOpenFilePicker({ multiple, types });
       return Promise.all(chosen.map(async (handle) => adopt(await handle.getFile(), handle)));
     } catch (err) {
       if (cancelled(err)) return [];
     }
   }
   const chosen = await chooseFiles((input) => {
-    input.accept = '.pdf,application/pdf';
+    input.accept = images ? ['.pdf', ...IMAGE_SUFFIXES].join(',') : '.pdf,application/pdf';
     input.multiple = multiple;
   });
   return chosen.map((file) => adopt(file));
 }
 
-/** PDF soltados en la ventana: sus rutas. Hay que llamarla durante el evento: luego `dataTransfer` queda vacío. */
+/** PDF e imágenes soltados en la ventana: sus rutas. Hay que llamarla durante el evento: luego `dataTransfer` queda vacío. */
 export async function droppedPdfs(transfer: DataTransfer): Promise<string[]> {
   const items = [...transfer.items].filter((item) => item.kind === 'file');
   const entries = items.map((item) => ({ file: item.getAsFile(), handle: item.getAsFileSystemHandle?.() }));
   await restored;
   const paths: string[] = [];
   for (const { file, handle } of entries) {
-    if (!file || !isPdf(file.name)) continue;
+    if (!file || !(isPdf(file.name) || isImage(file.name))) continue;
     const real = await handle?.catch(() => null);
     paths.push(adopt(file, real?.kind === 'file' ? real as FileSystemFileHandle : undefined));
   }

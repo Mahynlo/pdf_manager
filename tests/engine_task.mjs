@@ -19,8 +19,10 @@ const url = (file) => pathToFileURL(file).href;
 
 const { init } = await import(url(path.join(modules, 'pdfium', 'dist', 'index.js')));
 const { AppNative } = await import(url(path.join(ui, 'src', 'lib', 'pdf-engine', 'native.ts')));
-const { PdfAnnotationSubtype } = await import(url(path.join(modules, 'models', 'dist', 'index.js')));
+const { PdfAnnotationSubtype, PdfStandardFont, PdfTextAlignment, PdfVerticalAlignment } = await import(url(path.join(modules, 'models', 'dist', 'index.js')));
+const { standardFontText } = await import(url(path.join(ui, 'src', 'lib', 'standard-font.ts')));
 const { runTask } = await import(url(path.join(ui, 'src', 'lib', 'engine-tasks.ts')));
+const { imagesPdf } = await import(url(path.join(ui, 'src', 'lib', 'images', 'images.ts')));
 
 const [task, rawArgs, input, output] = process.argv.slice(2);
 const args = JSON.parse(rawArgs);
@@ -68,6 +70,20 @@ if (task === 'mark') {
   result = await edit(async (doc) => {
     for (const page of doc.pages) await engine.applyAllRedactions(doc, page).toPromise();
   });
+} else if (task === 'freetext') {
+  // Textos libres en la página 1 como los crea el visor (annotations.ts), uno debajo de otro:
+  // args.texts; con args.clean, antes se quita lo que la fuente no tiene (lib/standard-font.ts).
+  result = await edit(async (doc) => {
+    for (const [i, raw] of args.texts.entries()) {
+      const box = { origin: { x: 40, y: 40 + i * 60 }, size: { width: 400, height: 40 } };
+      await engine.createPageAnnotation(doc, doc.pages[0], {
+        type: PdfAnnotationSubtype.FREETEXT, id: `texto-${i}`, pageIndex: 0, rect: box,
+        contents: args.clean ? standardFontText(raw).text : raw, fontSize: 20, fontColor: '#000000',
+        fontFamily: PdfStandardFont.Helvetica, opacity: 1, textAlign: PdfTextAlignment.Left,
+        verticalAlign: PdfVerticalAlignment.Top, color: '#FFFFFF', backgroundColor: '#FFFFFF',
+      }).toPromise();
+    }
+  });
 } else if (task === 'meta') {
   result = await edit((doc) => engine.setMetadata(doc, args.metadata).toPromise());
 } else if (task === 'pages') {
@@ -80,7 +96,16 @@ if (task === 'mark') {
       else if (op === 'remove') engine.removePage(doc, ...rest);
       else if (op === 'blank') engine.insertBlankPage(doc, ...rest);
       else if (op === 'duplicate') engine.duplicatePage(doc, ...rest);
-      else if (op === 'remove-restore') {
+      else if (op === 'insert-pdf' || op === 'replace-pdf') {
+        // Las páginas del PDF de unas imágenes (args: posición y archivo), como pages.ts insertPdf
+        // (detrás de la página) y replaceWithPdf (en su lugar).
+        const [at, file] = rest;
+        const bytes = fs.readFileSync(file);
+        const { stash } = engine.stashPdf(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+        if (op === 'replace-pdf') engine.removePage(doc, at);
+        engine.restorePages(doc, stash, op === 'replace-pdf' ? at : at + 1);
+        engine.dropStash(stash);
+      } else if (op === 'remove-restore') {
         const stash = engine.stashPage(doc, rest[0]);
         engine.removePage(doc, rest[0]);
         engine.restorePages(doc, stash, rest[0]);
@@ -88,6 +113,15 @@ if (task === 'mark') {
       } else throw new Error(`Operación desconocida: ${op}`);
     }
   });
+} else if (task === 'images') {
+  // El PDF de unas imágenes JPG (lib/images/images.ts): args.images, [{ file, width, height,
+  // rotation, options }] con el tamaño tal como se ve. El archivo de entrada no se usa.
+  const pages = args.images.map(({ file, width, height, rotation, options }) => ({
+    image: { name: path.basename(file), blob: new Blob([fs.readFileSync(file)], { type: 'image/jpeg' }), url: '', width, height },
+    rotation,
+    options,
+  }));
+  result = new Uint8Array(await imagesPdf(pages));
 } else if (task === 'copy' || task === 'extract') {
   // Las copias que saca el visor (como document/copy.ts): args.withoutText, args.decrypt y,
   // para extraer, args.indices.

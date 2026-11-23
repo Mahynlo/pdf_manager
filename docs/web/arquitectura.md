@@ -186,10 +186,32 @@ Con diagramas de secuencia: [como-funciona.md](como-funciona.md), secciones 3, 4
   modelo de Gemini u OpenAI no responde (503) o no existe, se prueba otro y la respuesta lo dice.
   `ai.models` pide al servidor su lista de modelos de conversación. Las respuestas llegan también como
   HTML de Markdown sin HTML crudo, imágenes ni enlaces, que el frontend inserta tal cual.
-- **Arrastrar PDFs y «Abrir con»**: el navegador no da la ruta de un archivo soltado; `WebviewHost`
-  escucha el `drop` desde Python (pywebview añade `pywebviewFullPath`) y abre los PDF con
-  `DocumentService.open`. `shell/dropzone.ts` solo evita que WebView2 navegue al archivo y muestra el aviso.
+- **Arrastrar PDFs e imágenes y «Abrir con»**: el navegador no da la ruta de un archivo soltado; `WebviewHost`
+  escucha el `drop` desde Python (pywebview añade `pywebviewFullPath`) y los abre con
+  `DocumentService.open_many` (las imágenes van al diálogo «Imágenes a PDF», ver imagenes-pdf.md). `shell/dropzone.ts` solo evita que WebView2 navegue al archivo y muestra el aviso.
   Los PDF recibidos al arrancar (o de otra instancia) se abren cuando el frontend llama a `app.ready`.
+- **Botón derecho y selección de texto** (escritorio): pywebview quita el menú del navegador fuera
+  de `--debug` y la selección de texto de toda la ventana (`body { user-select: none }`).
+  - **El menú:** `_enable_native_menus` (`app/host.py`) lo activa justo antes de cargar la página, envolviendo
+    `EdgeChrome.load_url` de pywebview (el ajuste de WebView2 solo vale desde la siguiente navegación).
+    `_filter_menu` lo deja solo en los campos de texto (las sugerencias del corrector de Windows,
+    cortar, copiar, pegar) y sobre texto seleccionado (copiar), sin «Atrás», «Recargar», «Imprimir»…
+    En el resto de la ventana no sale, y los menús propios (pestañas, recientes, visor) cancelan el del navegador.
+  - **La selección:** se devuelve donde hay contenido para leer o copiar (`base.css`: Ayuda, mensajes del
+    asistente y de los diálogos, avisos, registros, propiedades); los campos se seleccionan siempre.
+  - **Al actualizar pywebview:** revisar `load_url` y que el menú siga saliendo (`tests/test_native_menu.py` prueba el filtro).
+- **Texto libre, leyendas y sellos de texto**: se escriben con las fuentes estándar de PDF, que solo
+  tienen WinAnsi (letras latinas con acentos, €, comillas tipográficas…). Probado con el motor: un
+  emoji, ✓, griego o chino dejan toda la apariencia de la anotación en blanco en PDFium, aunque el
+  texto (`/Contents`) se guarda entero y otros lectores (Acrobat, navegadores) lo redibujan con sus
+  fuentes y lo muestran. Por eso:
+  - el texto libre los deja pasar, sin aviso (el aviso molestaba y el editor volvía a escribir el
+    texto original);
+  - las leyendas sí los bloquean (`standardFontText` en el diálogo): su miniatura se dibuja con
+    nuestro PDF (`stamp-pdf.ts`) y saldría «?»; los sellos de texto se limpian al colocarlos.
+
+  Los GIF del panel de emojis de Windows se ven mientras se escribe y no se guardan
+  (EmbedPDF toma el `innerText`). Inofensivo.
 - **Tareas largas con progreso**: `progressDialog()` de `lib/ui.ts` (barra y «Cancelar»).
 - **Cerrar con cambios sin guardar**: el componente de la pestaña lo pregunta en `canClose()`. Al cerrar la ventana,
   `WebviewHost` cancela el cierre si hay documentos modificados y emite `app:quit-requested`; el

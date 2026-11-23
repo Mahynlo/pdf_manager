@@ -11,31 +11,36 @@ Ubicadas en la parte superior, te permiten tener abiertos múltiples documentos 
 Esta es la primera barra de botones, justo debajo de las pestañas. Contiene controles esenciales para leer tu documento:
 * **Paginación (`<`, `>`, `[ 1 ] / 14`):** Avanza o retrocede entre las páginas del documento, o escribe un número para saltar directamente a una página específica.
 * **Zoom (`-`, `+`, `100%`):** Acerca o aleja el documento para una mejor lectura. También puedes usar el menú desplegable para ajustar el PDF al ancho o alto de tu pantalla.
+* **Mano, Selección de texto y Puntero:** La mano desplaza la página, la selección de texto sirve para copiar o resaltar, y el puntero selecciona, mueve y transforma las anotaciones.
 * **Modos de visualización:** Alterna entre vista de una sola página, desplazamiento continuo o ajuste de página.
 * **Deshacer / Rehacer:** Revierte o repite tus últimas anotaciones.
+* **Anotar (lápiz):** Muestra u oculta la barra de anotaciones.
+* **Páginas:** Insertar página en blanco, insertar páginas desde imágenes, ajustar imagen de la página, duplicar, eliminar y mover la página actual.
+* **Exportar:** Extraer la página actual a un nuevo PDF, exportar el texto del documento, exportar las páginas como imágenes (PNG, JPG) y extraer todas las imágenes del documento.
+* **En el móvil:** «Anotar» está en la barra de abajo, y «Páginas», «Exportar», «Vista» (zoom, modos, modo noche, miniaturas) y «Girar y orientación» están como submenús dentro del menú principal (**⋮**). Toca uno para abrirlo y la flecha de arriba para volver.
 * **Búsqueda rápida (Lupa):** Encuentra rápidamente palabras.
 * **Modo Oscuro (Luna):** Cambia la interfaz y el documento a tonos oscuros para reducir la fatiga visual.
 * **Botón de OCR:** Realiza OCR sobre la hoja actual del documento.
 * **Botón de detección de OCR:** Observa las zonas de detección del OCR en la página.
 
 ## 3. Barra de Herramientas de Anotación
-La segunda barra contiene todas las utilidades para marcar y editar el contenido del PDF:
-* **Selección (Flecha):** Herramienta principal para interactuar con los elementos.
+Se abre con el botón **Anotar** de la barra principal y aparece centrada debajo de ella. Al cerrarla se vuelve a la selección de texto. Contiene las utilidades para marcar y editar el contenido del PDF:
 * **Marcador de texto:** Resalta, subraya (`U`) o tacha (`T` con línea) el texto seleccionado.
 * **Formas:** Inserta cuadrados, círculos/elipses, líneas y flechas para señalar partes importantes del documento.
 * **Dibujo libre (Lápiz):** Realiza trazos a mano alzada.
 * **Texto (`T`):** Añade cuadros de texto en cualquier lugar de la página.
 * **Paleta de Colores:** Personaliza el color de tus resaltados, formas y textos.
 * **Notas (Sticky note):** Agrega notas emergentes con comentarios sin ocupar espacio en el documento.
+* **Sellos y firma:** Están en el panel lateral derecho.
 
 ![alt text](/ayuda_svg/Partes_del_visor.svg)
 
-## 4. Menú Principal (Archivo y Edición de Páginas)
+## 4. Menú Principal (⋮)
 Al hacer clic en el botón de menú superior izquierdo (ícono con líneas/desplegable), encontrarás opciones esenciales para gestionar tu archivo y manipular las páginas:
 * **Guardar e Imprimir:** "Guardar cambios", "Guardar PDF como..." para crear una copia, y "Imprimir documento".
 * **Rotación y Orientación:** "Rotar 90° a la derecha/izquierda", y "Voltear 180°" (para la página actual o todas). Destaca la opción inteligente **Corregir orientación del escaneo**.
-* **Edición de Páginas:** "Insertar página en blanco", "Duplicar página actual" y "Eliminar página actual".
-* **Organización:** "Mover página arriba" y "Mover página abajo" para reordenar tu documento.
+* **Propiedades** del documento y **Gestionar leyendas**.
+* Insertar, duplicar, eliminar o mover páginas y exportar están en los botones **Páginas** y **Exportar** de la barra principal (ver la guía **Imágenes a PDF**).
 * **Cerrar:** "Cerrar pestaña" actual.
 ![alt text](/ayuda_svg/Menu_Principal.svg)
 

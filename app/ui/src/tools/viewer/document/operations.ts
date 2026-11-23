@@ -8,11 +8,13 @@
 // texto de las páginas, que le pasa el visor antes (text.ts).
 import { call, type ApiError } from '$lib/api.ts';
 import { fileName } from '$lib/dom.ts';
+import type { ImagePage } from '$lib/images/images.ts';
 import type { MenuItem } from '$lib/menu.svelte.ts';
 import type { DocumentInfo, DocumentState } from '$lib/types.ts';
-import { askChoice, confirmDialog, progressDialog, setStatus, toast } from '$lib/ui.ts';
+import { askChoice, confirmDialog, openModal, progressDialog, setStatus, toast } from '$lib/ui.ts';
 import { t, tip } from '$texts';
 import type { PageCanvas } from '../canvas/canvas.ts';
+import { reading } from '../canvas/embed.ts';
 import type { PageRecognizer } from '../ocr/recognize.ts';
 import { applyMarks } from '../redact/apply.ts';
 import type { RedactionMarks } from '../redact/redaction.ts';
@@ -21,6 +23,7 @@ import type { PageEditor } from './pages.ts';
 import type { DocumentText } from './text.ts';
 
 const T = t.viewer.document;
+const I = t.images;
 
 /** Lo que necesitan las operaciones del visor (Viewer.svelte). */
 export interface DocumentView {
@@ -50,6 +53,8 @@ export class DocumentActions {
   text: DocumentText;
   recognizer: PageRecognizer;
   queue: Promise<unknown> = Promise.resolve(); // las operaciones se encadenan: cada una ve el resultado de la anterior
+  /** Las páginas hechas con una imagen en esta sesión, por `uid`: con esto se pueden rehacer («Ajustar imagen…»). */
+  imagePages = new Map<number, ImagePage>();
 
   constructor(info: DocumentInfo, view: DocumentView, { canvas, pages, copy, text, recognizer }: DocumentParts) {
     this.view = view;
@@ -83,6 +88,66 @@ export class DocumentActions {
 
   duplicate() {
     return this._pages((page) => this.pages.duplicate(page));
+  }
+
+  // ── Imágenes ───────────────────────────────────────────────────────────
+  /** Apunta las páginas `pages` (hechas con imágenes), cuyos `uid` son `uids`. */
+  registerImages(pages: ImagePage[], uids: number[]): void {
+    pages.forEach((page, i) => this.imagePages.set(uids[i], page));
+  }
+
+  /** «Insertar páginas desde imágenes»: el diálogo y las páginas nuevas detrás de la actual. */
+  insertImages() {
+    return this._pages(async (page) => {
+      const [{ loadImages }, { pickImageFiles }, { default: ImagesDialog }] = await Promise.all([
+        import('$lib/images/images.ts'), import('$lib/images/pick.ts'), import('$lib/images/ImagesDialog.svelte'),
+      ]);
+      const files = await pickImageFiles();
+      if (!files.length) return null;
+      const { images, failed } = await loadImages(files);
+      if (failed.length) toast(I.dialog.unreadable(failed), 'warning');
+      if (!images.length) return null;
+      const result = await openModal<{ pages: ImagePage[]; pdf: ArrayBuffer }>(ImagesDialog, { images, mode: 'insert', after: page });
+      if (!result) return null;
+      const inserted = await this.pages.insertPdf(page, result.pdf);
+      this.registerImages(result.pages, inserted.uids);
+      setStatus(I.inserted(result.pages.length));
+      return inserted.page;
+    });
+  }
+
+  /** La página actual se hizo con una imagen en esta sesión (se puede ajustar). */
+  get isImagePage(): boolean {
+    const page = this.view.page();
+    return page < this.pageCount && this.imagePages.has(this.pages.uidAt(page));
+  }
+
+  /** «Ajustar imagen…»: rehace la página actual con otros ajustes (tamaño, margen, giro…). */
+  adjustImage() {
+    return this._pages(async (page) => {
+      const current = this.imagePages.get(this.pages.uidAt(page));
+      if (!current) {
+        toast(I.notImagePage, 'info');
+        return null;
+      }
+      const { default: ImagesDialog } = await import('$lib/images/ImagesDialog.svelte');
+      const result = await openModal<{ pages: ImagePage[]; pdf: ArrayBuffer }>(ImagesDialog, {
+        images: [current.image], mode: 'adjust', page: current,
+      });
+      if (!result) return null;
+      const uid = await this.pages.replaceWithPdf(page, result.pdf);
+      this.registerImages(result.pages, [uid]);
+      setStatus(I.adjusted(page + 1));
+      return page;
+    });
+  }
+
+  /** Suelta las imágenes de las páginas (al cerrar el visor). */
+  async releaseImages(): Promise<void> {
+    if (!this.imagePages.size) return;
+    const { releaseImages } = await import('$lib/images/images.ts');
+    releaseImages([...new Set([...this.imagePages.values()].map((page) => page.image))]);
+    this.imagePages.clear();
   }
 
   remove() {
@@ -204,13 +269,14 @@ export class DocumentActions {
    * estructura de páginas distinta de la guardada (la lleva el editor).
    */
   _withState(info: DocumentInfo): DocumentInfo {
-    return { ...info, modified: info.annotated || info.redacted || this.pages.changedWith(info.keys) };
+    return { ...info, modified: Boolean(info.untitled) || info.annotated || info.redacted || this.pages.changedWith(info.keys) };
   }
 
   // ── Guardar ────────────────────────────────────────────────────────────
   /** Guarda sobre el original (Ctrl+S). Resuelve true si se guardó. */
   save(): Promise<boolean> {
     return this._file(async () => {
+      if (this.info.untitled) return this._write('viewer.save_as'); // aún no tiene archivo
       try {
         return await this._write('viewer.save');
       } catch (err) {
@@ -304,6 +370,22 @@ export class DocumentActions {
     });
   }
 
+  /** «Exportar páginas como imágenes» (PNG o JPG): las dibuja el motor, con sus anotaciones. */
+  exportPageImages() {
+    return this._file(async () => {
+      await this.view.commit(); // las anotaciones pendientes también salen en la imagen
+      const { default: ExportImagesDialog } = await import('./ExportImagesDialog.svelte');
+      const engine = await reading();
+      const result = await openModal<{ count: number; folder: string }>(ExportImagesDialog, {
+        docId: this.info.id,
+        total: this.pageCount,
+        current: this.view.page(),
+        render: (index: number, scale: number) => engine.pageImage(this.canvas.shownDocument(), index, scale),
+      });
+      if (result) setStatus(I.export.done(result.count, result.folder));
+    });
+  }
+
   exportImages() {
     return this._file(async () => {
       const copy = await this.copy.upload(); // Python saca las imágenes del PDF
@@ -315,9 +397,9 @@ export class DocumentActions {
   }
 
   // ── Menú ⋮ (mismo orden que _build_more_menu en Qt) ────────────────────
+  /** Menú ⋮: guardar y girar (las páginas y exportar tienen su botón: `pageItems`, `exportItems`). */
   menuItems(): MenuItem[] {
     const M = T.menu;
-    const page = this.view.page();
     return [
       { label: tip(M.save), icon: 'save', onSelect: () => this.save() },
       { label: tip(M.saveAs), icon: 'save', onSelect: () => this.saveAs() },
@@ -328,16 +410,32 @@ export class DocumentActions {
       { label: M.flipAll, icon: 'rotate-cw', onSelect: () => this.rotate(180, true) },
       { label: M.fixOrientation, icon: 'compass', onSelect: () => this.fixOrientation() },
       { label: M.fixOrientationAll, icon: 'compass', onSelect: () => this.fixOrientationAll() },
-      'separator',
+    ];
+  }
+
+  /** Botón «Páginas»: insertar, ajustar, duplicar, eliminar y mover. */
+  pageItems(): MenuItem[] {
+    const M = T.menu;
+    const page = this.view.page();
+    return [
       { label: M.insertBlank, icon: 'file-plus', onSelect: () => this.insertBlank() },
+      { label: M.insertImages, icon: 'image', onSelect: () => this.insertImages() },
+      { label: M.adjustImage, icon: 'crop', disabled: !this.isImagePage, onSelect: () => this.adjustImage() },
       { label: M.duplicate, icon: 'copy', onSelect: () => this.duplicate() },
       { label: M.remove, icon: 'trash', onSelect: () => this.remove() },
       'separator',
       { label: M.moveUp, icon: 'arrow-up', disabled: page <= 0, onSelect: () => this.move(page - 1) },
       { label: M.moveDown, icon: 'arrow-down', disabled: page >= this.pageCount - 1, onSelect: () => this.move(page + 1) },
-      'separator',
+    ];
+  }
+
+  /** Botón «Exportar»: la página actual a un PDF, el texto, las páginas como imágenes y las imágenes. */
+  exportItems(): MenuItem[] {
+    const M = T.menu;
+    return [
       { label: M.extractPage, icon: 'files', onSelect: () => this.extractPage() },
       { label: M.exportText, icon: 'file-text', onSelect: () => this.exportText() },
+      { label: M.exportPageImages, icon: 'download', onSelect: () => this.exportPageImages() },
       { label: M.exportImages, icon: 'image', onSelect: () => this.exportImages() },
     ];
   }

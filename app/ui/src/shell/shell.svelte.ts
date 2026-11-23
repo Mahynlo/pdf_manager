@@ -7,11 +7,12 @@
 // funciones que exporte: canClose(), onKey(ev) y onShow() (ver tools.ts).
 //
 // En la versión de navegador la dirección de la página sigue a la pestaña activa (router.ts).
-import { call, on, type ApiError } from '$lib/api.ts';
+import { call, on, send, type ApiError } from '$lib/api.ts';
 import { fileName } from '$lib/dom.ts';
+import type { ImagePage, SourceImage } from '$lib/images/images.ts';
 import type { MenuItem } from '$lib/menu.svelte.ts';
 import type { DocumentInfo } from '$lib/types.ts';
-import { askChoice, askPassword, setStatus, toast } from '$lib/ui.ts';
+import { askChoice, askPassword, openModal, setStatus, toast } from '$lib/ui.ts';
 import type { Component } from 'svelte';
 import { t } from '$texts';
 import { ROUTED, Router, type Route } from './router.ts';
@@ -89,6 +90,8 @@ class Shell {
     if (initial) this.follow(null, initial);
     // Aperturas pedidas por el backend (Abrir PDF, resultados de otras herramientas…).
     on<{ path: string; password: string | null }>('document:open', ({ path, password }) => this.openDocument(path, password));
+    // Imágenes abiertas con «Abrir» o arrastradas: se convierten en un PDF nuevo.
+    on<{ paths: string[] }>('images:open', ({ paths }) => this.openImagePaths(paths));
     // Se cerró la ventana con documentos sin guardar o trabajos en curso (como closeEvent en Qt).
     on<{ documents: string[]; jobs: string[] }>('app:quit-requested', ({ documents, jobs }) => this.confirmQuit(documents, jobs));
     // Descarga de los modelos del OCR la primera vez que se usa (si el instalador no los llevaba).
@@ -142,28 +145,81 @@ class Shell {
     try {
       const info = await this._loadDocument(path, password);
       if (!info) return;
-      const key = docKey(info.id);
-      if (this.get(key)) return this.activate(key);
-      const tab = new Tab(key, info.name, 'file-text', { path: info.path, viewer: true });
-      tab.props = {
-        info,
-        close: () => this.close(key),
-        update: (next: DocumentInfo) => this._updateDocumentTab(key, next),
-      };
-      this.tabs.push(tab);
-      this.activate(key);
-      const { default: Viewer } = await loadViewer();
-      if (!this.get(key)) {
-        call('viewer.close_document', info.id);
-        return;
-      }
-      tab.component = Viewer;
-      setStatus(T.opened(info.name));
+      if (await this._showDocument(info)) setStatus(T.opened(info.name));
     } catch (err) {
       console.error(err);
       toast((err as Error).message, 'danger');
     } finally {
       this.opening.delete(path);
+    }
+  }
+
+  /** Abre `info` en una pestaña de visor; `images`: las páginas hechas con imágenes (para ajustarlas). */
+  async _showDocument(info: DocumentInfo, images: ImagePage[] = []): Promise<boolean> {
+    const key = docKey(info.id);
+    if (this.get(key)) {
+      this.activate(key);
+      return false;
+    }
+    // Un documento nuevo no tiene archivo: sin ruta, no se confunde con uno abierto del disco.
+    const tab = new Tab(key, info.name, 'file-text', { path: info.untitled ? null : info.path, viewer: true });
+    tab.modified = Boolean(info.untitled); // nuevo: sin guardar desde el principio
+    tab.props = {
+      info,
+      images,
+      close: () => this.close(key),
+      update: (next: DocumentInfo) => this._updateDocumentTab(key, next),
+    };
+    this.tabs.push(tab);
+    this.activate(key);
+    const { default: Viewer } = await loadViewer();
+    if (!this.get(key)) {
+      call('viewer.close_document', info.id);
+      return false;
+    }
+    tab.component = Viewer;
+    return true;
+  }
+
+  // ── Imágenes a PDF ─────────────────────────────────────────────────────
+  /** «Imágenes a PDF»: elegirlas con el selector de la ventana. */
+  async imagesToPdf(): Promise<void> {
+    const { pickImageFiles } = await import('$lib/images/pick.ts');
+    const files = await pickImageFiles();
+    if (files.length) await this._imagesDocument(files, []);
+  }
+
+  /** Imágenes que manda Python (`images:open`: «Abrir» o arrastradas). */
+  async openImagePaths(paths: string[]): Promise<void> {
+    try {
+      const { readImagePaths } = await import('$lib/images/pick.ts');
+      const { files, failed } = await readImagePaths(paths);
+      await this._imagesDocument(files, failed);
+    } catch (err) {
+      toast((err as Error).message, 'danger');
+    }
+  }
+
+  /** El diálogo «Imágenes a PDF» con `files`; el PDF se abre como documento nuevo, sin guardar. */
+  async _imagesDocument(files: { name: string; blob: Blob }[], failed: string[]): Promise<void> {
+    const I = t.images;
+    const [{ loadImages }, { default: ImagesDialog }] = await Promise.all([
+      import('$lib/images/images.ts'), import('$lib/images/ImagesDialog.svelte'),
+    ]);
+    const loaded = await loadImages(files);
+    failed = [...failed, ...loaded.failed];
+    if (failed.length) toast(I.dialog.unreadable(failed), 'warning');
+    if (!loaded.images.length) return;
+    const result = await openModal<{ pages: ImagePage[]; pdf: ArrayBuffer }>(ImagesDialog, { images: loaded.images, mode: 'create' });
+    if (!result) return;
+    try {
+      const only = result.pages.length === 1 ? result.pages[0].image.name.replace(/\.[^.]+$/, '') : '';
+      const info = await call<DocumentInfo>('viewer.create', `${only || I.untitled}.pdf`, await send(result.pdf));
+      if (await this._showDocument(info, result.pages)) setStatus(I.created(result.pages.length));
+    } catch (err) {
+      const { releaseImages } = await import('$lib/images/images.ts');
+      releaseImages([...new Set<SourceImage>(result.pages.map((page) => page.image))]);
+      toast((err as Error).message, 'danger');
     }
   }
 
@@ -188,10 +244,10 @@ class Shell {
   }
 
   /** Marca de cambios sin guardar y, tras «Guardar como», la nueva ruta (como _refresh_viewer_tab en Qt). */
-  _updateDocumentTab(key: string, { name, path, modified }: Pick<DocumentInfo, 'name' | 'path' | 'modified'>): void {
+  _updateDocumentTab(key: string, { name, path, modified, untitled }: Pick<DocumentInfo, 'name' | 'path' | 'modified' | 'untitled'>): void {
     const tab = this.get(key);
     if (!tab) return;
-    Object.assign(tab, { title: name, path, modified });
+    Object.assign(tab, { title: name, path: untitled ? null : path, modified });
     if (key === this.current) this.router?.show(tab, { replace: true }); // su dirección lleva el nombre
   }
 
@@ -302,7 +358,11 @@ class Shell {
 
   // ── Menús de la cabecera ───────────────────────────────────────────────
   brandMenu(): MenuItem[] {
-    const items: MenuItem[] = [{ label: T.brand.openPdf, icon: 'folder-open', onSelect: () => this.openPdfDialog() }, 'separator'];
+    const items: MenuItem[] = [
+      { label: T.brand.openPdf, icon: 'folder-open', onSelect: () => this.openPdfDialog() },
+      { label: T.brand.imagesToPdf, icon: 'image', onSelect: () => this.imagesToPdf() },
+      'separator',
+    ];
     let section = 0;
     for (const tool of TOOLS) {
       if ((tool.section ?? 0) !== section) {

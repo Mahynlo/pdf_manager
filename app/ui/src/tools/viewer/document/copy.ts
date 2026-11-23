@@ -4,8 +4,7 @@
 // El dueño del documento es EmbedPDF: la copia la saca su motor (lib/pdf-engine, `saveCopy`) sin
 // el texto invisible del OCR, que solo sirve para seleccionar y buscar en el visor. Python la
 // escribe tal cual al guardar. El texto que lee Python no va en una copia: ver text.ts.
-import { call, upload } from '$lib/api.ts';
-import { t } from '$texts';
+import { send } from '$lib/api.ts';
 import type { PageCanvas } from '../canvas/canvas.ts';
 import { copies } from '../canvas/embed.ts';
 import { pageUids } from './pages.ts';
@@ -16,13 +15,7 @@ export interface Uploaded {
   keys: string[]; // la clave de cada página (pages.ts)
 }
 
-/** Sube `data` (un PDF, el texto de unas páginas o imágenes de página) para Python; devuelve su URL. */
-export async function send(data: ArrayBuffer): Promise<string> {
-  const url = await call<string>('viewer.upload_url');
-  const response = await upload(url, data);
-  if (!response.ok) throw new Error(t.viewer.document.uploadError(response.status));
-  return url;
-}
+export { send } from '$lib/api.ts';
 
 export class DocumentCopy {
   /** `commit`: escribe en el documento de EmbedPDF las anotaciones pendientes. */
