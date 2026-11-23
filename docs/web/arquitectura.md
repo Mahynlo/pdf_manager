@@ -202,10 +202,13 @@ Con diagramas de secuencia: [como-funciona.md](como-funciona.md), secciones 3, 4
   - **Al actualizar pywebview:** revisar `load_url` y que el menú siga saliendo (`tests/test_native_menu.py` prueba el filtro).
 - **Texto libre, leyendas y sellos de texto**: se escriben con las fuentes estándar de PDF, que solo
   tienen WinAnsi (letras latinas con acentos, €, comillas tipográficas…). Probado con el motor: un
-  emoji, ✓, griego o chino dejan toda la anotación en blanco. `lib/standard-font.ts`
-  (`standardFontText`) quita esos caracteres:
-  - en el texto libre, al editarlo (`Annotations._standardText`), con un aviso;
-  - en las leyendas, el diálogo no deja guardarlas ni insertarlas y dice por qué.
+  emoji, ✓, griego o chino dejan toda la apariencia de la anotación en blanco en PDFium, aunque el
+  texto (`/Contents`) se guarda entero y otros lectores (Acrobat, navegadores) lo redibujan con sus
+  fuentes y lo muestran. Por eso:
+  - el texto libre los deja pasar, sin aviso (el aviso molestaba y el editor volvía a escribir el
+    texto original);
+  - las leyendas sí los bloquean (`standardFontText` en el diálogo): su miniatura se dibuja con
+    nuestro PDF (`stamp-pdf.ts`) y saldría «?»; los sellos de texto se limpian al colocarlos.
 
   Los GIF del panel de emojis de Windows se ven mientras se escribe y no se guardan
   (EmbedPDF toma el `innerText`). Inofensivo.

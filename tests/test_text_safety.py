@@ -137,10 +137,11 @@ def test_an_emoji_blanks_free_text_unless_it_is_removed():
     assert _dark_rows(run_engine("freetext", base, {"texts": texts, "clean": True})) == [True, True, True]
 
 
-def test_the_viewer_cleans_free_text_and_legends():
+def test_the_viewer_cleans_text_stamps_and_legends():
     ui = UI / "src" / "tools" / "viewer"
     annotations = (ui / "annotations" / "annotations.ts").read_text(encoding="utf-8")
-    assert "_standardText(event.pageIndex" in annotations and "standardFontText(stamp.text)" in annotations
+    assert "standardFontText(stamp.text)" in annotations
+    assert "_standardText" not in annotations  # el texto libre admite emojis (otros lectores los muestran)
     assert "standardFontText(text).removed" in (ui / "stamps" / "LegendsDialog.svelte").read_text(encoding="utf-8")
     field = (UI / "src" / "lib" / "components" / "PasswordField.svelte").read_text(encoding="utf-8")
     assert 'spellcheck="false"' in field  # al mostrarla, el corrector no la lee

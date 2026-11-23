@@ -392,7 +392,6 @@ export default {
   /** Anotaciones (annotations/). */
   annotations: {
     noteTitle: 'Añadir Nota de Texto',
-    unsupportedChars: (chars: string) => `Se quitaron caracteres que el texto del PDF no puede mostrar: ${chars}. Se admiten letras con acentos, números y signos habituales.`,
     noteLabel: 'Texto de la nota:',
     insertTitle: 'Insertar texto',
     insertLabel: 'Texto a insertar:',
