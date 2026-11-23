@@ -11,8 +11,8 @@ Ubicadas en la parte superior, te permiten tener abiertos múltiples documentos 
 Esta es la primera barra de botones, justo debajo de las pestañas. Contiene controles esenciales para leer tu documento:
 * **Paginación (`<`, `>`, `[ 1 ] / 14`):** Avanza o retrocede entre las páginas del documento, o escribe un número para saltar directamente a una página específica.
 * **Zoom (`-`, `+`, `100%`):** Acerca o aleja el documento para una mejor lectura. También puedes usar el menú desplegable para ajustar el PDF al ancho o alto de tu pantalla.
-* **Modos de visualización:** Alterna entre vista de una sola página, desplazamiento continuo o ajuste de página.
 * **Mano, Selección de texto y Puntero:** La mano desplaza la página, la selección de texto sirve para copiar o resaltar, y el puntero selecciona, mueve y transforma las anotaciones.
+* **Modos de visualización:** Alterna entre vista de una sola página, desplazamiento continuo o ajuste de página.
 * **Deshacer / Rehacer:** Revierte o repite tus últimas anotaciones.
 * **Anotar (lápiz):** Muestra u oculta la barra de anotaciones.
 * **Búsqueda rápida (Lupa):** Encuentra rápidamente palabras.

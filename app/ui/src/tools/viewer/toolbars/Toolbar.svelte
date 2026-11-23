@@ -1,6 +1,6 @@
 <!--
   Barra superior del visor (como _toolbar_mixin.py en Qt): menú ⋮ · navegación · zoom ·
-  modos de vista · mano, selección de texto y puntero · deshacer/rehacer · «Anotar» (abre la
+  mano, selección de texto y puntero · modos de vista · deshacer/rehacer · «Anotar» (abre la
   barra de anotaciones, ToolsBar.svelte) · paneles · modo noche.
 -->
 <script lang="ts">
@@ -162,10 +162,6 @@
     </button>
   </div>
   {@render button('plus', tip(T.zoomIn), actions.zoomIn, { group: ZOOM })}
-  {@render separator(WIDE)}
-  {@render button('rows', T.continuous, () => actions.setMode(MODES.CONTINUOUS), { checked: view.mode === MODES.CONTINUOUS, group: WIDE })}
-  {@render button('book-open', T.double, () => actions.setMode(MODES.DOUBLE), { checked: view.mode === MODES.DOUBLE, group: WIDE })}
-  {@render button('file', T.single, () => actions.setMode(MODES.SINGLE), { checked: view.mode === MODES.SINGLE, group: WIDE })}
   {@render separator()}
   <div class="tb-nav" role="group" aria-label={TT.groups.navigate}>
     {#each NAVIGATE as { key, icon, title } (key)}
@@ -179,6 +175,10 @@
       <Icon name="chevron-down" size={12} />
     </button>
   </div>
+  {@render separator(WIDE)}
+  {@render button('rows', T.continuous, () => actions.setMode(MODES.CONTINUOUS), { checked: view.mode === MODES.CONTINUOUS, group: WIDE })}
+  {@render button('book-open', T.double, () => actions.setMode(MODES.DOUBLE), { checked: view.mode === MODES.DOUBLE, group: WIDE })}
+  {@render button('file', T.single, () => actions.setMode(MODES.SINGLE), { checked: view.mode === MODES.SINGLE, group: WIDE })}
   {@render separator()}
   {@render button('undo', tip(T.undo), actions.undo, { disabled: !view.canUndo })}
   {@render button('redo', tip(T.redo), actions.redo, { disabled: !view.canRedo })}

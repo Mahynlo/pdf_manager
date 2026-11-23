@@ -60,8 +60,8 @@ Inicio va siempre la primera. Las vistas no cambian de sitio en la página al re
 
 Empieza cerrada y se abre con **Anotar** en la barra superior (también al elegir una de sus
 herramientas con un atajo; al cerrarla se vuelve a la selección de texto, o a la mano en pantallas
-táctiles). La mano, la selección de texto y el puntero están en la barra superior, entre «Página
-única» y deshacer; los sellos y la firma, en el panel lateral. Va centrada (`justify-content: safe
+táctiles). La mano, la selección de texto y el puntero están en la barra superior, entre el zoom y
+los modos de vista; los sellos y la firma, en el panel lateral. Va centrada (`justify-content: safe
 center`: si no cabe, se desplaza desde el principio sin cortarse).
 
 Se compacta por niveles para caber (`use:fit`, `lib/fit.ts`, patrón «priority+»): mide el contenido de
