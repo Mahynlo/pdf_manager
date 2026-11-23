@@ -68,8 +68,12 @@ miniaturas · modo noche. Se compacta igual que la de anotaciones (`use:fit`, ve
 | 0 | Todo a la vista |
 | 1 | «Anotar», «Páginas» y «Exportar», solo con su icono |
 | 2 | Mano, selección y puntero en un botón (la última usada; la flecha abre las tres); los menús, sin flecha |
-| 3 | Primera/última página, modos de vista y modo noche, al menú ⋮ (`toolbar.collapsed()`) |
-| 4 | También «Páginas» y «Exportar», al menú ⋮ (`toolbar.menusCollapsed()`) |
+| 3 | Primera/última página, modos de vista y modo noche, al menú ⋮ → **Vista** (`toolbar.collapsed()`) |
+| 4 | También «Páginas» y «Exportar», al menú ⋮ como submenús (`toolbar.menusCollapsed()`) |
+
+Lo que sale de la barra va al menú ⋮ en **submenús** (`submenu` en `lib/menu.svelte.ts`: se abren en
+el mismo sitio, con «volver» arriba), así el menú cabe en la pantalla: en un móvil tiene 10 entradas
+en vez de 33.
 
 ## La barra de anotaciones
 
@@ -92,7 +96,12 @@ verdad, así vale con ratón o con dedo y con el panel lateral abierto o cerrado
 ## El visor en un móvil
 
 - La página se abre **ajustada al ancho**, y se reajusta al girar el móvil.
-- En una pantalla estrecha, «Anotar» queda solo con su icono (un lápiz).
+- **Anotar** va en la barra de abajo, la primera (junto al pulgar; la barra de anotaciones se abre
+  justo debajo). Las miniaturas, en ⋮ → Vista. Así la barra de arriba cabe en 360 px.
+- El menú ⋮ agrupa girar, vista, páginas y exportar en submenús («Girar y orientación» también en
+  horizontal, donde hay poca altura). «Doble página» no se ofrece: no caben dos páginas.
+- En una pantalla táctil los menús y descripciones no muestran atajos de teclado (`tip()` en
+  `texts/index.ts`), y las flechas de los botones con grupo miden 28 px de ancho.
 - En una pantalla táctil la herramienta inicial es la **mano**. Arrastrar desplaza con cualquier
   herramienta, salvo las de texto y las de dibujo: arrastrar selecciona o dibuja, porque es lo que se
   ha pedido al elegirlas.

@@ -46,6 +46,7 @@
   const WIDE = 'tb-wide';
   const ZOOM = 'tb-zoom-group';
   const MENUS = 'tb-menus';
+  const PHONE_HIDDEN = 'tb-phone-hidden';
 
   /** Estado que pinta la barra (`tools`: la barra de anotaciones abierta). */
   interface ToolbarView {
@@ -211,15 +212,16 @@
   {@render separator()}
   {@render button('undo', tip(T.undo), actions.undo, { disabled: !view.canUndo })}
   {@render button('redo', tip(T.redo), actions.redo, { disabled: !view.canRedo })}
-  {@render separator()}
-  <button class="btn btn--ghost tb-btn tb-annotate" class:is-checked={view.tools} type="button" title={T.tools}
+  <!-- En el móvil, «Anotar» va en la barra de abajo (Viewer.svelte) y las miniaturas en ⋮ → Vista. -->
+  {@render separator(PHONE_HIDDEN)}
+  <button class="btn btn--ghost tb-btn tb-annotate {PHONE_HIDDEN}" class:is-checked={view.tools} type="button" title={T.tools}
           aria-label={T.tools} aria-pressed={view.tools} onclick={actions.toggleTools}>
     <Icon name="pen-line" size={18} /><span class="tb-annotate__label">{T.annotate}</span>
   </button>
   {@render menuButton('files', T.pages, T.pagesTip, actions.pagesMenu)}
   {@render menuButton('download', T.export, T.exportTip, actions.exportMenu)}
   {@render separator(MENUS)}
-  {@render button('panel-left', T.thumbnails, actions.toggleSidebar, { checked: view.sidebar })}
+  {@render button('panel-left', T.thumbnails, actions.toggleSidebar, { checked: view.sidebar, group: PHONE_HIDDEN })}
   {@render button('moon', T.night, actions.toggleNight, { checked: view.night, group: WIDE })}
   <span class="grow"></span>
   {@render button('panel-right', T.dock, actions.toggleDock, { checked: view.dock, group: 'tb-dock-toggle' })}

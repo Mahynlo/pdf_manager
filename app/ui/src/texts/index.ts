@@ -17,8 +17,11 @@ export type Label = string | { label: string; shortcut?: string };
 
 export const t: Texts = es;
 
-/** Texto para el `title` de un botón: «Etiqueta (atajo)». */
+// Sin teclado a mano (móvil, tableta): los atajos sobran.
+const TOUCH_ONLY = typeof matchMedia === 'function' && matchMedia('(hover: none) and (pointer: coarse)').matches;
+
+/** Texto para el `title` de un botón: «Etiqueta (atajo)»; en una pantalla táctil, sin el atajo. */
 export function tip(text: Label): string {
   if (typeof text === 'string') return text;
-  return text.shortcut ? `${text.label} (${text.shortcut})` : text.label;
+  return text.shortcut && !TOUCH_ONLY ? `${text.label} (${text.shortcut})` : text.label;
 }

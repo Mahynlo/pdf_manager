@@ -6,6 +6,7 @@
 //     'separator',
 //     { label: 'Quitar', icon: 'x', checked: false, disabled: false, onSelect: quitar },
 //     { label: 'Rojo', color: '#E53935', onSelect: … },   // muestra de color en vez de icono
+//     { label: 'Exportar', icon: 'download', submenu: () => [...] },  // se abre en el mismo sitio, con «volver»
 //   ]);
 
 export interface MenuOption {
@@ -15,6 +16,10 @@ export interface MenuOption {
   checked?: boolean;
   disabled?: boolean;
   onSelect?: () => unknown;
+  /** Sus opciones sustituyen a las del menú (la primera vuelve atrás): para menús largos en el móvil. */
+  submenu?: () => MenuItem[];
+  /** La opción «volver» de un submenú (la pone Menu.svelte). */
+  back?: boolean;
 }
 
 export type MenuItem = MenuOption | 'separator';

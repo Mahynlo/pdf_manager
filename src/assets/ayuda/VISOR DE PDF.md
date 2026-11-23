@@ -17,7 +17,7 @@ Esta es la primera barra de botones, justo debajo de las pestañas. Contiene con
 * **Anotar (lápiz):** Muestra u oculta la barra de anotaciones.
 * **Páginas:** Insertar página en blanco, insertar páginas desde imágenes, ajustar imagen de la página, duplicar, eliminar y mover la página actual.
 * **Exportar:** Extraer la página actual a un nuevo PDF, exportar el texto del documento, exportar las páginas como imágenes (PNG, JPG) y extraer todas las imágenes del documento.
-* En el móvil, «Páginas» y «Exportar» están dentro del menú principal (**⋮**).
+* **En el móvil:** «Anotar» está en la barra de abajo, y «Páginas», «Exportar», «Vista» (zoom, modos, modo noche, miniaturas) y «Girar y orientación» están como submenús dentro del menú principal (**⋮**). Toca uno para abrirlo y la flecha de arriba para volver.
 * **Búsqueda rápida (Lupa):** Encuentra rápidamente palabras.
 * **Modo Oscuro (Luna):** Cambia la interfaz y el documento a tonos oscuros para reducir la fatiga visual.
 * **Botón de OCR:** Realiza OCR sobre la hoja actual del documento.

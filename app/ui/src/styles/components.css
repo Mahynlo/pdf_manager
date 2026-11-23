@@ -276,6 +276,7 @@
   box-shadow: var(--shadow-2);
   animation: menu-in 0.12s ease-out;
 }
+.menu__more { display: inline-flex; margin-left: auto; padding-left: 12px; color: var(--icon-color); }
 .menu__item {
   display: flex;
   align-items: center;

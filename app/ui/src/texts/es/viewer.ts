@@ -565,6 +565,10 @@ export default {
     print: { label: 'Imprimir documento', shortcut: 'Ctrl+P' },
     properties: 'Propiedades del documento',
     legends: 'Gestionar Leyendas y Sellos...',
+    /** Submenús del menú ⋮ cuando la barra no tiene sitio (y «Girar», en el móvil, también en horizontal). */
+    view: 'Vista',
+    rotate: 'Girar y orientación',
+    thumbnails: 'Miniaturas',
     close: 'Cerrar documento',
   },
 };

@@ -284,12 +284,13 @@
     if (target >= 0) goTo(target);
   };
 
-  /** Lo que no cabe en la barra superior en una pantalla estrecha. */
+  /** Lo que no cabe en la barra superior en una pantalla estrecha: el submenú «Vista» del menú ⋮. */
   function hiddenControls(): MenuItem[] {
     if (!viewport.narrow && !toolbar?.collapsed()) return [];
     const B = T.toolbar;
+    const short = (label: string) => label.replace(/\s*\(.*\)$/, ''); // sin la explicación de la descripción
     const mode = (label: string, icon: string, value: Mode): MenuItem => ({
-      label, icon, checked: view.mode === value, onSelect: () => canvas.setMode(value),
+      label: short(label), icon, checked: view.mode === value, onSelect: () => canvas.setMode(value),
     });
     return [
       ...(viewport.compact ? [
@@ -300,13 +301,14 @@
       { label: B.fitPage, icon: 'file', onSelect: () => canvas.fitPage() },
       'separator',
       mode(B.continuous, 'rows', MODES.CONTINUOUS),
-      mode(B.double, 'book-open', MODES.DOUBLE),
+      // En un móvil no caben dos páginas a la vez.
+      ...(viewport.compact ? [] : [mode(B.double, 'book-open', MODES.DOUBLE)]),
       mode(B.single, 'file', MODES.SINGLE),
-      { label: B.night, icon: 'moon', checked: view.night, onSelect: toolbarActions.toggleNight },
+      { label: short(B.night), icon: 'moon', checked: view.night, onSelect: toolbarActions.toggleNight },
+      ...(viewport.compact ? [{ label: T.more.thumbnails, icon: 'panel-left', checked: view.sidebar, onSelect: toolbarActions.toggleSidebar }] : []),
       'separator',
       { label: tip(B.first), icon: 'chevrons-left', disabled: view.page <= 0, onSelect: () => goTo(0) },
       { label: tip(B.last), icon: 'chevrons-right', disabled: view.page >= view.count - 1, onSelect: () => goTo(total() - 1) },
-      'separator',
     ];
   }
 
@@ -316,17 +318,26 @@
   });
 
   const toolbarActions = {
+    // Lo que no cabe en la barra va en submenús («Vista», «Páginas», «Exportar»; en el móvil, también
+    // en horizontal, «Girar»): así el menú cabe en la pantalla.
     moreMenu: (): MenuItem[] => {
-      const [save, saveAs, ...rest] = actions.menuItems();
+      const [save, saveAs, , ...rotations] = actions.menuItems();
+      const viewItems = hiddenControls();
+      const menus = viewport.compact || Boolean(toolbar?.menusCollapsed()); // responsive.css y Toolbar.svelte: .tb-menus
+      const sub = (label: string, icon: string, items: MenuItem[]): MenuItem => ({ label, icon, submenu: () => items });
+      const B = T.toolbar;
+      const grouped: MenuItem[] = [
+        ...(viewItems.length ? [sub(T.more.view, 'eye', viewItems)] : []),
+        ...(menus ? [sub(B.pages, 'files', actions.pageItems()), sub(B.export, 'download', actions.exportItems())] : []),
+      ];
       return [
         save, saveAs,
         { label: tip(T.more.print), icon: 'printer', onSelect: print },
         { label: T.more.properties, icon: 'info', onSelect: showProperties },
-        ...rest,
         'separator',
-        ...hiddenControls(),
-        // Sin sitio para los botones «Páginas» y «Exportar» (responsive.css y Toolbar.svelte: .tb-menus).
-        ...(viewport.compact || toolbar?.menusCollapsed() ? [...actions.pageItems(), 'separator', ...actions.exportItems(), 'separator'] as MenuItem[] : []),
+        ...(viewport.reading ? [sub(T.more.rotate, 'rotate-cw', rotations)] : [...rotations, 'separator' as const]),
+        ...grouped,
+        ...(grouped.length || viewport.reading ? ['separator' as const] : []),
         { label: T.more.legends, icon: 'tag', onSelect: () => stamps!.manageLegends() },
         { label: T.more.close, icon: 'x', onSelect: close },
       ];
@@ -520,6 +531,14 @@
       </div>
     </aside>
     <div class="viewer-rail" role="tablist" aria-orientation={viewport.compact ? 'horizontal' : 'vertical'} aria-label={T.toolbar.dock}>
+      {#if viewport.compact}
+        <!-- En el móvil, «Anotar» aquí: junto al pulgar y a la barra de anotaciones, que se abre debajo. -->
+        <button class="viewer-rail__tab viewer-rail__annotate" class:is-active={view.tools} type="button"
+                aria-pressed={view.tools} title={T.toolbar.tools} aria-label={T.toolbar.tools}
+                onclick={toolbarActions.toggleTools}>
+          <Icon name="pen-line" size={18} />
+        </button>
+      {/if}
       {#each DOCK_GROUPS as group, i (i)}
         {#if i}<span class="viewer-rail__sep" aria-hidden="true"></span>{/if}
         {#each group as { key, icon } (key)}
