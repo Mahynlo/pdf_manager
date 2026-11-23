@@ -15,6 +15,9 @@ Esta es la primera barra de botones, justo debajo de las pestañas. Contiene con
 * **Modos de visualización:** Alterna entre vista de una sola página, desplazamiento continuo o ajuste de página.
 * **Deshacer / Rehacer:** Revierte o repite tus últimas anotaciones.
 * **Anotar (lápiz):** Muestra u oculta la barra de anotaciones.
+* **Páginas:** Insertar página en blanco, insertar páginas desde imágenes, ajustar imagen de la página, duplicar, eliminar y mover la página actual.
+* **Exportar:** Extraer la página actual a un nuevo PDF, exportar el texto del documento, exportar las páginas como imágenes (PNG, JPG) y extraer todas las imágenes del documento.
+* En el móvil, «Páginas» y «Exportar» están dentro del menú principal (**⋮**).
 * **Búsqueda rápida (Lupa):** Encuentra rápidamente palabras.
 * **Modo Oscuro (Luna):** Cambia la interfaz y el documento a tonos oscuros para reducir la fatiga visual.
 * **Botón de OCR:** Realiza OCR sobre la hoja actual del documento.
@@ -32,13 +35,12 @@ Se abre con el botón **Anotar** de la barra principal y aparece centrada debajo
 
 ![alt text](/ayuda_svg/Partes_del_visor.svg)
 
-## 4. Menú Principal (Archivo y Edición de Páginas)
+## 4. Menú Principal (⋮)
 Al hacer clic en el botón de menú superior izquierdo (ícono con líneas/desplegable), encontrarás opciones esenciales para gestionar tu archivo y manipular las páginas:
 * **Guardar e Imprimir:** "Guardar cambios", "Guardar PDF como..." para crear una copia, y "Imprimir documento".
 * **Rotación y Orientación:** "Rotar 90° a la derecha/izquierda", y "Voltear 180°" (para la página actual o todas). Destaca la opción inteligente **Corregir orientación del escaneo**.
-* **Edición de Páginas:** "Insertar página en blanco", "Insertar páginas desde imágenes", "Ajustar imagen de la página", "Duplicar página actual" y "Eliminar página actual" (ver la guía **Imágenes a PDF**).
-* **Exportar:** "Extraer página actual a nuevo PDF", "Exportar texto del documento", "Exportar páginas como imágenes (PNG, JPG)" y "Extraer todas las imágenes del documento".
-* **Organización:** "Mover página arriba" y "Mover página abajo" para reordenar tu documento.
+* **Propiedades** del documento y **Gestionar leyendas**.
+* Insertar, duplicar, eliminar o mover páginas y exportar están en los botones **Páginas** y **Exportar** de la barra principal (ver la guía **Imágenes a PDF**).
 * **Cerrar:** "Cerrar pestaña" actual.
 ![alt text](/ayuda_svg/Menu_Principal.svg)
 

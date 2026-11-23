@@ -56,6 +56,21 @@ y, si no caben, la tira se desplaza. La activa siempre queda a la vista, tambié
 Inicio va siempre la primera. Las vistas no cambian de sitio en la página al reordenar las pestañas
 (`shell.views`, por orden de apertura): así no pierden su desplazamiento.
 
+## La barra superior del visor
+
+Lleva menú ⋮ · páginas · zoom · mano, selección de texto y puntero · modos de vista · deshacer y
+rehacer · **Anotar** · **Páginas ▾** (insertar, ajustar, duplicar, eliminar y mover páginas) ·
+**Exportar ▾** (la página actual a un PDF, el texto, las páginas como imágenes, las imágenes) ·
+miniaturas · modo noche. Se compacta igual que la de anotaciones (`use:fit`, ver `Toolbar.svelte`):
+
+| Nivel | Qué cambia |
+|---|---|
+| 0 | Todo a la vista |
+| 1 | «Anotar», «Páginas» y «Exportar», solo con su icono |
+| 2 | Mano, selección y puntero en un botón (la última usada; la flecha abre las tres); los menús, sin flecha |
+| 3 | Primera/última página, modos de vista y modo noche, al menú ⋮ (`toolbar.collapsed()`) |
+| 4 | También «Páginas» y «Exportar», al menú ⋮ (`toolbar.menusCollapsed()`) |
+
 ## La barra de anotaciones
 
 Empieza cerrada y se abre con **Anotar** en la barra superior (también al elegir una de sus

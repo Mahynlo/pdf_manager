@@ -397,9 +397,9 @@ export class DocumentActions {
   }
 
   // ── Menú ⋮ (mismo orden que _build_more_menu en Qt) ────────────────────
+  /** Menú ⋮: guardar y girar (las páginas y exportar tienen su botón: `pageItems`, `exportItems`). */
   menuItems(): MenuItem[] {
     const M = T.menu;
-    const page = this.view.page();
     return [
       { label: tip(M.save), icon: 'save', onSelect: () => this.save() },
       { label: tip(M.saveAs), icon: 'save', onSelect: () => this.saveAs() },
@@ -410,7 +410,14 @@ export class DocumentActions {
       { label: M.flipAll, icon: 'rotate-cw', onSelect: () => this.rotate(180, true) },
       { label: M.fixOrientation, icon: 'compass', onSelect: () => this.fixOrientation() },
       { label: M.fixOrientationAll, icon: 'compass', onSelect: () => this.fixOrientationAll() },
-      'separator',
+    ];
+  }
+
+  /** Botón «Páginas»: insertar, ajustar, duplicar, eliminar y mover. */
+  pageItems(): MenuItem[] {
+    const M = T.menu;
+    const page = this.view.page();
+    return [
       { label: M.insertBlank, icon: 'file-plus', onSelect: () => this.insertBlank() },
       { label: M.insertImages, icon: 'image', onSelect: () => this.insertImages() },
       { label: M.adjustImage, icon: 'crop', disabled: !this.isImagePage, onSelect: () => this.adjustImage() },
@@ -419,7 +426,13 @@ export class DocumentActions {
       'separator',
       { label: M.moveUp, icon: 'arrow-up', disabled: page <= 0, onSelect: () => this.move(page - 1) },
       { label: M.moveDown, icon: 'arrow-down', disabled: page >= this.pageCount - 1, onSelect: () => this.move(page + 1) },
-      'separator',
+    ];
+  }
+
+  /** Botón «Exportar»: la página actual a un PDF, el texto, las páginas como imágenes y las imágenes. */
+  exportItems(): MenuItem[] {
+    const M = T.menu;
+    return [
       { label: M.extractPage, icon: 'files', onSelect: () => this.extractPage() },
       { label: M.exportText, icon: 'file-text', onSelect: () => this.exportText() },
       { label: M.exportPageImages, icon: 'download', onSelect: () => this.exportPageImages() },

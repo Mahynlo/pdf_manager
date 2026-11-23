@@ -1,10 +1,11 @@
 <!--
   Barra superior del visor (como _toolbar_mixin.py en Qt): menú ⋮ · navegación · zoom ·
   mano, selección de texto y puntero · modos de vista · deshacer/rehacer · «Anotar» (abre la
-  barra de anotaciones, ToolsBar.svelte) · paneles · modo noche.
+  barra de anotaciones, ToolsBar.svelte) · menús «Páginas» y «Exportar» · paneles · modo noche.
 -->
 <script lang="ts">
   import Icon from '$lib/Icon.svelte';
+  import { fit } from '$lib/fit.ts';
   import { openMenu, type MenuItem } from '$lib/menu.svelte.ts';
   import { strip } from '$lib/strip.ts';
   import { t, tip } from '$texts';
@@ -25,9 +26,26 @@
   });
   const shownNavigate = $derived(NAVIGATE.find((b) => b.key === lastNavigate) ?? NAVIGATE[1]);
   const ZOOM_PRESETS = [25, 50, 75, 100, 125, 150, 200, 300, 400];
+  // Se compacta para caber (lib/fit.ts, `data-level` en styles/viewer.css):
+  //   1  «Anotar», «Páginas» y «Exportar», solo con su icono;
+  //   2  mano, selección y puntero en un botón; los menús, sin su flecha;
+  //   3  sin primera/última página, modos de vista ni modo noche: pasan al menú ⋮ (`collapsed()`);
+  //   4  tampoco «Páginas» ni «Exportar»: también al menú ⋮ (`menusCollapsed()`).
+  const LEVELS = 4;
+  let bar: HTMLDivElement;
+  const level = () => Number(bar?.dataset.level ?? 0);
+  /** Si los controles `tb-wide` no están en la barra (niveles 3 y 4): van al menú ⋮. */
+  export function collapsed(): boolean {
+    return level() >= 3;
+  }
+  /** Si «Páginas» y «Exportar» no están en la barra (nivel 4): sus entradas van al menú ⋮. */
+  export function menusCollapsed(): boolean {
+    return level() >= 4;
+  }
   // Lo que se oculta en una pantalla estrecha (responsive.css): pasa al menú ⋮ (hiddenControls).
   const WIDE = 'tb-wide';
   const ZOOM = 'tb-zoom-group';
+  const MENUS = 'tb-menus';
 
   /** Estado que pinta la barra (`tools`: la barra de anotaciones abierta). */
   interface ToolbarView {
@@ -46,6 +64,8 @@
   /** Lo que hace cada botón (`moreMenu()` da las entradas del menú ⋮). */
   interface ToolbarActions {
     moreMenu(): MenuItem[];
+    pagesMenu(): MenuItem[];
+    exportMenu(): MenuItem[];
     first(): void;
     prev(): void;
     next(): void;
@@ -137,9 +157,18 @@
   </button>
 {/snippet}
 
+<!-- Botón con menú («Páginas», «Exportar»); en el móvil, sus entradas van al menú ⋮. -->
+{#snippet menuButton(icon: string, label: string, title: string, items: () => MenuItem[])}
+  <button class="btn btn--ghost tb-btn tb-annotate tb-menu-btn {MENUS}" type="button" {title} aria-label={title}
+          aria-haspopup="menu" onclick={(ev) => openMenu(ev.currentTarget, items())}>
+    <Icon name={icon} size={18} /><span class="tb-annotate__label">{label}</span><span class="tb-menu-btn__arrow"><Icon name="chevron-down" size={12} /></span>
+  </button>
+{/snippet}
+
 {#snippet separator(group = '')}<span class="tb-sep {group}" aria-hidden="true"></span>{/snippet}
 
-<div class="viewer-toolbar" role="toolbar" aria-label={T.label} use:strip>
+<div bind:this={bar} class="viewer-toolbar viewer-toolbar--main" role="toolbar" aria-label={T.label}
+     use:fit={{ levels: LEVELS }} use:strip>
   {@render button('more-vertical', T.more, (ev) => openMenu(ev.currentTarget, actions.moreMenu()))}
   {@render separator()}
   {@render button('chevrons-left', tip(T.first), actions.first, { disabled: view.page <= 0, group: WIDE })}
@@ -187,6 +216,9 @@
           aria-label={T.tools} aria-pressed={view.tools} onclick={actions.toggleTools}>
     <Icon name="pen-line" size={18} /><span class="tb-annotate__label">{T.annotate}</span>
   </button>
+  {@render menuButton('files', T.pages, T.pagesTip, actions.pagesMenu)}
+  {@render menuButton('download', T.export, T.exportTip, actions.exportMenu)}
+  {@render separator(MENUS)}
   {@render button('panel-left', T.thumbnails, actions.toggleSidebar, { checked: view.sidebar })}
   {@render button('moon', T.night, actions.toggleNight, { checked: view.night, group: WIDE })}
   <span class="grow"></span>

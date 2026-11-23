@@ -71,13 +71,15 @@ Para guardarlo pulsa **Ctrl + S**: como aún no tiene archivo, se abre **Guardar
 
 ---
 
-## Desde el menú del visor (⋮)
+## Desde los botones «Páginas» y «Exportar» del visor
 
-* **Insertar páginas desde imágenes…:** elige imágenes y se añaden como páginas detrás de la página actual, con el mismo diálogo. Se puede deshacer (**Ctrl + Z**).
-* **Ajustar imagen de la página…:** rehace la página actual con otro tamaño de hoja, orientación, margen, ajuste o giro. Se puede deshacer.
+En la barra superior del visor (en el móvil, dentro del menú **⋮**):
+
+* **Páginas → Insertar páginas desde imágenes…:** elige imágenes y se añaden como páginas detrás de la página actual, con el mismo diálogo. Se puede deshacer (**Ctrl + Z**).
+* **Páginas → Ajustar imagen de la página…:** rehace la página actual con otro tamaño de hoja, orientación, margen, ajuste o giro. Se puede deshacer.
     * Solo está disponible en las páginas creadas desde imágenes **mientras el documento sigue abierto**. Al cerrarlo y volver a abrirlo, esas páginas pasan a ser páginas normales.
     * Las anotaciones de esa página se quitan al ajustarla (con **Ctrl + Z** vuelven).
-* **Exportar páginas como imágenes (PNG, JPG)…:** guarda cada página como una imagen, con sus anotaciones, en la carpeta que elijas.
+* **Exportar → Exportar páginas como imágenes (PNG, JPG)…:** guarda cada página como una imagen, con sus anotaciones, en la carpeta que elijas.
     * **Formato:** PNG (sin pérdida) o JPG (ocupa menos).
     * **Resolución:** 96 ppp (pantalla), 150 ppp (recomendada) o 300 ppp (impresión).
     * **Páginas:** todas, la actual o un intervalo como `1-3, 5`.

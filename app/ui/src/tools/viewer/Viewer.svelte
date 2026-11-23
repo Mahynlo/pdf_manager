@@ -286,7 +286,7 @@
 
   /** Lo que no cabe en la barra superior en una pantalla estrecha. */
   function hiddenControls(): MenuItem[] {
-    if (!viewport.narrow) return [];
+    if (!viewport.narrow && !toolbar?.collapsed()) return [];
     const B = T.toolbar;
     const mode = (label: string, icon: string, value: Mode): MenuItem => ({
       label, icon, checked: view.mode === value, onSelect: () => canvas.setMode(value),
@@ -325,10 +325,14 @@
         ...rest,
         'separator',
         ...hiddenControls(),
+        // Sin sitio para los botones «Páginas» y «Exportar» (responsive.css y Toolbar.svelte: .tb-menus).
+        ...(viewport.compact || toolbar?.menusCollapsed() ? [...actions.pageItems(), 'separator', ...actions.exportItems(), 'separator'] as MenuItem[] : []),
         { label: T.more.legends, icon: 'tag', onSelect: () => stamps!.manageLegends() },
         { label: T.more.close, icon: 'x', onSelect: close },
       ];
     },
+    pagesMenu: () => actions.pageItems(),
+    exportMenu: () => actions.exportItems(),
     first: () => goTo(0),
     prev,
     next,
