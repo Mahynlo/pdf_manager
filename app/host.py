@@ -35,6 +35,72 @@ TEXT_TYPES = ("Archivos de Texto (*.txt)",)
 _DWMWA_USE_IMMERSIVE_DARK_MODE = 20
 
 
+# Lo que el menú de WebView2 trae de navegador y en la app sobra (nombres de CoreWebView2ContextMenuItem).
+_BROWSER_MENU_ITEMS = frozenset({
+    "back", "forward", "reload", "saveAs", "print", "createQrCode", "share", "webCapture", "inspectElement",
+    "openLinkInNewWindow", "copyLinkLocation", "saveLinkAs", "copyLinkToHighlight", "openImageInNewWindow",
+    "saveImageAs", "copyImageLocation", "saveMediaAs", "loop", "showAllControls", "readAloud", "translate",
+    "openInDefaultBrowser", "moreTools", "other",
+})
+
+
+def _filter_menu(args: Any) -> None:
+    """``ContextMenuRequested``: menú solo en campos de texto o sobre texto seleccionado, y sin lo de navegador."""
+    try:
+        target = args.ContextMenuTarget
+        if not (target.IsEditable or target.HasSelection):
+            args.Handled = True  # sin menú
+            return
+        items = args.MenuItems
+        for i in range(items.Count - 1, -1, -1):
+            if items[i].Name in _BROWSER_MENU_ITEMS:
+                items.RemoveAt(i)
+        # Sin separadores al principio, al final ni dos seguidos (los de lo que se quitó).
+        for i in range(items.Count - 1, -1, -1):
+            separator = str(items[i].Kind) == "Separator"
+            if separator and (i == 0 or i == items.Count - 1 or str(items[i - 1].Kind) == "Separator"):
+                items.RemoveAt(i)
+        log.debug("Menú del botón derecho: %s", [items[i].Name for i in range(items.Count)])
+    except Exception:
+        log.debug("No se pudo filtrar el menú del botón derecho", exc_info=True)
+
+
+def _enable_native_menus() -> None:
+    """El menú del botón derecho de WebView2 donde sirve: en los campos de texto (las sugerencias
+    del corrector, cortar, copiar, pegar) y sobre texto seleccionado (copiar). En el resto de la
+    ventana sigue sin salir, y los menús propios (pestañas, recientes, visor) no cambian: cancelan
+    el del navegador.
+
+    pywebview lo quita fuera de ``--debug`` al crear WebView2, y el ajuste solo vale desde la
+    siguiente navegación (la app es una sola página: no vuelve a navegar). Por eso se activa justo
+    antes de cargar la página, envolviendo ``EdgeChrome.load_url`` (pywebview 6.2: lo llama después
+    de poner sus ajustes). Revisarlo al actualizar pywebview. Solo WebView2."""
+    if os.name != "nt":
+        return
+    try:
+        from webview.platforms import edgechromium
+    except Exception:
+        log.debug("Sin WebView2: no se activa el menú del botón derecho", exc_info=True)
+        return
+    original = edgechromium.EdgeChrome.load_url
+    if getattr(original, "native_menus", False):
+        return
+
+    def load_url(browser: Any, url: str) -> None:
+        try:
+            core = browser.webview.CoreWebView2
+            core.Settings.AreDefaultContextMenusEnabled = True
+            if not getattr(browser, "menu_filtered", False):
+                core.ContextMenuRequested += lambda _sender, args: _filter_menu(args)
+                browser.menu_filtered = True
+        except Exception:
+            log.debug("No se pudo activar el menú del botón derecho de WebView2", exc_info=True)
+        original(browser, url)
+
+    load_url.native_menus = True  # type: ignore[attr-defined]
+    edgechromium.EdgeChrome.load_url = load_url
+
+
 class WebviewHost:
     def __init__(self) -> None:
         self._window: webview.Window | None = None
@@ -61,6 +127,7 @@ class WebviewHost:
         window.events.minimized += lambda: self._memory_target(low=True)
         window.events.restored += lambda: self._memory_target(low=False)
         window.events.maximized += lambda: self._memory_target(low=False)
+        _enable_native_menus()
         if on_drop_files is not None:
             window.events.loaded += self._listen_drops
 
