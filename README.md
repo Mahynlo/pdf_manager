@@ -50,9 +50,22 @@ Accesos a cada herramienta y archivos recientes. Cada PDF y cada herramienta se 
 - Deshacer y rehacer (Ctrl+Z / Ctrl+Y) tanto las anotaciones como las operaciones de página.
 - Imprimir con el diálogo de Windows/Edge (vista previa, páginas, orientación, color, márgenes,
   escala y doble cara), con las anotaciones y en calidad vectorial.
-- Exportar el texto y las imágenes del documento.
+- Exportar el texto y las imágenes del documento, y **las páginas como imágenes** (PNG o JPG, a 96,
+  150 o 300 ppp, con sus anotaciones).
 
 📚 [Cómo está hecho el visor](docs/web/embedpdf.md)
+
+### 🖼️ Imágenes a PDF
+- Abre imágenes (PNG, JPG, WebP, BMP, GIF, SVG) desde Inicio, con Ctrl+O o arrastrándolas: cada una
+  es una página de un **PDF nuevo** que se abre en el visor sin guardar (Ctrl+S → «Guardar como»).
+- Tamaño de hoja (A4, Carta, Oficio, Legal, A5, A3 o el de la imagen), margen y encajar o rellenar.
+- **Orientación automática** (cada página según su imagen) y, en las páginas que haga falta,
+  **a mano** (vertical u horizontal), con la vista previa de todas las páginas tal como quedarán.
+- Los JPG van tal cual (sin perder calidad) y las fotos del móvil salen derechas.
+- En un PDF abierto: **insertar páginas desde imágenes** y **ajustar la imagen** de una página
+  (otro tamaño, margen u orientación), con deshacer.
+
+📚 [Guía de uso](src/assets/ayuda/5_IMAGENES%20A%20PDF.md) · [Cómo está hecho](docs/web/imagenes-pdf.md)
 
 ### 🖍️ Censura
 Marca lo que hay que tapar y revísalo en la página antes de aplicarlo:
@@ -112,6 +125,7 @@ Qué conviene probar con uso real:
 | **Anotaciones, sellos y firmas** | Crearlas, editarlas, guardarlas y abrir el PDF en otro lector (Edge, Acrobat) para ver que se ven igual |
 | **Censura** | Marcar, aplicar y guardar la copia; comprobar en otro lector que el texto tapado ya no se puede copiar ni buscar (tampoco el del OCR) |
 | **OCR** | Página, área y documento entero en escaneos reales; corregir orientación; buscar y exportar el texto reconocido |
+| **Imágenes a PDF** | Fotos del móvil (verticales y apaisadas), capturas, PNG con transparencia y SVG; orientación automática y a mano; insertar y ajustar páginas en un PDF abierto; exportar páginas como imágenes y abrir el PDF guardado en otro lector |
 | **Imprimir** | Distintas impresoras y «Microsoft Print to PDF», con anotaciones y páginas giradas |
 | **Asistente IA** | Con Gemini u OpenAI (clave de API) o con una IA local (Ollama, LM Studio). Sin proveedor responde en modo básico |
 | **Combinar, Extraer y Seguridad** | Los diálogos de Windows para elegir archivos y carpetas, el progreso y los PDF que generan |

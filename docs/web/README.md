@@ -22,6 +22,7 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
 | [instalador.md](instalador.md) | Ejecutable (PyInstaller), instalador (Inno Setup), «Abrir con» e instancia única |
 | [svelte.md](svelte.md) | La interfaz en Svelte (`app/ui`): estructura, compilación y cómo escribir componentes |
 | [embedpdf.md](embedpdf.md) | Migración del visor a EmbedPDF paso a paso: plan, estado y cómo está hecho cada paso |
+| [imagenes-pdf.md](imagenes-pdf.md) | Imágenes en el visor: el PDF que se escribe con ellas, el documento nuevo sin archivo, insertar y ajustar páginas, exportar páginas como imágenes |
 | [navegador.md](navegador.md) | La app en un navegador: el mismo Python en wasm (Pyodide) |
 | [responsive.md](responsive.md) | Adaptación a cada pantalla: cortes, reglas y cómo comprobarlo |
 | [versiones.md](versiones.md) | Publicar una versión: el changelog generado de los commits, cómo escribirlos y la Release |

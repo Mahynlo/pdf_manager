@@ -34,7 +34,8 @@ La segunda barra contiene todas las utilidades para marcar y editar el contenido
 Al hacer clic en el botón de menú superior izquierdo (ícono con líneas/desplegable), encontrarás opciones esenciales para gestionar tu archivo y manipular las páginas:
 * **Guardar e Imprimir:** "Guardar cambios", "Guardar PDF como..." para crear una copia, y "Imprimir documento".
 * **Rotación y Orientación:** "Rotar 90° a la derecha/izquierda", y "Voltear 180°" (para la página actual o todas). Destaca la opción inteligente **Corregir orientación del escaneo**.
-* **Edición de Páginas:** "Insertar página en blanco", "Duplicar página actual" y "Eliminar página actual".
+* **Edición de Páginas:** "Insertar página en blanco", "Insertar páginas desde imágenes", "Ajustar imagen de la página", "Duplicar página actual" y "Eliminar página actual" (ver la guía **Imágenes a PDF**).
+* **Exportar:** "Extraer página actual a nuevo PDF", "Exportar texto del documento", "Exportar páginas como imágenes (PNG, JPG)" y "Extraer todas las imágenes del documento".
 * **Organización:** "Mover página arriba" y "Mover página abajo" para reordenar tu documento.
 * **Cerrar:** "Cerrar pestaña" actual.
 ![alt text](/ayuda_svg/Menu_Principal.svg)
