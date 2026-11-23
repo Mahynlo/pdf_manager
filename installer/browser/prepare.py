@@ -32,7 +32,7 @@ ONNX_FILES = ("ort-wasm-simd-threaded.mjs", "ort-wasm-simd-threaded.wasm")
 MODELS = ROOT / "src" / "assets" / "ocr_models"
 
 SOURCES = ("app/__init__.py", "app/backend", "app/browser", "src/pdf_core")
-ASSETS = ("src/assets/ayuda", "src/assets/ayuda_img", "src/assets/ayuda_svg")
+ASSETS = ("src/assets/ayuda", "src/assets/ayuda_img")
 
 
 def _get(url: str) -> bytes:

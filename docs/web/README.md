@@ -24,6 +24,7 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
 | [embedpdf.md](embedpdf.md) | Migración del visor a EmbedPDF paso a paso: plan, estado y cómo está hecho cada paso |
 | [imagenes-pdf.md](imagenes-pdf.md) | Imágenes en el visor: el PDF que se escribe con ellas, el documento nuevo sin archivo, insertar y ajustar páginas, exportar páginas como imágenes |
 | [navegador.md](navegador.md) | La app en un navegador: el mismo Python en wasm (Pyodide) |
+| [ayuda.md](ayuda.md) | La Ayuda: cómo se escriben las guías (título, índice, teclas, recuadros, enlaces) y cómo se regeneran sus capturas |
 | [responsive.md](responsive.md) | Adaptación a cada pantalla: cortes, reglas y cómo comprobarlo |
 | [versiones.md](versiones.md) | Publicar una versión: el changelog generado de los commits, cómo escribirlos y la Release |
 | [seguridad.md](seguridad.md) | Seguridad: amenazas, medidas (CSP, servidor local, clave de la IA…), riesgos aceptados y cómo comprobarlo |

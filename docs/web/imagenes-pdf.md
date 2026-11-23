@@ -2,7 +2,7 @@
 
 Cómo funcionan «Imágenes a PDF», insertar y ajustar páginas desde imágenes y exportar las páginas
 como imágenes. La guía de uso está en la Ayuda de la app
-([5_IMAGENES A PDF.md](../../src/assets/ayuda/5_IMAGENES%20A%20PDF.md)).
+([06_IMAGENES A PDF.md](../../src/assets/ayuda/06_IMAGENES%20A%20PDF.md)).
 
 ## Resumen
 

@@ -1568,16 +1568,58 @@ def test_help_renders_markdown_safely(tmp_path):
     (docs / "2_SEGUNDO.md").write_text("Texto con <script>alert(1)</script> y [enlace](https://x.org)", encoding="utf-8")
     (docs / "1_PRIMERO.md").write_text("## Sección\n\n| a | b |\n|---|---|\n| 1 | 2 |", encoding="utf-8")
     svc = HelpService((tmp_path / "no_existe", docs))
-    assert svc.documents() == [
-        {"file": "1_PRIMERO.md", "title": "1 PRIMERO"},
-        {"file": "2_SEGUNDO.md", "title": "2 SEGUNDO"},
-    ]
+    assert [(d["file"], d["title"]) for d in svc.documents()] == [("1_PRIMERO.md", "Primero"), ("2_SEGUNDO.md", "Segundo")]
     first = svc.document("1_PRIMERO.md")
-    assert first["title"] == "1 PRIMERO" and "<table>" in first["html"] and "Manual de Usuario" in first["html"]
+    assert first["title"] == "Primero" and "<table>" in first["html"]
     second = svc.document("2_SEGUNDO.md")["html"]
     assert "<script>" not in second and "&lt;script&gt;" in second and 'href="https://x.org"' in second
     with pytest.raises(UserError):
         svc.document("../../secreto.md")  # solo los nombres de la lista
+
+
+def test_help_guide_title_index_keys_and_callouts(tmp_path):
+    docs = tmp_path / "ayuda"
+    docs.mkdir()
+    (docs / "01_VISOR.md").write_text(
+        "# 📄 Visor de **PDF**\n\nLeer y organizar.\n\n## Moverse\n\nPulsa `Ctrl+S` o `Ctrl+Shift+S`; el código `1,3-5` no.\n\n"
+        "## Moverse\n\n> **Consejo:** úsalo.\n\n> Una cita normal.\n",
+        encoding="utf-8",
+    )
+    svc = HelpService((docs,))
+    assert svc.documents() == [{"file": "01_VISOR.md", "title": "Visor de PDF", "icon": "📄", "summary": "Leer y organizar."}]
+    doc = svc.document("01_VISOR.md")
+    assert doc["sections"] == [{"id": "moverse", "title": "Moverse"}, {"id": "moverse-2", "title": "Moverse"}]
+    html = doc["html"]
+    assert "<h1" not in html and "Leer y organizar" not in html  # van en la cabecera, no en el cuerpo
+    assert '<h2 id="moverse">' in html and '<h2 id="moverse-2">' in html
+    assert '<kbd>Ctrl</kbd>+<kbd>S</kbd>' in html and '<kbd>Shift</kbd>+<kbd>S</kbd>' in html
+    assert "<code>1,3-5</code>" in html
+    assert '<blockquote class="callout callout--tip">' in html and html.count("callout") == 2  # la cita normal, sin clase
+
+
+def test_help_search_ignores_accents_and_case(tmp_path):
+    docs = tmp_path / "ayuda"
+    docs.mkdir()
+    (docs / "01_UNO.md").write_text("# 🚀 Uno\n\nResumen.\n\n## Índice del documento\n\nLos MARCADORES del PDF.\n", encoding="utf-8")
+    (docs / "02_DOS.md").write_text("# Dos\n\nNada que ver.\n", encoding="utf-8")
+    svc = HelpService((docs,))
+    hits = svc.search("indice marcadores")
+    assert [(h["file"], h["section"], h["title"]) for h in hits] == [("01_UNO.md", "indice-del-documento", "Índice del documento")]
+    assert "MARCADORES" in hits[0]["snippet"]
+    assert svc.search("  ") == [] and svc.search("inexistente") == []
+
+
+def test_help_real_guides_and_images():
+    """Las guías de la aplicación: todas con título, icono y resumen, y sus imágenes existen."""
+    svc = HelpService()
+    guides = svc.documents()
+    assert len(guides) >= 10 and all(g["title"] and g["icon"] and g["summary"] for g in guides)
+    for guide in guides:
+        html = svc.document(guide["file"])["html"]
+        assert 'src="/ayuda_img/' not in html, guide["file"]  # toda imagen local se encontró e incrustó
+    names = {g["file"].lower() for g in guides}
+    for link in ("visor", "anotar", "buscar", "asistente", "imagenes", "extraer", "combinar", "seguridad", "preguntas"):
+        assert any(link in name for name in names), link  # los enlaces ayuda:… de las guías
 
 
 def test_help_inlines_local_images_only_inside_assets(tmp_path):

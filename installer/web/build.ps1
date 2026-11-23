@@ -33,7 +33,6 @@ $Data = @(
     "app\ui\dist;app\ui\dist",
     "src\assets\ayuda;src\assets\ayuda",
     "src\assets\ayuda_img;src\assets\ayuda_img",
-    "src\assets\ayuda_svg;src\assets\ayuda_svg",
     "src\assets\ocr_models;assets\ocr_models"
 )
 $DataArgs = $Data | ForEach-Object { "--add-data"; "$Root\$_" }

@@ -49,7 +49,6 @@ button, a, [role="tab"] { touch-action: manipulation; }
 /* ── Extra grande: el contenido deja de estirarse ────────────────────────── */
 .tool-page { width: 100%; max-width: 1680px; margin-inline: auto; }
 .settings { width: 100%; max-width: 960px; margin-inline: auto; }
-.markdown { max-width: 80ch; }
 
 @media (min-width: 1600px) {
   .recent { width: 380px; }
@@ -79,9 +78,6 @@ button, a, [role="tab"] { touch-action: manipulation; }
 
   .steps { flex-direction: column; height: auto; padding: 14px; }
   .steps__sep { width: 100%; height: 1px; }
-
-  .help-docs { flex-direction: column; height: auto; }
-  .help-docs__list { width: auto; max-height: 240px; }
 
   .tb-wide { display: none !important; }
 
