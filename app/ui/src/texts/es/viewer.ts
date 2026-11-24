@@ -403,30 +403,44 @@ export default {
     editNoteTitle: 'Editar nota',
     /** Barra de propiedades de la selección (editing.ts). */
     bar: {
-      width: 'Grosor del trazo',
-      fontSize: 'Tamaño de letra',
-      points: (n: number) => `${n} pt`,
-      fill: 'Relleno de forma...',
-      noFill: 'Sin relleno',
-      custom: 'Personalizado...',
+      label: 'Propiedades de la anotación',
       editText: 'Editar texto',
-      duplicate: { label: 'Duplicar', shortcut: 'Ctrl+D' },
+      duplicate: { label: 'Duplicar', shortcut: 'Ctrl+D' }, // solo el atajo
       front: 'Traer al frente',
       back: 'Enviar al fondo',
-      customColor: 'Color personalizado...',
       remove: { label: 'Eliminar', shortcut: 'Supr' },
       close: 'Cerrar',
       cantReorder: 'No se puede cambiar el orden: no se pudo copiar el dibujo de un sello.',
     },
-    /** Paleta de la barra de herramientas (como los botones de color de Qt): [color, nombre]. */
-    palette: [
-      ['#FBC02D', 'Amarillo'], ['#43A047', 'Verde'], ['#1E88E5', 'Azul'],
-      ['#8E24AA', 'Púrpura'], ['#E53935', 'Rojo'], ['#000000', 'Negro'],
-    ] as [string, string][],
-    /** Colores de la barra de propiedades (AnnotationPropertyBar en Qt): [color, nombre]. */
+    /** Botones de estilo y sus paneles (style/): en la barra de anotaciones y en la de la selección. */
+    style: {
+      color: 'Color',
+      textColor: 'Color del texto',
+      width: 'Grosor',
+      fill: 'Relleno',
+      fontSize: 'Tamaño de letra',
+      noFill: 'Sin relleno',
+      points: (n: string) => `${n} pt`,
+      presets: 'Colores',
+      recent: 'Recientes',
+      custom: 'Personalizado',
+      hue: 'Matiz',
+      shade: 'Saturación y brillo',
+      hex: 'Código de color',
+      eyedropper: 'Tomar un color de la pantalla',
+      current: 'Actual',
+      new: 'Nuevo',
+      apply: 'Aplicar',
+      cancel: 'Cancelar',
+      noTool: 'Elige una herramienta para cambiar su estilo',
+      sizeHint: (min: number, max: number) => `De ${min} a ${max} pt`,
+    },
+    /** Colores de la paleta (annotations/styles.svelte.ts): [color, nombre], dos filas de 7. */
     presetColors: [
-      ['#FFD600', 'Amarillo'], ['#4CAF50', 'Verde'], ['#2196F3', 'Azul'], ['#F44336', 'Rojo'],
-      ['#9C27B0', 'Morado'], ['#FF9800', 'Naranja'], ['#212121', 'Negro'],
+      ['#FFD600', 'Amarillo'], ['#FF9800', 'Naranja'], ['#F44336', 'Rojo'], ['#E91E63', 'Rosa'],
+      ['#9C27B0', 'Morado'], ['#2196F3', 'Azul'], ['#4CAF50', 'Verde'],
+      ['#00796B', 'Verde azulado'], ['#1565C0', 'Azul oscuro'], ['#B71C1C', 'Granate'], ['#795548', 'Marrón'],
+      ['#FFFFFF', 'Blanco'], ['#9E9E9E', 'Gris'], ['#000000', 'Negro'],
     ] as [string, string][],
   },
   /** Sellos (stamps/): panel, bibliotecas y gestor de leyendas. */

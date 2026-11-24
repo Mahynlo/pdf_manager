@@ -14,7 +14,7 @@ Pulsa **Anotar** en la barra del visor para abrirla; vuelve a pulsarlo para cerr
 | **2** | **Formas** | Rectángulo, círculo o elipse, línea, flecha, **polilínea** y **polígono** (clic en cada vértice; doble clic para terminar). |
 | **3** | **Trazos libres** | Pluma, **marcador** (trazo translúcido, como un rotulador) y dibujo fino. |
 | **4** | **Insertar** | **Texto** (`T`): clic donde quieras escribir. Con el clic derecho sobre el botón eliges **Texto con flecha** (llamada) o **Nota adhesiva**. **Imagen**: elige un archivo y haz clic donde colocarla. |
-| **5** | **Colores** | El color de las siguientes anotaciones (y de las que tengas seleccionadas). |
+| **5** | **Estilo** | El de la herramienta elegida: colores rápidos y, según la herramienta, **color**, **grosor**, **relleno** y **tamaño de letra**. Cada herramienta recuerda el suyo, también al cerrar la app. |
 
 > **Consejo:** Para resaltar rápido no hace falta abrir la barra: selecciona el texto con la herramienta de selección y elige **Resaltar** en la barra que aparece.
 
@@ -26,9 +26,18 @@ Elige el **Puntero** (en la barra del visor) y haz clic sobre la anotación:
 
 * **Arrástrala** para moverla, o usa las flechas del teclado.
 * Tira de sus **esquinas** para cambiar el tamaño.
-* En la barra que aparece cambias el **color**, el **grosor** del trazo, el **relleno** de las formas y el **tamaño de letra**, y tienes **Editar texto**, **Duplicar** (`Ctrl+D`), **Traer al frente**, **Enviar al fondo** y **Eliminar** (`Supr`).
+* En la barra que aparece cambias su **color**, el **grosor** del trazo, el **relleno** de las formas y el **tamaño de letra** (solo lo que tiene esa anotación), y tienes **Editar texto**, **Traer al frente**, **Enviar al fondo** y **Eliminar** (`Supr`). Para duplicarla, `Ctrl+D`.
 
 Todo se puede deshacer con `Ctrl+Z`.
+
+## Color, grosor y relleno
+
+Los botones de estilo abren un panel pequeño, en la barra de anotaciones y en la de una anotación seleccionada:
+
+* **Color:** pulsa uno de la paleta y se aplica. En **Personalizado** eliges cualquiera: con el cuadro y la barra de colores, escribiendo su código (`#1565C0`) o con el cuentagotas, que toma un color de la pantalla. Se aplica al pulsar **Aplicar**, y se guarda en **Recientes**.
+* **Grosor:** de 0,5 a 100 puntos. Mueve el deslizador, pulsa un valor rápido o escribe el número exacto y pulsa `Intro`. La vista previa muestra cómo queda. El panel sigue abierto para afinar; ciérralo con `Esc` o pulsando fuera.
+* **Relleno** (rectángulo, elipse, polígono y texto): un color o **Sin relleno**.
+* **Tamaño de letra** (texto): de 6 a 96 puntos, igual que el grosor.
 
 ## Texto en la página
 

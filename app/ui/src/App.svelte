@@ -5,6 +5,7 @@
 -->
 <script lang="ts">
   import Menu from '$lib/components/Menu.svelte';
+  import Popover from '$lib/components/Popover.svelte';
   import { feedback } from '$lib/feedback.svelte.ts';
   import Icon from '$lib/Icon.svelte';
   import { openMenu } from '$lib/menu.svelte.ts';
@@ -72,3 +73,4 @@
 </div>
 
 <Menu />
+<Popover />

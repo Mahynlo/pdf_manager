@@ -1,11 +1,12 @@
 <!--
-  Barra de anotaciones (AnnotSubBar en Qt): marcar texto, formas, trazos, texto e imagen y
-  colores, centrada. Se abre con «Anotar» en la barra superior, donde están también la mano, la
+  Barra de anotaciones (AnnotSubBar en Qt): marcar texto, formas, trazos, texto e imagen y, al
+  final, el estilo de la herramienta activa (colores rápidos, color, grosor, relleno, letra: los
+  que tiene; annotations/styles.svelte.ts), centrada. Se abre con «Anotar» en la barra superior, donde están también la mano, la
   selección de texto y el puntero (Toolbar.svelte). Los sellos y la firma, en el panel lateral.
 
   Se compacta para caber (lib/fit.ts, `data-level` en styles/viewer.css):
     0  todo a la vista;
-    1  los colores en un botón;
+    1  sin los colores rápidos (queda el botón de color);
     2  marcar texto, formas y trazos: un botón por grupo (la última herramienta usada y, en la
        flecha, las demás);
     3  también insertar.
@@ -27,15 +28,16 @@
   import { fit } from '$lib/fit.ts';
   import { openMenu, type MenuItem } from '$lib/menu.svelte.ts';
   import { strip } from '$lib/strip.ts';
-  import { PALETTE } from '../annotations/palette.ts';
+  import { QUICK_COLORS, PRESETS, styleOf, type ToolStyle } from '../annotations/styles.svelte.ts';
+  import StyleButtons from '../style/StyleButtons.svelte';
   import { t } from '$texts';
 
-  /** `tool`: herramienta activa; `setTool(t)`, `setColor(hex)`; `visible`: abierta con «Anotar». */
-  let { tool, setTool, setColor, visible }: {
+  /** `tool`: herramienta activa; `setTool(t)`; `setStyle(cambios)`: estilo de la activa; `visible`: abierta con «Anotar». */
+  let { tool, setTool, setStyle, visible }: {
     visible: boolean;
     tool: string;
     setTool: (tool: string) => void;
-    setColor: (color: string) => void;
+    setStyle: (patch: Partial<ToolStyle>) => void;
   } = $props();
 
   const T = t.viewer.tools;
@@ -130,9 +132,9 @@
     openMenu(ev.currentTarget.parentElement!, items);
   }
 
-  function paletteMenu(ev: MouseEvent & { currentTarget: HTMLElement }) {
-    openMenu(ev.currentTarget, PALETTE.map(([color, name]) => ({ label: T.color(name), color, onSelect: () => setColor(color) })));
-  }
+  // Estilo de la herramienta activa (null: no tiene, p. ej. la mano o la imagen).
+  const style = $derived(styleOf(tool));
+  const colorName = (color: string) => PRESETS.find(([c]) => c === color)?.[1] ?? color;
 </script>
 
 {#snippet toolButton({ key, icon, title }: ToolButton)}
@@ -143,7 +145,7 @@
 {/snippet}
 
 <div class="viewer-toolbar viewer-toolbar--tools" role="toolbar" aria-label={T.label} hidden={!visible}
-     use:fit={{ levels: LEVELS }} use:strip>
+     use:fit={{ levels: LEVELS, key: tool }} use:strip>
   {#each GROUPS as group (group.id)}
     <div class="tb-group" role="group" aria-label={group.label} data-collapse={group.collapse}>
       <div class="tb-group__all">
@@ -159,14 +161,15 @@
     </div>
     <span class="tb-sep" aria-hidden="true"></span>
   {/each}
-  <div class="tb-swatches" role="group" aria-label={T.colors}>
-    {#each PALETTE as [color, name] (color)}
-      <button class="tb-swatch" type="button" title={T.color(name)} aria-label={T.color(name)} style:--swatch={color}
-              onclick={() => setColor(color)}></button>
-    {/each}
+  <div class="tb-style" role="group" aria-label={T.colors}>
+    <div class="tb-swatches">
+      {#each QUICK_COLORS as color (color)}
+        <button class="tb-swatch" class:is-checked={style?.color === color} type="button" disabled={!style}
+                title={style ? T.color(colorName(color)) : t.viewer.annotations.style.noTool} aria-label={T.color(colorName(color))}
+                aria-pressed={style?.color === color} style:--swatch={color} onclick={() => setStyle({ color })}></button>
+      {/each}
+    </div>
+    <StyleButtons {style} colorTitle={tool === TOOLS.TEXT || tool === TOOLS.CALLOUT ? t.viewer.annotations.style.textColor : undefined}
+                  onChange={setStyle} />
   </div>
-  <button class="btn btn--icon tb-btn tb-palette" type="button" title={T.colors} aria-label={T.colors}
-          aria-haspopup="menu" onclick={paletteMenu}>
-    <Icon name="palette" size={18} />
-  </button>
 </div>

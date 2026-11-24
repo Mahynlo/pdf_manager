@@ -46,6 +46,7 @@
   import TocTree from './panels/TocTree.svelte';
   import Toolbar from './toolbars/Toolbar.svelte';
   import ToolsBar, { BAR_TOOLS } from './toolbars/ToolsBar.svelte';
+  import { setStyle, type ToolStyle } from './annotations/styles.svelte.ts';
 
   const T = t.viewer;
   const INPUTS = 'input, textarea, select, [contenteditable]';
@@ -223,11 +224,10 @@
     if (BAR_TOOLS.has(next)) view.tools = true; // también con un atajo: se ve cuál está activa
   }
 
-  /** Color de la paleta: lo usan las siguientes anotaciones y, como en Qt, también recolorea las seleccionadas. */
-  function setColor(color: string) {
-    Object.assign(annotations.style, { penColor: color, shapeColor: color, highlightColor: color });
-    if (editor.items.length) editor.setColor(color);
-    canvas.setTool(canvas.tool); // la herramienta activa toma el color nuevo
+  /** Estilo de la herramienta activa (barra de anotaciones): lo usan sus siguientes anotaciones. */
+  function setToolStyle(patch: Partial<ToolStyle>) {
+    setStyle(tool, patch);
+    canvas.setTool(canvas.tool); // EmbedPDF toma el estilo nuevo
   }
 
   /** Imprimir: el diálogo de WebView2 con el PDF y sus anotaciones tal como están en el visor. */
@@ -481,7 +481,7 @@
 
 <div class="viewer">
   <Toolbar bind:this={toolbar} {view} {tool} actions={toolbarActions} />
-  <ToolsBar {tool} {setTool} {setColor} visible={view.tools} />
+  <ToolsBar {tool} {setTool} setStyle={setToolStyle} visible={view.tools} />
   <div class="viewer__body">
     <Thumbnails {docId} count={view.count} current={view.page} {revision} {versions} visible={view.sidebar}
                 fetchThumbs={(pages) => canvas.thumbnails(pages)} release={(url) => URL.revokeObjectURL(url)} onSelect={thumbSelected} onMove={(src, dst) => actions.move(dst, src)} />

@@ -212,16 +212,21 @@ def main() -> None:
             (".viewer-sidebar", 11, "inside"),
             (".viewer-rail", 12, "left"),
         ])
+        # Con el rectángulo elegido: se ven sus botones de estilo (color, grosor, relleno).
+        visible(page, ".viewer-toolbar--tools button[aria-label='Forma: Rectángulo']").click()
+        page.mouse.move(640, 500)  # que no quede ningún botón resaltado
+        page.wait_for_timeout(300)
         first = visible(page, ".viewer-toolbar--tools .tb-group").bounding_box()
-        last = visible(page, ".viewer-toolbar--tools .tb-swatches").bounding_box()
+        last = visible(page, ".viewer-toolbar--tools .tb-style").bounding_box()
         shot(page, "barra-anotaciones.png", [
             (".viewer-toolbar--tools [aria-label='Marcar texto']", 1, "left"),
             (".viewer-toolbar--tools [aria-label='Formas']", 2, "left"),
             (".viewer-toolbar--tools [aria-label='Trazos libres']", 3, "left"),
             (".viewer-toolbar--tools [aria-label='Insertar']", 4, "left"),
-            (".viewer-toolbar--tools .tb-swatches", 5, "left"),
+            (".viewer-toolbar--tools .tb-style", 5, "left"),
         ], clip={"x": first["x"] - 20, "y": first["y"] - 14, "width": last["x"] + last["width"] - first["x"] + 34,
                "height": first["height"] + 26})
+        visible(page, ".viewer-toolbar--main button[aria-label^='Seleccionar Texto']").click()
 
         def panel(label: str, name: str, marks: list[Mark]) -> None:
             visible(page, f".viewer-rail__tab[aria-label^='{label}']").click()

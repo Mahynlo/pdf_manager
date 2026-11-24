@@ -297,9 +297,10 @@ tirador de giro de EmbedPDF), y encima mientras se escribe un texto libre.
 
 | Archivo | Qué hace |
 |---|---|
-| `palette.ts` | Colores y estilos (solo datos; también los valores iniciales de las herramientas en `embed.ts`) |
-| `annotations.ts` | `Annotations`: estilo por visor, marcas de texto, crear/cambiar/borrar, deshacer, aviso de cambios y `sync` con Python |
-| `editing.ts` | `AnnotationEditor`: barra de propiedades (color, grosor, letra, relleno, editar nota, traer al frente, enviar al fondo, duplicar, eliminar), teclado (Supr, Esc, Ctrl+D, flechas) y doble clic en una nota |
+| `styles.svelte.ts` | Paleta y estilo de cada herramienta (color, grosor, relleno, letra): compartido por los visores, guardado en el navegador; también los valores iniciales de `embed.ts` |
+| `style/` (en `tools/viewer`) | Botones de estilo (`StyleButtons.svelte`) y sus paneles emergentes: color con editor propio y «Aplicar» (`ColorPanel.svelte`), grosor y tamaño de letra (`SizePanel.svelte`) |
+| `annotations.ts` | `Annotations`: el estilo de cada herramienta al activarla (`styleOf`), marcas de texto, crear/cambiar/borrar, deshacer, aviso de cambios y `sync` con Python |
+| `editing.ts` | `AnnotationEditor`: barra de propiedades (los botones de estilo que tenga lo seleccionado, editar nota, traer al frente, enviar al fondo, eliminar), teclado (Supr, Esc, Ctrl+D, flechas) y doble clic en una nota |
 | `PdfPage.svelte` | `AnnotationLayer` de EmbedPDF dentro de cada página |
 | `canvas.ts` | `ANNOTATION_TOOL`: herramienta de EmbedPDF de cada herramienta de dibujo (rectángulo → `square`, flecha → `lineArrow`, pluma y trazo fino → `ink`, texto → `freeText`, nota → `textComment`) |
 

@@ -6,7 +6,8 @@ carpeta agrupa una parte del visor:
 | Carpeta | Qué contiene |
 |---|---|
 | `canvas/` | El lienzo con EmbedPDF: el registro y sus complementos (`embed.ts`, `EmbedRoot.svelte`), la clase `PageCanvas` con zoom, modos de vista y herramientas (`canvas.ts`, `layout.ts`), las páginas (`PdfPages.svelte`, `PdfPage.svelte`) y la selección de texto (`selection.ts`) |
-| `annotations/` | Anotaciones: el modelo sobre EmbedPDF (`annotations.ts`), la barra de propiedades y el teclado (`editing.ts`), y colores y estilos (`palette.ts`) |
+| `annotations/` | Anotaciones: el modelo sobre EmbedPDF (`annotations.ts`), la barra de propiedades y el teclado (`editing.ts`), y la paleta y el estilo de cada herramienta (`styles.svelte.ts`) |
+| `style/` | Estilo de una anotación: los botones (`StyleButtons.svelte`, también en la barra de la selección con `mount.svelte.ts`) y sus paneles de color (`ColorPanel.svelte`, `color.ts`) y de grosor o letra (`SizePanel.svelte`) |
 | `stamps/` | Sellos y firmas: las bibliotecas (`library.svelte.ts`, `standard.ts`), el PDF de cada sello (`stamp-pdf.ts`), las firmas (`signatures.svelte.ts`), el panel (`StampsPanel.svelte`) y los diálogos de firma y de leyendas |
 | `redact/` | Censura: las marcas (`redaction.ts`), aplicarlas en el documento con el motor (`apply.ts`), el panel (`RedactPanel.svelte`) y los perfiles (`ProfilesDialog.svelte`) |
 | `ocr/` | OCR: el panel y sus diálogos de lote y resultado, y el reconocimiento de páginas, recortes y su orientación (`recognize.ts`: el motor dibuja, Python reconoce, el motor escribe el texto) |

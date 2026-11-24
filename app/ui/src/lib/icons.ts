@@ -7,13 +7,13 @@
 //
 //   button.append(ic('save'));
 import {
-  ArrowDown, ArrowDownAZ, ArrowRight, ArrowUp, ArrowUpDown, ArrowUpRight, BookOpen, Brush, Calendar,
+  ALargeSmall, ArrowDown, ArrowDownAZ, ArrowRight, ArrowUp, ArrowUpDown, ArrowUpRight, BookOpen, Brush, Calendar,
   ChartBar, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsLeft, ChevronsRight, Circle,
   CircleCheck, CircleExclamationPoint, CircleQuestionMark, CircleStop, Clock, Compass, Copy, CreditCard,
   Crop, Download, EllipsisVertical, Eraser, Eye, EyeOff, File, FilePlus, FileStack, FileText, Files,
   Fingerprint, Folder, FolderOpen, FolderPlus, Globe, Hand, Hash, Highlighter, House, IdCard, Image, Images,
   Info, Keyboard, Landmark, Lightbulb, LineSquiggle, List, ListTree, Lock, LockOpen, Mail, MessageCircle,
-  MessageSquare, Minus, Moon, PaintBucket, Palette, PanelLeft, PanelRight, PenLine, Pencil, Pentagon, Phone,
+  MessageSquare, Minus, Moon, PaintBucket, Palette, Pipette, PanelLeft, PanelRight, PenLine, Pencil, Pentagon, Phone,
   Play, Plus, Pointer, Printer, Redo, Rocket, RotateCcw, RotateCw, Rows2, Save, ScanSearch, ScanText,
   Scissors, Search, Send, Settings, Shield, ShieldCheck, Signature, Sparkles, Square, SquareDashed, Stamp, Star,
   Strikethrough, Sun, Table, Tag, Terminal, TextCursor, Timer, Trash, TriangleAlert, Type, Underline, Undo, Upload,
@@ -24,6 +24,7 @@ import custom from '../assets/icons-custom.json';
 
 /** Nombre en la app → icono de Lucide (algunos nombres son los de versiones anteriores de Lucide). */
 const ICONS: Record<string, IconNode> = {
+  'a-large-small': ALargeSmall,
   'arrow-down': ArrowDown,
   'arrow-down-a-z': ArrowDownAZ,
   'arrow-right': ArrowRight,
@@ -87,6 +88,7 @@ const ICONS: Record<string, IconNode> = {
   'moon': Moon,
   'more-vertical': EllipsisVertical,
   'paint-bucket': PaintBucket,
+  'pipette': Pipette,
   'palette': Palette,
   'panel-left': PanelLeft,
   'panel-right': PanelRight,

@@ -30,6 +30,7 @@ app/ui/
       ui.ts             toast(), setStatus() y diálogos: askChoice, confirmDialog, askText,
                         askPassword, progressDialog, openModal
       menu.svelte.ts    openMenu(botón, opciones) / openMenuAt(x, y, opciones)
+      popover.svelte.ts openPopover(botón, Componente, props): un panel bajo un botón (color, grosor…)
       theme.svelte.ts   tema claro/oscuro compartido (theme.dark, theme.toggle())
       thumbs.ts         miniaturas bajo demanda (ThumbLoader y la acción use:thumb)
       strip.ts, fit.ts  tiras que no caben: use:strip (rueda y bordes difuminados) y use:fit
@@ -37,7 +38,7 @@ app/ui/
       Icon.svelte       un icono por nombre (lib/icons.ts: Lucide y los propios)
       dom.ts, icons.ts  h() e ic(): solo para el código imperativo del lienzo
       components/       Dialog y los diálogos de ui.ts; controles: PasswordField, Checkbox,
-                        RadioGroup, Fieldset, Banner, SubTabs, SectionCard, ToolHeader, Menu
+                        RadioGroup, Fieldset, Banner, SubTabs, SectionCard, ToolHeader, Menu, Popover
     shell/              shell.svelte.ts (estado de las pestañas), TabStrip.svelte y
                         tab-drag.ts (la tira de pestañas y reordenarlas), tools.ts (registro de
                         herramientas), Home y RecentFiles (Inicio), dropzone.ts, router.ts

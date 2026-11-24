@@ -10,6 +10,8 @@ import type { Action } from 'svelte/action';
 export interface FitOptions {
   /** El nivel más compacto. */
   levels: number;
+  /** Si cambia, se vuelve a medir (el contenido cambió sin cambiar el ancho de la barra). */
+  key?: unknown;
 }
 
 export const fit: Action<HTMLElement, FitOptions> = (node, initial) => {
@@ -32,6 +34,7 @@ export const fit: Action<HTMLElement, FitOptions> = (node, initial) => {
     update(next) {
       levels = next.levels;
       measure();
+      requestAnimationFrame(measure); // por si el contenido nuevo aún no estaba pintado
     },
     destroy() {
       resize.disconnect();

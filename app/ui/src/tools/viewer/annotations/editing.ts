@@ -2,19 +2,21 @@
 // property_bar.py y annotation_editing.py en Qt). Seleccionar (Ctrl+clic añade o quita),
 // mover, redimensionar, girar y editar el texto libre en la página (doble clic) lo hace la
 // capa de anotaciones de EmbedPDF. Aquí:
-//   · la barra sobre la selección: color, grosor, tamaño de letra, relleno, editar el texto
-//     (nota, insertar o reemplazar texto), traer al frente, enviar al fondo, duplicar, eliminar;
+//   · la barra sobre la selección: color, grosor, relleno y tamaño de letra (solo los que tiene
+//     lo seleccionado; style/StyleButtons.svelte), editar el texto (nota, insertar o reemplazar
+//     texto), traer al frente, enviar al fondo, eliminar;
 //   · el teclado: Supr, Esc, Ctrl+D y las flechas (con Mayús, de 10 en 10 puntos);
 //   · doble clic en una nota o una marca de inserción: editar su texto (diálogo).
 import { PdfAnnotationSubtype as T, type Position, type Rect } from '@embedpdf/models';
 import { h } from '$lib/dom.ts';
 import { ic } from '$lib/icons.ts';
-import { openMenu } from '$lib/menu.svelte.ts';
+import { closePopover, popoverIn } from '$lib/popover.svelte.ts';
 import { askText, toast } from '$lib/ui.ts';
 import { t, tip } from '$texts';
 import type { PageCanvas } from '../canvas/canvas.ts';
 import type { Annot, AnnotDraft, Annotations } from './annotations.ts';
-import { FONT_SIZES, PRESET_COLORS, STROKE_WIDTHS } from './palette.ts';
+import { mountStyleButtons, type MountedStyleButtons } from '../style/mount.svelte.ts';
+import { NO_FILL, type ToolStyle } from './styles.svelte.ts';
 
 const TX = t.viewer.annotations;
 const WIDTH_TYPES = new Set([T.SQUARE, T.CIRCLE, T.LINE, T.INK, T.POLYLINE, T.POLYGON]);
@@ -23,7 +25,6 @@ const MARKUP_TYPES = new Set([T.HIGHLIGHT, T.UNDERLINE, T.STRIKEOUT, T.SQUIGGLY,
 const TEXT_TYPES = new Set([T.TEXT, T.CARET]); // su texto se edita en un diálogo
 const COLORLESS = new Set([T.STAMP, T.REDACT]); // imágenes; censura: su color lo da el panel
 const NO_COPY = new Set([T.STAMP, T.LINK, T.WIDGET, T.POPUP, T.REDACT]); // sus datos no están en el objeto; marcas: las pone el panel
-const NONE = 'transparent'; // sin relleno, para EmbedPDF
 const DUPLICATE_OFFSET = 7.5; // pt (15 en la escena de Qt)
 const BAR_GAP = 12; // px entre la selección y la barra
 const ROTATE_CLEARANCE = 56; // px sobre la selección que ocupa el tirador de giro de EmbedPDF
@@ -57,7 +58,10 @@ function shifted(object: Annot, dx: number, dy: number): AnnotDraft {
   return copy;
 }
 
-const nearest = (values: number[], value: number) => values.reduce((a, b) => (Math.abs(b - value) < Math.abs(a - value) ? b : a));
+/** Color que se ve de `item`: la letra en el texto libre; el trazo en lo demás. */
+const colorOf = (item: Annot): string => (item.type === T.FREETEXT ? item.fontColor : item.strokeColor ?? item.color) ?? '#000000';
+/** Relleno de `item` (en el texto libre, su fondo). */
+const fillOf = (item: Annot): string => (item.type === T.FREETEXT ? item.backgroundColor : item.color) ?? NO_FILL;
 
 export class AnnotationEditor {
   canvas: PageCanvas;
@@ -65,15 +69,12 @@ export class AnnotationEditor {
   items: Annot[] = []; // seleccionadas (objetos de EmbedPDF)
   dragging = false;
   bar: HTMLDivElement;
-  widthSelect!: HTMLSelectElement;
-  fontSelect!: HTMLSelectElement;
-  fillButton!: HTMLButtonElement;
+  styleButtons!: MountedStyleButtons;
+  styleGroup!: HTMLSpanElement;
   noteButton!: HTMLButtonElement;
-  copyButton!: HTMLButtonElement;
   frontButton!: HTMLButtonElement;
   backButton!: HTMLButtonElement;
   actionsSep!: HTMLSpanElement;
-  colors!: HTMLSpanElement;
 
   constructor(canvas: PageCanvas, annotations: Annotations) {
     this.canvas = canvas;
@@ -84,9 +85,14 @@ export class AnnotationEditor {
 
   /** La selección cambió (aviso de annotations.ts). */
   setSelection(items: Annot[]): void {
+    // Otra selección: se cierra el panel de estilo que estuviera abierto (si es la misma, p. ej.
+    // tras cambiarle el grosor, sigue abierto para afinar).
+    const same = items.length === this.items.length && items.every((item, i) => item.id === this.items[i].id);
+    if (!same && popoverIn(this.bar)) closePopover();
     this.items = items;
     this._configureBar();
     this.placeBar();
+    requestAnimationFrame(() => this.placeBar()); // con los botones de estilo ya pintados (Svelte)
     // Sin selección (la X de la barra, por ejemplo) tampoco se sigue escribiendo en un texto
     // libre. Después del cambio: un clic en el fondo ya lo habrá terminado.
     if (!items.length) requestAnimationFrame(() => !this.items.length && this.canvas.finishEditing());
@@ -161,6 +167,15 @@ export class AnnotationEditor {
     this.annotations.update(this.items, (item) => (FILL_TYPES.has(item.type) ? { color, backgroundColor: color } : null));
   }
 
+  /** Un cambio de los botones de estilo: a lo seleccionado que lo tenga. */
+  _setStyle(patch: Partial<ToolStyle>): void {
+    if (patch.color) this.setColor(patch.color);
+    if (patch.fill) this._setFill(patch.fill);
+    const { width, fontSize } = patch;
+    if (width != null) this.annotations.update(this.items, (item) => (WIDTH_TYPES.has(item.type) ? { strokeWidth: width } : null));
+    if (fontSize != null) this.annotations.update(this.items, (item) => (item.type === T.FREETEXT ? { fontSize } : null));
+  }
+
   /** Texto de una nota o de una marca de insertar o reemplazar texto. */
   async editNote(item: Annot): Promise<void> {
     const [title, label] = item.type === T.CARET ? [TX.editTextTitle, TX.editTextLabel] : [TX.editNoteTitle, TX.noteLabel];
@@ -179,6 +194,7 @@ export class AnnotationEditor {
       if (!inLayer(ev)) return;
       this.dragging = true;
       this.bar.hidden = true;
+      if (popoverIn(this.bar)) closePopover();
     }, { capture: true });
     // En captura en la ventana: EmbedPDF para el `pointerup` del arrastre.
     const release = () => {
@@ -205,64 +221,46 @@ export class AnnotationEditor {
     const iconButton = (icon: string, title: string, onclick: () => void, extra = '') => h('button', {
       class: `btn btn--icon btn--sm ${extra}`, type: 'button', title, 'aria-label': title, onclick, onpointerdown: stop,
     }, ic(icon));
-    const custom = h('input', { type: 'color', class: 'prop-bar__picker', tabindex: '-1', onchange: () => this.setColor(custom.value.toUpperCase()) });
-    const fillPicker = h('input', { type: 'color', class: 'prop-bar__picker', tabindex: '-1', onchange: () => this._setFill(fillPicker.value.toUpperCase()) });
-    this.widthSelect = h('select', {
-      class: 'input input--sm prop-bar__select', title: B.width, onpointerdown: stop,
-      onchange: () => this.annotations.update(this.items, (item) => (WIDTH_TYPES.has(item.type) ? { strokeWidth: Number(this.widthSelect.value) } : null)),
-    }, STROKE_WIDTHS.map((w) => h('option', { value: String(w) }, B.points(w))));
-    this.fontSelect = h('select', {
-      class: 'input input--sm prop-bar__select', title: B.fontSize, onpointerdown: stop,
-      onchange: () => this.annotations.update(this.items, (item) => (item.type === T.FREETEXT ? { fontSize: Number(this.fontSelect.value) } : null)),
-    }, FONT_SIZES.map((s) => h('option', { value: String(s) }, B.points(s))));
-    this.fillButton = iconButton('paint-bucket', B.fill, () => openMenu(this.fillButton, [
-      { label: B.noFill, icon: 'x', onSelect: () => this._setFill(NONE) },
-      'separator',
-      ...PRESET_COLORS.map(([color, name]) => ({ label: name, icon: 'circle', onSelect: () => this._setFill(color) })),
-      'separator',
-      { label: B.custom, icon: 'palette', onSelect: () => fillPicker.click() },
-    ]));
+    this.styleGroup = h('span', { class: 'prop-bar__style' });
+    this.styleButtons = mountStyleButtons(this.styleGroup, (patch) => this._setStyle(patch));
+    this.canvas.loading.then(() => this.canvas.unsubscribe.push(() => this.styleButtons.destroy()));
     this.noteButton = iconButton('pencil', B.editText, () => this.editNote(this.items[0]));
-    this.copyButton = iconButton('copy', tip(B.duplicate), () => this.duplicate());
     this.frontButton = iconButton('arrow-up', B.front, () => this.order(true));
     this.backButton = iconButton('arrow-down', B.back, () => this.order(false));
     this.actionsSep = h('span', { class: 'sel-bar__sep', 'aria-hidden': 'true' });
-    this.colors = h('span', { class: 'prop-bar__colors' },
-      PRESET_COLORS.map(([color, name]) => h('button', {
-        class: 'tb-swatch', type: 'button', title: name, 'aria-label': name, style: { '--swatch': color },
-        onclick: () => this.setColor(color),
-      })),
-      iconButton('palette', B.customColor, () => custom.click()), custom,
-      h('span', { class: 'sel-bar__sep', 'aria-hidden': 'true' }));
-    return h('div', { class: 'prop-bar', role: 'toolbar', hidden: true, onpointerdown: stop },
-      this.colors,
-      this.widthSelect, this.fontSelect, this.fillButton, fillPicker, this.noteButton,
+    return h('div', { class: 'prop-bar', role: 'toolbar', 'aria-label': B.label, hidden: true, onpointerdown: stop },
+      this.styleGroup, this.noteButton,
       this.actionsSep,
       this.frontButton, this.backButton,
-      this.copyButton,
       iconButton('trash', tip(B.remove), () => this.remove(), 'is-danger'),
       iconButton('x', B.close, () => this.clear()),
     );
   }
 
-  /** Muestra solo los controles que aplican a lo seleccionado (como configure_for_items). */
+  /**
+   * Muestra solo los controles que aplican a lo seleccionado (como configure_for_items). Con
+   * varias anotaciones distintas, cada valor es el de la primera que lo tiene.
+   */
   _configureBar(): void {
     const { items } = this;
     this.bar.hidden = !items.length || this.dragging;
     if (!items.length) return;
+    const colored = items.filter((item) => !COLORLESS.has(item.type));
     const withWidth = items.find((item) => WIDTH_TYPES.has(item.type));
+    const withFill = items.find((item) => FILL_TYPES.has(item.type));
     const text = items.find((item) => item.type === T.FREETEXT);
-    this.widthSelect.hidden = !withWidth;
-    if (withWidth) this.widthSelect.value = String(nearest(STROKE_WIDTHS, withWidth.strokeWidth ?? 1));
-    this.fontSelect.hidden = !text;
-    if (text) this.fontSelect.value = String(nearest(FONT_SIZES, text.fontSize ?? 12));
-    this.fillButton.hidden = !items.some((item) => FILL_TYPES.has(item.type));
+    const style: Partial<ToolStyle> = {};
+    if (colored.length) style.color = colorOf(colored[0]);
+    if (withWidth) style.width = withWidth.strokeWidth ?? 1;
+    if (withFill) style.fill = fillOf(withFill);
+    if (text) style.fontSize = text.fontSize ?? 12;
+    const hasStyle = Object.keys(style).length > 0;
+    const onlyText = colored.length > 0 && colored.every((item) => item.type === T.FREETEXT);
+    this.styleButtons.set(hasStyle ? style : null, onlyText ? t.viewer.annotations.style.textColor : undefined);
+    this.styleGroup.hidden = !hasStyle;
     this.noteButton.hidden = !(items.length === 1 && TEXT_TYPES.has(items[0].type));
-    this.colors.hidden = items.every((item) => COLORLESS.has(item.type));
     // Sin nada delante (p. ej. una imagen), sobra el separador de las acciones.
-    this.actionsSep.hidden = this.colors.hidden
-      && [this.widthSelect, this.fontSelect, this.fillButton, this.noteButton].every((el) => el.hidden);
-    this.copyButton.hidden = items.every((item) => NO_COPY.has(item.type));
+    this.actionsSep.hidden = !hasStyle && this.noteButton.hidden;
     this.frontButton.hidden = this.backButton.hidden = items.every((item) => item.type === T.STAMP);
   }
 
