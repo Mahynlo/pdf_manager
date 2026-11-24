@@ -26,6 +26,14 @@ sin más.
 Extraer azul, Combinar verde, OCR naranja, Imágenes a PDF verde azulado, Seguridad ámbar, Ayuda violeta y
 Configuración gris: los mismos tonos que en las versiones anteriores, ajustados a la paleta.
 
+### Colores de las anotaciones
+
+No son de la interfaz: son los del PDF y no cambian con el tema. La paleta (14 colores en dos filas,
+`t.viewer.annotations.presetColors`) y el estilo de cada herramienta están en
+[`tools/viewer/annotations/styles.svelte.ts`](../../app/ui/src/tools/viewer/annotations/styles.svelte.ts).
+Los paneles de estilo (`tools/viewer/style/`) sí usan los tokens; su vista previa del grosor y de la
+letra va sobre blanco, como el papel.
+
 ## Medidas
 
 En [`styles/base.css`](../../app/ui/src/styles/base.css):

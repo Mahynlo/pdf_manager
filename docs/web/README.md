@@ -50,7 +50,10 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
     - resaltar, subrayar, tachar;
     - rectángulo, círculo, flecha, pluma;
     - texto libre, notas, sellos y leyendas guardadas;
-    - edición con el puntero: mover, redimensionar, color, grosor, relleno, orden, duplicar;
+    - estilo por herramienta (color, grosor de 0,5 a 100 pt, relleno, tamaño de letra), recordado
+      entre sesiones; selector de color propio con «Aplicar», recientes y cuentagotas;
+    - edición con el puntero: mover, redimensionar, estilo, orden; en figuras y trazos, duplicar y
+      crear un sello propio con lo seleccionado;
     - deshacer y rehacer.
   - OCR: página actual, recorte y lotes, con métricas y cajas en el lienzo; el texto reconocido se
     selecciona, se busca y se exporta. Corrección de orientación (una página o todas).

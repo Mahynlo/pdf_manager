@@ -17,13 +17,19 @@
     el.style.top = `${top}px`;
   }
 
-  // Se coloca al abrirse y cuando cambia su contenido (p. ej. al desplegar «Personalizado»).
+  // Se coloca al abrirse, cuando cambia su contenido (p. ej. al desplegar «Personalizado») y
+  // cuando cambia la ventana: en el móvil, al salir el teclado para escribir en sus campos (no se
+  // cierra, o no se podría escribir).
   $effect(() => {
     if (!el || !popover.component) return;
     place();
     const resize = new ResizeObserver(place);
     resize.observe(el);
-    return () => resize.disconnect();
+    window.addEventListener('resize', place);
+    return () => {
+      resize.disconnect();
+      window.removeEventListener('resize', place);
+    };
   });
 
   // Se escucha tras el clic que lo abrió. Un clic en su botón lo deja a openPopover (que lo cierra).
@@ -45,20 +51,20 @@
     const timer = setTimeout(() => {
       document.addEventListener('pointerdown', onOutside, true);
       document.addEventListener('keydown', onKey, true);
-      window.addEventListener('resize', closePopover);
     });
     return () => {
       clearTimeout(timer);
       document.removeEventListener('pointerdown', onOutside, true);
       document.removeEventListener('keydown', onKey, true);
-      window.removeEventListener('resize', closePopover);
     };
   });
 </script>
 
 {#if popover.component}
-  <!-- Los clics dentro no llegan a la página (no quitan la selección de la anotación). -->
-  <div class="popover" bind:this={el} role="dialog" tabindex="-1" onpointerdown={(ev) => ev.stopPropagation()}>
+  <!-- Ni los clics ni las teclas de dentro llegan a la página: no quitan la selección de la
+       anotación, y las flechas del cuadro de color no la mueven (Esc lo cierra antes, en onKey). -->
+  <div class="popover" bind:this={el} role="dialog" tabindex="-1" onpointerdown={(ev) => ev.stopPropagation()}
+       onkeydown={(ev) => ev.stopPropagation()}>
     <popover.component {...popover.props} />
   </div>
 {/if}
