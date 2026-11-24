@@ -26,7 +26,8 @@ Elige el **Puntero** (en la barra del visor) y haz clic sobre la anotación:
 
 * **Arrástrala** para moverla, o usa las flechas del teclado.
 * Tira de sus **esquinas** para cambiar el tamaño.
-* En la barra que aparece cambias su **color**, el **grosor** del trazo, el **relleno** de las formas y el **tamaño de letra** (solo lo que tiene esa anotación), y tienes **Editar texto**, **Traer al frente**, **Enviar al fondo** y **Eliminar** (`Supr`). Para duplicarla, `Ctrl+D`.
+* En la barra que aparece cambias su **color**, el **grosor** del trazo, el **relleno** de las formas y el **tamaño de letra** (solo lo que tiene esa anotación), y tienes **Editar texto**, **Traer al frente**, **Enviar al fondo** y **Eliminar** (`Supr`).
+* En las **figuras** y los **trazos** tienes además **Duplicar** (`Ctrl+D`) y **Crear sello**, que guarda lo seleccionado en **Propios** del panel de sellos para ponerlo en cualquier PDF.
 
 Todo se puede deshacer con `Ctrl+Z`.
 

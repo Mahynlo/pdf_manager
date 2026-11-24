@@ -405,7 +405,8 @@ export default {
     bar: {
       label: 'Propiedades de la anotación',
       editText: 'Editar texto',
-      duplicate: { label: 'Duplicar', shortcut: 'Ctrl+D' }, // solo el atajo
+      duplicate: { label: 'Duplicar', shortcut: 'Ctrl+D' },
+      stamp: 'Crear sello: guardar lo seleccionado en «Propios» para ponerlo en cualquier PDF',
       front: 'Traer al frente',
       back: 'Enviar al fondo',
       remove: { label: 'Eliminar', shortcut: 'Supr' },

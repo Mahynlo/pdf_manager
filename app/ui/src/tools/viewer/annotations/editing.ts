@@ -4,7 +4,7 @@
 // capa de anotaciones de EmbedPDF. Aquí:
 //   · la barra sobre la selección: color, grosor, relleno y tamaño de letra (solo los que tiene
 //     lo seleccionado; style/StyleButtons.svelte), editar el texto (nota, insertar o reemplazar
-//     texto), traer al frente, enviar al fondo, eliminar;
+//     texto), en figuras y trazos duplicar y crear sello, traer al frente, enviar al fondo, eliminar;
 //   · el teclado: Supr, Esc, Ctrl+D y las flechas (con Mayús, de 10 en 10 puntos);
 //   · doble clic en una nota o una marca de inserción: editar su texto (diálogo).
 import { PdfAnnotationSubtype as T, type Position, type Rect } from '@embedpdf/models';
@@ -15,11 +15,13 @@ import { askText, toast } from '$lib/ui.ts';
 import { t, tip } from '$texts';
 import type { PageCanvas } from '../canvas/canvas.ts';
 import type { Annot, AnnotDraft, Annotations } from './annotations.ts';
+import { stampFromAnnotations } from '../stamps/library.svelte.ts';
 import { mountStyleButtons, type MountedStyleButtons } from '../style/mount.svelte.ts';
 import { NO_FILL, type ToolStyle } from './styles.svelte.ts';
 
 const TX = t.viewer.annotations;
 const WIDTH_TYPES = new Set([T.SQUARE, T.CIRCLE, T.LINE, T.INK, T.POLYLINE, T.POLYGON]);
+const DRAWINGS = WIDTH_TYPES; // figuras y trazos: con Duplicar y Crear sello en la barra
 const FILL_TYPES = new Set([T.SQUARE, T.CIRCLE, T.POLYGON, T.FREETEXT]);
 const MARKUP_TYPES = new Set([T.HIGHLIGHT, T.UNDERLINE, T.STRIKEOUT, T.SQUIGGLY, T.TEXT, T.CARET]);
 const TEXT_TYPES = new Set([T.TEXT, T.CARET]); // su texto se edita en un diálogo
@@ -72,6 +74,8 @@ export class AnnotationEditor {
   styleButtons!: MountedStyleButtons;
   styleGroup!: HTMLSpanElement;
   noteButton!: HTMLButtonElement;
+  copyButton!: HTMLButtonElement;
+  stampButton!: HTMLButtonElement;
   frontButton!: HTMLButtonElement;
   backButton!: HTMLButtonElement;
   actionsSep!: HTMLSpanElement;
@@ -147,6 +151,11 @@ export class AnnotationEditor {
     const copies = this.items.filter((item) => !NO_COPY.has(item.type))
       .map((item) => shifted(item, DUPLICATE_OFFSET, DUPLICATE_OFFSET));
     if (copies.length) this.annotations.select(this.annotations.create(copies));
+  }
+
+  /** Sello propio con lo seleccionado (pide el nombre; queda en «Propios» del panel de sellos). */
+  makeStamp(): void {
+    if (this.canvas.shown) void stampFromAnnotations(this.annotations, this.canvas.shown, this.items);
   }
 
   /** Traer al frente o enviar al fondo (como el menú de las anotaciones en Qt). */
@@ -225,12 +234,15 @@ export class AnnotationEditor {
     this.styleButtons = mountStyleButtons(this.styleGroup, (patch) => this._setStyle(patch));
     this.canvas.loading.then(() => this.canvas.unsubscribe.push(() => this.styleButtons.destroy()));
     this.noteButton = iconButton('pencil', B.editText, () => this.editNote(this.items[0]));
+    this.copyButton = iconButton('copy', tip(B.duplicate), () => this.duplicate());
+    this.stampButton = iconButton('stamp', B.stamp, () => this.makeStamp());
     this.frontButton = iconButton('arrow-up', B.front, () => this.order(true));
     this.backButton = iconButton('arrow-down', B.back, () => this.order(false));
     this.actionsSep = h('span', { class: 'sel-bar__sep', 'aria-hidden': 'true' });
     return h('div', { class: 'prop-bar', role: 'toolbar', 'aria-label': B.label, hidden: true, onpointerdown: stop },
       this.styleGroup, this.noteButton,
       this.actionsSep,
+      this.copyButton, this.stampButton,
       this.frontButton, this.backButton,
       iconButton('trash', tip(B.remove), () => this.remove(), 'is-danger'),
       iconButton('x', B.close, () => this.clear()),
@@ -262,6 +274,9 @@ export class AnnotationEditor {
     // Sin nada delante (p. ej. una imagen), sobra el separador de las acciones.
     this.actionsSep.hidden = !hasStyle && this.noteButton.hidden;
     this.frontButton.hidden = this.backButton.hidden = items.every((item) => item.type === T.STAMP);
+    // Figuras y trazos (con texto o notas, también): duplicar y guardar como sello.
+    this.copyButton.hidden = this.stampButton.hidden = !items.some((item) => DRAWINGS.has(item.type))
+      || items.some((item) => NO_COPY.has(item.type));
   }
 
   /** ¿Se está escribiendo en un texto libre de la página? */

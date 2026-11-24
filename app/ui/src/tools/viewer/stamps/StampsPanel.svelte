@@ -16,7 +16,7 @@
   import type { Annotations } from '../annotations/annotations.ts';
   import { TOOLS, type PageCanvas } from '../canvas/canvas.ts';
   import LegendsDialog from './LegendsDialog.svelte';
-  import { CUSTOM, stampLibraries as library, type StampItem } from './library.svelte.ts';
+  import { CUSTOM, stampFromAnnotations, stampLibraries as library, type StampItem } from './library.svelte.ts';
   import SignatureDialog, { type NewSignature } from './SignatureDialog.svelte';
   import { signatures } from './signatures.svelte.ts';
   import { textStampSize, type TextStamp } from './stamp-pdf.ts';
@@ -169,13 +169,7 @@
     if (file) addCustom(file.name.replace(/\.[^.]+$/, ''), (name) => library.addFromImage(file, name));
   }
 
-  async function fromSelection() {
-    const items = annotations.selected();
-    if (!items.length) return toast(T.noSelection, 'warning');
-    if (items.some((item) => item.pageIndex !== items[0].pageIndex)) return toast(T.samePage, 'warning');
-    await annotations.commit(); // el dibujo sale del PDF de EmbedPDF: lo pendiente tiene que estar escrito
-    addCustom(T.defaultName, (name) => library.addFromAnnotations(canvas.shown!, items, name));
-  }
+  const fromSelection = () => stampFromAnnotations(annotations, canvas.shown!, annotations.selected());
 
   // ── Firmas ─────────────────────────────────────────────────────────────
   async function newSignature() {
