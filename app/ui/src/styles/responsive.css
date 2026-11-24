@@ -59,14 +59,15 @@ button, a, [role="tab"] { touch-action: manipulation; }
 /* ── Expandido: las columnas laterales se estrechan ──────────────────────── */
 @media (max-width: 1199.98px) {
   .viewer-dock { width: 320px; }
-  .recent { width: 280px; }
+  .recent { width: 260px; }
+  .home__main { padding: 28px 28px; }
 }
 
 /* ── Medio y compacto: una sola columna, los paneles flotan ──────────────── */
 @media (max-width: 839.98px) {
   .home { flex-direction: column; height: auto; min-height: 100%; }
-  .home__center { order: -1; flex: none; overflow: visible; justify-content: flex-start; padding: 28px 16px 20px; }
-  .recent { flex: 1 0 auto; width: auto; padding: 14px 16px; border-right: 0; border-top: 1px solid var(--border-light); }
+  .home__main { order: -1; flex: none; overflow: visible; padding: 24px 16px 20px; }
+  .recent { flex: 1 0 auto; width: auto; padding: 14px 12px; border-right: 0; border-top: 1px solid var(--border-light); }
   .recent__list { flex: none; overflow: visible; }
 
   .merge { height: auto; padding: 14px 16px; }
@@ -103,9 +104,16 @@ button, a, [role="tab"] { touch-action: manipulation; }
   .tab__close { margin-left: 0; }
 
   .home__title { font-size: 24px; }
-  .home__lead { margin-bottom: 16px; }
-  .home__cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; width: 100%; }
-  .home-card { width: auto; height: auto; min-height: 148px; padding: 12px 10px; }
+  .home-open { flex-wrap: wrap; gap: 12px 14px; padding: 16px; }
+  .home-open__icon { width: 44px; height: 44px; }
+  .home-open__info { flex-basis: calc(100% - 60px); }
+  .home-open__button { width: 100%; }
+  .home-open__formats { display: none; }
+  /* Tarjetas en fila: el icono a la izquierda y el texto al lado. */
+  .home__cards { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .home-card { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 14px; row-gap: 2px; min-height: 0; padding: 14px; }
+  .home-card__top { grid-row: span 2; margin: 0; }
+  .home-card__go { display: none; }
 
   .tool-page { padding: 12px; }
   .tool-header { gap: 10px; }
@@ -173,7 +181,13 @@ button, a, [role="tab"] { touch-action: manipulation; }
   .app-header { height: 40px; }
   .tab { height: 32px; }
   .home { flex-direction: row; }
-  .home__center { order: 0; }
+  .home__main { order: 0; overflow: auto; }
+  .home__main { padding: 16px 20px; }
+  .home__inner { gap: 10px; }
+  .home__local, .home__lead, .home-open__formats { display: none; }
+  .home__title { font-size: 20px; }
+  .home-open { padding: 12px 16px; }
+  .home-open__icon { width: 40px; height: 40px; }
   .extract, .merge__column { min-height: 0; }
 }
 
@@ -222,8 +236,15 @@ button, a, [role="tab"] { touch-action: manipulation; }
 @media (hover: none) {
   .recent-row .btn--icon { opacity: 1; }
   .stamp-tile__remove { opacity: 1; visibility: visible; }
-  .home-card:hover { transform: none; box-shadow: none; }
+  .home-card:hover { transform: none; box-shadow: var(--shadow-1); }
+  .home-card__go { display: none; }
   .ai-msg__tools { opacity: 1; }
+}
+
+/* Solo pantalla táctil: no hay nada que arrastrar ni teclado con Ctrl+O. */
+@media (hover: none) and (pointer: coarse) {
+  .home-open__text--mouse { display: none; }
+  .home-open__text--touch { display: block; }
 }
 
 @media (prefers-reduced-motion: reduce) {

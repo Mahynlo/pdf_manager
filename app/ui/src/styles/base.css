@@ -4,8 +4,9 @@
   --radius-sm: 6px;
   --radius: 8px;
   --radius-lg: 12px;
+  --radius-xl: 16px;
   --shadow-1: 0 1px 2px var(--shadow);
-  --shadow-2: 0 6px 20px var(--shadow);
+  --shadow-2: 0 8px 24px -4px var(--shadow), 0 2px 6px var(--shadow);
   --speed: 0.14s;
 }
 

@@ -10,9 +10,9 @@ Qué puedes hacer con Extraer PDFs, cómo abrir tus documentos y dónde está ca
 |---|---|---|
 | **1** | **Menú de la aplicación** | Abrir PDF o imágenes, Imágenes a PDF, cada herramienta, Configuración, Ayuda y el tema claro u oscuro. |
 | **2** | **Pestañas** | Inicio, cada herramienta y cada PDF van en su propia pestaña. Con el clic derecho sobre una pestaña puedes cerrar las demás, moverla o copiar la ruta del archivo. |
-| **3** | **Abrir** | Abre un PDF o imágenes (`Ctrl+O`). |
+| **3** | **Abrir un documento** | **Abrir archivo** abre un PDF o imágenes (`Ctrl+O`). También puedes soltar aquí los archivos, o en cualquier parte de la ventana. |
 | **4** | **Herramientas** | Las tarjetas de las herramientas principales: pulsa una para empezar. |
-| **5** | **Archivos recientes** | Los últimos documentos que abriste. Pulsa uno para volver a abrirlo. |
+| **5** | **Archivos recientes** | Los últimos documentos que abriste, con su tamaño y su carpeta. Pulsa uno para volver a abrirlo. |
 
 ## ¿Qué quieres hacer?
 
@@ -31,7 +31,7 @@ Qué puedes hacer con Extraer PDFs, cómo abrir tus documentos y dónde está ca
 
 Puedes abrir **PDF** e **imágenes** (PNG, JPG, WebP, BMP, GIF y SVG) de varias formas:
 
-* Pulsa `Ctrl+O` o el botón **+** junto a las pestañas.
+* Pulsa **Abrir archivo** en Inicio, `Ctrl+O` o el botón **+** junto a las pestañas.
 * **Arrastra** los archivos desde el Explorador hasta la ventana.
 * Pulsa la tarjeta **OCR de PDF** de Inicio.
 * Pulsa un documento de **Archivos recientes**.

@@ -72,7 +72,9 @@ class DocumentService:
 
     @exposed
     def recent(self) -> list[dict[str, Any]]:
-        return [{"path": p, "name": Path(p).name, "folder": str(Path(p).parent)} for p in recent_files.load(self._exists)]
+        """Los últimos abiertos: ``path``, ``name``, ``folder`` y ``size`` (bytes, o ``None``)."""
+        return [{"path": p, "name": Path(p).name, "folder": str(Path(p).parent), "size": self._host.file_size(p)}
+                for p in recent_files.load(self._exists)]
 
     @exposed
     def remove_recent(self, path: str) -> list[dict[str, Any]]:

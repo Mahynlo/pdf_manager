@@ -371,7 +371,7 @@
 /* Encima de la página (y de sus anotaciones): las marcas. */
 .pdf-page__marks { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 .pdf-page__marks > * { position: absolute; }
-.sel-rect { background: rgba(26, 115, 232, 0.33); }
+.sel-rect { background: rgba(37, 99, 235, 0.30); }
 /* Todas las coincidencias, suaves; la actual, como antes (amarillo con borde naranja). */
 .search-hit { background: rgba(255, 235, 59, 0.3); }
 .search-hit.is-current { background: rgba(255, 235, 59, 0.51); outline: 1.5px solid rgba(255, 160, 0, 0.78); }

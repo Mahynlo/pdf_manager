@@ -285,6 +285,7 @@ def test_documents_open_asks_the_frontend_and_manages_recent_files(tmp_path, two
         viewer.close()
     assert ("recent:changed", None) in host.events
     assert [f["name"] for f in docs.recent()] == ["a.pdf", "b.pdf"]  # el último abierto, primero
+    assert all(f["size"] == Path(f["path"]).stat().st_size for f in docs.recent())  # para Inicio
     assert [f["name"] for f in docs.remove_recent(str(two_pdfs[1].resolve()))] == ["b.pdf"]
     assert docs.clear_recent() == []
 

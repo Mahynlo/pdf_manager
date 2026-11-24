@@ -26,6 +26,16 @@
   $effect(() => on('recent:changed', refresh));
   refresh();
 
+  const NUMBER = new Intl.NumberFormat('es', { maximumFractionDigits: 1 });
+  /** «840 KB», «12,4 MB». */
+  function size(bytes: number): string {
+    const kb = bytes / 1024;
+    return kb < 1024 ? `${NUMBER.format(Math.max(1, Math.round(kb)))} KB` : `${NUMBER.format(kb / 1024)} MB`;
+  }
+  /** Lo que va bajo el nombre: el tamaño y, en el escritorio, la carpeta. */
+  const details = (file: RecentFile) =>
+    [file.size == null ? '' : size(file.size), BROWSER ? '' : file.folder].filter(Boolean).join(' · ');
+
   const open = (file: RecentFile) => shell.openDocument(file.path);
   const remove = (file: RecentFile) => run('remove_recent', file.path);
 
@@ -45,7 +55,7 @@
 
 <aside class="recent">
   <div class="recent__head">
-    <Icon name="clock" size={18} />
+    <Icon name="clock" size={16} />
     <h2 class="recent__title">{T.title}</h2>
     <button class="btn btn--ghost btn--sm" type="button" disabled={!files.length} onclick={() => run('clear_recent')}>
       {T.clear}
@@ -58,7 +68,7 @@
         <span class="recent-row__badge"><Icon name="file-text" size={18} /></span>
         <span class="recent-row__info">
           <span class="recent-row__name ellipsis">{file.name}</span>
-          {#if !BROWSER}<span class="caption ellipsis">{file.folder}</span>{/if}
+          {#if details(file)}<span class="caption ellipsis">{details(file)}</span>{/if}
         </span>
         <button class="btn btn--icon btn--sm" type="button" title={T.remove}
                 onclick={(ev) => { ev.stopPropagation(); remove(file); }}>

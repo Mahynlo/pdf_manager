@@ -188,7 +188,7 @@ def main() -> None:
         page.locator(".tab", has_text="Inicio").click()
         page.wait_for_timeout(500)
         shot(page, "inicio.png", [
-            (".brand", 1, "left"), (".tabstrip", 2, "left"), (".app-header button[title^='Abrir PDF']", 3, "left"),
+            (".brand", 1, "left"), (".tabstrip", 2, "left"), (".home-open", 3, "left"),
             (".home__cards", 4, "left"), (".recent", 5, "inside"),
         ])
 
