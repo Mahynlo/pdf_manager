@@ -1,4 +1,4 @@
-# 🔒 Seguridad
+# :lock: Seguridad
 
 Protege un PDF con contraseña y permisos, o quítale la protección a uno tuyo.
 

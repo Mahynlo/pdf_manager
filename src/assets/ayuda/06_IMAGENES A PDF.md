@@ -1,4 +1,4 @@
-# 🖼️ Imágenes a PDF
+# :images: Imágenes a PDF
 
 Convierte fotos y escaneos en un PDF, añade imágenes como páginas a un PDF abierto y guarda las páginas como imágenes.
 

@@ -104,7 +104,7 @@
 {/snippet}
 
 <div class="merge">
-  <ToolHeader emoji={tool.emoji} color={tool.color} title={T.title} subtitle={T.subtitle} />
+  <ToolHeader icon={tool.icon} color={tool.color} title={T.title} subtitle={T.subtitle} />
   <div class="merge__body">
     <section class="merge__column">
       <div class="section-head">

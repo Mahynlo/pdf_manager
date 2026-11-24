@@ -204,7 +204,7 @@
 {/snippet}
 
 <div class="tool-page tool-page--fill">
-  <ToolHeader emoji={tool.emoji} color={tool.color} title={T.title} subtitle={T.subtitle} />
+  <ToolHeader icon={tool.icon} color={tool.color} title={T.title} subtitle={T.subtitle} />
   <hr class="divider" />
   <div class="help">
     <nav class="card help__nav" class:is-open={navOpen} aria-label={T.guides}>
@@ -219,7 +219,7 @@
       </div>
       <!-- Pantalla estrecha: la guía abierta; al pulsar, la lista. -->
       <button class="help__current" type="button" aria-expanded={navOpen} onclick={() => (navOpen = !navOpen)}>
-        <span class="help__guide-icon" aria-hidden="true">{shown?.icon}</span>
+        <span class="help__guide-icon" aria-hidden="true">{#if shown?.icon}<Icon name={shown.icon} size={18} />{/if}</span>
         <span class="ellipsis grow">{shown?.title ?? T.loading}</span>
         <Icon name="chevron-down" />
       </button>
@@ -244,7 +244,7 @@
             <li>
               <button class="help__guide" class:is-active={active === guide.file} type="button"
                       aria-current={active === guide.file ? 'page' : undefined} onclick={() => open(guide.file)}>
-                <span class="help__guide-icon" aria-hidden="true">{guide.icon}</span>
+                <span class="help__guide-icon" aria-hidden="true"><Icon name={guide.icon || 'book-open'} size={18} /></span>
                 <span class="ellipsis">{guide.title}</span>
               </button>
               {#if active === guide.file && shown?.sections.length}
@@ -266,7 +266,7 @@
     <main class="card help__main" bind:this={main} {onscroll}>
       {#if shown}
         <header class="help__header">
-          <span class="help__header-icon" aria-hidden="true">{shown.icon}</span>
+          <span class="help__header-icon" aria-hidden="true"><Icon name={shown.icon || 'book-open'} size={26} /></span>
           <div>
             <h1 class="help__title">{shown.title}</h1>
             {#if shown.summary}<p class="help__summary">{shown.summary}</p>{/if}
@@ -281,13 +281,13 @@
           {#if index > 0}
             <button class="help__pager-link" type="button" onclick={() => open(all[index - 1].file)}>
               <span class="caption"><Icon name="chevron-left" size={14} /> {T.previous}</span>
-              <span>{all[index - 1].icon} {all[index - 1].title}</span>
+              <span class="help__pager-title"><Icon name={all[index - 1].icon || 'book-open'} />{all[index - 1].title}</span>
             </button>
           {/if}
           {#if index >= 0 && index < all.length - 1}
             <button class="help__pager-link help__pager-link--next" type="button" onclick={() => open(all[index + 1].file)}>
               <span class="caption">{T.next} <Icon name="chevron-right" size={14} /></span>
-              <span>{all[index + 1].icon} {all[index + 1].title}</span>
+              <span class="help__pager-title"><Icon name={all[index + 1].icon || 'book-open'} />{all[index + 1].title}</span>
             </button>
           {/if}
         </footer>

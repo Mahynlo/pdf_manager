@@ -1,4 +1,4 @@
-# 📄 Visor de PDF
+# :file-text: Visor de PDF
 
 Leer un documento, moverte por él y organizar sus páginas.
 

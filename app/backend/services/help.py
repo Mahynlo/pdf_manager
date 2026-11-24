@@ -5,7 +5,7 @@ así es seguro insertarlo en la página tal cual.
 
 Cada guía empieza así (``src/assets/ayuda/``; el número del nombre del archivo da el orden)::
 
-    # 📄 Visor de PDF
+    # :file-text: Visor de PDF                  ← título; :file-text: es su icono (de Lucide, lib/icons.ts)
     Leer, recorrer y organizar un documento.     ← resumen (el primer párrafo)
 
     ## Primera sección                            ← entrada del índice de la guía
@@ -48,8 +48,8 @@ _KEY = r"(?:Ctrl|Mayús|Shift|Alt|Supr|Intro|Esc|Tab|Inicio|Fin|Re Pág|Av Pág|
 _KEYS = re.compile(rf"^{_KEY}(?:\s*\+\s*{_KEY})*$")
 # Recuadros: la primera palabra en negrita de la cita.
 _CALLOUTS = {"consejo": "tip", "importante": "warning", "atención": "warning", "nota": "note"}
-# Emoji (o símbolo) al principio del título: el icono de la guía.
-_ICON = re.compile(r"^(\W+?)\s+(?=\w)")
+# «:nombre:» al principio del título: el icono de la guía (un icono de Lucide de lib/icons.ts).
+_ICON = re.compile(r"^:([a-z0-9-]+):\s*")
 _SEARCH_RESULTS = 12
 
 
@@ -146,7 +146,7 @@ class HelpService:
         if len(tokens) > 2 and tokens[0].type == "heading_open" and tokens[0].tag == "h1":
             title = tokens[1].content.replace("**", "").strip()
             if match := _ICON.match(title):
-                icon, title = match.group(1).strip(), title[match.end():]
+                icon, title = match.group(1), title[match.end():]
             tokens = tokens[3:]
             if len(tokens) > 2 and tokens[0].type == "paragraph_open":
                 summary = _plain(tokens[1].content)
@@ -171,7 +171,7 @@ class HelpService:
 
     @exposed
     def documents(self) -> list[dict[str, str]]:
-        """Las guías en orden: ``file``, ``title``, ``icon`` (un emoji) y ``summary``."""
+        """Las guías en orden: ``file``, ``title``, ``icon`` (nombre de un icono) y ``summary``."""
         guides = []
         for path in self._files():
             try:

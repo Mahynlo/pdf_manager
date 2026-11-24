@@ -1,4 +1,4 @@
-# 🔎 Buscar, OCR y censura
+# :scan-search: Buscar, OCR y censura
 
 Encontrar texto, leer el de un documento escaneado y tapar datos de forma permanente. Todo está en el panel lateral del visor.
 

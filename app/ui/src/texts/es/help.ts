@@ -21,7 +21,7 @@ export default {
   /** Guía de los atajos: no es Markdown, sale de la lista de Configuración (t.settings.shortcuts). */
   shortcuts: {
     title: 'Atajos de teclado',
-    icon: '⌨️',
+    icon: 'keyboard',
     summary: 'Las combinaciones de teclas del visor y de la ventana. También están en Configuración.',
     or: 'o',
   },

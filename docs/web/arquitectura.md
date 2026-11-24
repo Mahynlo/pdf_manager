@@ -62,7 +62,7 @@ app/
     src/main.ts           arranque: estilos, tema guardado y App
     src/styles/           tokens.css (colores del tema),
                           base.css, components.css y uno por área
-    src/assets/icons.json trazos de los iconos
+    src/lib/icons.ts      los iconos: Lucide (paquete `lucide`) y los propios de assets/icons-custom.json
     src/App.svelte        ventana: cabecera con pestañas, vistas, barra de estado, avisos y menú
     src/lib/              api.ts (puente con Python), ui.ts (avisos, barra de estado y diálogos),
                           menu.svelte.ts (menús emergentes), theme.svelte.ts, thumbs.ts
@@ -102,7 +102,7 @@ Con diagramas de secuencia: [como-funciona.md](como-funciona.md), secciones 3, 4
   sus elementos con `h()` (`lib/dom.ts`).
 - **Colores solo desde `tokens.css`** (`var(--accent)`…). El tema cambia con `data-theme` en `<html>`.
 - **Iconos**: `<Icon name="nombre" />` (o `ic('nombre')` en el código del lienzo). Usan
-  `currentColor`, así que siguen el tema solos. Un icono nuevo se añade a `app/ui/src/assets/icons.json`.
+  `currentColor`, así que siguen el tema solos. Son los de [Lucide](https://lucide.dev) (paquete `lucide`, versión fija): un icono nuevo se importa en `app/ui/src/lib/icons.ts` y se añade a su tabla `ICONS` con el nombre que usará la app. Solo llega a la app lo importado. Los pocos que Lucide no tiene (subrayado ondulado, insertar y reemplazar texto, línea, polilínea) están en `assets/icons-custom.json`. La interfaz no usa emojis como iconos.
 - **Listas con clave**: `{#each lista as item (item.id)}`, así Svelte reutiliza los elementos al
   repintar y no se pierde el desplazamiento.
 - **Abrir PDFs**: desde el backend, `DocumentService.open(ruta, contraseña=None)` emite

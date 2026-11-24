@@ -1581,12 +1581,12 @@ def test_help_guide_title_index_keys_and_callouts(tmp_path):
     docs = tmp_path / "ayuda"
     docs.mkdir()
     (docs / "01_VISOR.md").write_text(
-        "# 📄 Visor de **PDF**\n\nLeer y organizar.\n\n## Moverse\n\nPulsa `Ctrl+S` o `Ctrl+Shift+S`; el código `1,3-5` no.\n\n"
+        "# :file-text: Visor de **PDF**\n\nLeer y organizar.\n\n## Moverse\n\nPulsa `Ctrl+S` o `Ctrl+Shift+S`; el código `1,3-5` no.\n\n"
         "## Moverse\n\n> **Consejo:** úsalo.\n\n> Una cita normal.\n",
         encoding="utf-8",
     )
     svc = HelpService((docs,))
-    assert svc.documents() == [{"file": "01_VISOR.md", "title": "Visor de PDF", "icon": "📄", "summary": "Leer y organizar."}]
+    assert svc.documents() == [{"file": "01_VISOR.md", "title": "Visor de PDF", "icon": "file-text", "summary": "Leer y organizar."}]
     doc = svc.document("01_VISOR.md")
     assert doc["sections"] == [{"id": "moverse", "title": "Moverse"}, {"id": "moverse-2", "title": "Moverse"}]
     html = doc["html"]
@@ -1600,7 +1600,7 @@ def test_help_guide_title_index_keys_and_callouts(tmp_path):
 def test_help_search_ignores_accents_and_case(tmp_path):
     docs = tmp_path / "ayuda"
     docs.mkdir()
-    (docs / "01_UNO.md").write_text("# 🚀 Uno\n\nResumen.\n\n## Índice del documento\n\nLos MARCADORES del PDF.\n", encoding="utf-8")
+    (docs / "01_UNO.md").write_text("# :rocket: Uno\n\nResumen.\n\n## Índice del documento\n\nLos MARCADORES del PDF.\n", encoding="utf-8")
     (docs / "02_DOS.md").write_text("# Dos\n\nNada que ver.\n", encoding="utf-8")
     svc = HelpService((docs,))
     hits = svc.search("indice marcadores")
@@ -1672,8 +1672,26 @@ def _svelte_icons(src: str) -> set[str]:
     return used
 
 
+def _icon_names() -> set[str]:
+    """Los iconos que tiene la app: los de Lucide registrados en lib/icons.ts y los propios."""
+    source = (UI_SRC_DIR / "lib" / "icons.ts").read_text(encoding="utf-8")
+    table = source.split("const ICONS", 1)[1].split("};", 1)[0]
+    custom = json.loads((UI_SRC_DIR / "assets" / "icons-custom.json").read_text(encoding="utf-8"))
+    return set(re.findall(r"^  '([a-z0-9-]+)': [A-Z]\w*,$", table, re.MULTILINE)) | set(custom)
+
+
+def test_icons_named_by_the_backend_exist():
+    """Iconos que da el backend: los de los patrones de censura y los de las guías de Ayuda."""
+    from app.backend.services import redact
+
+    names = _icon_names()
+    assert set(redact._PATTERN_ICONS.values()) <= names
+    assert {g["icon"] for g in HelpService().documents()} <= names
+
+
 def test_every_icon_used_in_the_frontend_exists():
-    names = set(json.loads((UI_SRC_DIR / "assets" / "icons.json").read_text(encoding="utf-8")))
+    names = _icon_names()
+    assert len(names) > 100
     src = _frontend_sources()
     assert {"file-text", "sun", "moon"} <= _svelte_icons(src), "el patrón de Svelte no encontró los iconos de App.svelte"
     used = set(_ICON_USE.findall(src)) | _svelte_icons(src)

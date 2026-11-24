@@ -1,4 +1,4 @@
-# ✨ Asistente IA
+# :sparkles: Asistente IA
 
 Pregúntale al documento abierto: resúmenes, datos clave, datos sensibles y cualquier duda sobre su contenido.
 

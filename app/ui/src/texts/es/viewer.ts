@@ -341,7 +341,7 @@ export default {
     removeAll: 'Quitar todas las marcas',
     groupTip: (label: string) => `Clic para ir a sus marcas:\n${label}`,
     removeGroup: 'Quitar sus marcas',
-    empty: 'Sin marcas — escribe una frase, usa ⚡ Patrones o marca en la página',
+    empty: 'Sin marcas — escribe una frase, usa los Patrones o marca en la página',
     color: 'Color',
     colorName: (name: string) => `Color ${name}`,
     /** Colores de relleno (los mismos que Qt): [color, nombre]. */

@@ -1,4 +1,4 @@
-# 🔍 Extraer texto de PDF
+# :search: Extraer texto de PDF
 
 Busca en muchos PDF a la vez las páginas que mencionan algo y júntalas en un PDF nuevo.
 

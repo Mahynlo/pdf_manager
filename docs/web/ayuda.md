@@ -11,7 +11,7 @@ el buscador (`help.search`: todas las palabras, sin tildes ni mayúsculas, por s
 ## Una guía
 
 ```markdown
-# 📄 Visor de PDF                                    ← título; el emoji es su icono en la lista
+# :file-text: Visor de PDF                          ← título; :file-text: es su icono (de Lucide, lib/icons.ts)
 Leer un documento, moverte por él y organizar…       ← resumen (el primer párrafo), bajo el título
 
 ## Las partes del visor                              ← cada «##» es una entrada del índice
@@ -24,7 +24,7 @@ Leer un documento, moverte por él y organizar…       ← resumen (el primer p
   `Inicio`, `Fin`, `Re Pág`, `Av Pág`, `F1`…`F12`, flechas, letras y cifras sueltas. El resto de código se
   queda como código (`1,3-5`).
 * **Recuadros:** una cita que empieza por `**Consejo:**`, `**Importante:**` (o `**Atención:**`) o
-  `**Nota:**` sale como recuadro verde, ámbar o azul. Una cita sin eso, como cita normal.
+  `**Nota:**` sale como recuadro verde, ámbar o azul, con su icono de Lucide (bombilla, aviso, información). Una cita sin eso, como cita normal.
 * **Enlaces:**
     * `[texto](#seccion)`: una sección de la misma guía (el id es el título sin tildes, en minúsculas y con guiones).
     * `[texto](ayuda:visor)`: otra guía, la primera cuyo archivo contiene «visor». `ayuda:atajos` abre los atajos.

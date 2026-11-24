@@ -1,4 +1,4 @@
-# ✏️ Anotar, sellos y firmas
+# :pen-line: Anotar, sellos y firmas
 
 Resaltar, escribir, dibujar, poner sellos y firmar sobre el PDF.
 

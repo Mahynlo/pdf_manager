@@ -1,4 +1,4 @@
-# 📑 Combinar PDFs
+# :files: Combinar PDFs
 
 Une varios PDF en uno solo, eligiendo qué páginas entran y en qué orden.
 

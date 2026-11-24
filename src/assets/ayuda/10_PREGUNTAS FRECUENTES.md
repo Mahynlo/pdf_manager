@@ -1,4 +1,4 @@
-# ❓ Preguntas frecuentes
+# :circle-help: Preguntas frecuentes
 
 Respuestas rápidas a las dudas más habituales.
 

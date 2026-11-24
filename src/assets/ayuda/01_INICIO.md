@@ -1,4 +1,4 @@
-# 🚀 Primeros pasos
+# :rocket: Primeros pasos
 
 Qué puedes hacer con Extraer PDFs, cómo abrir tus documentos y dónde está cada cosa.
 
