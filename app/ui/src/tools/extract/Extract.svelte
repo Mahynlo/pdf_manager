@@ -105,7 +105,7 @@
 </script>
 
 <div class="tool-page">
-  <ToolHeader emoji={tool.emoji} color={tool.color} title={T.title} subtitle={T.subtitle} />
+  <ToolHeader icon={tool.icon} color={tool.color} title={T.title} subtitle={T.subtitle} />
   {#if job}
     <div class="card extract">
       <section class="extract__criteria"><Criteria bind:this={criteria} {job} {onState} /></section>

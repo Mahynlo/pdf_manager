@@ -24,6 +24,8 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
 | [embedpdf.md](embedpdf.md) | Migración del visor a EmbedPDF paso a paso: plan, estado y cómo está hecho cada paso |
 | [imagenes-pdf.md](imagenes-pdf.md) | Imágenes en el visor: el PDF que se escribe con ellas, el documento nuevo sin archivo, insertar y ajustar páginas, exportar páginas como imágenes |
 | [navegador.md](navegador.md) | La app en un navegador: el mismo Python en wasm (Pyodide) |
+| [ayuda.md](ayuda.md) | La Ayuda: cómo se escriben las guías (título, índice, teclas, recuadros, enlaces) y cómo se regeneran sus capturas |
+| [diseno.md](diseno.md) | Paleta de colores, tipografía, medidas y cómo es la pantalla de Inicio |
 | [responsive.md](responsive.md) | Adaptación a cada pantalla: cortes, reglas y cómo comprobarlo |
 | [versiones.md](versiones.md) | Publicar una versión: el changelog generado de los commits, cómo escribirlos y la Release |
 | [seguridad.md](seguridad.md) | Seguridad: amenazas, medidas (CSP, servidor local, clave de la IA…), riesgos aceptados y cómo comprobarlo |
@@ -36,7 +38,7 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
   - Inicio fija, una pestaña por herramienta y una por PDF, menú de marca, tema claro/oscuro;
   - atajos y barra de estado;
   - aviso de cambios sin guardar al cerrar una pestaña o la ventana.
-- **Inicio**: herramientas y archivos recientes.
+- **Inicio**: abrir un documento (o soltarlo), herramientas y archivos recientes con su tamaño.
 - **Combinar, Seguridad y Extraer**: completas, con trabajos en segundo plano, contraseñas y progreso.
 - **Ajustes y Ayuda**: tema, recientes, registro de diagnóstico, atajos y manuales.
 - **Visor de PDF** (páginas dibujadas por EmbedPDF, ver [embedpdf.md](embedpdf.md)):
@@ -48,7 +50,10 @@ uv run pytest tests/test_app_backend.py tests/test_web_architecture.py
     - resaltar, subrayar, tachar;
     - rectángulo, círculo, flecha, pluma;
     - texto libre, notas, sellos y leyendas guardadas;
-    - edición con el puntero: mover, redimensionar, color, grosor, relleno, orden, duplicar;
+    - estilo por herramienta (color, grosor de 0,5 a 100 pt, relleno, tamaño de letra), recordado
+      entre sesiones; selector de color propio con «Aplicar», recientes y cuentagotas;
+    - edición con el puntero: mover, redimensionar, estilo, orden; en figuras y trazos, duplicar y
+      crear un sello propio con lo seleccionado;
     - deshacer y rehacer.
   - OCR: página actual, recorte y lotes, con métricas y cajas en el lienzo; el texto reconocido se
     selecciona, se busca y se exporta. Corrección de orientación (una página o todas).

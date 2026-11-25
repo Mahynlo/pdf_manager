@@ -1,84 +1,113 @@
-/* Colores del tema. */
+/* Paleta de la app (docs/web/diseno.md). Los componentes usan solo estos nombres, nunca colores
+   sueltos: así el tema oscuro es redefinirlos aquí.
+
+   - Neutros: pizarra (grises con un punto de azul).
+   - Acento: azul (botones principales, selección, foco, enlaces).
+   - Marca: el rojo de «Extraer PDFs» (el botón de la marca y los PDF de recientes).
+   - Estados: éxito, aviso, peligro (y `gold`, el de los sellos y las estrellas).
+   - Herramientas (`--c-*`): el color de cada herramienta en su icono (shell/tools.ts). */
 :root {
   color-scheme: light;
-  --bg-base: #F7F9FC;
-  --bg-header: #ECEFF4;
+  /* Fondos, de atrás hacia delante */
+  --bg-header: #EEF2F6;
+  --bg-base: #F8FAFC;
+  --bg-sidebar: #F3F6F9;
   --bg-card: #FFFFFF;
-  --bg-card-hover: #F1F3F4;
-  --bg-subtle: #F1F4F8;
-  --bg-sidebar: #F7F9FC;
+  --bg-card-hover: #F8FAFC;
+  --bg-subtle: #F1F5F9;
   --bg-toolbar: #FFFFFF;
-  --bg-canvas: #E2E5E8;
-  --bg-hover: rgba(0, 0, 0, 0.05);
-  --bg-selected: rgba(26, 115, 232, 0.12);
-  --text-primary: #202124;
-  --text-secondary: #5F6368;
-  --text-muted: #80868B;
-  --icon-color: #4A4F55;
-  --icon-active: #1A73E8;
-  --accent: #1A73E8;
-  --accent-light: rgba(26, 115, 232, 0.10);
-  --accent-hover: #1557B0;
-  --accent-pressed: #0D47A1;
+  --bg-canvas: #E2E8F0;
+  --bg-hover: rgba(15, 23, 42, 0.05);
+  --bg-selected: rgba(37, 99, 235, 0.10);
+  /* Texto e iconos */
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #64748B;
+  --icon-color: #475569;
+  --icon-active: #2563EB;
+  /* Acento */
+  --accent: #2563EB;
+  --accent-light: rgba(37, 99, 235, 0.10);
+  --accent-hover: #1D4ED8;
+  --accent-pressed: #1E40AF;
   --accent-text: #FFFFFF;
-  --border: #DADCE0;
-  --border-light: #E8EAED;
-  --border-strong: #AEB4BC;
-  --shadow: rgba(0, 0, 0, 0.08);
-  --success: #1E8E3E;
-  --success-hover: #18762F;
-  --success-bg: rgba(30, 142, 62, 0.12);
-  --warning: #E37400;
-  --warning-bg: rgba(227, 116, 0, 0.12);
-  --danger: #D93025;
-  --danger-hover: #B3261E;
-  --danger-bg: rgba(217, 48, 37, 0.12);
-  --gold: #F9AB00;
-  --gold-bg: rgba(249, 171, 0, 0.15);
+  /* Bordes y sombras */
+  --border: #D5DCE5;
+  --border-light: #E2E8F0;
+  --border-strong: #94A3B8;
+  --shadow: rgba(15, 23, 42, 0.08);
+  /* Estados */
+  --success: #15803D;
+  --success-hover: #166534;
+  --success-bg: rgba(21, 128, 61, 0.12);
+  --warning: #D97706;
+  --warning-bg: rgba(217, 119, 6, 0.12);
+  --danger: #DC2626;
+  --danger-hover: #B91C1C;
+  --danger-bg: rgba(220, 38, 38, 0.10);
+  --gold: #F59E0B;
+  --gold-bg: rgba(245, 158, 11, 0.15);
+  /* Marca */
   --brand: #D32F2F;
   --brand-bg: rgba(211, 47, 47, 0.08);
-  --log-bg: #F4F6F9;
-  --log-text: #30343A;
+  /* Registro (consola de Extraer, Combinar…) */
+  --log-bg: #F1F5F9;
+  --log-text: #1E293B;
+  /* Herramientas */
+  --c-blue: #2563EB;
+  --c-green: #16A34A;
+  --c-amber: #D97706;
+  --c-orange: #EA580C;
+  --c-teal: #0D9488;
+  --c-violet: #7C3AED;
+  --c-slate: #64748B;
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg-base: #121316;
-  --bg-header: #0B0C0E;
-  --bg-card: #1C1E24;
-  --bg-card-hover: #242730;
-  --bg-subtle: #202229;
-  --bg-sidebar: #181A20;
-  --bg-toolbar: #181A20;
-  --bg-canvas: #121316;
-  --bg-hover: rgba(255, 255, 255, 0.07);
-  --bg-selected: rgba(88, 101, 242, 0.22);
-  --text-primary: #F2F3F5;
-  --text-secondary: #C4C9D0;
-  --text-muted: #8E95A0;
-  --icon-color: #D5D9DF;
-  --icon-active: #8B95FF;
-  --accent: #5865F2;
-  --accent-light: rgba(88, 101, 242, 0.18);
-  --accent-hover: #4752C4;
-  --accent-pressed: #3C45A5;
+  --bg-header: #0B0F15;
+  --bg-base: #10151C;
+  --bg-sidebar: #141A22;
+  --bg-card: #19202A;
+  --bg-card-hover: #202834;
+  --bg-subtle: #1C2430;
+  --bg-toolbar: #141A22;
+  --bg-canvas: #0B0F15;
+  --bg-hover: rgba(226, 232, 240, 0.07);
+  --bg-selected: rgba(96, 165, 250, 0.18);
+  --text-primary: #F1F5F9;
+  --text-secondary: #CBD5E1;
+  --text-muted: #94A3B8;
+  --icon-color: #CBD5E1;
+  --icon-active: #60A5FA;
+  --accent: #3B82F6;
+  --accent-light: rgba(59, 130, 246, 0.18);
+  --accent-hover: #2563EB;
+  --accent-pressed: #1D4ED8;
   --accent-text: #FFFFFF;
-  --border: #3A3D45;
-  --border-light: #2C2F36;
-  --border-strong: #5D626D;
+  --border: #334155;
+  --border-light: #263141;
+  --border-strong: #52617A;
   --shadow: rgba(0, 0, 0, 0.40);
-  --success: #3BA55D;
-  --success-hover: #2F8A4C;
-  --success-bg: rgba(59, 165, 93, 0.18);
-  --warning: #FAA81A;
-  --warning-bg: rgba(250, 168, 26, 0.18);
-  --danger: #ED4245;
-  --danger-hover: #C53033;
-  --danger-bg: rgba(237, 66, 69, 0.18);
-  --gold: #FEE75C;
-  --gold-bg: rgba(254, 231, 92, 0.18);
-  --brand: #FF6B6B;
-  --brand-bg: rgba(255, 107, 107, 0.10);
-  --log-bg: #0F1013;
-  --log-text: #D5D9DF;
+  --success: #22C55E;
+  --success-hover: #16A34A;
+  --success-bg: rgba(34, 197, 94, 0.16);
+  --warning: #F59E0B;
+  --warning-bg: rgba(245, 158, 11, 0.16);
+  --danger: #EF4444;
+  --danger-hover: #DC2626;
+  --danger-bg: rgba(239, 68, 68, 0.16);
+  --gold: #FCD34D;
+  --gold-bg: rgba(252, 211, 77, 0.16);
+  --brand: #F87171;
+  --brand-bg: rgba(248, 113, 113, 0.12);
+  --log-bg: #0B0F15;
+  --log-text: #CBD5E1;
+  --c-blue: #60A5FA;
+  --c-green: #4ADE80;
+  --c-amber: #FBBF24;
+  --c-orange: #FB923C;
+  --c-teal: #2DD4BF;
+  --c-violet: #A78BFA;
+  --c-slate: #94A3B8;
 }

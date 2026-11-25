@@ -19,16 +19,16 @@ from collections.abc import Iterable
 from pdf_core.pdf import PackedPageText, PageText, Rect
 from pdf_core.text_utils import fold_accents
 
-# Patrones predefinidos de datos personales (menú ⚡ del panel).
+# Patrones predefinidos de datos personales (menú «Patrones» del panel; su icono, en services/redact.py).
 PII_PATTERNS = [
-    ("📧 Correos electrónicos", r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+"),
-    ("🪪 DNI / NIE (España)", r"\b(?:\d{8}[A-HJ-NP-TV-Z]|[XYZ]\d{7}[A-HJ-NP-TV-Z])\b"),
-    ("📞 Teléfonos", r"\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}\b"),
-    ("💳 Tarjetas de crédito / débito", r"\b(?:\d{4}[-\s]?){3}\d{4}\b"),
-    ("📅 Fechas (DD/MM/YYYY)", r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b"),
-    ("🌐 Direcciones IP (IPv4)", r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
-    ("🏛️ Cuentas bancarias / IBAN", r"\b[A-Z]{2}\d{2}[A-Z0-9]{4,30}\b"),
-    ("🆔 RFC / CURP (México)", r"\b[A-Z]{4}\d{6}[A-Z0-9]{3}\b|\b[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d\b"),
+    ("Correos electrónicos", r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+"),
+    ("DNI / NIE (España)", r"\b(?:\d{8}[A-HJ-NP-TV-Z]|[XYZ]\d{7}[A-HJ-NP-TV-Z])\b"),
+    ("Teléfonos", r"\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}\b"),
+    ("Tarjetas de crédito / débito", r"\b(?:\d{4}[-\s]?){3}\d{4}\b"),
+    ("Fechas (DD/MM/YYYY)", r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b"),
+    ("Direcciones IP (IPv4)", r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
+    ("Cuentas bancarias / IBAN", r"\b[A-Z]{2}\d{2}[A-Z0-9]{4,30}\b"),
+    ("RFC / CURP (México)", r"\b[A-Z]{4}\d{6}[A-Z0-9]{3}\b|\b[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d\b"),
 ]
 _REGEX_CHARS = frozenset("\\^$*+?[](){}|")
 

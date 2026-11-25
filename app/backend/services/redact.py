@@ -25,6 +25,17 @@ from pdf_core.censorship_profiles import get_profile_manager
 
 SESSION = "redact"  # clave en ``_OpenDocument.extras``
 HEX_COLOR = re.compile(r"#[0-9A-Fa-f]{6}")
+# Icono de cada patrón predefinido en el menú (nombres de app/ui/src/lib/icons.ts).
+_PATTERN_ICONS = {
+    "Correos electrónicos": "mail",
+    "DNI / NIE (España)": "id-card",
+    "Teléfonos": "phone",
+    "Tarjetas de crédito / débito": "credit-card",
+    "Fechas (DD/MM/YYYY)": "calendar",
+    "Direcciones IP (IPv4)": "globe",
+    "Cuentas bancarias / IBAN": "landmark",
+    "RFC / CURP (México)": "fingerprint",
+}
 
 
 @dataclass
@@ -49,7 +60,9 @@ class RedactService:
 
     @exposed
     def patterns(self) -> list[dict[str, str]]:
-        return [{"label": label, "pattern": pattern} for label, pattern in redaction.PII_PATTERNS]
+        """Patrones del menú: ``label``, ``pattern`` e ``icon`` (de la interfaz, lib/icons.ts)."""
+        return [{"label": label, "pattern": pattern, "icon": _PATTERN_ICONS.get(label, "zap")}
+                for label, pattern in redaction.PII_PATTERNS]
 
     @exposed
     def set_options(self, doc_id: int, case_sensitive: bool, whole_word: bool, search_ocr: bool) -> dict[str, Any]:

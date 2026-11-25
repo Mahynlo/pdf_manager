@@ -12,7 +12,7 @@ import { t } from '$texts';
 
 const T = t.shell.tools;
 
-/** Tarjeta de Inicio: título y texto (con saltos de línea). */
+/** Tarjeta de Inicio: título y una frase. */
 export interface Card {
   title: string;
   text: string;
@@ -24,8 +24,7 @@ export interface Tool {
   key: string;
   title: string; // pestaña
   menuLabel: string; // menú de la marca
-  icon: string;
-  emoji: string;
+  icon: string; // de lib/icons.ts: el de la pestaña, el menú, la cabecera y la tarjeta
   color: string;
   card?: Card; // sin tarjeta no sale en Inicio
   section?: number; // grupo en el menú de la marca (separador entre grupos)
@@ -36,14 +35,14 @@ export interface Tool {
 export interface HomeAction {
   after: string; // clave de la herramienta tras la que va
   action: 'open-pdf' | 'images-to-pdf';
-  emoji: string;
+  icon: string;
   color: string;
   card: Card;
 }
 
 /** Tarjeta de Inicio: una herramienta (`tool`, su clave) o una acción. */
 export interface HomeCard {
-  emoji: string;
+  icon: string;
   color: string;
   card: Card;
   tool?: string;
@@ -52,23 +51,23 @@ export interface HomeCard {
 
 export const TOOLS: Tool[] = [
   {
-    key: 'extract', ...T.extract, icon: 'search', emoji: '🔍', color: '#1A73E8',
+    key: 'extract', ...T.extract, icon: 'search', color: 'var(--c-blue)',
     load: () => import('../tools/extract/Extract.svelte'),
   },
   {
-    key: 'merge', ...T.merge, icon: 'files', emoji: '📑', color: '#2E7D32',
+    key: 'merge', ...T.merge, icon: 'files', color: 'var(--c-green)',
     load: () => import('../tools/merge/Merge.svelte'),
   },
   {
-    key: 'security', ...T.security, icon: 'lock', emoji: '🔒', color: '#F9A825',
+    key: 'security', ...T.security, icon: 'lock', color: 'var(--c-amber)',
     load: () => import('../tools/security/Security.svelte'),
   },
   {
-    key: 'settings', ...T.settings, icon: 'settings', emoji: '⚙️', color: '#607D8B', section: 1,
+    key: 'settings', ...T.settings, icon: 'settings', color: 'var(--c-slate)', section: 1,
     load: () => import('../tools/settings/Settings.svelte'),
   },
   {
-    key: 'help', ...T.help, icon: 'circle-help', emoji: '❓', color: '#7E57C2', section: 1,
+    key: 'help', ...T.help, icon: 'circle-help', color: 'var(--c-violet)', section: 1,
     load: () => import('../tools/help/Help.svelte'),
   },
 ];
@@ -80,10 +79,10 @@ export const loadViewer: Loader = () => import('../tools/viewer/Viewer.svelte');
 // (se colocan tras la herramienta indicada en `after`).
 export const HOME_ACTIONS: HomeAction[] = [
   {
-    after: 'merge', action: 'open-pdf', emoji: '📄', color: '#E65100', card: t.shell.actions.openPdf,
+    after: 'merge', action: 'open-pdf', icon: 'scan-text', color: 'var(--c-orange)', card: t.shell.actions.openPdf,
   },
   {
-    after: 'merge', action: 'images-to-pdf', emoji: '🖼️', color: '#00897B', card: t.shell.actions.imagesToPdf,
+    after: 'merge', action: 'images-to-pdf', icon: 'images', color: 'var(--c-teal)', card: t.shell.actions.imagesToPdf,
   },
 ];
 

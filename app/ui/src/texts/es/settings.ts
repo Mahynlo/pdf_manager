@@ -44,14 +44,15 @@ export default {
       ]],
       ['Búsqueda', [
         ['Buscar texto', [['Ctrl', 'F']]],
-        ['Siguiente coincidencia', [['↓']]],
-        ['Coincidencia anterior', [['↑']]],
+        ['Siguiente coincidencia', [['F3'], ['↓']]],
+        ['Coincidencia anterior', [['Shift', 'F3'], ['↑']]],
       ]],
       ['Edición y texto', [
         ['Deshacer', [['Ctrl', 'Z']]],
         ['Rehacer', [['Ctrl', 'Y'], ['Ctrl', 'Shift', 'Z']]],
         ['Seleccionar todo el texto', [['Ctrl', 'A']]],
         ['Copiar texto seleccionado', [['Ctrl', 'C']]],
+        ['Texto libre en la página', [['T']]],
         ['Duplicar anotación', [['Ctrl', 'D']]],
         ['Eliminar selección', [['Supr']]],
         ['Cancelar selección', [['Esc']]],

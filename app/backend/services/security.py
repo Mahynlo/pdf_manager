@@ -28,11 +28,11 @@ PERMISSIONS: tuple[tuple[str, str], ...] = (
 
 # Niveles rápidos en el orden del desplegable (clave del motor, texto).
 PRESETS: tuple[tuple[str, str], ...] = (
-    ("sin_restricciones", "📖 Sin restricciones - Acceso completo a todo"),
-    ("solo_lectura", "🔒 Solo lectura - Ver sin editar ni copiar"),
+    ("sin_restricciones", "Sin restricciones - Acceso completo a todo"),
+    ("solo_lectura", "Solo lectura - Ver sin editar ni copiar"),
     ("solo_impresion", "Solo impresión - Imprimir sin copiar a otro programa"),
     ("impresion_y_lectura", "Impresión y lectura - Leer e imprimir, no editar"),
-    ("muy_restrictivo", "🔐 Muy restrictivo - Acceso mínimo, solo lectura básica"),
+    ("muy_restrictivo", "Muy restrictivo - Acceso mínimo, solo lectura básica"),
 )
 DEFAULT_PRESET = "solo_lectura"
 

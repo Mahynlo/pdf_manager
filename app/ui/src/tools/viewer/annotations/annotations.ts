@@ -33,7 +33,7 @@ import { t } from '$texts';
 import { ANNOTATION_TOOL, TOOLS, type PageCanvas } from '../canvas/canvas.ts';
 import { KINDS, MANUAL_LABEL, type SelectionPart } from '../redact/redaction.ts';
 import { TEXT_STAMP, textStampSize, type TextStamp } from '../stamps/stamp-pdf.ts';
-import { DEFAULT_STYLE, type AnnotationStyle } from './palette.ts';
+import { styleOf } from './styles.svelte.ts';
 
 /**
  * Anotación de EmbedPDF. Es una unión de tipos (rectángulo, texto libre, nota…) y el código lee
@@ -73,16 +73,16 @@ interface HistoryInternals {
 
 type Markup = 'highlight' | 'underline' | 'strikeout' | 'squiggly';
 type TextEdit = 'insert' | 'replace';
-type StyleKey = keyof AnnotationStyle;
 
 const T = PdfAnnotationSubtype;
 const TX = t.viewer.annotations;
 // Marcas de texto: tipo de anotación, herramienta de EmbedPDF (sus valores) y color del estilo.
-const MARKUP: Record<Markup, [PdfAnnotationSubtype, string, StyleKey]> = {
-  highlight: [T.HIGHLIGHT, 'highlight', 'highlightColor'],
-  underline: [T.UNDERLINE, 'underline', 'underlineColor'],
-  strikeout: [T.STRIKEOUT, 'strikeout', 'strikeoutColor'],
-  squiggly: [T.SQUIGGLY, 'squiggly', 'squigglyColor'],
+// [tipo, herramienta de EmbedPDF]; el color, el de la herramienta del visor del mismo nombre (styles.svelte.ts).
+const MARKUP: Record<Markup, [PdfAnnotationSubtype, string]> = {
+  highlight: [T.HIGHLIGHT, 'highlight'],
+  underline: [T.UNDERLINE, 'underline'],
+  strikeout: [T.STRIKEOUT, 'strikeout'],
+  squiggly: [T.SQUIGGLY, 'squiggly'],
 };
 // Insertar y reemplazar texto: marca de inserción (Caret) con el texto; al reemplazar, además,
 // lo seleccionado se tacha y queda agrupado con la marca (como Acrobat).
@@ -102,43 +102,40 @@ const HISTORY_TOPIC = 'annotations'; // el de las órdenes de EmbedPDF (ANNOTATI
 const TEXT_LINE = 1.2;
 const TEXT_PADDING = 6;
 
-/** Estilo de `tool` (herramienta del visor) para los valores de su herramienta de EmbedPDF. */
-function toolDefaults(tool: string, style: AnnotationStyle): Record<string, unknown> {
+/**
+ * Valores de la herramienta de EmbedPDF de `tool` (herramienta del visor): su estilo
+ * (styles.svelte.ts) y, en la censura, el del documento (`redact`).
+ */
+function toolDefaults(tool: string, redact: { redactColor: string; redactOutline: string }): Record<string, unknown> {
+  if (tool === TOOLS.REDACT) {
+    return {
+      color: redact.redactColor, overlayColor: redact.redactColor, strokeColor: redact.redactOutline,
+      contents: MANUAL_LABEL, subject: KINDS.MANUAL,
+    };
+  }
+  const style = styleOf(tool);
+  if (!style) return {};
   switch (tool) {
-    case TOOLS.RECT:
-    case TOOLS.ELLIPSE:
-    case TOOLS.POLYLINE:
-    case TOOLS.POLYGON:
-      return { strokeColor: style.shapeColor, strokeWidth: style.shapeWidth };
-    case TOOLS.LINE:
-    case TOOLS.ARROW:
-      return { strokeColor: style.penColor, strokeWidth: style.shapeWidth };
-    case TOOLS.PEN:
-      return { strokeColor: style.penColor, strokeWidth: style.penWidth };
-    case TOOLS.MARKER:
-      return { strokeColor: style.highlightColor, strokeWidth: style.markerWidth };
-    case TOOLS.DRAW:
-      return { strokeColor: style.penColor, strokeWidth: style.thinWidth };
     case TOOLS.TEXT:
-      return { fontColor: style.penColor, fontSize: style.fontSize };
+      return { fontColor: style.color, fontSize: style.fontSize };
     case TOOLS.CALLOUT:
-      return { fontColor: style.penColor, fontSize: style.fontSize, strokeColor: style.penColor };
+      return { fontColor: style.color, fontSize: style.fontSize, strokeColor: style.color };
     case TOOLS.NOTE:
-      return { strokeColor: style.noteColor, color: style.noteColor };
-    case TOOLS.REDACT:
-      return {
-        color: style.redactColor, overlayColor: style.redactColor, strokeColor: style.redactOutline,
-        contents: MANUAL_LABEL, subject: KINDS.MANUAL,
-      };
-    default:
-      return {};
+    case TOOLS.HIGHLIGHT:
+    case TOOLS.UNDERLINE:
+    case TOOLS.STRIKEOUT:
+    case TOOLS.SQUIGGLY:
+      return { strokeColor: style.color, color: style.color };
+    default: // formas y trazos (el relleno, solo en las que lo tienen)
+      return { strokeColor: style.color, strokeWidth: style.width, ...(style.fill != null && { color: style.fill }) };
   }
 }
 
 export class Annotations {
   canvas: PageCanvas;
   host: AnnotationsHost;
-  style: AnnotationStyle = { ...DEFAULT_STYLE };
+  /** Censura: el relleno de las marcas (lo elige su panel) y el borde de las pendientes. */
+  style = { redactColor: '#000000', redactOutline: '#E53935' };
   seen = new Set<string>(); // anotaciones ya creadas (rehacer no vuelve a pedir el texto de la nota)
   watchers = new Set<() => void>(); // avisar de cualquier cambio en las anotaciones (`watch`)
   measure: CanvasRenderingContext2D | null = null; // para medir el texto libre (_fitText)
@@ -487,8 +484,8 @@ export class Annotations {
    */
   markup(kind: Markup | TextEdit, parts: SelectionPart[]): Annot[] | Promise<Annot[]> {
     if (kind === 'insert' || kind === 'replace') return this._textEdit(kind, parts);
-    const [type, toolId, styleKey] = MARKUP[kind];
-    const color = this.style[styleKey];
+    const [type, toolId] = MARKUP[kind];
+    const color = styleOf(kind)!.color;
     const defaults = this._plugin().provides().getTools().find((tool) => tool.id === toolId)?.defaults ?? {};
     return this.create(parts.map(({ pageIndex, rect, segmentRects }) => ({
       ...defaults, type, pageIndex, rect, segmentRects, strokeColor: color, color,
@@ -507,7 +504,7 @@ export class Annotations {
     if (!last || !line) return [];
     const text = (await askText(title, label, '', { multiline: true }))?.trim();
     if (!text) return [];
-    const color = this.style.editColor;
+    const color = styleOf(TOOLS.INSERT_TEXT)!.color;
     const common = { strokeColor: color, color, opacity: 1, flags: ['print'] };
     const size = line.size.height / 2;
     const [caret] = this.create([{

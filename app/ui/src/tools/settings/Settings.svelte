@@ -41,7 +41,7 @@
 {/snippet}
 
 <div class="tool-page">
-  <ToolHeader emoji={tool.emoji} color={tool.color} title={T.title} subtitle={T.subtitle} />
+  <ToolHeader icon={tool.icon} color={tool.color} title={T.title} subtitle={T.subtitle} />
   <hr class="divider" />
   <div class="settings">
     <SectionCard title={T.appearance.title}>

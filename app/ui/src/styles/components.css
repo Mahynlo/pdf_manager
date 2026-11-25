@@ -115,7 +115,7 @@
 }
 .empty > .icon { color: var(--text-muted); opacity: 0.7; }
 
-/* Página de herramienta y su cabecera: emoji en píldora + título + subtítulo */
+/* Página de herramienta y su cabecera: icono en píldora + título + subtítulo */
 .tool-page { min-height: 100%; display: flex; flex-direction: column; gap: 14px; padding: 16px 20px; }
 .tool-header { display: flex; align-items: center; gap: 16px; }
 .tool-header .title { font-size: 22px; font-weight: 700; }
@@ -126,7 +126,7 @@
   width: 46px;
   height: 46px;
   border-radius: var(--radius-lg);
-  font-size: 22px;
+  color: var(--c);
   background: color-mix(in srgb, var(--c) 15%, transparent);
 }
 .divider { width: 100%; margin: 0; border: 0; border-top: 1px solid var(--border-light); }
@@ -364,3 +364,15 @@
 @keyframes progress-busy { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
 @media (prefers-reduced-motion: reduce) { .progress--busy > span { animation: none; width: 100%; opacity: 0.6; } }
 .progress-dialog .dialog__body { width: min(420px, 90vw); }
+
+/* Una tecla (Configuración → Atajos y la Ayuda). */
+.keycap {
+  min-width: 26px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  font: 600 12px var(--font);
+  text-align: center;
+}

@@ -141,8 +141,8 @@
   async function patterns(ev: MouseEvent & { currentTarget: HTMLButtonElement }) {
     const anchor = ev.currentTarget;
     await run(async () => {
-      const list = await call<{ label: string; pattern: string }[]>('redact.patterns');
-      openMenu(anchor, list.map(({ label, pattern }) => ({ label, onSelect: () => addTerm(pattern) })));
+      const list = await call<{ label: string; pattern: string; icon: string }[]>('redact.patterns');
+      openMenu(anchor, list.map(({ label, pattern, icon }) => ({ label, icon, onSelect: () => addTerm(pattern) })));
     });
   }
 

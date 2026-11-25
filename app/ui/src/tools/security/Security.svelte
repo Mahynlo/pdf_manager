@@ -19,7 +19,7 @@
 {#snippet protect()}<Protect />{/snippet}
 
 <div class="tool-page">
-  <ToolHeader emoji={tool.emoji} color={tool.color} title={T.title} subtitle={T.subtitle} />
+  <ToolHeader icon={tool.icon} color={tool.color} title={T.title} subtitle={T.subtitle} />
   <hr class="divider" />
   <SubTabs tabs={[
     { label: T.tabs.unlock, icon: 'lock-open', panel: unlock },

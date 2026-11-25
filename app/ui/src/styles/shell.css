@@ -139,19 +139,19 @@
 /* ── Inicio ──────────────────────────────────────────────────────────────── */
 .home { display: flex; height: 100%; }
 
+/* Recientes (shell/RecentFiles.svelte) */
 .recent {
   flex: none;
-  width: 330px;
+  width: 300px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 18px 10px 14px 14px;
+  gap: 8px;
+  padding: 16px 10px 12px;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border-light);
 }
-.recent__head { display: flex; align-items: center; gap: 8px; padding: 0 4px 12px; border-bottom: 1px solid var(--border-light); }
-.recent__head > .icon { color: var(--text-muted); }
-.recent__title { flex: 1; font-size: 16px; font-weight: 600; }
+.recent__head { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 4px 0 8px; color: var(--text-muted); }
+.recent__title { flex: 1; font-size: 11.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
 .recent__list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 .recent__empty { padding: 16px; text-align: center; color: var(--text-muted); }
 
@@ -172,56 +172,112 @@
   width: 32px;
   height: 32px;
   border-radius: var(--radius);
-  color: #D32F2F;
-  background: rgba(211, 47, 47, 0.12);
+  color: var(--brand);
+  background: var(--brand-bg);
 }
 .recent-row__info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .recent-row__name { font-weight: 500; }
 .recent-row .btn--icon { opacity: 0; }
 .recent-row:hover .btn--icon, .recent-row:focus-within .btn--icon { opacity: 1; }
 
-.home__center {
-  flex: 1;
-  min-width: 0;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
+/* Lo principal */
+.home__main { flex: 1; min-width: 0; overflow: auto; padding: 36px 40px; }
+.home__inner { display: flex; flex-direction: column; gap: 16px; max-width: 1040px; margin: 0 auto; }
+
+.home__head { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.home__local {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: 6px;
-  padding: 36px;
-  text-align: center;
+  height: 24px;
+  padding: 0 10px;
+  margin-bottom: 4px;
+  border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
+  border-radius: 999px;
+  background: var(--success-bg);
+  color: var(--success);
+  font-size: 12px;
+  font-weight: 600;
 }
-.home__emoji { font-size: 48px; line-height: 1.1; }
-.home__title { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
-.home__lead { font-size: 15px; color: var(--text-secondary); margin-bottom: 24px; }
-.home__cards { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; }
+.home__title { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
+.home__lead { font-size: 15px; color: var(--text-secondary); }
+
+/* Abrir un documento */
+.home-open {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 20px 22px;
+  margin-top: 4px;
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--bg-card);
+  transition: border-color var(--speed), background var(--speed);
+}
+.home-open:hover, body.is-dropping .home-open { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 4%, var(--bg-card)); }
+.home-open__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-lg);
+  color: var(--accent);
+  background: var(--accent-light);
+}
+.home-open__info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.home-open__title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 16px; font-weight: 600; }
+.home-open__formats { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.home-open__format {
+  padding: 1px 6px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font: 600 11px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+.home-open__text { color: var(--text-secondary); }
+.home-open__text .keycap { padding: 0 6px; min-width: 0; }
+.home-open__text--touch { display: none; }
+.home-open__button { flex: none; }
+
+/* Herramientas */
+.home__section {
+  margin-top: 12px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.home__cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
 
 .home-card {
-  position: relative;
-  width: 220px;
-  height: 180px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 150px;
   padding: 18px;
+  text-align: left;
   cursor: pointer;
   transition: transform var(--speed), box-shadow var(--speed), border-color var(--speed);
 }
-.home-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); border-color: var(--border); }
+.home-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); border-color: color-mix(in srgb, var(--c) 40%, var(--border-light)); }
+.home-card__top { display: flex; align-items: flex-start; justify-content: space-between; align-self: stretch; margin-bottom: 8px; }
 .home-card__icon {
   display: grid;
   place-items: center;
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
   border-radius: var(--radius-lg);
-  font-size: 24px;
-  background: color-mix(in srgb, var(--c) 15%, transparent);
+  color: var(--c);
+  background: color-mix(in srgb, var(--c) 14%, transparent);
 }
-.home-card__title { font-size: 16px; font-weight: 600; }
-.home-card__text { color: var(--text-secondary); font-size: 13px; white-space: pre-line; }
+.home-card__go { color: var(--c); opacity: 0; transform: translateX(-4px); transition: opacity var(--speed), transform var(--speed); }
+.home-card:hover .home-card__go, .home-card:focus-visible .home-card__go { opacity: 1; transform: none; }
+.home-card__title { font-size: 15px; font-weight: 600; }
+.home-card__text { color: var(--text-secondary); font-size: 13px; }
 
 /* Arrastrar PDFs a la ventana (dropzone.ts). */
 body.is-dropping::after {

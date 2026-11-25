@@ -85,11 +85,18 @@ center`: si no cabe, se desplaza desde el principio sin cortarse).
 
 Se compacta por niveles para caber (`use:fit`, `lib/fit.ts`, patrón «priority+»): mide el contenido de
 verdad, así vale con ratón o con dedo y con el panel lateral abierto o cerrado.
+Al final van los botones de estilo de la herramienta activa (los que tiene): cambian al elegir otra
+herramienta, por eso `use:fit` recibe `key: tool` y vuelve a medir.
+
+Los paneles de color y de grosor (`lib/popover.svelte.ts`) se quedan dentro de la ventana (debajo del
+botón o, si no cabe, encima) y se recolocan al cambiar su tamaño: en el móvil no se cierran al salir el
+teclado para escribir el código o el número. Con el dedo, el cuadro de color y la barra de matiz son
+más grandes.
 
 | Nivel | Qué cambia |
 |---|---|
 | 0 | Todo a la vista |
-| 1 | Los colores, en un botón con su menú |
+| 1 | Sin los colores rápidos: queda el botón de color de la herramienta |
 | 2 | Marcar texto, formas y trazos: un botón por grupo (la última herramienta usada; la flecha abre las demás) |
 | 3 | También insertar |
 

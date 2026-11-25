@@ -65,7 +65,7 @@ Accesos a cada herramienta y archivos recientes. Cada PDF y cada herramienta se 
 - En un PDF abierto: **insertar páginas desde imágenes** y **ajustar la imagen** de una página
   (otro tamaño, margen u orientación), con deshacer.
 
-📚 [Guía de uso](src/assets/ayuda/5_IMAGENES%20A%20PDF.md) · [Cómo está hecho](docs/web/imagenes-pdf.md)
+📚 [Guía de uso](src/assets/ayuda/06_IMAGENES%20A%20PDF.md) · [Cómo está hecho](docs/web/imagenes-pdf.md)
 
 ### 🖍️ Censura
 Marca lo que hay que tapar y revísalo en la página antes de aplicarlo:

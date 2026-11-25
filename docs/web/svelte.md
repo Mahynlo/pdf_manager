@@ -20,7 +20,7 @@ app/ui/
     main.ts             arranque: estilos, tema guardado, monta App y avisa a Python (app.ready)
     styles/             estilos globales: tokens.css (colores del tema), base, componentes y uno
                         por área (shell, merge, security, extract, settings, help, viewer)
-    assets/icons.json   trazos de los iconos (también los usa la versión Qt)
+    assets/icons-custom.json  los iconos propios que Lucide no tiene
     App.svelte          ventana: cabecera con pestañas, vistas, barra de estado, avisos y menú
     texts/              textos de la interfaz: es/ (catálogo: un archivo por herramienta, shell.ts
                         para la ventana y common.ts para los diálogos de lib/) e index.ts (t, tip())
@@ -30,14 +30,15 @@ app/ui/
       ui.ts             toast(), setStatus() y diálogos: askChoice, confirmDialog, askText,
                         askPassword, progressDialog, openModal
       menu.svelte.ts    openMenu(botón, opciones) / openMenuAt(x, y, opciones)
+      popover.svelte.ts openPopover(botón, Componente, props): un panel bajo un botón (color, grosor…)
       theme.svelte.ts   tema claro/oscuro compartido (theme.dark, theme.toggle())
       thumbs.ts         miniaturas bajo demanda (ThumbLoader y la acción use:thumb)
       strip.ts, fit.ts  tiras que no caben: use:strip (rueda y bordes difuminados) y use:fit
                         (barras que se compactan por niveles)
-      Icon.svelte       iconos del juego común (assets/icons.json)
+      Icon.svelte       un icono por nombre (lib/icons.ts: Lucide y los propios)
       dom.ts, icons.ts  h() e ic(): solo para el código imperativo del lienzo
       components/       Dialog y los diálogos de ui.ts; controles: PasswordField, Checkbox,
-                        RadioGroup, Fieldset, Banner, SubTabs, SectionCard, ToolHeader, Menu
+                        RadioGroup, Fieldset, Banner, SubTabs, SectionCard, ToolHeader, Menu, Popover
     shell/              shell.svelte.ts (estado de las pestañas), TabStrip.svelte y
                         tab-drag.ts (la tira de pestañas y reordenarlas), tools.ts (registro de
                         herramientas), Home y RecentFiles (Inicio), dropzone.ts, router.ts
@@ -184,7 +185,7 @@ ahí, sin buscarlo por el código.
 ## Tests
 
 Los tests de `tests/test_app_backend.py` revisan `app/ui/src`:
-- cada icono usado existe en `icons.json`;
+- cada icono usado existe en `lib/icons.ts` (o en `icons-custom.json`), también los que nombra el backend;
 - cada `call('servicio.metodo')` existe en el backend.
 
 ## Estado

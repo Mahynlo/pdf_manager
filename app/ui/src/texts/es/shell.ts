@@ -61,8 +61,19 @@ export default {
   },
   home: {
     title: 'Inicio',
+    local: 'Todo se procesa en tu equipo',
+    localTip: 'Tus documentos no se suben a ningún servidor',
     heading: '¿Qué quieres hacer hoy?',
-    lead: 'Selecciona una herramienta para comenzar a trabajar',
+    lead: 'Abre un documento o elige una herramienta para empezar.',
+    /** Zona para abrir o soltar archivos. */
+    open: {
+      title: 'Abrir un documento',
+      text: 'Arrastra aquí un PDF o imágenes, o pulsa',
+      touch: 'Elige un PDF o imágenes para verlos y editarlos.',
+      button: 'Abrir archivo',
+      formats: ['PDF', 'PNG', 'JPG', 'WEBP'],
+    },
+    tools: 'Herramientas',
   },
   recent: {
     title: 'Archivos recientes',
@@ -84,24 +95,24 @@ export default {
     extract: {
       title: 'Extraer',
       menuLabel: 'Extraer texto',
-      card: { title: 'Extraer texto de PDF', text: 'Busca y extrae páginas\npor palabras clave' },
+      card: { title: 'Extraer texto de PDF', text: 'Busca en muchos PDF a la vez las páginas que mencionan algo y júntalas.' },
     },
     merge: {
       title: 'Combinar',
       menuLabel: 'Combinar PDFs',
-      card: { title: 'Combinar PDFs', text: 'Une varios PDFs\neligiendo las páginas' },
+      card: { title: 'Combinar PDFs', text: 'Une varios PDF en uno, eligiendo qué páginas entran y en qué orden.' },
     },
     security: {
       title: 'Seguridad',
       menuLabel: 'Seguridad',
-      card: { title: 'Gestión de Seguridad', text: 'Desbloquea y protege\ntus documentos' },
+      card: { title: 'Gestión de Seguridad', text: 'Protege un PDF con contraseña y permisos, o quítale la protección.' },
     },
     settings: { title: 'Ajustes', menuLabel: 'Configuración' },
     help: { title: 'Ayuda', menuLabel: 'Ayuda' },
   },
   /** Tarjetas de Inicio que hacen una acción en vez de abrir una herramienta. */
   actions: {
-    openPdf: { title: 'OCR de PDF', text: 'Abre un PDF y ejecuta\nreconocimiento de texto' },
-    imagesToPdf: { title: 'Imágenes a PDF', text: 'Convierte fotos y escaneos\nen un documento PDF' },
+    openPdf: { title: 'OCR de PDF', text: 'Abre un escaneo y reconoce su texto para buscarlo y copiarlo.' },
+    imagesToPdf: { title: 'Imágenes a PDF', text: 'Convierte fotos y escaneos en un documento PDF.' },
   },
 };

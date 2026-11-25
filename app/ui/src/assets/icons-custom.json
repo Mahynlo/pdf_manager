@@ -1,0 +1,7 @@
+{
+ "line": "<path d=\"M5 19 19 5\"/>",
+ "polyline": "<path d=\"M3 17 9 8l5 7 7-10\"/>",
+ "squiggly": "<path d=\"M6 3v6a6 6 0 0 0 12 0V3\"/><path d=\"M3 20c1.5-1.5 3-1.5 4.5 0s3 1.5 4.5 0 3-1.5 4.5 0 3 1.5 4.5 0\"/>",
+ "text-insert": "<path d=\"M4 5h16\"/><path d=\"M4 10h16\"/><path d=\"m8 20 4-6 4 6\"/>",
+ "text-replace": "<path d=\"M6 4h12\"/><path d=\"M3 8h18\"/><path d=\"M6 12h12\"/><path d=\"m8 21 4-5 4 5\"/>"
+}

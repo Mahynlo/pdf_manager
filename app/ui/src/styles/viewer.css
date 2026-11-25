@@ -278,11 +278,11 @@
   cursor: pointer;
 }
 .tb-split__more:hover { background: var(--bg-hover); color: var(--text-primary); }
-.tb-palette { display: none; }
+/* Estilo de la herramienta activa (style/StyleButtons.svelte). */
+.tb-style { display: flex; align-items: center; gap: 2px; }
 
-/* Nivel 1: los colores en un botón. */
+/* Nivel 1: sin los colores rápidos (queda el botón de color). */
 .viewer-toolbar--tools[data-level]:not([data-level="0"]) .tb-swatches { display: none; }
-.viewer-toolbar--tools[data-level]:not([data-level="0"]) .tb-palette { display: inline-flex; }
 /* Niveles 2 y 3: cada grupo en un botón (insertar, solo en el 3). */
 .viewer-toolbar--tools:is([data-level="2"], [data-level="3"]) [data-collapse="2"] > .tb-group__all,
 .viewer-toolbar--tools[data-level="3"] [data-collapse="3"] > .tb-group__all { display: none; }
@@ -301,7 +301,9 @@
   background: var(--swatch);
   cursor: pointer;
 }
-.tb-swatch:hover { transform: scale(1.12); }
+.tb-swatch:hover:not(:disabled) { transform: scale(1.12); }
+.tb-swatch:disabled { opacity: 0.35; cursor: default; }
+.tb-swatch.is-checked { box-shadow: 0 0 0 2px var(--bg-toolbar), 0 0 0 3.5px var(--accent); }
 
 /* ── Barra de propiedades de la anotación seleccionada ───────────────────── */
 /* Texto libre en edición (EmbedPDF): se ve todo lo escrito, cada línea entera, aunque aún no
@@ -324,11 +326,9 @@
   background: var(--bg-card);
   box-shadow: var(--shadow-2);
 }
-.prop-bar .tb-swatch { margin: 0 1px; border-width: 1.5px; }
-.prop-bar__colors { display: flex; align-items: center; gap: 4px; }
-.prop-bar__colors[hidden] { display: none; }
-.prop-bar__select { width: 74px; }
-.prop-bar__picker { position: absolute; width: 0; height: 0; padding: 0; border: 0; opacity: 0; pointer-events: none; }
+.prop-bar__style { display: flex; align-items: center; gap: 2px; }
+.prop-bar__style[hidden] { display: none; }
+.prop-bar .style-btn { height: 28px; }
 
 /* Gestor de leyendas */
 .legends-dialog .dialog__body { width: min(600px, 94vw); }
@@ -371,7 +371,7 @@
 /* Encima de la página (y de sus anotaciones): las marcas. */
 .pdf-page__marks { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 .pdf-page__marks > * { position: absolute; }
-.sel-rect { background: rgba(26, 115, 232, 0.33); }
+.sel-rect { background: rgba(37, 99, 235, 0.30); }
 /* Todas las coincidencias, suaves; la actual, como antes (amarillo con borde naranja). */
 .search-hit { background: rgba(255, 235, 59, 0.3); }
 .search-hit.is-current { background: rgba(255, 235, 59, 0.51); outline: 1.5px solid rgba(255, 160, 0, 0.78); }

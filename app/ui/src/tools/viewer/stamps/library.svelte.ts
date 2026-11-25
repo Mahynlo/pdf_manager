@@ -12,9 +12,9 @@
 import { PdfAnnotationName } from '@embedpdf/models';
 import type { StampCapability, StampDefinition, StampLibrary, StampPlugin } from '@embedpdf/plugin-stamp';
 import { call } from '$lib/api.ts';
-import { toast } from '$lib/ui.ts';
+import { askText, setStatus, toast } from '$lib/ui.ts';
 import { t } from '$texts';
-import type { Annot } from '../annotations/annotations.ts';
+import type { Annot, Annotations } from '../annotations/annotations.ts';
 import { registry } from '../canvas/embed.ts';
 import { imageStampPdf, textStampPdf, type TextStamp } from './stamp-pdf.ts';
 import { STANDARD } from './standard.ts';
@@ -212,3 +212,22 @@ class StampLibraries {
 }
 
 export const stampLibraries = new StampLibraries();
+
+/**
+ * Sello propio con las anotaciones `items` de `annotations` (de una misma página): pide el nombre
+ * y lo guarda en «Propios». Lo usan el panel de sellos («Desde lo seleccionado») y la barra de la
+ * selección («Crear sello»).
+ */
+export async function stampFromAnnotations(annotations: Annotations, documentId: string, items: Annot[]): Promise<void> {
+  if (!items.length) return void toast(T.noSelection, 'warning');
+  if (items.some((item) => item.pageIndex !== items[0].pageIndex)) return void toast(T.samePage, 'warning');
+  await annotations.commit(); // el dibujo sale del PDF de EmbedPDF: lo pendiente tiene que estar escrito
+  const name = (await askText(T.nameTitle, T.nameLabel, T.defaultName))?.trim();
+  if (!name) return;
+  try {
+    await stampLibraries.addFromAnnotations(documentId, items, name);
+    setStatus(T.added(name));
+  } catch (err) {
+    toast(T.addError((err as Error).message ?? String(err)), 'danger');
+  }
+}

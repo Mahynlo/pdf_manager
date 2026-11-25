@@ -23,7 +23,7 @@
 | Recurso | Ruta en `_internal` | Lo usa |
 |---|---|---|
 | `app\ui\dist` | `app\ui\dist` | La ventana (`app.UI_DIST_DIR`) |
-| `src\assets\ayuda`, `ayuda_img`, `ayuda_svg` | Las mismas | Pestaña Ayuda (`services/help.py`) |
+| `src\assets\ayuda`, `ayuda_img` | Las mismas | Pestaña Ayuda (`services/help.py`) |
 | `src\assets\ocr_models` | `assets\ocr_models` | Modelos de OCR de PaddleOCR (`pdf_core/ocr/models.py` los busca dos carpetas por encima de su archivo). Los `.onnx` son un componente opcional del instalador |
 | Módulos de `pdf_core` | Dentro del ejecutable | Todo el backend |
 

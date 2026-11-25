@@ -13,6 +13,7 @@ export interface RecentFile {
   path: string;
   name: string;
   folder: string;
+  size: number | null; // bytes
 }
 
 /** Entrada del índice de un PDF. */

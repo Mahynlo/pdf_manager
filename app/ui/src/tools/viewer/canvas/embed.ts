@@ -35,7 +35,7 @@ import wasmUrl from '@embedpdf/pdfium/pdfium.wasm?url';
 import { createAppEngine, type AppEngine, type DocumentCopies, type PageReading, type PageStructure } from '$lib/pdf-engine/index.ts';
 import { STANDARD_LIBRARY } from '../stamps/standard.ts';
 import { t } from '$texts';
-import { DEFAULT_STYLE as STYLE, PRESET_COLORS } from '../annotations/palette.ts';
+import { INITIAL as S, PRESETS } from '../annotations/styles.svelte.ts';
 import EmbedRoot from './EmbedRoot.svelte';
 
 export const UNIT = 2; // píxeles por punto PDF al 100 % (como el lienzo Qt: una carta mide 1224 px)
@@ -54,33 +54,33 @@ export const OTHER_MODE = 'viewer-tools';
 // Herramientas de anotación de EmbedPDF con nuestros valores iniciales (se mezclan con los
 // suyos). Cada visor les aplica después su propio estilo al activarlas (annotations.ts).
 const markup = (color: string) => ({ defaults: { strokeColor: color, color } });
-const shape = { defaults: { strokeColor: STYLE.shapeColor, strokeWidth: STYLE.shapeWidth } };
+const shape = { defaults: { strokeColor: S.rect.color, strokeWidth: S.rect.width, color: S.rect.fill } };
 const TEXT = t.viewer.canvas.defaultText;
 const ANNOTATION_TOOLS = [
-  { id: 'highlight', ...markup(STYLE.highlightColor) },
-  { id: 'underline', ...markup(STYLE.underlineColor) },
-  { id: 'strikeout', ...markup(STYLE.strikeoutColor) },
-  { id: 'squiggly', ...markup(STYLE.squigglyColor) },
+  { id: 'highlight', ...markup(S.highlight.color) },
+  { id: 'underline', ...markup(S.underline.color) },
+  { id: 'strikeout', ...markup(S.strikeout.color) },
+  { id: 'squiggly', ...markup(S.squiggly.color) },
   { id: 'square', ...shape },
   { id: 'circle', ...shape },
   { id: 'polyline', ...shape },
   { id: 'polygon', ...shape },
-  { id: 'line', defaults: { strokeColor: STYLE.penColor, strokeWidth: STYLE.shapeWidth } },
-  { id: 'lineArrow', defaults: { strokeColor: STYLE.penColor, strokeWidth: STYLE.shapeWidth } },
-  { id: 'ink', defaults: { strokeColor: STYLE.penColor, strokeWidth: STYLE.penWidth } },
-  { id: 'inkHighlighter', defaults: { strokeColor: STYLE.highlightColor, strokeWidth: STYLE.markerWidth } },
+  { id: 'line', defaults: { strokeColor: S.line.color, strokeWidth: S.line.width } },
+  { id: 'lineArrow', defaults: { strokeColor: S.arrow.color, strokeWidth: S.arrow.width } },
+  { id: 'ink', defaults: { strokeColor: S.pen.color, strokeWidth: S.pen.width } },
+  { id: 'inkHighlighter', defaults: { strokeColor: S.marker.color, strokeWidth: S.marker.width } },
   {
     id: 'freeText',
-    defaults: { contents: TEXT, fontColor: STYLE.penColor, fontSize: STYLE.fontSize },
+    defaults: { contents: TEXT, fontColor: S.text.color, fontSize: S.text.fontSize },
     clickBehavior: { enabled: true, defaultSize: { width: 120, height: 22 }, defaultContent: TEXT },
   },
   {
     id: 'freeTextCallout',
     defaults: {
-      contents: TEXT, fontColor: STYLE.penColor, fontSize: STYLE.fontSize, strokeColor: STYLE.penColor, strokeWidth: 1,
+      contents: TEXT, fontColor: S.callout.color, fontSize: S.callout.fontSize, strokeColor: S.callout.color, strokeWidth: 1,
     },
   },
-  { id: 'textComment', defaults: { strokeColor: STYLE.noteColor, color: STYLE.noteColor } },
+  { id: 'textComment', defaults: { strokeColor: S.note.color, color: S.note.color } },
   { id: 'link', categories: ['link'] }, // bloqueados (ver `locked`)
 ];
 
@@ -270,7 +270,7 @@ function plugins() {
     // son del documento.
     createPluginRegistration(ViewerAnnotationPackage, {
       tools: ANNOTATION_TOOLS,
-      colorPresets: PRESET_COLORS.map(([color]) => color),
+      colorPresets: PRESETS.map(([color]) => color),
       locked: { type: LockModeType.Include, categories: ['link'] },
     } as Parameters<typeof AnnotationPluginPackage.create>[1]),
     // Censura: las marcas pendientes son anotaciones (se revisan, se mueven, se borran y se
