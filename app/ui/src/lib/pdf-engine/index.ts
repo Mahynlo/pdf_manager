@@ -8,7 +8,7 @@
 import { PdfEngine, createHybridImageConverter } from '@embedpdf/engines';
 import { Task, type IPdfiumExecutor, type PdfDocumentObject, type PdfPageObject } from '@embedpdf/models';
 import { ImageEncoderPool } from './encoder.ts';
-import type { CopyMethod, CopyOptions, DocumentFacts, ReadingMethod, StructureMethod } from './native.ts';
+import type { CopyMethod, CopyOptions, DocumentFacts, FieldMethod, ReadingMethod, StructureMethod } from './native.ts';
 import type { OcrText, PageFacts, PageImage } from './page-ocr.ts';
 import type { Box } from './page-reader.ts';
 import type { PageTexts } from './page-text.ts';
@@ -169,11 +169,26 @@ export class PageReading {
   }
 }
 
+/** Lo que hace el motor de la app con los campos de formulario que no hace EmbedPDF (native.ts). */
+export class FieldEditing {
+  constructor(private executor: WorkerExecutor) {}
+
+  private call<R>(method: FieldMethod, ...args: unknown[]): Promise<R> {
+    return this.executor.send<R>(method, args).toPromise();
+  }
+
+  /** Indicadores (/Ff) del campo del widget `id` de la página `index`; false si no lo encontró. */
+  setFieldFlags(doc: PdfDocumentObject, index: number, id: string, flags: number): Promise<boolean> {
+    return this.call('setFieldFlags', doc, index, id, flags);
+  }
+}
+
 export interface AppEngine {
   engine: PdfEngine<Blob>; // el que usan EmbedPDF y las tareas de Python (engine-tasks.ts)
   structure: PageStructure;
   copies: DocumentCopies;
   reading: PageReading;
+  fields: FieldEditing;
 }
 
 /** Arranca el motor con el wasm de `wasmUrl` (URL absoluta). */
@@ -190,6 +205,7 @@ export function createAppEngine(wasmUrl: string): AppEngine {
     structure: new PageStructure(executor),
     copies: new DocumentCopies(executor),
     reading: new PageReading(executor),
+    fields: new FieldEditing(executor),
   };
 }
 

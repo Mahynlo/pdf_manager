@@ -553,6 +553,45 @@
 .forms-props { display: flex; flex-direction: column; gap: 8px; padding: 8px; border: 1px solid var(--border-light); border-radius: var(--radius-sm); }
 .forms-props .field { display: flex; flex-direction: column; gap: 4px; }
 .forms-props__checks { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.forms-props__checks--column { flex-direction: column; align-items: flex-start; }
+.forms-props__check { display: inline-flex; align-items: center; }
+.forms-props__check.is-disabled { opacity: 0.5; pointer-events: none; }
+.forms-props__section {
+  margin: 4px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-light);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.forms-props__inline { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.forms-props__number { width: 110px; }
+.forms-props__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.forms-props__remove { margin-top: 4px; }
+.forms-options { display: flex; flex-direction: column; gap: 4px; }
+.forms-options__row { display: flex; align-items: center; gap: 4px; border-radius: var(--radius-sm); }
+.forms-options__row > .input { flex: 1; min-width: 0; }
+.forms-options__row.is-current { background: var(--bg-selected); }
+.forms-options__button {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.forms-options__button:hover { background: var(--bg-hover); }
 .forms-props__hint { margin: -4px 0 0; color: var(--text-muted); font-size: 11.5px; }
 .forms-props__error { margin: 0; color: var(--danger); font-size: 12.5px; }
 .forms-props .btn--sm { gap: 5px; align-self: flex-start; }

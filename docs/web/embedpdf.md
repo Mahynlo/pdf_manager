@@ -376,12 +376,28 @@ cada herramienta; el complemento le ponía `TextField_1a2b3c4d`). Los nombres va
 caracteres fuera de ASCII ni puntos (`fieldName`): el motor 2.15.1 guarda mal los demás («Opción»
 quedaba «OpciÃ³n» en el PDF).
 
-**Propiedades:** nombre, obligatorio, solo lectura, varias líneas (texto), opciones (listas, «Aplicar
-opciones») y estilo con los botones de estilo de las anotaciones (color del borde, relleno, grosor del
-borde y, si tiene texto, tamaño de letra); y eliminar. Todo con `updateAnnotation` (se deshace), salvo
-el nombre, que se cambia con `renameField` (no se deshace). Si el nombre nuevo es el de otro campo del
-mismo tipo, pregunta si unirlos (`shareField`): así se agrupan los botones de opción; en un PDF los
-campos con el mismo nombre son el mismo campo y comparten el valor.
+**Propiedades** (`forms/FieldProperties.svelte`, la lógica en `forms/fields.ts`), por secciones como
+en los editores de formularios; cada cambio se aplica enseguida:
+
+| Sección | Tipos | Qué tiene |
+|---|---|---|
+| Campo | todos | nombre; Obligatorio, Solo lectura, No exportar |
+| Texto | texto | Longitud máxima (vacía = sin límite), Multilínea, Contraseña, Un carácter por casilla (solo con longitud máxima; quita multilínea y contraseña) |
+| Opciones | desplegable, lista | una fila por opción (cambiarla, ×), «Añadir opción»; Selección múltiple (lista) o Permitir escribir (desplegable) |
+| Botones | opción | «Los botones con el mismo valor se activan a la vez», «Mantener uno activado» (fijo), los botones del grupo (ir a uno, ×), «Añadir botón» (a la derecha del último, o debajo si no cabe) y «Duplicar grupo» (copia los botones en un grupo nuevo «Opcion N») |
+| Estilo | texto, casilla, opción, listas | los botones de estilo de las anotaciones (color del borde, relleno, grosor y, si tiene texto, tamaño de letra) |
+
+En una casilla se ve su valor al marcarla. Los indicadores (`FLAGS` en `fields.ts`) se cambian con
+`updateAnnotation` (se deshacen con Ctrl+Z). Los botones de acción y las firmas no los actualiza el
+motor de EmbedPDF: ahí la sección «Campo» la escribe el motor de la app (`AppNative.setFieldFlags`,
+`FPDFAnnot_SetFormFieldFlags`; no se deshace). La longitud máxima no se puede quitar del PDF (y 0
+impediría escribir): «sin límite» guarda 32767 (`NO_LIMIT`). «Exportar datos…» omite los campos «No
+exportar» (`exportableValues`). Los botones nuevos se crean de uno en uno y se espera a que el motor los
+haya escrito (`written` en `annotations.ts`) antes de unirlos al grupo con `shareField`.
+
+El nombre se cambia con `renameField` (no se deshace). Si el nombre nuevo es el de otro campo del mismo
+tipo, pregunta si unirlos (`shareField`): así se agrupan los botones de opción; en un PDF los campos
+con el mismo nombre son el mismo campo y comparten el valor.
 
 **Datos:** «Exportar datos…» guarda los valores (nombre → valor) en un `.json` junto al PDF: los da
 el visor (`FormFields.exportData`) y los escribe Python (`viewer.save_form_data`, que comprueba que
@@ -393,8 +409,18 @@ dos cosas se deshacen.
 
 **Lo que no hace (aún):** los campos sin borde (`/BS` con ancho 0, habituales en formularios
 dibujados en el contenido de la página) no se ven en «Editar campos» (el complemento los dibuja con
-su borde); se encuentran con la lista del panel. Botones de acción, firmas digitales y el JavaScript
-de los formularios no se tocan.
+su borde); se encuentran con la lista del panel. Botones de acción y firmas no se crean (solo se
+cambian sus indicadores); las firmas digitales y el JavaScript de los formularios no se tocan.
+
+Con EmbedPDF 2.15.1 tampoco se puede (haría falta EmbedPDF 3.x o escribir los objetos del PDF a mano):
+
+- **Información sobre herramientas (`/TU`), valor predeterminado (`/DV`) y valor de exportación de
+  cada opción:** van en el diccionario del campo, y el motor solo llega al del widget
+  (`FPDFAnnot_GetLinkedAnnot` solo devuelve objetos `/Type /Annot`).
+- **Valor de cada botón de opción:** el motor le pone el id de la anotación; el panel muestra «Botón N»
+  y el valor en la descripción emergente.
+- **Quitar «Mantener uno activado»:** el motor fuerza `NoToggleToOff` en los botones de opción.
+- **Desplegable sin opción elegida:** no deja vaciarlo.
 
 ### Sellos y firmas (hechos): `plugin-stamp` y `plugin-signature`
 
@@ -954,6 +980,10 @@ Al cambiar las páginas de un documento abierto (operaciones de página), que Em
 - **El giro de una página cargada vale 0:** con la rotación normalizada, `FPDFPage_GetRotation` no da el
   giro real; `AppNative` lo lee del diccionario de la página (`EPDF_GetPageRotationByIndex`).
 - **`extractText` de una página vacía** devuelve caracteres sin sentido (en el motor de EmbedPDF).
+- **Indicadores de botones de acción y firmas:** `updateAnnotation` no los cambia (el motor responde
+  que no); `AppNative.setFieldFlags` los escribe con `FPDFAnnot_SetFormFieldFlags`.
+- **`commit` vuelve antes de escribir la anotación creada:** unir un botón recién creado fallaba con
+  «annotation not found»; `written(id)` en `annotations.ts` espera al aviso `committed` de la creación.
 
 Al sacar copias del documento:
 

@@ -20,7 +20,7 @@
 // a las de la página tal como se ve).
 import {
   PdfAnnotationReplyType, PdfAnnotationSubtype, PdfStandardFont, PdfTextAlignment, PdfVerticalAlignment, uuidV4,
-  type PdfAnnotationObject, type Rect,
+  type PdfAnnotationObject, type PdfWidgetAnnoObject, type Rect,
 } from '@embedpdf/models';
 import type { PluginRegistry } from '@embedpdf/core';
 import {
@@ -32,7 +32,7 @@ import { standardFontText } from '$lib/standard-font.ts';
 import { askText } from '$lib/ui.ts';
 import { t } from '$texts';
 import { ANNOTATION_TOOL, FORM_TOOLS, TOOLS, type PageCanvas } from '../canvas/canvas.ts';
-import { formWrites } from '../canvas/embed.ts';
+import { fieldEditing, formWrites } from '../canvas/embed.ts';
 import { formOptions } from '../forms/state.svelte.ts';
 import { KINDS, MANUAL_LABEL, type SelectionPart } from '../redact/redaction.ts';
 import { TEXT_STAMP, textStampSize, type TextStamp } from '../stamps/stamp-pdf.ts';
@@ -100,6 +100,7 @@ const AUTO_POINTER = new Set<string>([
 ]);
 // Fuera del orden de dibujo: no se apilan con las demás (enlaces, formularios, ventanas de nota).
 const UNSTACKED = new Set<PdfAnnotationSubtype>([T.LINK, T.WIDGET, T.POPUP]);
+const WRITE_TIMEOUT = 5000; // ms que se espera a que el motor escriba una anotación creada (`written`)
 const HISTORY_TOPIC = 'annotations'; // el de las órdenes de EmbedPDF (ANNOTATION_HISTORY_TOPIC)
 // Caja del texto libre (_fitText): alto de línea (en tamaños de letra) y margen, en puntos.
 const TEXT_LINE = 1.2;
@@ -141,6 +142,7 @@ export class Annotations {
   style = { redactColor: '#000000', redactOutline: '#E53935' };
   seen = new Set<string>(); // anotaciones ya creadas (rehacer no vuelve a pedir el texto de la nota)
   watchers = new Set<() => void>(); // avisar de cualquier cambio en las anotaciones (`watch`)
+  pendingWrites = new Map<string, () => void>(); // anotación creada → avisar cuando esté en el PDF (`written`)
   measure: CanvasRenderingContext2D | null = null; // para medir el texto libre (_fitText)
 
   /** `host`: lo que el visor hace con los avisos. */
@@ -200,6 +202,46 @@ export class Annotations {
     return shown ? this._registry().getPlugin<FormPlugin>('form')!.provides().forDocument(shown) : null;
   }
 
+  /**
+   * Indicadores (/Ff) de un campo que EmbedPDF 2.15.1 no sabe actualizar (botones de acción y firmas):
+   * los escribe el motor de la app y se ponen al día en el estado de EmbedPDF. No se deshace.
+   */
+  async setFieldFlags(widget: PdfWidgetAnnoObject, flag: number): Promise<boolean> {
+    const scope = this.scope();
+    if (!scope) return false;
+    await this.commit();
+    const done = await (await fieldEditing()).setFieldFlags(this.canvas.shownDocument(), widget.pageIndex, widget.id, flag);
+    if (done) {
+      scope.syncAnnotationObject(widget.id, { field: { ...widget.field, flag } } as Partial<PdfAnnotationObject>);
+      this.host.onChanged();
+      for (const fn of this.watchers) fn();
+    }
+    return done;
+  }
+
+  /**
+   * Termina cuando la anotación `id`, recién creada con `create`, ya está escrita en el PDF de EmbedPDF
+   * (su aviso `committed`); como mucho, tras `WRITE_TIMEOUT`. Se llama justo después de crearla: el
+   * aviso llega después, del motor.
+   */
+  written(id: string): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingWrites.delete(id);
+        resolve();
+      }, WRITE_TIMEOUT);
+      this.pendingWrites.set(id, () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
+  /** Tamaño de la página `index` sin girar (las coordenadas de EmbedPDF), en puntos. */
+  pageSize(index: number): { width: number; height: number } {
+    return this.canvas.pageInfo(index).size;
+  }
+
   _history(): HistoryScope {
     return this._historyPlugin().provides().forDocument(this.canvas.shown!);
   }
@@ -248,6 +290,10 @@ export class Annotations {
     // Cada cambio llega dos veces: al hacerlo (también al deshacer) y cuando ya está en el PDF.
     if (event.committed) {
       this.host.onRendered([event.pageIndex]);
+      if (event.type === 'create') {
+        this.pendingWrites.get(event.annotation.id)?.();
+        this.pendingWrites.delete(event.annotation.id);
+      }
       return;
     }
     this.host.onChanged();

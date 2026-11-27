@@ -33,7 +33,7 @@ import { TilingPluginPackage } from '@embedpdf/plugin-tiling';
 import { ViewportPluginPackage } from '@embedpdf/plugin-viewport';
 import { ZoomPluginPackage } from '@embedpdf/plugin-zoom';
 import wasmUrl from '@embedpdf/pdfium/pdfium.wasm?url';
-import { createAppEngine, type AppEngine, type DocumentCopies, type PageReading, type PageStructure } from '$lib/pdf-engine/index.ts';
+import { createAppEngine, type AppEngine, type DocumentCopies, type FieldEditing, type PageReading, type PageStructure } from '$lib/pdf-engine/index.ts';
 import { nameNewFields } from '../forms/fields.ts';
 import { STANDARD_LIBRARY } from '../stamps/standard.ts';
 import { t } from '$texts';
@@ -133,6 +133,12 @@ export async function structure(): Promise<PageStructure> {
 export async function copies(): Promise<DocumentCopies> {
   await registry();
   return appEngine!.copies;
+}
+
+/** Lo que hace el motor con los campos de formulario que no hace EmbedPDF (lib/pdf-engine). */
+export async function fieldEditing(): Promise<FieldEditing> {
+  await registry();
+  return appEngine!.fields;
 }
 
 /** Lo que necesita el OCR del documento abierto: leer y dibujar páginas y escribir su texto (lib/pdf-engine). */

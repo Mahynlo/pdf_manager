@@ -178,6 +178,43 @@ export class AppNative extends PdfiumNative {
     });
   }
 
+  // ── Campos de formulario ───────────────────────────────────────────────
+  /**
+   * Cambia los indicadores (/Ff: obligatorio, solo lectura, no exportar…) del campo del widget `id`
+   * (su /NM) de la página `index`. Para los botones de acción y las firmas: PdfiumNative 2.15.1 solo
+   * actualiza los campos de texto, casillas, opciones y listas. Devuelve si lo encontró.
+   */
+  setFieldFlags(doc: PdfDocumentObject, index: number, id: string, flags: number): boolean {
+    const ctx = this.context(doc);
+    const m = this.internals.pdfiumModule;
+    return ctx.borrowPage(index, (page) => page.withFormHandle((form) => {
+      for (let i = 0; i < m.FPDFPage_GetAnnotCount(page.pagePtr); i++) {
+        const annot = m.FPDFPage_GetAnnot(page.pagePtr, i);
+        if (!annot) continue;
+        try {
+          if (this.annotationName(annot) === id) return m.FPDFAnnot_SetFormFieldFlags(form, annot, flags);
+        } finally {
+          m.FPDFPage_CloseAnnot(annot);
+        }
+      }
+      return false;
+    }));
+  }
+
+  /** El /NM de `annot` (el id con el que la conoce EmbedPDF). */
+  private annotationName(annot: number): string {
+    const { pdfiumModule: m, memoryManager } = this.internals;
+    const bytes = m.FPDFAnnot_GetStringValue(annot, 'NM', 0, 0);
+    if (bytes <= 2) return '';
+    const buffer = memoryManager.malloc(bytes);
+    try {
+      m.FPDFAnnot_GetStringValue(annot, 'NM', buffer, bytes);
+      return m.pdfium.UTF16ToString(buffer);
+    } finally {
+      memoryManager.free(buffer);
+    }
+  }
+
   // ── Copias del documento ───────────────────────────────────────────────
   /**
    * El PDF entero de `docPtr` (lo usan saveAsCopy, extractPages y las tareas de engine-tasks.ts).
@@ -373,3 +410,4 @@ export type StructureMethod = 'pageList' | 'rotatePages' | 'movePage' | 'removeP
   | 'stashPage' | 'stashPdf' | 'restorePages' | 'dropStash';
 export type CopyMethod = 'saveCopy' | 'extractCopy' | 'documentFacts';
 export type ReadingMethod = 'pageFacts' | 'pageImage' | 'writeOcrText' | 'pageTexts';
+export type FieldMethod = 'setFieldFlags';

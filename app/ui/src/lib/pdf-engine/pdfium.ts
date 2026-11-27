@@ -83,6 +83,9 @@ export interface Pdfium {
   FPDFPage_GetAnnot(page: number, index: number): number;
   FPDFPage_CloseAnnot(annot: number): void;
   FPDFAnnot_SetStringValue(annot: number, key: string, value: number): boolean;
+  FPDFAnnot_GetStringValue(annot: number, key: string, buffer: number, length: number): number;
+  FPDFAnnot_GetFormFieldFlags(form: number, annot: number): number;
+  FPDFAnnot_SetFormFieldFlags(form: number, annot: number, flags: number): boolean;
 }
 
 /** La memoria del wasm (el gestor de PdfiumNative). */
@@ -104,7 +107,7 @@ export interface DocumentContext {
   docPtr: number;
   normalizeRotation: boolean;
   pageCache: { forceReleaseAll(): void };
-  borrowPage<T>(index: number, fn: (page: { pagePtr: number }) => T): T;
+  borrowPage<T>(index: number, fn: (page: { pagePtr: number; withFormHandle<R>(fn: (form: number) => R): R }) => T): T;
 }
 
 /** Llama a `fn` con `size` bytes de memoria del wasm, que se sueltan al terminar. */
