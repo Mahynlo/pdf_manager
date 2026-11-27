@@ -1,5 +1,8 @@
 /* ── Imágenes a PDF (lib/images/ImagesDialog.svelte) ─────────────────────── */
 .images-dialog .dialog__body { width: min(880px, 96vw); }
+/* Si no cabe en alto, el cuerpo se desplaza: sus partes no encogen (la cuadrícula y la vista se montaban
+   y los botones quedaban encima). */
+.images-dialog .dialog__body > * { flex-shrink: 0; }
 .images-dialog__options { display: grid; grid-template-columns: 1.1fr 1.2fr 1fr 1fr; gap: 10px; }
 .images-dialog__field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .images-dialog__main { display: flex; gap: 16px; min-height: 380px; }
@@ -55,6 +58,9 @@
   .images-dialog__options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .images-dialog__main { flex-direction: column; }
   .images-dialog__page { width: auto; }
-  .images-dialog__preview { height: 240px; }
+  /* La vista grande mide 300 px (PREVIEW): el recuadro crece con ella y, si no cabe a lo ancho, la
+     hoja se reduce sin deformarse (se salía del recuadro y tapaba la cuadrícula y los botones). */
+  .images-dialog__preview { height: auto; min-height: 240px; padding: 10px; }
+  .images-dialog__preview canvas { max-width: 100%; height: auto !important; }
   .export-images__grid { grid-template-columns: 1fr; }
 }

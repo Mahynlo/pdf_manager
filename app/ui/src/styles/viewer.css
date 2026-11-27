@@ -488,6 +488,8 @@
 .forms-mode--block { display: flex; }
 .forms-mode--block .segmented__item { flex: 1; justify-content: center; padding-block: 6px; }
 .forms-panel { height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 6px 8px; overflow-y: auto; }
+/* El panel entero se desplaza: sin esto, la columna encogía al cambio de modo (con overflow oculto) hasta una raya. */
+.forms-panel > * { flex-shrink: 0; }
 .forms-panel__head, .forms-panel__row { display: flex; align-items: center; gap: 6px; }
 .forms-panel__icon, .forms-panel__head .heading { color: var(--accent); }
 .forms-panel__icon { display: grid; }

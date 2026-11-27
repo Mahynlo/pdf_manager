@@ -40,6 +40,11 @@ comporta como una tableta. Por eso el tamaño mínimo de la ventana es 420 × 48
 - **Las filas de botones bajan de línea** antes que salirse o recortar el texto.
 - **No se usa `:hover` como única forma de llegar a algo**: en el móvil no existe.
 - **Las rejillas nuevas usan `auto-fill` con `minmax`**: se adaptan solas, sin cortes.
+- **Una columna flex que se desplaza no deja encoger a sus hijos** (`> * { flex-shrink: 0; }`): si no,
+  cuando falta alto, los que tienen `overflow: hidden` se aplastan (el cambio de modo del panel
+  Formularios quedaba en una raya) y los demás se montan unos sobre otros (en «Imágenes a PDF», la
+  vista grande y los botones tapaban la cuadrícula). Lo mismo con un lienzo de tamaño fijo dentro de un
+  recuadro: `max-width: 100%; height: auto`.
 
 ## Pestañas
 
