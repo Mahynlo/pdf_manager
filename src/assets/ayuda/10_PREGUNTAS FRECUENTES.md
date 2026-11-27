@@ -40,7 +40,7 @@ Es una firma **visual** (un trazo o una imagen), como firmar a mano un papel esc
 
 ## ¿Cómo deshago un cambio?
 
-`Ctrl+Z` deshace y `Ctrl+Y` rehace: anotaciones, sellos, firmas y cambios de páginas, mientras el documento siga abierto.
+`Ctrl+Z` deshace y `Ctrl+Y` rehace: anotaciones, sellos, firmas, lo que rellenas en un formulario y cambios de páginas, mientras el documento siga abierto.
 
 ## Cerré sin guardar, ¿perdí los cambios?
 

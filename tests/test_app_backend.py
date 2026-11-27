@@ -1650,7 +1650,7 @@ def test_help_real_guides_and_images():
         html = svc.document(guide["file"])["html"]
         assert 'src="/ayuda_img/' not in html, guide["file"]  # toda imagen local se encontró e incrustó
     names = {g["file"].lower() for g in guides}
-    for link in ("visor", "anotar", "buscar", "asistente", "imagenes", "extraer", "combinar", "seguridad", "preguntas"):
+    for link in ("visor", "anotar", "formularios", "buscar", "asistente", "imagenes", "extraer", "combinar", "seguridad", "preguntas"):
         assert any(link in name for name in names), link  # los enlaces ayuda:… de las guías
 
 

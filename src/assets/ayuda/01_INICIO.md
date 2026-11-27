@@ -20,6 +20,7 @@ Qué puedes hacer con Extraer PDFs, cómo abrir tus documentos y dónde está ca
 |---|---|---|
 | Leer un PDF, ir a una página, ampliar, girar o reordenar páginas | El visor | [Visor de PDF](ayuda:visor) |
 | Resaltar, subrayar, escribir, dibujar, sellar o firmar | Botón **Anotar** del visor | [Anotar, sellos y firmas](ayuda:anotar) |
+| Rellenar un formulario, crear campos o guardar sus datos | Botón **Formularios** del visor | [Formularios](ayuda:formularios) |
 | Buscar una palabra, leer el texto de un escaneo o tapar datos | Panel lateral del visor | [Buscar, OCR y censura](ayuda:buscar) |
 | Preguntar sobre el documento o resumirlo | Panel lateral del visor | [Asistente IA](ayuda:asistente) |
 | Convertir fotos en un PDF o guardar páginas como imagen | Tarjeta **Imágenes a PDF** | [Imágenes a PDF](ayuda:imagenes) |

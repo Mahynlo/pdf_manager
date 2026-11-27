@@ -21,6 +21,8 @@ Leer un documento, moverte por él y organizar sus páginas.
 | **11** | **Miniaturas** | Pulsa una para ir a esa página. Se muestran u ocultan con el botón junto a la luna. |
 | **12** | **Panel lateral** | Buscar, Índice, Sellos y firmas, Censura, OCR y Asistente IA. |
 
+El botón **Formularios** de la barra abre la barra para rellenar y crear campos de formulario (ver [Formularios](ayuda:formularios)).
+
 El botón de la **luna** de la barra activa el **modo noche**: invierte los colores de las páginas para leer a oscuras (no cambia el PDF).
 
 ## Moverse por el documento
@@ -88,3 +90,5 @@ La barra superior se compacta sola cuando no cabe: primero quita los textos de l
 | **3** | **Anotar**, en la barra de abajo, junto al pulgar. |
 | **4** | Los paneles: Buscar, Índice, Sellos y firmas, Censura, OCR y Asistente IA. |
 | **5** | La barra de anotaciones, que se abre justo debajo. |
+
+**Formularios** también está en la barra de abajo.
