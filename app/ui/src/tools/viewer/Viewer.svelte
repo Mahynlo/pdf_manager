@@ -1,7 +1,8 @@
 <!--
   Pestaña de visor PDF: compone las barras
-  de herramientas, las miniaturas, el lienzo (con la selección de texto y las
-  anotaciones) y el panel lateral (índice, OCR, censura, IA y búsqueda).
+  de herramientas (la superior, la de anotaciones y la de formularios), las miniaturas, el lienzo
+  (con la selección de texto y las anotaciones) y el panel lateral (índice, sellos, censura, OCR,
+  formularios, IA y búsqueda).
 
   El lienzo y sus capas son código imperativo (canvas/canvas.ts, canvas/selection.ts,
   annotations/annotations.ts, annotations/editing.ts) sobre EmbedPDF. Este componente los
@@ -25,7 +26,10 @@
   import type { Annot } from './annotations/annotations.ts';
   import AiPanel from './panels/AiPanel.svelte';
   import { Annotations } from './annotations/annotations.ts';
-  import { PageCanvas, TOOLS } from './canvas/canvas.ts';
+  import { FORM_TOOLS, PageCanvas, TOOLS } from './canvas/canvas.ts';
+  import { FormFields } from './forms/fields.ts';
+  import FormsPanel from './forms/FormsPanel.svelte';
+  import FormsBar from './toolbars/FormsBar.svelte';
   import { AnnotationEditor } from './annotations/editing.ts';
   import { MODES, type Mode } from './canvas/layout.ts';
   import OcrPanel from './ocr/OcrPanel.svelte';
@@ -56,7 +60,7 @@
   type DockTab = keyof typeof T.dock;
   const DOCK_GROUPS: { key: DockTab; icon: string }[][] = [
     [{ key: 'search', icon: 'search' }, { key: 'toc', icon: 'list-tree' }],
-    [{ key: 'stamps', icon: 'stamp' }, { key: 'redact', icon: 'eraser' }, { key: 'ocr', icon: 'scan-text' }],
+    [{ key: 'stamps', icon: 'stamp' }, { key: 'forms', icon: 'text-cursor-input' }, { key: 'redact', icon: 'eraser' }, { key: 'ocr', icon: 'scan-text' }],
     [{ key: 'ai', icon: 'sparkles' }],
   ];
 
@@ -78,6 +82,7 @@
   let view = $state({
     page: 0, count: doc.pages.length, zoom: 1, mode: MODES.CONTINUOUS as Mode,
     canUndo: false, canRedo: false, night: false, sidebar: !viewport.narrow && !viewport.reading, dock: false, tools: false,
+    forms: false, // la barra «Formularios» (una de las dos: o la de anotaciones o esta)
   });
   // Con el dedo, arrastrar tiene que desplazar la página: seleccionar texto hay que pedirlo.
   const BASE_TOOL = viewport.touch ? TOOLS.HAND : TOOLS.SELECT;
@@ -200,7 +205,12 @@
     setTool: (t) => setTool(t),
   });
 
-  const editor = new AnnotationEditor(canvas, annotations);
+  const editor = new AnnotationEditor(canvas, annotations, () => openDockTab('forms'));
+  // Los formularios del documento: los usan su barra y su panel.
+  const fields = new FormFields(annotations, docId, (widget) => {
+    leavePanel();
+    canvas.scrollToRect(widget.pageIndex, canvas.toView(widget.pageIndex, widget.rect));
+  });
   // Python recibe las páginas al día y su texto (de `pages`, o de todas) antes de leerlo. En la cola
   // del documento: espera a las operaciones de página pendientes.
   const syncText = (pages: number[] | null = null) => actions.run(() => text.sync(pages));
@@ -221,7 +231,15 @@
     if (!EDIT_TOOLS.has(next)) editor.clear();
     canvas.setTool(next);
     tool = next;
-    if (BAR_TOOLS.has(next)) view.tools = true; // también con un atajo: se ve cuál está activa
+    // También con un atajo: se ve la barra de la herramienta activa (una barra a la vez).
+    if (BAR_TOOLS.has(next)) showBar('tools');
+    if (FORM_TOOLS.has(next)) showBar('forms');
+  }
+
+  /** Abre la barra de anotaciones o la de formularios (y cierra la otra). */
+  function showBar(bar: 'tools' | 'forms') {
+    view.tools = bar === 'tools';
+    view.forms = bar === 'forms';
   }
 
   /** Estilo de la herramienta activa (barra de anotaciones): lo usan sus siguientes anotaciones. */
@@ -364,8 +382,15 @@
       if (view.sidebar) leavePanel();
     },
     toggleTools: () => {
-      view.tools = !view.tools;
-      if (!view.tools && BAR_TOOLS.has(tool)) setTool(BASE_TOOL); // cerrada, no se sigue dibujando
+      if (view.tools) view.tools = false;
+      else showBar('tools');
+      // Cerrada su barra, no se sigue dibujando ni creando campos.
+      if ((!view.tools && BAR_TOOLS.has(tool)) || (!view.forms && FORM_TOOLS.has(tool))) setTool(BASE_TOOL);
+    },
+    toggleForms: () => {
+      if (view.forms) view.forms = false;
+      else showBar('forms');
+      if ((!view.forms && FORM_TOOLS.has(tool)) || (!view.tools && BAR_TOOLS.has(tool))) setTool(BASE_TOOL);
     },
     setTool,
     undo,
@@ -432,6 +457,11 @@
       setTool(TOOLS.SELECT);
       return true;
     }
+    // Esc deja de crear campos (con «Crear varios seguidos» la herramienta sigue): a «Editar campos».
+    if (key === 'escape' && !inField && FORM_TOOLS.has(tool)) {
+      setTool(TOOLS.POINTER);
+      return true;
+    }
     // Con anotaciones seleccionadas: Supr, Esc, Ctrl+D y flechas son para ellas.
     if (!inField && editor.onKey(ev)) return true;
     if (key === 'escape' && editor.stopTyping()) return true;
@@ -482,6 +512,8 @@
 <div class="viewer">
   <Toolbar bind:this={toolbar} {view} {tool} actions={toolbarActions} />
   <ToolsBar {tool} {setTool} setStyle={setToolStyle} visible={view.tools} />
+  <FormsBar {tool} {setTool} fillTool={BASE_TOOL} visible={view.forms} {fields} panelOpen={view.dock && dockTab === 'forms'}
+            togglePanel={() => toggleDockTab('forms')} />
   <div class="viewer__body">
     <Thumbnails {docId} count={view.count} current={view.page} {revision} {versions} visible={view.sidebar}
                 fetchThumbs={(pages) => canvas.thumbnails(pages)} release={(url) => URL.revokeObjectURL(url)} onSelect={thumbSelected} onMove={(src, dst) => actions.move(dst, src)} />
@@ -514,6 +546,9 @@
           <StampsPanel bind:this={stamps} {canvas} {annotations} {tool} {setTool} active={view.dock && dockTab === 'stamps'}
                        close={() => (view.dock = false)} />
         </div>
+        <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'forms'}>
+          <FormsPanel {fields} {annotations} {tool} {setTool} fillTool={BASE_TOOL} close={() => (view.dock = false)} />
+        </div>
         <div class="viewer-dock__panel" role="tabpanel" hidden={dockTab !== 'ai'}>
           <AiPanel bind:this={ai} {docId} {syncText} active={view.dock && dockTab === 'ai'} close={() => (view.dock = false)}
                    redact={async (items) => {
@@ -538,10 +573,16 @@
                 onclick={toolbarActions.toggleTools}>
           <Icon name="pen-line" size={18} />
         </button>
+        <button class="viewer-rail__tab viewer-rail__annotate" class:is-active={view.forms} type="button"
+                aria-pressed={view.forms} title={T.toolbar.formsTip} aria-label={T.toolbar.formsTip}
+                onclick={toolbarActions.toggleForms}>
+          <Icon name="text-cursor-input" size={18} />
+        </button>
       {/if}
       {#each DOCK_GROUPS as group, i (i)}
         {#if i}<span class="viewer-rail__sep" aria-hidden="true"></span>{/if}
-        {#each group as { key, icon } (key)}
+        <!-- En el móvil el panel de formularios se abre desde su barra (junto al pulgar, con su botón). -->
+        {#each group.filter(({ key }) => !(viewport.compact && key === 'forms')) as { key, icon } (key)}
           {@const open = view.dock && dockTab === key}
           <button class="viewer-rail__tab" class:is-active={open} type="button" role="tab" aria-selected={open}
                   title={tip(T.dock[key])} aria-label={tip(T.dock[key])} onclick={() => toggleDockTab(key)}>

@@ -77,6 +77,9 @@ class FakeHost:
     def save_text(self, suggested_path: str) -> str | None:
         return self.save_pdf(suggested_path)
 
+    def save_json(self, suggested_path: str) -> str | None:
+        return self.save_pdf(suggested_path)
+
     def read_file(self, path: str) -> bytes:
         return Path(path).read_bytes()
 
@@ -470,6 +473,34 @@ def test_viewer_keeps_ocr_words_while_their_page_moves_or_turns(tmp_path):
         # Se deshace el giro en el visor: la página vuelve con su clave y con sus palabras.
         viewer.reshape([["rotate", [1], -1]], [2, 1])
         assert "reconocido" in _text(svc, doc_id, 1)
+    finally:
+        svc.close()
+
+
+def test_save_form_data_writes_the_field_values_as_json(tmp_path):
+    """«Exportar datos» del panel de formularios: los valores que da el visor (nombre → valor) en un
+    .json junto al PDF; cancelar no escribe nada y lo que no son pares de textos no se guarda."""
+    pdf = _blank_pdf(tmp_path / "solicitud.pdf", 1)
+    out = tmp_path / "datos.json"
+    host = FakeHost(save_to=str(out))
+    svc = ViewerService(host)
+    try:
+        doc_id = svc.open(str(pdf))["id"]
+        values = {"nombre": "Ana Pérez", "acepto": "Yes", "país": "Perú"}
+        assert svc.save_form_data(doc_id, json.dumps(values)) == str(out)
+        assert host.saved_suggestions[-1] == str(tmp_path / "solicitud_formulario.json")
+        assert json.loads(out.read_text(encoding="utf-8")) == values
+        assert "Ana Pérez" in out.read_text(encoding="utf-8")  # legible, sin escapes
+
+        for bad in ("[1, 2]", '{"nombre": 3}', "no es json"):
+            with pytest.raises(UserError) as error:
+                svc.save_form_data(doc_id, bad)
+            assert error.value.code == "bad_form_data"
+
+        host.save_to = None
+        out.unlink()
+        assert svc.save_form_data(doc_id, json.dumps(values)) is None
+        assert not out.exists()
     finally:
         svc.close()
 

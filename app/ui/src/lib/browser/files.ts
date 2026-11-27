@@ -59,6 +59,7 @@ export interface FileData {
 const TYPES: Record<string, PickerType> = {
   pdf: { description: 'Archivos PDF', accept: { 'application/pdf': ['.pdf'] } },
   txt: { description: 'Archivos de texto', accept: { 'text/plain': ['.txt'] } },
+  json: { description: 'Datos JSON', accept: { 'application/json': ['.json'] } },
   // Las que dibuja la ventana: el diálogo «Imágenes a PDF» (documents.py IMAGE_SUFFIXES)
   images: {
     description: 'Imágenes',

@@ -139,7 +139,7 @@ button, a, [role="tab"] { touch-action: manipulation; }
   .sel-bar, .prop-bar { flex-wrap: wrap; max-width: calc(100vw - 16px); }
   .tb-sep { margin: 0 2px; }
   .tb-page { width: 46px; }
-  .viewer-toolbar--tools { order: 1; border-top: 1px solid var(--border); border-bottom: 0; }
+  .viewer-toolbar--tools, .viewer-toolbar--forms { order: 1; border-top: 1px solid var(--border); border-bottom: 0; }
   .viewer__body { flex-direction: column; }
   .viewer__stage { min-height: 0; }
 

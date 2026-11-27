@@ -1,14 +1,14 @@
 <!--
-  Barra de anotaciones (AnnotSubBar en Qt): marcar texto, formas, trazos, texto e imagen, campos de
-  formulario (forms/) y, al final, el estilo de la herramienta activa (colores rápidos, color,
+  Barra de anotaciones (AnnotSubBar en Qt): marcar texto, formas, trazos, texto e imagen y, al
+  final, el estilo de la herramienta activa (colores rápidos, color,
   grosor, relleno, letra: los que tiene; annotations/styles.svelte.ts), centrada. Se abre con «Anotar» en la barra superior, donde están también la mano, la
   selección de texto y el puntero (Toolbar.svelte). Los sellos y la firma, en el panel lateral.
 
   Se compacta para caber (lib/fit.ts, `data-level` en styles/viewer.css):
     0  todo a la vista;
     1  sin los colores rápidos (queda el botón de color);
-    2  marcar texto, formas, trazos y formulario: un botón por grupo (la última herramienta usada
-       y, en la flecha, las demás);
+    2  marcar texto, formas y trazos: un botón por grupo (la última herramienta usada y, en la
+       flecha, las demás);
     3  también insertar.
   Si ni así cabe, se desplaza (lib/strip.ts).
 -->
@@ -20,7 +20,6 @@
     TOOLS.HIGHLIGHT, TOOLS.UNDERLINE, TOOLS.STRIKEOUT, TOOLS.SQUIGGLY, TOOLS.INSERT_TEXT, TOOLS.REPLACE_TEXT,
     TOOLS.RECT, TOOLS.ELLIPSE, TOOLS.LINE, TOOLS.ARROW, TOOLS.POLYLINE, TOOLS.POLYGON,
     TOOLS.PEN, TOOLS.MARKER, TOOLS.DRAW, TOOLS.TEXT, TOOLS.CALLOUT, TOOLS.NOTE, TOOLS.IMAGE,
-    TOOLS.FORM_TEXT, TOOLS.FORM_CHECKBOX, TOOLS.FORM_RADIO, TOOLS.FORM_COMBO, TOOLS.FORM_LIST,
   ]);
 </script>
 
@@ -89,15 +88,6 @@
       id: 'insert', label: T.groups.insert, collapse: 3, tools: [
         { key: TOOLS.TEXT, icon: 'type', title: T.text },
         { key: TOOLS.IMAGE, icon: 'image', title: T.image },
-      ],
-    },
-    {
-      id: 'form', label: T.groups.form, collapse: 2, tools: [
-        { key: TOOLS.FORM_TEXT, icon: 'text-cursor-input', title: T.formText },
-        { key: TOOLS.FORM_CHECKBOX, icon: 'square-check', title: T.formCheckbox },
-        { key: TOOLS.FORM_RADIO, icon: 'circle-dot', title: T.formRadio },
-        { key: TOOLS.FORM_COMBO, icon: 'square-chevron-down', title: T.formCombo },
-        { key: TOOLS.FORM_LIST, icon: 'list-checks', title: T.formList },
       ],
     },
   ];

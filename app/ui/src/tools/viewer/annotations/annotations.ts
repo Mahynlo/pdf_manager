@@ -33,6 +33,7 @@ import { askText } from '$lib/ui.ts';
 import { t } from '$texts';
 import { ANNOTATION_TOOL, FORM_TOOLS, TOOLS, type PageCanvas } from '../canvas/canvas.ts';
 import { formWrites } from '../canvas/embed.ts';
+import { formOptions } from '../forms/state.svelte.ts';
 import { KINDS, MANUAL_LABEL, type SelectionPart } from '../redact/redaction.ts';
 import { TEXT_STAMP, textStampSize, type TextStamp } from '../stamps/stamp-pdf.ts';
 import { styleOf } from './styles.svelte.ts';
@@ -217,6 +218,7 @@ export class Annotations {
         if (!ours(documentId)) return;
         this.host.onChanged();
         this.host.onRendered([pageIndex]);
+        for (const fn of this.watchers) fn();
       }),
       annotation.onAnnotationEvent((event) => {
         if (ours(event.documentId)) this._onEvent(event);
@@ -262,6 +264,7 @@ export class Annotations {
   async _created(annotation: PdfAnnotationObject, pageIndex: number): Promise<void> {
     const { tool } = this.canvas;
     if (!AUTO_POINTER.has(tool)) return;
+    if (FORM_TOOLS.has(tool) && formOptions.keepTool) return; // «Crear varios seguidos»
     const scope = this.scope();
     if (!scope) return;
     if (annotation.type === T.TEXT && tool === TOOLS.NOTE) {

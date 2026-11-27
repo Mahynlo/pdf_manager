@@ -34,6 +34,7 @@ import { ViewportPluginPackage } from '@embedpdf/plugin-viewport';
 import { ZoomPluginPackage } from '@embedpdf/plugin-zoom';
 import wasmUrl from '@embedpdf/pdfium/pdfium.wasm?url';
 import { createAppEngine, type AppEngine, type DocumentCopies, type PageReading, type PageStructure } from '$lib/pdf-engine/index.ts';
+import { nameNewFields } from '../forms/fields.ts';
 import { STANDARD_LIBRARY } from '../stamps/standard.ts';
 import { t } from '$texts';
 import { INITIAL as S, PRESETS } from '../annotations/styles.svelte.ts';
@@ -109,6 +110,7 @@ export function registry(): Promise<PluginRegistry> {
       mount(EmbedRoot, { target: document.createElement('div'), props: { engine, plugins: plugins(), onReady: resolve } });
     });
     acceptPageLists(embed);
+    nameNewFields(embed);
     // Sin `wantsRawTouch`, el dedo desplaza las páginas. En una pantalla táctil, salvo con las
     // herramientas de texto: ahí arrastrar selecciona (para desplazar está la mano).
     const interaction = embed.getPlugin<InteractionManagerPlugin>('interaction-manager')!.provides();

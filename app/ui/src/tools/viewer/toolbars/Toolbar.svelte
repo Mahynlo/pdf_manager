@@ -60,6 +60,7 @@
     sidebar: boolean;
     dock: boolean;
     tools: boolean;
+    forms: boolean;
   }
 
   /** Lo que hace cada botón (`moreMenu()` da las entradas del menú ⋮). */
@@ -85,6 +86,7 @@
     toggleSidebar(): void;
     toggleDock(): void;
     toggleTools(): void;
+    toggleForms(): void;
   }
 
   /** `tool`: la herramienta activa del lienzo. */
@@ -217,6 +219,10 @@
   <button class="btn btn--ghost tb-btn tb-annotate {PHONE_HIDDEN}" class:is-checked={view.tools} type="button" title={T.tools}
           aria-label={T.tools} aria-pressed={view.tools} onclick={actions.toggleTools}>
     <Icon name="pen-line" size={18} /><span class="tb-annotate__label">{T.annotate}</span>
+  </button>
+  <button class="btn btn--ghost tb-btn tb-annotate {PHONE_HIDDEN}" class:is-checked={view.forms} type="button" title={T.formsTip}
+          aria-label={T.formsTip} aria-pressed={view.forms} onclick={actions.toggleForms}>
+    <Icon name="text-cursor-input" size={18} /><span class="tb-annotate__label">{T.forms}</span>
   </button>
   {@render menuButton('files', T.pages, T.pagesTip, actions.pagesMenu)}
   {@render menuButton('download', T.export, T.exportTip, actions.exportMenu)}

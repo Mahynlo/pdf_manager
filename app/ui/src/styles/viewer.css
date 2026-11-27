@@ -248,15 +248,15 @@
 /* ── Barra de herramientas del lienzo (AnnotSubBar en Qt) ─────────────────── */
 /* Centrada; se compacta por niveles para caber (lib/fit.ts, `data-level`; ver ToolsBar.svelte) y,
    si ni así, se desplaza desde el principio («safe»: no se corta por la izquierda). */
-.viewer-toolbar--tools {
+.viewer-toolbar--tools, .viewer-toolbar--forms {
   height: 42px;
   padding: 2px 8px;
   overflow-x: auto;
   scrollbar-width: none;
   justify-content: safe center;
 }
-.viewer-toolbar--tools::-webkit-scrollbar { display: none; }
-.viewer-toolbar--tools > * { flex: none; }
+.viewer-toolbar--tools::-webkit-scrollbar, .viewer-toolbar--forms::-webkit-scrollbar { display: none; }
+.viewer-toolbar--tools > *, .viewer-toolbar--forms > * { flex: none; }
 .tb-group, .tb-group__all, .tb-swatches { display: flex; align-items: center; }
 .tb-group__all { gap: 2px; }
 
@@ -354,11 +354,6 @@
 }
 .ask-text .field { display: flex; flex-direction: column; gap: 6px; }
 .dialog__textarea { height: auto; min-height: 110px; padding: 8px 10px; resize: vertical; font: inherit; }
-/* Propiedades de un campo de formulario (forms/FieldDialog.svelte) */
-.field-dialog__body { display: flex; flex-direction: column; gap: 10px; }
-.field-dialog .field { display: flex; flex-direction: column; gap: 6px; }
-.field-dialog__hint { margin: -4px 0 0; color: var(--text-muted); font-size: 12px; }
-.field-dialog__error { margin: 0; color: var(--danger); font-size: 13px; }
 
 /* ── Selección de texto y resultados de búsqueda ─────────────────────────── */
 .viewer__stage { position: relative; flex: 1; min-width: 0; display: flex; }
@@ -487,6 +482,83 @@
 .ocr-batch .radio-group { display: flex; flex-direction: column; gap: 6px; }
 .ocr-result .dialog__body { width: min(680px, 90vw); }
 .ocr-result__text { min-height: 360px; font-family: Consolas, "Cascadia Mono", monospace; font-size: 12.5px; }
+
+/* ── Formularios: barra (toolbars/FormsBar.svelte) y panel (forms/FormsPanel.svelte) ── */
+.forms-mode .segmented__item { display: inline-flex; align-items: center; gap: 5px; }
+.forms-mode--block { display: flex; }
+.forms-mode--block .segmented__item { flex: 1; justify-content: center; padding-block: 6px; }
+.forms-panel { height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 6px 8px; overflow-y: auto; }
+.forms-panel__head, .forms-panel__row { display: flex; align-items: center; gap: 6px; }
+.forms-panel__icon, .forms-panel__head .heading { color: var(--accent); }
+.forms-panel__icon { display: grid; }
+.forms-panel__hint { margin: 0; padding: 8px; font-size: 12.5px; text-align: center; }
+.forms-create { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.forms-create__tool {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 6px 2px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.forms-create__tool > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.forms-create__tool:hover { background: var(--bg-hover); color: var(--text-primary); }
+.forms-create__tool.is-checked { background: var(--bg-selected); border-color: var(--accent); color: var(--accent); }
+.forms-list {
+  flex: none;
+  min-height: 44px;
+  max-height: 38vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+}
+.forms-list__empty { margin: 0; padding: 12px; text-align: center; font-size: 12.5px; }
+.forms-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.forms-item:hover { background: var(--bg-hover); }
+.forms-item.is-current { background: var(--bg-selected); }
+.forms-item__icon { display: grid; color: var(--icon-color); }
+.forms-item__text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.forms-item__name, .forms-item__value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.forms-item__value { color: var(--text-muted); font-size: 11.5px; }
+.forms-item__badge { color: var(--danger); font-weight: 700; }
+.forms-item__lock { display: grid; color: var(--text-muted); }
+.forms-item__page { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+.forms-item__dot { width: 8px; height: 8px; flex: none; border-radius: 50%; border: 1px solid var(--border); }
+.forms-item__dot.is-filled { background: var(--accent); border-color: var(--accent); }
+.forms-props { display: flex; flex-direction: column; gap: 8px; padding: 8px; border: 1px solid var(--border-light); border-radius: var(--radius-sm); }
+.forms-props .field { display: flex; flex-direction: column; gap: 4px; }
+.forms-props__checks { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.forms-props__hint { margin: -4px 0 0; color: var(--text-muted); font-size: 11.5px; }
+.forms-props__error { margin: 0; color: var(--danger); font-size: 12.5px; }
+.forms-props .btn--sm { gap: 5px; align-self: flex-start; }
+.forms-props .is-danger:hover:not(:disabled) { color: var(--danger); background: var(--danger-bg); }
+.forms-data { display: flex; flex-wrap: wrap; gap: 6px; }
+.forms-data .btn--sm { gap: 5px; }
 
 /* ── Pestaña Censura (redact_panel.py en Qt) ──────────────────────────────── */
 .redact-panel { height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 6px 8px; }

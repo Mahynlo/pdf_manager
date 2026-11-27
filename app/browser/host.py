@@ -106,6 +106,9 @@ class BrowserHost:
     def save_text(self, suggested_path: str) -> str | None:
         return self._save(suggested_path, "txt")
 
+    def save_json(self, suggested_path: str) -> str | None:
+        return self._save(suggested_path, "json")
+
     def _save(self, suggested_path: str, kind: str) -> str | None:
         path, _ = self._ask("save", {"name": Path(suggested_path).name, "kind": kind})
         if path:

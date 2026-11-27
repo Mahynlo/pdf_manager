@@ -342,33 +342,59 @@ errores de JavaScript.
 
 Los campos de formulario (texto, casilla, botón de opción, lista desplegable y lista) los dibuja la
 capa de anotaciones con los dibujantes del complemento de formularios. Antes salían pintados en la
-imagen de la página y no se podían rellenar.
+imagen de la página y no se podían rellenar. Tienen su propia sección, aparte de «Anotar»:
 
-**Rellenar:** con cualquier herramienta salvo el puntero y las de formulario, los campos están
-bloqueados como anotaciones (`LOCKED` en `embed.ts`: categoría `form`), y el complemento los dibuja
-como controles que se rellenan (`renderLocked`). Cada cambio lo escribe en el PDF de EmbedPDF y lo
-apunta en el historial: Ctrl+Z / Ctrl+Y lo deshacen y rehacen. Ese cambio no pasa por los avisos de
-las anotaciones: `annotations.ts` escucha `onFieldValueChange` para marcar la pestaña con cambios sin
-guardar y rehacer la miniatura. Guardar lo saca el motor, como las anotaciones.
+- **Barra «Formularios»** (botón en la barra superior; en el móvil, en la de abajo;
+  `toolbars/FormsBar.svelte`): el modo **Rellenar** / **Editar campos**, las cinco herramientas para
+  crear campos, «Crear varios seguidos», campo anterior y siguiente (orden de tabulación del
+  documento: `selectPreviousField` / `selectNextField`) y el botón del panel. Es una de las dos: abrir
+  «Anotar» la cierra, y al revés.
+- **Panel «Formularios»** del lateral (`forms/FormsPanel.svelte`; en el móvil se abre desde la
+  barra): el modo y las herramientas de crear; la **lista de campos** (tipo, nombre, valor, página,
+  obligatorio, solo lectura; con filtro si hay más de seis y un resumen «N de M con valor»): un clic
+  lleva al campo y lo deja listo para escribir o, en «Editar campos», lo selecciona; las
+  **propiedades** del campo seleccionado (`forms/FieldProperties.svelte`); y los **datos**.
 
-**Crear y cambiar campos:** grupo «Formulario» de la barra de anotaciones (`TOOLS.FORM_*` en
-`canvas.ts`, herramientas `formTextField`, `formCheckbox`, `formRadioButton`, `formCombobox` y
-`formListbox` del complemento). Clic o arrastrar crea el campo y se vuelve al puntero con él
-seleccionado. Con el puntero y con estas herramientas los campos se desbloquean (`FORM_DESIGN`): se
-seleccionan, mueven, redimensionan, cambian de color de borde y se borran como las demás
-anotaciones (en ese modo no se rellenan). «Propiedades del campo» (barra de la selección o doble
-clic; `forms/fields.ts` y `forms/FieldDialog.svelte`): nombre, obligatorio, solo lectura, varias
-líneas (texto) y las opciones de las listas. Lo que no es el nombre se cambia con `updateAnnotation`
-(se deshace); el nombre, con `renameField` del complemento (no se deshace). Si el nombre nuevo es el
-de otro campo del mismo tipo, pregunta si unirlos (`shareField`): así se agrupan los botones de
-opción; en un PDF, los campos con el mismo nombre son el mismo campo y comparten el valor.
+**Rellenar:** con cualquier herramienta salvo el puntero y las de crear, los campos están bloqueados
+como anotaciones (`LOCKED` en `embed.ts`: categoría `form`), y el complemento los dibuja como
+controles que se rellenan (`renderLocked`). Cada cambio lo escribe en el PDF de EmbedPDF y lo apunta
+en el historial: Ctrl+Z / Ctrl+Y lo deshacen y rehacen. Ese cambio no pasa por los avisos de las
+anotaciones: `annotations.ts` escucha `onFieldValueChange` para marcar la pestaña con cambios sin
+guardar, rehacer la miniatura y avisar al panel. Guardar lo saca el motor, como las anotaciones.
 
-Cada campo nuevo lleva el nombre único que le pone el complemento (`TextField_1a2b3c4d`; no usa el
-de los valores de la herramienta), y cada botón de opción nuevo, un id como valor de exportación.
+**Editar campos y crearlos:** «Editar campos» es el puntero; con él y con las herramientas de crear
+(`TOOLS.FORM_*` en `canvas.ts`: `formTextField`, `formCheckbox`, `formRadioButton`, `formCombobox`,
+`formListbox`) los campos se desbloquean (`FORM_DESIGN`) y se seleccionan, mueven, redimensionan y
+borran como las demás anotaciones. Clic o arrastrar crea el campo y se pasa a «Editar campos» con él
+seleccionado y sus propiedades en el panel; con «Crear varios seguidos» (`forms/state.svelte.ts`) la
+herramienta sigue (Esc termina). En la barra de la selección, «Propiedades del campo» y el doble clic
+abren el panel.
+
+Cada campo nuevo nace con un nombre legible y libre en su documento: «Texto 1», «Casilla 1»,
+«Opcion 1», «Desplegable 1», «Lista 1» (`nameNewFields` en `forms/fields.ts` envuelve lo que crea
+cada herramienta; el complemento le ponía `TextField_1a2b3c4d`). Los nombres van sin tildes ni otros
+caracteres fuera de ASCII ni puntos (`fieldName`): el motor 2.15.1 guarda mal los demás («Opción»
+quedaba «OpciÃ³n» en el PDF).
+
+**Propiedades:** nombre, obligatorio, solo lectura, varias líneas (texto), opciones (listas, «Aplicar
+opciones») y estilo con los botones de estilo de las anotaciones (color del borde, relleno, grosor del
+borde y, si tiene texto, tamaño de letra); y eliminar. Todo con `updateAnnotation` (se deshace), salvo
+el nombre, que se cambia con `renameField` (no se deshace). Si el nombre nuevo es el de otro campo del
+mismo tipo, pregunta si unirlos (`shareField`): así se agrupan los botones de opción; en un PDF los
+campos con el mismo nombre son el mismo campo y comparten el valor.
+
+**Datos:** «Exportar datos…» guarda los valores (nombre → valor) en un `.json` junto al PDF: los da
+el visor (`FormFields.exportData`) y los escribe Python (`viewer.save_form_data`, que comprueba que
+sean un objeto de textos; `Host.save_json`: el diálogo nativo en escritorio, el selector o la descarga
+en el navegador). «Importar datos…» lee un `.json` en la ventana y rellena con `setFormValues` los
+campos que existen y se pueden cambiar (avisa de los que no). «Vaciar formulario» borra texto,
+casillas y botones de opción (las listas conservan su opción: el motor no deja una sin elegir). Las
+dos cosas se deshacen.
 
 **Lo que no hace (aún):** los campos sin borde (`/BS` con ancho 0, habituales en formularios
-dibujados en el contenido de la página) no se ven con el puntero: el complemento los dibuja con su
-borde. Botones de acción, firmas digitales y el JavaScript de los formularios no se tocan.
+dibujados en el contenido de la página) no se ven en «Editar campos» (el complemento los dibuja con
+su borde); se encuentran con la lista del panel. Botones de acción, firmas digitales y el JavaScript
+de los formularios no se tocan.
 
 ### Sellos y firmas (hechos): `plugin-stamp` y `plugin-signature`
 
@@ -892,6 +918,12 @@ PDFium entero (unos 140 KB), que solo usa el worker.
   Svelte, una utilidad que monta la raíz `<EmbedPDF>`; las páginas del visor se montan fuera de ella
   (`embed.ts`). `PdfPages.svelte` da ese contexto (`provideRendererRegistry`) y monta la utilidad
   (`FormPluginPackage.autoMountElements()`).
+- **Nombres de campo con tildes (motor 2.15.1):** `EPDFAnnot_SetFormFieldName` guarda mal los caracteres
+  fuera de ASCII («Opción» → «OpciÃ³n» en el PDF), y entonces el complemento no los reconoce al unir
+  campos. `fieldName` (`forms/fields.ts`) los quita de los nombres nuevos y de los que se escriben.
+- **Enter que confirmaba la pregunta siguiente:** al aplicar el nombre con Enter, si ya existía se
+  abría la pregunta «¿Unir?» con el foco en «Unir» en la misma pulsación, y el `keypress` la aceptaba.
+  `FieldProperties.svelte` hace `preventDefault` del Enter.
 - **Valores de campo que se cruzan (`plugin-form` 2.15.1):** cada tecla escribe el valor con una serie
   de lecturas y escrituras asíncronas en el motor; escribiendo deprisa se cruzaban y el PDF se quedaba
   con un valor anterior, aunque en la página se viera el último («Ana Pér» en vez de «Ana Pérez»).

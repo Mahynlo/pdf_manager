@@ -7,8 +7,8 @@
 //     texto), en figuras y trazos duplicar y crear sello, traer al frente, enviar al fondo, eliminar;
 //   · el teclado: Supr, Esc, Ctrl+D y las flechas (con Mayús, de 10 en 10 puntos);
 //   · doble clic en una nota o una marca de inserción: editar su texto (diálogo); en un campo de
-//     formulario, sus propiedades (forms/fields.ts; también con su botón en la barra).
-import { PdfAnnotationSubtype as T, type PdfWidgetAnnoObject, type Position, type Rect } from '@embedpdf/models';
+//     formulario, sus propiedades en el panel «Formularios» (también con su botón en la barra).
+import { PdfAnnotationSubtype as T, type Position, type Rect } from '@embedpdf/models';
 import { h } from '$lib/dom.ts';
 import { ic } from '$lib/icons.ts';
 import { closePopover, popoverIn } from '$lib/popover.svelte.ts';
@@ -16,7 +16,6 @@ import { askText, toast } from '$lib/ui.ts';
 import { t, tip } from '$texts';
 import type { PageCanvas } from '../canvas/canvas.ts';
 import type { Annot, AnnotDraft, Annotations } from './annotations.ts';
-import { editField } from '../forms/fields.ts';
 import { stampFromAnnotations } from '../stamps/library.svelte.ts';
 import { mountStyleButtons, type MountedStyleButtons } from '../style/mount.svelte.ts';
 import { NO_FILL, type ToolStyle } from './styles.svelte.ts';
@@ -83,9 +82,13 @@ export class AnnotationEditor {
   backButton!: HTMLButtonElement;
   actionsSep!: HTMLSpanElement;
 
-  constructor(canvas: PageCanvas, annotations: Annotations) {
+  /** Abre las propiedades del campo de formulario seleccionado (el panel «Formularios»). */
+  fieldProperties: () => void;
+
+  constructor(canvas: PageCanvas, annotations: Annotations, fieldProperties: () => void) {
     this.canvas = canvas;
     this.annotations = annotations;
+    this.fieldProperties = fieldProperties;
     this.bar = this._buildBar();
     this._enable();
   }
@@ -198,11 +201,6 @@ export class AnnotationEditor {
     }
   }
 
-  /** Propiedades de un campo de formulario (nombre, obligatorio, opciones…). */
-  editField(item: Annot): void {
-    void editField(this.annotations, item as PdfWidgetAnnoObject);
-  }
-
   // ── Ratón ──────────────────────────────────────────────────────────────
   _enable(): void {
     const el: HTMLElement = this.canvas.el;
@@ -226,7 +224,7 @@ export class AnnotationEditor {
       const [item, ...rest] = this.items;
       if (!item || rest.length || !inLayer(ev)) return;
       if (TEXT_TYPES.has(item.type)) this.editNote(item);
-      else if (item.type === T.WIDGET) this.editField(item);
+      else if (item.type === T.WIDGET) this.fieldProperties();
     });
     el.addEventListener('scroll', () => this.placeBar(), { passive: true });
     // Al empezar y terminar de escribir un texto libre, la barra cambia de lado.
@@ -245,7 +243,7 @@ export class AnnotationEditor {
     this.styleButtons = mountStyleButtons(this.styleGroup, (patch) => this._setStyle(patch));
     this.canvas.loading.then(() => this.canvas.unsubscribe.push(() => this.styleButtons.destroy()));
     this.noteButton = iconButton('pencil', B.editText, () => this.editNote(this.items[0]));
-    this.fieldButton = iconButton('sliders-horizontal', t.viewer.forms.properties, () => this.editField(this.items[0]));
+    this.fieldButton = iconButton('sliders-horizontal', t.viewer.forms.properties, () => this.fieldProperties());
     this.copyButton = iconButton('copy', tip(B.duplicate), () => this.duplicate());
     this.stampButton = iconButton('stamp', B.stamp, () => this.makeStamp());
     this.frontButton = iconButton('arrow-up', B.front, () => this.order(true));

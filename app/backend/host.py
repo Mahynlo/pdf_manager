@@ -54,6 +54,9 @@ class Host(Protocol):
     def save_text(self, suggested_path: str) -> str | None:
         """Diálogo «Guardar como» para un .txt; ``None`` si se cancela."""
 
+    def save_json(self, suggested_path: str) -> str | None:
+        """Diálogo «Guardar como» para un .json; ``None`` si se cancela."""
+
     # ── Documentos del visor ─────────────────────────────────────────────────
     def read_file(self, path: str) -> bytes:
         """El contenido de ``path``.

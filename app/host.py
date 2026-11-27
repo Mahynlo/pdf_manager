@@ -32,6 +32,7 @@ PDF_TYPES = ("Archivos PDF (*.pdf)",)
 _IMAGES = ";".join(f"*{suffix}" for suffix in IMAGE_SUFFIXES)
 DOCUMENT_TYPES = (f"PDF e imágenes (*.pdf;{_IMAGES})", *PDF_TYPES, f"Imágenes ({_IMAGES})")
 TEXT_TYPES = ("Archivos de Texto (*.txt)",)
+JSON_TYPES = ("Datos JSON (*.json)",)
 _DWMWA_USE_IMMERSIVE_DARK_MODE = 20
 
 
@@ -204,6 +205,9 @@ class WebviewHost:
 
     def save_text(self, suggested_path: str) -> str | None:
         return self._save_dialog(suggested_path, TEXT_TYPES)
+
+    def save_json(self, suggested_path: str) -> str | None:
+        return self._save_dialog(suggested_path, JSON_TYPES)
 
     def _save_dialog(self, suggested_path: str, file_types: tuple[str, ...]) -> str | None:
         suggested = Path(suggested_path)

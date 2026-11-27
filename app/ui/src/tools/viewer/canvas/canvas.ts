@@ -126,9 +126,9 @@ export const ANNOTATION_TOOL: Record<string, string> = {
 };
 // Herramientas que crean campos de formulario.
 export const FORM_TOOLS = new Set<string>([TOOLS.FORM_TEXT, TOOLS.FORM_CHECKBOX, TOOLS.FORM_RADIO, TOOLS.FORM_COMBO, TOOLS.FORM_LIST]);
-// Con estas los campos de formulario se seleccionan, se mueven y se cambian (FORM_DESIGN); con las
-// demás se rellenan.
-const FORM_DESIGN_TOOLS = new Set<string>([TOOLS.POINTER, ...FORM_TOOLS]);
+// Con estas los campos de formulario se seleccionan, se mueven y se cambian (FORM_DESIGN, «Editar
+// campos»); con las demás se rellenan.
+export const FORM_DESIGN_TOOLS = new Set<string>([TOOLS.POINTER, ...FORM_TOOLS]);
 // Cómo coloca EmbedPDF las páginas en cada modo de vista.
 const LAYOUTS: Record<Mode, { strategy: string; spread: SpreadMode }> = {
   [MODES.CONTINUOUS]: { strategy: ScrollStrategy.Vertical, spread: SpreadMode.None },
@@ -495,6 +495,8 @@ export class PageCanvas {
     const annotation = this._plugin<AnnotationPlugin>('annotation').provides().forDocument(id);
     annotation.setLocked(FORM_DESIGN_TOOLS.has(this.tool) ? FORM_DESIGN : LOCKED);
     if (annotationTool) {
+      // Los campos nuevos toman un nombre libre en el documento activo (forms/fields.ts nameNewFields).
+      if (FORM_TOOLS.has(this.tool)) this.activate();
       this.events.onTool?.(this.tool, id);
       annotation.setActiveTool(annotationTool);
       return;

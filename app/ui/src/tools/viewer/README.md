@@ -8,12 +8,12 @@ carpeta agrupa una parte del visor:
 | `canvas/` | El lienzo con EmbedPDF: el registro y sus complementos (`embed.ts`, `EmbedRoot.svelte`), la clase `PageCanvas` con zoom, modos de vista y herramientas (`canvas.ts`, `layout.ts`), las páginas (`PdfPages.svelte`, `PdfPage.svelte`) y la selección de texto (`selection.ts`) |
 | `annotations/` | Anotaciones: el modelo sobre EmbedPDF (`annotations.ts`), la barra de propiedades y el teclado (`editing.ts`), y la paleta y el estilo de cada herramienta (`styles.svelte.ts`) |
 | `style/` | Estilo de una anotación: los botones (`StyleButtons.svelte`, también en la barra de la selección con `mount.svelte.ts`) y sus paneles de color (`ColorPanel.svelte`, `color.ts`) y de grosor o letra (`SizePanel.svelte`) |
-| `forms/` | Campos de formulario (complemento `plugin-form`): sus propiedades (`fields.ts`, `FieldDialog.svelte`). Se rellenan en la página y se crean con las herramientas «Formulario» (`canvas.ts`) |
+| `forms/` | Formularios (complemento `plugin-form`): el modelo (`fields.ts`: lista de campos, propiedades, nombres de los nuevos, datos), el panel lateral (`FormsPanel.svelte`, `FieldProperties.svelte`) y las opciones compartidas (`state.svelte.ts`). Su barra es `toolbars/FormsBar.svelte` |
 | `stamps/` | Sellos y firmas: las bibliotecas (`library.svelte.ts`, `standard.ts`), el PDF de cada sello (`stamp-pdf.ts`), las firmas (`signatures.svelte.ts`), el panel (`StampsPanel.svelte`) y los diálogos de firma y de leyendas |
 | `redact/` | Censura: las marcas (`redaction.ts`), aplicarlas en el documento con el motor (`apply.ts`), el panel (`RedactPanel.svelte`) y los perfiles (`ProfilesDialog.svelte`) |
 | `ocr/` | OCR: el panel y sus diálogos de lote y resultado, y el reconocimiento de páginas, recortes y su orientación (`recognize.ts`: el motor dibuja, Python reconoce, el motor escribe el texto) |
 | `document/` | Acciones sobre el archivo: guardar, páginas y exportar (`operations.ts`), las operaciones de página con el motor de EmbedPDF y su deshacer (`pages.ts`), la copia del documento que sale del visor a un archivo, a la impresora o a Python (`copy.ts`), el texto de las páginas que recibe Python (`text.ts`; las tres sobre `$lib/pdf-engine`), imprimir con el diálogo de WebView2 (`print.ts`), las propiedades (`properties.ts`, `PropertiesDialog.svelte`) y exportar las páginas como imágenes (`ExportImagesDialog.svelte`) |
-| `toolbars/` | La barra superior (`Toolbar.svelte`) y la de herramientas del lienzo (`ToolsBar.svelte`) |
+| `toolbars/` | La barra superior (`Toolbar.svelte`), la de anotaciones (`ToolsBar.svelte`) y la de formularios (`FormsBar.svelte`) |
 | `panels/` | Los demás paneles: miniaturas (`Thumbnails.svelte`), índice, búsqueda y asistente IA |
 
 Reglas:

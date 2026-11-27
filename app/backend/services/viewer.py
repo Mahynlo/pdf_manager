@@ -36,6 +36,7 @@ nunca con rutas directamente: en el navegador los tiene la ventana, no Python.
 from __future__ import annotations
 
 import itertools
+import json
 import logging
 import threading
 from collections.abc import Iterator
@@ -473,6 +474,24 @@ class ViewerService:
             pages = [self.packed_text(entry, i) for i in range(len(entry.keys))]
             ocr_text = {i: " ".join(w[4] for w in entry.ocr[key]) for i, key in enumerate(entry.keys) if key in entry.ocr}
         self._write(dest, page_ops.document_text(pages, ocr_text).encode("utf-8"))
+        return dest
+
+    @exposed
+    def save_form_data(self, doc_id: int, text: str) -> str | None:
+        """«Exportar datos» del panel de formularios: los valores de los campos que da el visor
+        (JSON, nombre → valor) en un .json junto al PDF. Devuelve su ruta (``None`` si se cancela)."""
+        try:
+            values = json.loads(text)
+        except ValueError:
+            values = None
+        if not isinstance(values, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in values.items()):
+            raise UserError("Los datos del formulario no son válidos.", "bad_form_data")
+        with self._lock:
+            source = Path(self._doc(doc_id).path)
+        dest = self._host.save_json(str(source.with_name(f"{source.stem}_formulario.json")))
+        if not dest:
+            return None
+        self._write(dest, json.dumps(values, ensure_ascii=False, indent=2).encode("utf-8"))
         return dest
 
     @exposed
