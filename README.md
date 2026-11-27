@@ -1,43 +1,72 @@
-# PdfManager App
+<p align="center">
+  <img src="app/ui/src/assets/logo.png" alt="Logotipo de Extraer PDFs" width="128" height="128">
+</p>
 
-Aplicación de escritorio para Windows para ver, anotar, censurar y manipular archivos PDF, con OCR,
-extracción por palabras clave, combinación y seguridad.
+<h1 align="center">Extraer PDFs</h1>
 
-![Visor PDF](docs/web/imagenes/visor.png)
+<p align="center">
+  <strong>Ver, anotar, rellenar, censurar y manipular archivos PDF en Windows.</strong><br>
+  Con OCR, formularios, extracción por palabras clave, combinación y seguridad. Todo se procesa en tu equipo.
+</p>
 
+<p align="center">
+  <a href="https://github.com/Mahynlo/pdf_manager/releases"><img alt="Última versión" src="https://img.shields.io/github/v/release/Mahynlo/pdf_manager?include_prereleases&label=versi%C3%B3n"></a>
+  <img alt="Windows" src="https://img.shields.io/badge/plataforma-Windows-0078D6">
+  <img alt="Python 3.10 o superior" src="https://img.shields.io/badge/Python-3.10%2B-3776AB">
+  <img alt="Svelte 5" src="https://img.shields.io/badge/interfaz-Svelte%205-FF3E00">
+  <img alt="Motor PDFium" src="https://img.shields.io/badge/motor-PDFium-4285F4">
+</p>
+
+<p align="center">
+  <a href="https://github.com/Mahynlo/pdf_manager/releases"><strong>Descargar</strong></a> ·
+  <a href="docs/web/como-funciona.md">Cómo funciona</a> ·
+  <a href="docs/web/README.md">Documentación</a> ·
+  <a href="CHANGELOG.md">Cambios</a> ·
+  <a href="https://github.com/Mahynlo/pdf_manager/issues">Avisar de un fallo</a>
+</p>
+
+![El visor de PDF](docs/web/imagenes/visor.png)
+
+> [!NOTE]
 > **Versión web 0.1.30-beta-web: segunda versión de pruebas (beta).** La interfaz ahora usa tecnología web
 > (Svelte) dentro de una ventana de escritorio (pywebview + WebView2), con el backend en Python. Todo
 > el trabajo con PDF usa un solo motor, PDFium (licencia Apache/BSD). **La última versión estable
 > sigue siendo la 0.1.28** (Flet), que queda en la rama `Flet`. Ver [docs/README.md](docs/README.md).
 
-## Arquitectura
+## Contenido
 
-```
-app/            aplicación: ventana (pywebview), arranque y servicios Python que llama la interfaz
-app/ui/         interfaz en Svelte (compilada con Vite); el visor dibuja los PDF con EmbedPDF (PDFium)
-src/pdf_core/   lógica de PDF sin interfaz (PDFium, OCR, censura, combinar, seguridad...)
-installer/web/  ejecutable (PyInstaller) e instalador (Inno Setup)
-docs/web/       documentación de la versión web
-```
-
-La interfaz llama a los servicios de Python con `call('servicio.metodo', ...)`. EmbedPDF es dueño
-del documento abierto en el visor: dibuja las páginas y edita anotaciones, páginas y censura en la
-ventana. Python lee y escribe los archivos y hace lo que EmbedPDF no puede (OCR, IA, orientación del
-escaneo) y las herramientas de archivos (combinar, extraer y seguridad).
-
-- **[Cómo funciona, paso a paso](docs/web/como-funciona.md)**: diagramas de cada flujo (arranque,
-  abrir, guardar, OCR, censura, la versión de navegador…). El mejor sitio para empezar.
-- [Arquitectura y reglas](docs/web/arquitectura.md) y el resto de la
-  [documentación técnica](docs/web/README.md).
+- [Características](#características)
+- [Qué está en fase de pruebas](#qué-está-en-fase-de-pruebas)
+- [Instalación](#instalación)
+- [Arquitectura](#arquitectura)
+- [Desarrollo](#desarrollo)
+- [Compilación](#compilación)
+- [Versiones](#versiones)
+- [Versión Flet](#versión-flet)
 
 ## Características
 
-### 🏠 Inicio
+| Herramienta | Para qué sirve |
+|---|---|
+| [Inicio](#inicio) | Accesos a cada herramienta y archivos recientes, en pestañas |
+| [Visor de PDF](#visor-de-pdf) | Leer, anotar, sellar, firmar, organizar páginas, imprimir y exportar |
+| [Formularios](#formularios) | Rellenar los campos de un PDF, crear campos nuevos y guardar sus datos |
+| [Imágenes a PDF](#imágenes-a-pdf) | Convertir fotos y escaneos en un PDF, o añadirlos a uno abierto |
+| [Censura](#censura) | Borrar para siempre datos personales y texto sensible |
+| [OCR](#ocr) | Reconocer el texto de las páginas escaneadas |
+| [Asistente IA](#asistente-ia-en-pruebas) | Preguntar sobre el documento, resumirlo y detectar datos sensibles (en pruebas) |
+| [Combinar PDF](#combinar-pdf) | Unir varios PDF eligiendo y ordenando las páginas |
+| [Extraer](#extraer) | Sacar de muchos PDF las páginas que mencionan algo |
+| [Seguridad](#seguridad) | Poner o quitar contraseñas y permisos |
+
+### Inicio
+
 Accesos a cada herramienta y archivos recientes. Cada PDF y cada herramienta se abren en su pestaña.
 
 ![Inicio](docs/web/imagenes/inicio.png)
 
-### 📖 Visor de PDF
+### Visor de PDF
+
 - Zoom, scroll continuo, doble página o página única, miniaturas, índice y modo noche.
 - Selección de texto (también entre páginas) y búsqueda con lista de resultados.
 - **Anotaciones:** resaltar, subrayar, tachar, formas, flechas, pluma, texto libre, notas e imágenes.
@@ -55,7 +84,21 @@ Accesos a cada herramienta y archivos recientes. Cada PDF y cada herramienta se 
 
 📚 [Cómo está hecho el visor](docs/web/embedpdf.md)
 
-### 🖼️ Imágenes a PDF
+### Formularios
+
+- **Rellenar** los campos del PDF (texto, casillas, botones de opción y listas), pasar de un campo al
+  siguiente y ver en un panel cuáles tienen valor.
+- **Crear campos** nuevos sobre la página, uno o varios seguidos, y moverlos o cambiarles el tamaño.
+- **Propiedades** como en los editores de formularios: nombre, obligatorio, solo lectura, no exportar,
+  longitud máxima, multilínea, contraseña, un carácter por casilla, opciones de las listas, grupos de
+  botones de opción y estilo.
+- **Datos:** exportar los valores a un `.json`, importarlos en otro PDF con los mismos campos y vaciar
+  el formulario, con deshacer.
+
+📚 [Guía de uso](src/assets/ayuda/03_FORMULARIOS.md) · [Cómo está hecho](docs/web/embedpdf.md#formularios-hechos-plugin-form)
+
+### Imágenes a PDF
+
 - Abre imágenes (PNG, JPG, WebP, BMP, GIF, SVG) desde Inicio, con Ctrl+O o arrastrándolas: cada una
   es una página de un **PDF nuevo** que se abre en el visor sin guardar (Ctrl+S → «Guardar como»).
 - Tamaño de hoja (A4, Carta, Oficio, Legal, A5, A3 o el de la imagen), margen y encajar o rellenar.
@@ -67,8 +110,10 @@ Accesos a cada herramienta y archivos recientes. Cada PDF y cada herramienta se 
 
 📚 [Guía de uso](src/assets/ayuda/06_IMAGENES%20A%20PDF.md) · [Cómo está hecho](docs/web/imagenes-pdf.md)
 
-### 🖍️ Censura
+### Censura
+
 Marca lo que hay que tapar y revísalo en la página antes de aplicarlo:
+
 - frases, expresiones regulares y patrones de datos personales (correos, teléfonos, tarjetas, RFC/CURP...);
 - texto seleccionado y áreas dibujadas a mano;
 - perfiles de censura guardados.
@@ -78,38 +123,44 @@ debajo se borra para siempre y el documento solo se guarda como copia.
 
 ![Censura](docs/web/imagenes/censura.png)
 
-### 🔍 OCR
+### OCR
+
 Reconoce el texto de páginas escaneadas (página actual, recorte o documento entero) y corrige la
 orientación. El texto reconocido se puede seleccionar, buscar, censurar y exportar.
 
 ![OCR](docs/web/imagenes/ocr.png)
 
-### ✨ Asistente IA (en pruebas)
+### Asistente IA (en pruebas)
+
 Chat sobre el documento, resumen, datos clave y detección de datos sensibles (que se envían a
 Censura). Sin clave de API responde en modo básico.
 
-> ⚠️ El agente de IA está **en fase de pruebas** y todavía no está probado del todo. Necesita un
+> [!WARNING]
+> El agente de IA está **en fase de pruebas** y todavía no está probado del todo. Necesita un
 > proveedor configurado en el panel del asistente (Gemini u OpenAI con su clave de API, o una IA local como Ollama);
 > sin él solo funciona el modo básico.
 
-### 📄 Combinar PDF
+### Combinar PDF
+
 Une varios PDF eligiendo, girando y reordenando las páginas, con vista previa del resultado.
 
 ![Combinar PDF](docs/web/imagenes/combinar.png)
 
-### 📊 Extraer
+### Extraer
+
 Busca en varios PDF por palabras clave (o por rango de páginas) y genera un PDF con las páginas
 encontradas.
 
 ![Extraer](docs/web/imagenes/extraer.png)
 
-### 🔐 Seguridad
+### Seguridad
+
 - **Proteger:** contraseña de usuario y de propietario (AES-256) y permisos.
 - **Desbloquear:** quita la protección de un PDF del que se conoce la contraseña.
 
 ![Seguridad](docs/web/imagenes/seguridad.png)
 
-## 🧪 Qué está en fase de pruebas
+## Qué está en fase de pruebas
 
 La 0.1.30-beta-web es la **segunda versión de pruebas** (la primera fue la 0.1.29-web). Funciona en
 general y pasa las pruebas automáticas, pero cambió mucho por dentro: el visor ahora es dueño del
@@ -123,6 +174,7 @@ Qué conviene probar con uso real:
 | **Abrir y guardar** | PDF variados (escaneados, de Word, grandes, con contraseña, con formularios). Guardar, «Guardar como» y volver a abrir: que no falte nada y que la contraseña se conserve |
 | **Páginas** | Girar, mover (también arrastrando miniaturas), insertar, duplicar, eliminar y extraer, con Ctrl+Z / Ctrl+Y en medio, y guardar al final |
 | **Anotaciones, sellos y firmas** | Crearlas, editarlas, guardarlas y abrir el PDF en otro lector (Edge, Acrobat) para ver que se ven igual |
+| **Formularios** | Rellenar formularios reales, crear campos y cambiar sus propiedades, exportar e importar los datos, guardar y rellenar el PDF en otro lector |
 | **Censura** | Marcar, aplicar y guardar la copia; comprobar en otro lector que el texto tapado ya no se puede copiar ni buscar (tampoco el del OCR) |
 | **OCR** | Página, área y documento entero en escaneos reales; corregir orientación; buscar y exportar el texto reconocido |
 | **Imágenes a PDF** | Fotos del móvil (verticales y apaisadas), capturas, PNG con transparencia y SVG; orientación automática y a mano; insertar y ajustar páginas en un PDF abierto; exportar páginas como imágenes y abrir el PDF guardado en otro lector |
@@ -131,7 +183,7 @@ Qué conviene probar con uso real:
 | **Combinar, Extraer y Seguridad** | Los diálogos de Windows para elegir archivos y carpetas, el progreso y los PDF que generan |
 | **Sistema** | Instalar sobre la 0.1.29-web, «Abrir con», arrastrar PDF desde el Explorador, varias pestañas y reordenarlas, ventana pequeña |
 
-Ya se sabe que:
+Limitaciones conocidas:
 
 - Imprimir ya no tiene orden inverso ni orientación automática por página (lo hace ahora el diálogo de Windows).
 - El instalador no está firmado: Windows SmartScreen puede avisar al instalarlo («Más información» → «Ejecutar de todas formas»).
@@ -150,6 +202,26 @@ Abre un [issue](https://github.com/Mahynlo/pdf_manager/issues) con:
 Descarga el instalador `ExtraerPDFs_Web_Setup_<versión>.exe` de la página de
 [Releases](https://github.com/Mahynlo/pdf_manager/releases). Añade «Abrir con» para los PDF y admite
 arrastrar archivos a la ventana.
+
+## Arquitectura
+
+```
+app/            aplicación: ventana (pywebview), arranque y servicios Python que llama la interfaz
+app/ui/         interfaz en Svelte (compilada con Vite); el visor dibuja los PDF con EmbedPDF (PDFium)
+src/pdf_core/   lógica de PDF sin interfaz (PDFium, OCR, censura, combinar, seguridad...)
+installer/web/  ejecutable (PyInstaller) e instalador (Inno Setup)
+docs/web/       documentación de la versión web
+```
+
+La interfaz llama a los servicios de Python con `call('servicio.metodo', ...)`. EmbedPDF es dueño
+del documento abierto en el visor: dibuja las páginas y edita anotaciones, formularios, páginas y
+censura en la ventana. Python lee y escribe los archivos y hace lo que EmbedPDF no puede (OCR, IA,
+orientación del escaneo) y las herramientas de archivos (combinar, extraer y seguridad).
+
+- **[Cómo funciona, paso a paso](docs/web/como-funciona.md)**: diagramas de cada flujo (arranque,
+  abrir, guardar, OCR, censura, la versión de navegador…). El mejor sitio para empezar.
+- [Arquitectura y reglas](docs/web/arquitectura.md) y el resto de la
+  [documentación técnica](docs/web/README.md).
 
 ## Desarrollo
 
@@ -188,7 +260,6 @@ etiqueta `v*-web` (por ejemplo `v0.1.30-beta-web`). Detalle en
 Los cambios de cada versión están en [CHANGELOG.md](CHANGELOG.md). Su sección se genera a partir de
 los commits (`uv run python installer/changelog.py add`) y es también el texto de la Release de GitHub.
 Cómo publicar una versión y cómo escribir los commits: [docs/web/versiones.md](docs/web/versiones.md).
-
 
 ## Versión Flet
 
