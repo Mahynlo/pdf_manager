@@ -6,6 +6,7 @@ Bienvenido a **Extraer PDFs** — tu aplicación de gestión de documentos PDF t
 
 - **Abrir y ver PDFs** en pestañas separadas
 - **Anotar PDFs** — resaltar, subrayar, tachar, añadir notas y dibujar
+- **Formularios** — rellenar los campos de un PDF y crear campos nuevos (Anotar → Formulario)
 - **Buscar texto** dentro de un PDF (Ctrl+F)
 - **Extraer información** — palabras clave u OCR de múltiples PDFs
 - **Combinar PDFs** — unir varios documentos en uno solo
@@ -35,6 +36,7 @@ Bienvenido a **Extraer PDFs** — tu aplicación de gestión de documentos PDF t
 
 - **Abrir y ver PDFs** en pestañas separadas
 - **Anotar PDFs** — resaltar, subrayar, tachar, añadir notas y dibujar
+- **Formularios** — rellenar los campos de un PDF y crear campos nuevos (Anotar → Formulario)
 - **Buscar texto** dentro de un PDF (Ctrl+F)
 - **Extraer información** — palabras clave u OCR de múltiples PDFs
 - **Combinar PDFs** — unir varios documentos en uno solo

@@ -14,9 +14,10 @@
 // con `showRow`.
 import { mount } from 'svelte';
 import { createPluginRegistration, refreshPages, type PluginRegistry } from '@embedpdf/core';
-import type { PdfPageObject } from '@embedpdf/models';
-import { AnnotationPluginPackage, LockModeType } from '@embedpdf/plugin-annotation';
+import { Task, type PdfPageObject } from '@embedpdf/models';
+import { AnnotationPluginPackage, LockModeType, type LockMode } from '@embedpdf/plugin-annotation';
 import { DocumentManagerPluginPackage } from '@embedpdf/plugin-document-manager';
+import { FormPluginPackage, type FormPluginConfig } from '@embedpdf/plugin-form';
 import { HistoryPluginPackage } from '@embedpdf/plugin-history';
 import { InteractionManagerPluginPackage, type InteractionManagerPlugin } from '@embedpdf/plugin-interaction-manager';
 import { RedactionPluginPackage } from '@embedpdf/plugin-redaction';
@@ -50,6 +51,11 @@ const IMAGE = { type: 'image/webp', quality: 0.92 } as const;
 // selecciona texto; con el de las demás herramientas, no (dibujan otros módulos).
 export const TEXT_MODE = 'pointerMode';
 export const OTHER_MODE = 'viewer-tools';
+// Anotaciones que no se seleccionan ni se mueven: los enlaces y los campos de formulario, que así
+// se rellenan (el complemento de formularios los dibuja como campos). Con las herramientas de
+// formulario (FORM_DESIGN) los campos se desbloquean para moverlos y cambiarlos.
+export const LOCKED: LockMode = { type: LockModeType.Include, categories: ['link', 'form'] };
+export const FORM_DESIGN: LockMode = { type: LockModeType.Include, categories: ['link'] };
 
 // Herramientas de anotación de EmbedPDF con nuestros valores iniciales (se mezclan con los
 // suyos). Cada visor les aplica después su propio estilo al activarlas (annotations.ts).
@@ -267,12 +273,16 @@ function plugins() {
     createPluginRegistration(SearchPluginPackage),
     createPluginRegistration(HistoryPluginPackage),
     // Las anotaciones las dibuja y edita su capa (PdfPage.svelte); los enlaces quedan bloqueados:
-    // son del documento.
+    // son del documento. Los campos de formulario también: bloqueados se rellenan; para
+    // moverlos o cambiarlos se desbloquean (FORM_DESIGN).
     createPluginRegistration(ViewerAnnotationPackage, {
       tools: ANNOTATION_TOOLS,
       colorPresets: PRESETS.map(([color]) => color),
-      locked: { type: LockModeType.Include, categories: ['link'] },
+      locked: LOCKED,
     } as Parameters<typeof AnnotationPluginPackage.create>[1]),
+    // Formularios: los campos los dibuja la capa de anotaciones con los dibujantes del
+    // complemento (PdfPages.svelte), que además suma sus herramientas para crear campos.
+    createPluginRegistration(ViewerFormPackage),
     // Censura: las marcas pendientes son anotaciones (se revisan, se mueven, se borran y se
     // deshacen como las demás); se aplican en Python con el motor (redaction.ts).
     createPluginRegistration(RedactionPluginPackage, { useAnnotationMode: true, drawBlackBoxes: true }),
@@ -280,9 +290,10 @@ function plugins() {
     // defecto); los de texto y los propios los carga stamps/library.svelte.ts.
     createPluginRegistration(StampPluginPackage, { libraries: [STANDARD_LIBRARY], manifests: [], defaultLibrary: false }),
     createPluginRegistration(SignaturePluginPackage, { mode: SignatureMode.SignatureAndInitials }),
-    // Sin las anotaciones: las dibuja su capa encima (si no, saldrían dos veces).
+    // Sin las anotaciones ni los campos de formulario: los dibuja su capa encima (si no, saldrían
+    // dos veces y, al rellenar un campo, debajo seguiría el valor de antes).
     createPluginRegistration(RenderPluginPackage, {
-      withAnnotations: false, withForms: true, defaultImageType: IMAGE.type, defaultImageQuality: IMAGE.quality,
+      withAnnotations: false, withForms: false, defaultImageType: IMAGE.type, defaultImageQuality: IMAGE.quality,
     }),
     createPluginRegistration(ViewerTilingPackage, { tileSize: 768, overlapPx: 2.5, extraRings: 0, defaultImageType: IMAGE.type }),
     createPluginRegistration(ZoomPluginPackage, {
@@ -364,6 +375,45 @@ function withoutRepeatedTiles<S extends TilingState>(state: S): S {
   }
   return documents === state.documents ? state : { ...state, documents };
 }
+
+/** Lo interno de FormPlugin: escribe el valor de un campo (lo llaman sus controles en cada tecla). */
+interface FormInternals {
+  setFormFieldValues(...args: unknown[]): Task<boolean, unknown>;
+}
+
+let formQueue = Promise.resolve(); // los cambios de valor de los campos aún sin escribir (`oneAtATime`)
+
+/** Termina cuando ya están escritos en el PDF de EmbedPDF los valores de campo pendientes (antes de sacar una copia). */
+export function formWrites(): Promise<void> {
+  return formQueue;
+}
+
+/**
+ * Los cambios de valor de los campos, de uno en uno. plugin-form (2.15.1) escribe cada tecla con una
+ * serie de lecturas y escrituras asíncronas en el motor; si se escribe más rápido de lo que terminan,
+ * se cruzan y el PDF se queda con un valor anterior (en la página se ve el último). En cola, una copia
+ * sacada justo después tiene que esperar a que se escriban (`formWrites`). Hay que revisarlo al
+ * actualizar EmbedPDF.
+ */
+function oneAtATime(plugin: FormInternals): void {
+  const set = plugin.setFormFieldValues.bind(plugin);
+  plugin.setFormFieldValues = (...args) => {
+    const result = new Task<boolean, unknown>();
+    formQueue = formQueue.then(() => new Promise<void>((done) => {
+      set(...args).wait((value) => { result.resolve(value); done(); }, (error) => { result.fail(error); done(); });
+    }));
+    return result;
+  };
+}
+
+const ViewerFormPackage = {
+  ...FormPluginPackage,
+  create: (registry: PluginRegistry, config: FormPluginConfig) => {
+    const plugin = FormPluginPackage.create(registry, config);
+    oneAtATime(plugin as unknown as FormInternals);
+    return plugin;
+  },
+};
 
 const ViewerTilingPackage = {
   ...TilingPluginPackage,

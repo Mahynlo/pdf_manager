@@ -26,11 +26,13 @@ import type { PluginRegistry } from '@embedpdf/core';
 import {
   applyInsertUpright, type AnnotationEvent, type AnnotationPlugin, type AnnotationScope,
 } from '@embedpdf/plugin-annotation';
+import type { FormPlugin, FormScope } from '@embedpdf/plugin-form';
 import type { Command, HistoryPlugin, HistoryScope } from '@embedpdf/plugin-history';
 import { standardFontText } from '$lib/standard-font.ts';
 import { askText } from '$lib/ui.ts';
 import { t } from '$texts';
-import { ANNOTATION_TOOL, TOOLS, type PageCanvas } from '../canvas/canvas.ts';
+import { ANNOTATION_TOOL, FORM_TOOLS, TOOLS, type PageCanvas } from '../canvas/canvas.ts';
+import { formWrites } from '../canvas/embed.ts';
 import { KINDS, MANUAL_LABEL, type SelectionPart } from '../redact/redaction.ts';
 import { TEXT_STAMP, textStampSize, type TextStamp } from '../stamps/stamp-pdf.ts';
 import { styleOf } from './styles.svelte.ts';
@@ -93,7 +95,7 @@ const TEXT_EDITS: Record<TextEdit, { intent: string; title: string; label: strin
 // Tras crear con estas herramientas se pasa al puntero con lo creado seleccionado (como Qt).
 const AUTO_POINTER = new Set<string>([
   TOOLS.RECT, TOOLS.ELLIPSE, TOOLS.LINE, TOOLS.ARROW, TOOLS.POLYLINE, TOOLS.POLYGON,
-  TOOLS.TEXT, TOOLS.CALLOUT, TOOLS.NOTE, TOOLS.IMAGE, TOOLS.PLACE,
+  TOOLS.TEXT, TOOLS.CALLOUT, TOOLS.NOTE, TOOLS.IMAGE, TOOLS.PLACE, ...FORM_TOOLS,
 ]);
 // Fuera del orden de dibujo: no se apilan con las demás (enlaces, formularios, ventanas de nota).
 const UNSTACKED = new Set<PdfAnnotationSubtype>([T.LINK, T.WIDGET, T.POPUP]);
@@ -164,7 +166,7 @@ export class Annotations {
   /** Lo llama el lienzo antes de activar la herramienta de anotación de `tool`: le da nuestro estilo. */
   applyStyle(tool: string): void {
     const id = (ANNOTATION_TOOL as Record<string, string | undefined>)[tool];
-    if (id) this._plugin().provides().setToolDefaults(id, toolDefaults(tool, this.style));
+    if (id && !FORM_TOOLS.has(tool)) this._plugin().provides().setToolDefaults(id, toolDefaults(tool, this.style));
   }
 
   // ── EmbedPDF ───────────────────────────────────────────────────────────
@@ -191,6 +193,12 @@ export class Annotations {
     return shown ? this._plugin().provides().forDocument(shown) : null;
   }
 
+  /** Los campos de formulario del documento a la vista (null mientras no hay ninguno). */
+  form(): FormScope | null {
+    const shown: string | null = this.canvas.shown;
+    return shown ? this._registry().getPlugin<FormPlugin>('form')!.provides().forDocument(shown) : null;
+  }
+
   _history(): HistoryScope {
     return this._historyPlugin().provides().forDocument(this.canvas.shown!);
   }
@@ -200,8 +208,16 @@ export class Annotations {
     if (this.canvas.closed) return;
     const annotation = this._plugin().provides();
     const history = this._historyPlugin().provides();
+    const form = this._registry().getPlugin<FormPlugin>('form')!.provides();
     const ours = (documentId: string) => documentId === this.canvas.shown;
     this.canvas.unsubscribe.push(
+      // Se rellenó un campo de formulario (también al deshacer): el complemento lo escribe en el
+      // PDF de EmbedPDF sin pasar por los avisos de las anotaciones.
+      form.onFieldValueChange(({ documentId, pageIndex }) => {
+        if (!ours(documentId)) return;
+        this.host.onChanged();
+        this.host.onRendered([pageIndex]);
+      }),
       annotation.onAnnotationEvent((event) => {
         if (ours(event.documentId)) this._onEvent(event);
       }),
@@ -536,6 +552,7 @@ export class Annotations {
    */
   async commit(): Promise<void> {
     this.canvas.finishEditing(); // el texto que se está escribiendo también cuenta
+    await formWrites(); // y lo escrito en los campos de formulario
     await this.scope()?.commit().toPromise();
   }
 }

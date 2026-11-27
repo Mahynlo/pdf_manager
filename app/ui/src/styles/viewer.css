@@ -354,6 +354,11 @@
 }
 .ask-text .field { display: flex; flex-direction: column; gap: 6px; }
 .dialog__textarea { height: auto; min-height: 110px; padding: 8px 10px; resize: vertical; font: inherit; }
+/* Propiedades de un campo de formulario (forms/FieldDialog.svelte) */
+.field-dialog__body { display: flex; flex-direction: column; gap: 10px; }
+.field-dialog .field { display: flex; flex-direction: column; gap: 6px; }
+.field-dialog__hint { margin: -4px 0 0; color: var(--text-muted); font-size: 12px; }
+.field-dialog__error { margin: 0; color: var(--danger); font-size: 13px; }
 
 /* ── Selección de texto y resultados de búsqueda ─────────────────────────── */
 .viewer__stage { position: relative; flex: 1; min-width: 0; display: flex; }
@@ -365,7 +370,8 @@
 .pdf-canvas[data-tool="arrow"], .pdf-canvas[data-tool="polyline"], .pdf-canvas[data-tool="polygon"],
 .pdf-canvas[data-tool="pen"], .pdf-canvas[data-tool="marker"], .pdf-canvas[data-tool="draw"],
 .pdf-canvas[data-tool="text"], .pdf-canvas[data-tool="callout"], .pdf-canvas[data-tool="note"],
-.pdf-canvas[data-tool="area-ocr"], .pdf-canvas[data-tool="redact"] { cursor: crosshair; }
+.pdf-canvas[data-tool="area-ocr"], .pdf-canvas[data-tool="redact"],
+.pdf-canvas[data-tool^="form-"] { cursor: crosshair; }
 .pdf-canvas[data-tool="image"], .pdf-canvas[data-tool="place-text"] { cursor: copy; }
 .pdf-canvas[data-tool="pointer"] { cursor: default; }
 /* Encima de la página (y de sus anotaciones): las marcas. */

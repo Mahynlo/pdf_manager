@@ -6,8 +6,9 @@
 //     lo seleccionado; style/StyleButtons.svelte), editar el texto (nota, insertar o reemplazar
 //     texto), en figuras y trazos duplicar y crear sello, traer al frente, enviar al fondo, eliminar;
 //   · el teclado: Supr, Esc, Ctrl+D y las flechas (con Mayús, de 10 en 10 puntos);
-//   · doble clic en una nota o una marca de inserción: editar su texto (diálogo).
-import { PdfAnnotationSubtype as T, type Position, type Rect } from '@embedpdf/models';
+//   · doble clic en una nota o una marca de inserción: editar su texto (diálogo); en un campo de
+//     formulario, sus propiedades (forms/fields.ts; también con su botón en la barra).
+import { PdfAnnotationSubtype as T, type PdfWidgetAnnoObject, type Position, type Rect } from '@embedpdf/models';
 import { h } from '$lib/dom.ts';
 import { ic } from '$lib/icons.ts';
 import { closePopover, popoverIn } from '$lib/popover.svelte.ts';
@@ -15,6 +16,7 @@ import { askText, toast } from '$lib/ui.ts';
 import { t, tip } from '$texts';
 import type { PageCanvas } from '../canvas/canvas.ts';
 import type { Annot, AnnotDraft, Annotations } from './annotations.ts';
+import { editField } from '../forms/fields.ts';
 import { stampFromAnnotations } from '../stamps/library.svelte.ts';
 import { mountStyleButtons, type MountedStyleButtons } from '../style/mount.svelte.ts';
 import { NO_FILL, type ToolStyle } from './styles.svelte.ts';
@@ -74,6 +76,7 @@ export class AnnotationEditor {
   styleButtons!: MountedStyleButtons;
   styleGroup!: HTMLSpanElement;
   noteButton!: HTMLButtonElement;
+  fieldButton!: HTMLButtonElement;
   copyButton!: HTMLButtonElement;
   stampButton!: HTMLButtonElement;
   frontButton!: HTMLButtonElement;
@@ -98,8 +101,9 @@ export class AnnotationEditor {
     this.placeBar();
     requestAnimationFrame(() => this.placeBar()); // con los botones de estilo ya pintados (Svelte)
     // Sin selección (la X de la barra, por ejemplo) tampoco se sigue escribiendo en un texto
-    // libre. Después del cambio: un clic en el fondo ya lo habrá terminado.
-    if (!items.length) requestAnimationFrame(() => !this.items.length && this.canvas.finishEditing());
+    // libre. Después del cambio: un clic en el fondo ya lo habrá terminado. Solo el texto libre:
+    // un clic en un campo de formulario también deja sin selección y el campo se queda escribiendo.
+    if (!items.length) requestAnimationFrame(() => !this.items.length && this._typing() && this.canvas.finishEditing());
   }
 
   /** Esc mientras se escribe un texto libre: termina y lo deja seleccionado. */
@@ -194,6 +198,11 @@ export class AnnotationEditor {
     }
   }
 
+  /** Propiedades de un campo de formulario (nombre, obligatorio, opciones…). */
+  editField(item: Annot): void {
+    void editField(this.annotations, item as PdfWidgetAnnoObject);
+  }
+
   // ── Ratón ──────────────────────────────────────────────────────────────
   _enable(): void {
     const el: HTMLElement = this.canvas.el;
@@ -215,7 +224,9 @@ export class AnnotationEditor {
     this.canvas.loading.then(() => this.canvas.unsubscribe.push(() => window.removeEventListener('pointerup', release, { capture: true })));
     el.addEventListener('dblclick', (ev) => {
       const [item, ...rest] = this.items;
-      if (item && TEXT_TYPES.has(item.type) && !rest.length && inLayer(ev)) this.editNote(item);
+      if (!item || rest.length || !inLayer(ev)) return;
+      if (TEXT_TYPES.has(item.type)) this.editNote(item);
+      else if (item.type === T.WIDGET) this.editField(item);
     });
     el.addEventListener('scroll', () => this.placeBar(), { passive: true });
     // Al empezar y terminar de escribir un texto libre, la barra cambia de lado.
@@ -234,13 +245,14 @@ export class AnnotationEditor {
     this.styleButtons = mountStyleButtons(this.styleGroup, (patch) => this._setStyle(patch));
     this.canvas.loading.then(() => this.canvas.unsubscribe.push(() => this.styleButtons.destroy()));
     this.noteButton = iconButton('pencil', B.editText, () => this.editNote(this.items[0]));
+    this.fieldButton = iconButton('sliders-horizontal', t.viewer.forms.properties, () => this.editField(this.items[0]));
     this.copyButton = iconButton('copy', tip(B.duplicate), () => this.duplicate());
     this.stampButton = iconButton('stamp', B.stamp, () => this.makeStamp());
     this.frontButton = iconButton('arrow-up', B.front, () => this.order(true));
     this.backButton = iconButton('arrow-down', B.back, () => this.order(false));
     this.actionsSep = h('span', { class: 'sel-bar__sep', 'aria-hidden': 'true' });
     return h('div', { class: 'prop-bar', role: 'toolbar', 'aria-label': B.label, hidden: true, onpointerdown: stop },
-      this.styleGroup, this.noteButton,
+      this.styleGroup, this.noteButton, this.fieldButton,
       this.actionsSep,
       this.copyButton, this.stampButton,
       this.frontButton, this.backButton,
@@ -271,9 +283,10 @@ export class AnnotationEditor {
     this.styleButtons.set(hasStyle ? style : null, onlyText ? t.viewer.annotations.style.textColor : undefined);
     this.styleGroup.hidden = !hasStyle;
     this.noteButton.hidden = !(items.length === 1 && TEXT_TYPES.has(items[0].type));
+    this.fieldButton.hidden = !(items.length === 1 && items[0].type === T.WIDGET);
     // Sin nada delante (p. ej. una imagen), sobra el separador de las acciones.
-    this.actionsSep.hidden = !hasStyle && this.noteButton.hidden;
-    this.frontButton.hidden = this.backButton.hidden = items.every((item) => item.type === T.STAMP);
+    this.actionsSep.hidden = !hasStyle && this.noteButton.hidden && this.fieldButton.hidden;
+    this.frontButton.hidden = this.backButton.hidden = items.every((item) => item.type === T.STAMP || item.type === T.WIDGET);
     // Figuras y trazos (con texto o notas, también): duplicar y guardar como sello.
     this.copyButton.hidden = this.stampButton.hidden = !items.some((item) => DRAWINGS.has(item.type))
       || items.some((item) => NO_COPY.has(item.type));

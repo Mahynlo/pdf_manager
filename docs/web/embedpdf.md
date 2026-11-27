@@ -105,7 +105,8 @@ al cerrar la pestaña. Las pestañas ocultas no colocan sus páginas hasta que s
 - `RenderLayer` dibuja la página entera a 1 px por punto como fondo: se ve enseguida al desplazarse.
 - `TilingLayer` dibuja encima, en mosaicos de 768 px, solo la parte a la vista y a la resolución del zoom.
   Así, a mucho zoom no se rasteriza la página entera. Antes había un tope de 12 MP por página.
-- Ambos con las anotaciones no editables y los formularios (`withAnnotations`, `withForms`), en WebP.
+- Ambos sin las anotaciones ni los campos de formulario (`withAnnotations`, `withForms`: los dibuja la
+  capa de anotaciones encima, ver «Formularios»), en WebP. Las miniaturas sí los llevan dibujados.
 - Las miniaturas salen del mismo documento (`canvas.thumbnails`).
 
 **Medidas** (PDF de 43 MB y 120 páginas con fotos, en la app):
@@ -336,6 +337,38 @@ errores de JavaScript.
 
 **Retirado:** `services/annotation_store.py`, `pdf_core/annotations.py` y las llamadas
 `viewer.add_annotations`, `update_annotations`, `delete_annotations`, `reorder_annotations`, `undo` y `redo`.
+
+### Formularios (hechos): `plugin-form`
+
+Los campos de formulario (texto, casilla, botón de opción, lista desplegable y lista) los dibuja la
+capa de anotaciones con los dibujantes del complemento de formularios. Antes salían pintados en la
+imagen de la página y no se podían rellenar.
+
+**Rellenar:** con cualquier herramienta salvo el puntero y las de formulario, los campos están
+bloqueados como anotaciones (`LOCKED` en `embed.ts`: categoría `form`), y el complemento los dibuja
+como controles que se rellenan (`renderLocked`). Cada cambio lo escribe en el PDF de EmbedPDF y lo
+apunta en el historial: Ctrl+Z / Ctrl+Y lo deshacen y rehacen. Ese cambio no pasa por los avisos de
+las anotaciones: `annotations.ts` escucha `onFieldValueChange` para marcar la pestaña con cambios sin
+guardar y rehacer la miniatura. Guardar lo saca el motor, como las anotaciones.
+
+**Crear y cambiar campos:** grupo «Formulario» de la barra de anotaciones (`TOOLS.FORM_*` en
+`canvas.ts`, herramientas `formTextField`, `formCheckbox`, `formRadioButton`, `formCombobox` y
+`formListbox` del complemento). Clic o arrastrar crea el campo y se vuelve al puntero con él
+seleccionado. Con el puntero y con estas herramientas los campos se desbloquean (`FORM_DESIGN`): se
+seleccionan, mueven, redimensionan, cambian de color de borde y se borran como las demás
+anotaciones (en ese modo no se rellenan). «Propiedades del campo» (barra de la selección o doble
+clic; `forms/fields.ts` y `forms/FieldDialog.svelte`): nombre, obligatorio, solo lectura, varias
+líneas (texto) y las opciones de las listas. Lo que no es el nombre se cambia con `updateAnnotation`
+(se deshace); el nombre, con `renameField` del complemento (no se deshace). Si el nombre nuevo es el
+de otro campo del mismo tipo, pregunta si unirlos (`shareField`): así se agrupan los botones de
+opción; en un PDF, los campos con el mismo nombre son el mismo campo y comparten el valor.
+
+Cada campo nuevo lleva el nombre único que le pone el complemento (`TextField_1a2b3c4d`; no usa el
+de los valores de la herramienta), y cada botón de opción nuevo, un id como valor de exportación.
+
+**Lo que no hace (aún):** los campos sin borde (`/BS` con ancho 0, habituales en formularios
+dibujados en el contenido de la página) no se ven con el puntero: el complemento los dibuja con su
+borde. Botones de acción, firmas digitales y el JavaScript de los formularios no se tocan.
 
 ### Sellos y firmas (hechos): `plugin-stamp` y `plugin-signature`
 
@@ -840,7 +873,7 @@ En `app/ui/package.json`, con versiones fijas (todas iguales, 2.15.1):
 - `@embedpdf/models`: geometría (`transformRect`);
 - los complementos `document-manager`, `viewport`, `scroll`, `spread`, `rotate`, `render`, `zoom`,
   `tiling`, `interaction-manager`, `selection`, `search`, `annotation`, `history`, `redaction`,
-  `stamp` y `signature` (`export` se quitó: las copias las saca el motor de la app);
+  `stamp`, `signature` y `form` (`export` se quitó: las copias las saca el motor de la app);
 - `@embedpdf/default-stamps` 0.0.1 (MIT): los sellos estándar, con su manifiesto en español.
 
 Y `svelte` fijado en 5.51.0 (ver «Anotaciones y sellos»).
@@ -855,6 +888,15 @@ PDFium entero (unos 140 KB), que solo usa el worker.
 
 ## Fallos de EmbedPDF que se esquivan
 
+- **Dibujantes de los campos de formulario (`plugin-form` 2.15.1):** los apunta, en un contexto de
+  Svelte, una utilidad que monta la raíz `<EmbedPDF>`; las páginas del visor se montan fuera de ella
+  (`embed.ts`). `PdfPages.svelte` da ese contexto (`provideRendererRegistry`) y monta la utilidad
+  (`FormPluginPackage.autoMountElements()`).
+- **Valores de campo que se cruzan (`plugin-form` 2.15.1):** cada tecla escribe el valor con una serie
+  de lecturas y escrituras asíncronas en el motor; escribiendo deprisa se cruzaban y el PDF se quedaba
+  con un valor anterior, aunque en la página se viera el último («Ana Pér» en vez de «Ana Pérez»).
+  `ViewerFormPackage` (`embed.ts`) los hace de uno en uno, y `Annotations.commit` espera a que estén
+  escritos (`formWrites`) antes de sacar una copia (guardar, imprimir, Python).
 - **Mosaicos repetidos (`plugin-tiling` 2.15.1):** al volver a un zoom antes de que acaben los mosaicos del otro, crea
   unos con el mismo id que los de respaldo. La lista de Svelte falla con `each_key_duplicate` y el visor deja de
   responder. `ViewerTilingPackage` (`canvas/embed.ts`) los quita; hay que revisarlo al actualizar EmbedPDF.

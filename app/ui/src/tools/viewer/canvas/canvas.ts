@@ -36,7 +36,7 @@ import { h } from '$lib/dom.ts';
 import type { OcrText, OcrWord } from '$lib/pdf-engine/index.ts';
 import { t } from '$texts';
 import {
-  OTHER_MODE, PAGED, reading, refreshPageText, registry, showPageList, TEXT_MODE, UNIT, VIEWPORT_GAP, ZOOM_MAX, ZOOM_MIN,
+  FORM_DESIGN, LOCKED, OTHER_MODE, PAGED, reading, refreshPageText, registry, showPageList, TEXT_MODE, UNIT, VIEWPORT_GAP, ZOOM_MAX, ZOOM_MIN,
   type ViewerScroll,
 } from './embed.ts';
 import { pageUids } from '../document/pages.ts';
@@ -78,6 +78,11 @@ export const TOOLS = {
   PLACE_TEXT: 'place-text', // colocar un sello de texto (texto libre): lo hace StampsPanel.svelte
   AREA_OCR: 'area-ocr', // rectángulo para reconocer texto
   REDACT: 'redact', // marcar para censurar: texto (arrastrando sobre él) o un área
+  FORM_TEXT: 'form-text', // campos de formulario: clic o arrastrar para crearlos
+  FORM_CHECKBOX: 'form-checkbox',
+  FORM_RADIO: 'form-radio',
+  FORM_COMBO: 'form-combo', // lista desplegable
+  FORM_LIST: 'form-list', // lista de opciones
 } as const;
 
 export type Tool = (typeof TOOLS)[keyof typeof TOOLS];
@@ -113,7 +118,17 @@ export const ANNOTATION_TOOL: Record<string, string> = {
   [TOOLS.NOTE]: 'textComment',
   [TOOLS.IMAGE]: 'stamp',
   [TOOLS.REDACT]: 'redact', // del complemento de censura
+  [TOOLS.FORM_TEXT]: 'formTextField', // del complemento de formularios
+  [TOOLS.FORM_CHECKBOX]: 'formCheckbox',
+  [TOOLS.FORM_RADIO]: 'formRadioButton',
+  [TOOLS.FORM_COMBO]: 'formCombobox',
+  [TOOLS.FORM_LIST]: 'formListbox',
 };
+// Herramientas que crean campos de formulario.
+export const FORM_TOOLS = new Set<string>([TOOLS.FORM_TEXT, TOOLS.FORM_CHECKBOX, TOOLS.FORM_RADIO, TOOLS.FORM_COMBO, TOOLS.FORM_LIST]);
+// Con estas los campos de formulario se seleccionan, se mueven y se cambian (FORM_DESIGN); con las
+// demás se rellenan.
+const FORM_DESIGN_TOOLS = new Set<string>([TOOLS.POINTER, ...FORM_TOOLS]);
 // Cómo coloca EmbedPDF las páginas en cada modo de vista.
 const LAYOUTS: Record<Mode, { strategy: string; spread: SpreadMode }> = {
   [MODES.CONTINUOUS]: { strategy: ScrollStrategy.Vertical, spread: SpreadMode.None },
@@ -355,7 +370,7 @@ export class PageCanvas {
       // EmbedPDF dibuja sin girar si no se le pasa el giro de la página. Con las anotaciones:
       // en el lienzo las dibuja su capa, pero la miniatura es una sola imagen.
       const { rotation } = this.pageInfo(index);
-      const options = { scaleFactor: scale, rotation, dpr: 1, imageQuality: 0.8, withAnnotations: true };
+      const options = { scaleFactor: scale, rotation, dpr: 1, imageQuality: 0.8, withAnnotations: true, withForms: true };
       const blob = await render.renderPage({ pageIndex: index, options }).toPromise();
       result[index] = URL.createObjectURL(blob);
     }
@@ -478,6 +493,7 @@ export class PageCanvas {
     if (this.tool === TOOLS.PLACE) return; // ya la activó stamps/ (activateStampPlacement…)
     const annotationTool = ANNOTATION_TOOL[this.tool];
     const annotation = this._plugin<AnnotationPlugin>('annotation').provides().forDocument(id);
+    annotation.setLocked(FORM_DESIGN_TOOLS.has(this.tool) ? FORM_DESIGN : LOCKED);
     if (annotationTool) {
       this.events.onTool?.(this.tool, id);
       annotation.setActiveTool(annotationTool);
